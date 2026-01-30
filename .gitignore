@@ -30,4 +30,4 @@ coverage/
 *.local
 
 # Claude Code
-.claude/
+.claude/settings.local.json
