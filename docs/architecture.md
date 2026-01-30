@@ -9,6 +9,48 @@ WebベースのペイントツールのためのヘッドレスエンジンとUI
 - **エンジンとUIの分離**: コアロジックは特定のUIフレームワークに依存しない。また、ブラウザの入力イベント（PointerEvent等）にも直接依存せず、入力抽象化層（input）がこの橋渡しを行う
 - **入力デバイス非依存**: 抽象化された入力イベントを受け取る設計
 - **テスタビリティ**: エンジンはDOM非依存でユニットテスト可能
+- **関数型アプローチ**: クラスではなく関数とデータ構造で構成。状態管理はアプリ側の責任
+
+## Core Design Decisions
+
+### Canvas2D ベースの実装
+
+パフォーマンス検証の結果、Canvas2D APIを内部で使用することを決定：
+
+**理由:**
+- Canvas2DはGPUアクセラレーションされており、大きなブラシサイズでも高速
+- 手動ピクセル操作（Bresenham等）は小さいブラシでは問題ないが、半径50px以上で実用に耐えない
+- 100スタンプ描画: 手動実装 56ms vs Canvas2D arc 0.1ms（約500倍差）
+
+**トレードオフ:**
+- アンチエイリアスの細かい制御は難しくなる
+- ピクセルパーフェクトな描画には`getImageData()`が必要
+
+### 関数型アプローチ
+
+クラスではなく、データ構造 + 関数で構成：
+
+```typescript
+// Layer = ただのデータ構造
+interface Layer {
+  readonly width: number;
+  readonly height: number;
+  readonly canvas: OffscreenCanvas;
+  readonly ctx: OffscreenCanvasRenderingContext2D;
+  readonly meta: LayerMeta;
+}
+
+// 操作は全て関数
+function createLayer(width, height, meta?): Layer;
+function drawLine(layer, from, to, color, lineWidth?): void;
+function drawCircle(layer, center, radius, color): void;
+function getImageData(layer): ImageData;
+```
+
+**メリット:**
+- 状態の流れが明確（神クラス問題を回避）
+- テストしやすい（入力→出力が明確）
+- 状態管理はアプリ側の責任（React useState等）
 
 ## Current Target
 
@@ -22,12 +64,12 @@ headless-paint/
 ├── packages/
 │   ├── engine/              # コアエンジン（Canvas2Dベース）
 │   │   ├── src/
-│   │   │   ├── layer.ts        # レイヤー管理 + ピクセルデータ
-│   │   │   ├── stroke.ts       # ストローク補間
-│   │   │   ├── brush.ts        # ブラシ描画
-│   │   │   ├── composite.ts    # レイヤー合成
-│   │   │   ├── command.ts      # Undo/Redo
-│   │   │   ├── types.ts
+│   │   │   ├── types.ts        # 型定義（Layer, Color, Point等）
+│   │   │   ├── layer.ts        # レイヤー操作関数
+│   │   │   ├── draw.ts         # 描画関数（Canvas2D API使用）
+│   │   │   ├── stroke.ts       # ストローク補間（将来）
+│   │   │   ├── composite.ts    # レイヤー合成（将来）
+│   │   │   ├── command.ts      # Undo/Redo（将来）
 │   │   │   └── index.ts
 │   │   └── package.json
 │   │
@@ -48,23 +90,34 @@ headless-paint/
 
 ### @headless-paint/engine
 
-コアエンジン。ピクセルデータの管理と描画ロジックを担当。
+コアエンジン。レイヤー管理と描画ロジックを担当。
 
-**責務:**
-- 各レイヤーのビットマップ（`Uint8ClampedArray`）の保持
-- ストローク計算（点の補間、筆圧カーブ）
-- ブラシによるピクセル描画
-- レイヤー合成（composite）して`ImageData`を返す
-- Undo/Redo履歴管理
+**主要な関数:**
+```typescript
+// Layer操作
+createLayer(width, height, meta?): Layer
+clearLayer(layer): void
+getImageData(layer): ImageData
+getPixel(layer, x, y): Color
+setPixel(layer, x, y, color): void
+
+// 描画
+drawLine(layer, from, to, color, lineWidth?): void
+drawCircle(layer, center, radius, color): void
+drawPath(layer, points, color, lineWidth?): void
+
+// ユーティリティ
+colorToStyle(color): string
+```
 
 **依存:**
-- `gl-matrix`: 行列・ベクトル演算
-- `culori`: 色空間変換
+- `gl-matrix`: 行列・ベクトル演算（将来使用）
+- `culori`: 色空間変換（将来使用）
 
 **重要な設計判断:**
-- ビットマップデータはエンジンが所有
-- レイヤー合成もエンジンが行う（CPU合成）
-- `composite(): ImageData` でUI側に合成済み画像を渡す
+- 内部的にOffscreenCanvas + Canvas2D APIを使用
+- Layerはデータ構造であり、操作は関数で行う
+- `getImageData()` でUI側に合成済み画像を渡す
 - Rendererパッケージは設けない（UIが直接`putImageData`する）
 
 ### @headless-paint/input
@@ -84,9 +137,10 @@ headless-paint/
 デモ用Webアプリケーション。
 
 **責務:**
-- `engine.composite()`の結果を`<canvas>`に表示
+- `getImageData(layer)`の結果を`<canvas>`に表示
 - ツールバー、レイヤーパネル等のUI
 - ユーザーインタラクション
+- 状態管理（React useState/useReducer）
 
 ## Data Flow
 
@@ -104,23 +158,33 @@ User Input (PointerEvent)
 ┌─────────────────┐
 │  @engine        │
 │                 │
-│  stroke.ts      │  点の補間・スムージング
+│  draw.ts        │  Canvas2D APIで描画
 │       ↓         │
-│  brush.ts       │  ピクセルデータに描画
+│  layer.canvas   │  OffscreenCanvas更新
 │       ↓         │
-│  layer.pixels   │  Uint8ClampedArray更新
-│       ↓         │
-│  composite.ts   │  全レイヤー合成
+│  composite.ts   │  全レイヤー合成（将来）
 │                 │
 └─────────────────┘
          │
-         │ ImageData
+         │ ImageData (via getImageData)
          ▼
 ┌─────────────────┐
 │  UI (apps/web)  │  ctx.putImageData()
 │  <canvas>       │
 └─────────────────┘
 ```
+
+## Performance Notes
+
+Canvas2D APIを使用することで、以下のパフォーマンス特性を得られる：
+
+| 操作 | 手動実装 | Canvas2D | 備考 |
+|------|---------|----------|------|
+| 100本の線 (1920x1080) | 5.2ms | 0.1ms | 52倍高速 |
+| 100スタンプ radius=50px | 56ms | 0.1ms | 500倍以上高速 |
+| 100スタンプ radius=100px | 229ms | 0.1ms | 2000倍以上高速 |
+
+60fpsを維持するには16.67ms/frame以内に収める必要があるため、Canvas2Dの選択は必須。
 
 ## Future Considerations
 
@@ -132,7 +196,7 @@ Canvas2Dでパフォーマンス問題が発生した場合、バックエンド
 packages/engine/
 ├── core/              # 共通ロジック（バックエンド非依存）
 │   ├── stroke.ts
-│   ├── brush-params.ts
+│   ├── types.ts
 │   └── command.ts
 │
 ├── backend/
