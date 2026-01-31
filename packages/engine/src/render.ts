@@ -14,6 +14,10 @@ export function renderLayerWithTransform(
 ): void {
   ctx.save();
 
+  // 拡大時（scale >= 1）はスムージングを無効にしてにじみを防ぐ
+  const scale = Math.hypot(transform[0], transform[1]);
+  ctx.imageSmoothingEnabled = scale < 1;
+
   // mat3 を setTransform に適用
   // mat3: [a, b, 0, c, d, 0, tx, ty, 1] (column-major)
   // setTransform(a, b, c, d, tx, ty)
@@ -41,11 +45,17 @@ export function renderLayers(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   transform: mat3,
 ): void {
+  // 拡大時（scale >= 1）はスムージングを無効にしてにじみを防ぐ
+  const scale = Math.hypot(transform[0], transform[1]);
+  const smoothing = scale < 1;
+
   for (const layer of layers) {
     // 非表示レイヤーはスキップ
     if (!layer.meta.visible) continue;
 
     ctx.save();
+
+    ctx.imageSmoothingEnabled = smoothing;
 
     // 不透明度を適用
     ctx.globalAlpha = layer.meta.opacity;
