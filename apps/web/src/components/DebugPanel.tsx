@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { ViewTransform } from "@headless-paint/input";
+import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
 import type { GUI } from "lil-gui";
 
 interface DebugPanelProps {
@@ -64,26 +64,14 @@ export function DebugPanel({ transform, strokeCount }: DebugPanelProps) {
 
   // Update values
   useEffect(() => {
-    // mat3 column-major: [a, b, 0, c, d, 0, tx, ty, 1]
-    const a = transform[0];
-    const b = transform[1];
-    const c = transform[3];
-    const d = transform[4];
-    const tx = transform[6];
-    const ty = transform[7];
+    const components = decomposeTransform(transform);
+    const rotationDeg = components.rotation * (180 / Math.PI);
 
-    // Extract scale
-    const scaleX = Math.sqrt(a * a + b * b);
-    const scaleY = Math.sqrt(c * c + d * d);
-
-    // Extract rotation
-    const rotation = Math.atan2(b, a) * (180 / Math.PI);
-
-    dataRef.current.scaleX = Number(scaleX.toFixed(3));
-    dataRef.current.scaleY = Number(scaleY.toFixed(3));
-    dataRef.current.rotation = Number(rotation.toFixed(1));
-    dataRef.current.translateX = Number(tx.toFixed(1));
-    dataRef.current.translateY = Number(ty.toFixed(1));
+    dataRef.current.scaleX = Number(components.scaleX.toFixed(3));
+    dataRef.current.scaleY = Number(components.scaleY.toFixed(3));
+    dataRef.current.rotation = Number(rotationDeg.toFixed(1));
+    dataRef.current.translateX = Number(components.translateX.toFixed(1));
+    dataRef.current.translateY = Number(components.translateY.toFixed(1));
     dataRef.current.strokeCount = strokeCount;
   }, [transform, strokeCount]);
 

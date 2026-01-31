@@ -174,3 +174,45 @@ if (inverse) {
   // 逆変換が存在する
 }
 ```
+
+---
+
+## decomposeTransform
+
+ビュー変換行列を個別の変換成分（スケール・回転・平行移動）に分解する。
+
+```typescript
+function decomposeTransform(
+  transform: ViewTransform,
+): TransformComponents
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `transform` | `ViewTransform` | ○ | 分解対象のビュー変換 |
+
+**戻り値**: `TransformComponents` - 変換成分（スケール、回転、平行移動）
+
+**用途**: デバッグ表示、UI での変換情報表示など。
+
+**使用例**:
+```typescript
+import { decomposeTransform } from "@headless-paint/input";
+
+const components = decomposeTransform(transform);
+
+// スケール値を取得
+console.log(`Scale: ${components.scaleX} x ${components.scaleY}`);
+
+// 回転角度を度に変換して表示
+const rotationDeg = components.rotation * (180 / Math.PI);
+console.log(`Rotation: ${rotationDeg.toFixed(1)}°`);
+
+// 平行移動量を表示
+console.log(`Translate: (${components.translateX}, ${components.translateY})`);
+```
+
+**注意**:
+- `zoom()` は常に均等スケールを適用するため、通常は `scaleX === scaleY`
+- シアー（せん断）変換を含む行列では正確な分解ができない場合がある

@@ -16,6 +16,7 @@ import {
   pan,
   zoom,
   rotate,
+  decomposeTransform,
   screenToLayer,
   layerToScreen,
   shouldAcceptPoint,
@@ -33,6 +34,10 @@ transform = rotate(transform, Math.PI / 12, centerX, centerY);
 const layerPoint = screenToLayer({ x: e.offsetX, y: e.offsetY }, transform);
 const screenPoint = layerToScreen(layerPoint, transform);
 
+// 変換成分の取得（デバッグ用など）
+const components = decomposeTransform(transform);
+console.log(`Scale: ${components.scaleX}, Rotation: ${components.rotation}`);
+
 // 入力間引き
 const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
 ```
@@ -49,6 +54,7 @@ const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
 | `ViewTransform` | ビュー変換行列（mat3 形式） |
 | `SamplingConfig` | 間引き設定 |
 | `SamplingState` | 間引き状態 |
+| `TransformComponents` | 変換成分（スケール、回転、平行移動） |
 
 ### ビュー変換関数
 
@@ -61,6 +67,7 @@ const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
 | `zoom(transform, scale, cx, cy)` | 中心点基準でズーム |
 | `rotate(transform, angle, cx, cy)` | 中心点基準で回転 |
 | `invertViewTransform(transform)` | 逆変換を計算 |
+| `decomposeTransform(transform)` | 行列から変換成分を抽出 |
 
 ### 座標変換関数
 

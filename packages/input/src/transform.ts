@@ -1,5 +1,5 @@
 import { mat3 } from "gl-matrix";
-import type { ViewTransform } from "./types";
+import type { ViewTransform, TransformComponents } from "./types";
 
 /**
  * 単位行列のビュー変換を作成
@@ -119,4 +119,31 @@ export function invertViewTransform(
   const result = mat3.create();
   const inverted = mat3.invert(result, transform);
   return inverted ? result : null;
+}
+
+/**
+ * ビュー変換行列を個別の変換成分に分解
+ *
+ * 行列構造（column-major, gl-matrix形式）:
+ * [a, b, 0, c, d, 0, tx, ty, 1]
+ *  0  1  2  3  4  5   6   7  8
+ *
+ * @param transform 分解対象のビュー変換
+ * @returns 変換成分（スケール、回転、平行移動）
+ */
+export function decomposeTransform(
+  transform: ViewTransform,
+): TransformComponents {
+  const a = transform[0];
+  const b = transform[1];
+  const c = transform[3];
+  const d = transform[4];
+
+  return {
+    scaleX: Math.sqrt(a * a + b * b),
+    scaleY: Math.sqrt(c * c + d * d),
+    rotation: Math.atan2(b, a),
+    translateX: transform[6],
+    translateY: transform[7],
+  };
 }

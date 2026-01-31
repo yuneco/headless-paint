@@ -4,6 +4,7 @@ export type {
   ViewTransform,
   SamplingConfig,
   SamplingState,
+  TransformComponents,
 } from "./types";
 
 // Transform functions
@@ -13,6 +14,7 @@ export {
   zoom,
   rotate,
   invertViewTransform,
+  decomposeTransform,
 } from "./transform";
 
 // Coordinate functions

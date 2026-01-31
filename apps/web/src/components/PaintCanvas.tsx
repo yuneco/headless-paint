@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Layer } from "@headless-paint/engine";
 import { renderLayerWithTransform } from "@headless-paint/engine";
 import type { Point, ViewTransform } from "@headless-paint/input";
+import { layerToScreen } from "@headless-paint/input";
 import { usePointerHandler, type ToolType } from "../hooks/usePointerHandler";
 
 interface PaintCanvasProps {
@@ -71,14 +72,12 @@ export function PaintCanvas({
     ctx.beginPath();
 
     layerCorners.forEach((corner, i) => {
-      // Layer Space → Screen Space
-      const sx = transform[0] * corner.x + transform[3] * corner.y + transform[6];
-      const sy = transform[1] * corner.x + transform[4] * corner.y + transform[7];
+      const screenPoint = layerToScreen(corner, transform);
 
       if (i === 0) {
-        ctx.moveTo(sx, sy);
+        ctx.moveTo(screenPoint.x, screenPoint.y);
       } else {
-        ctx.lineTo(sx, sy);
+        ctx.lineTo(screenPoint.x, screenPoint.y);
       }
     });
 

@@ -33,3 +33,19 @@ export interface SamplingState {
   /** 最後に採用した時刻（ms） */
   readonly lastTimestamp: number | null;
 }
+
+/**
+ * 変換行列から抽出した変換成分
+ */
+export interface TransformComponents {
+  /** X軸方向のスケール */
+  readonly scaleX: number;
+  /** Y軸方向のスケール */
+  readonly scaleY: number;
+  /** 回転角度（ラジアン、正=反時計回り） */
+  readonly rotation: number;
+  /** X軸方向の平行移動 */
+  readonly translateX: number;
+  /** Y軸方向の平行移動 */
+  readonly translateY: number;
+}

@@ -5,7 +5,7 @@ import {
   type ViewTransform,
   createViewTransform,
   zoom,
-  invertViewTransform,
+  screenToLayer,
 } from "@headless-paint/input";
 
 interface MinimapProps {
@@ -53,43 +53,41 @@ export function Minimap({
     renderLayerWithTransform(layer, ctx, minimapTransform);
 
     // メインビューの表示範囲を赤枠で表示
-    const inverse = invertViewTransform(viewTransform);
-    if (inverse) {
-      // メインキャンバスの4隅をLayer Spaceに変換
-      const corners = [
-        { x: 0, y: 0 },
-        { x: mainCanvasWidth, y: 0 },
-        { x: mainCanvasWidth, y: mainCanvasHeight },
-        { x: 0, y: mainCanvasHeight },
-      ];
+    // メインキャンバスの4隅をLayer Spaceに変換
+    const corners = [
+      { x: 0, y: 0 },
+      { x: mainCanvasWidth, y: 0 },
+      { x: mainCanvasWidth, y: mainCanvasHeight },
+      { x: 0, y: mainCanvasHeight },
+    ];
 
-      ctx.save();
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
+    ctx.save();
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
 
-      corners.forEach((corner, i) => {
-        // Screen Space → Layer Space
-        const lx =
-          inverse[0] * corner.x + inverse[3] * corner.y + inverse[6];
-        const ly =
-          inverse[1] * corner.x + inverse[4] * corner.y + inverse[7];
+    let hasValidPoints = false;
+    corners.forEach((corner, i) => {
+      const layerPoint = screenToLayer(corner, viewTransform);
+      if (!layerPoint) return;
 
-        // Layer Space → Minimap Space
-        const mx = lx * scale;
-        const my = ly * scale;
+      hasValidPoints = true;
+      // Layer Space → Minimap Space
+      const mx = layerPoint.x * scale;
+      const my = layerPoint.y * scale;
 
-        if (i === 0) {
-          ctx.moveTo(mx, my);
-        } else {
-          ctx.lineTo(mx, my);
-        }
-      });
+      if (i === 0) {
+        ctx.moveTo(mx, my);
+      } else {
+        ctx.lineTo(mx, my);
+      }
+    });
 
+    if (hasValidPoints) {
       ctx.closePath();
       ctx.stroke();
-      ctx.restore();
     }
+    ctx.restore();
 
     // 枠線
     ctx.strokeStyle = "#ccc";

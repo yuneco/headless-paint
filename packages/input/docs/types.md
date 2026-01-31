@@ -107,3 +107,42 @@ function onPointerDown() {
   state = { lastPoint: null, lastTimestamp: null };
 }
 ```
+
+---
+
+## TransformComponents
+
+変換行列から抽出した変換成分。
+
+```typescript
+interface TransformComponents {
+  scaleX: number;      // X軸方向のスケール
+  scaleY: number;      // Y軸方向のスケール
+  rotation: number;    // 回転角度（ラジアン、正=反時計回り）
+  translateX: number;  // X軸方向の平行移動
+  translateY: number;  // Y軸方向の平行移動
+}
+```
+
+**フィールド説明**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `scaleX` | `number` | X軸方向のスケール値 |
+| `scaleY` | `number` | Y軸方向のスケール値 |
+| `rotation` | `number` | 回転角度（ラジアン）。度に変換: `rotation * (180 / Math.PI)` |
+| `translateX` | `number` | X軸方向の平行移動量 |
+| `translateY` | `number` | Y軸方向の平行移動量 |
+
+**使用例**:
+```typescript
+import { decomposeTransform } from "@headless-paint/input";
+
+const components = decomposeTransform(transform);
+
+// 度に変換して表示
+const rotationDeg = components.rotation * (180 / Math.PI);
+console.log(`Scale: ${components.scaleX}x${components.scaleY}`);
+console.log(`Rotation: ${rotationDeg}°`);
+console.log(`Translation: (${components.translateX}, ${components.translateY})`);
+```
