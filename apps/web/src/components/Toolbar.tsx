@@ -4,6 +4,10 @@ interface ToolbarProps {
   currentTool: ToolType;
   onToolChange: (tool: ToolType) => void;
   onReset: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 const tools: { type: ToolType; label: string; icon: string }[] = [
@@ -13,7 +17,15 @@ const tools: { type: ToolType; label: string; icon: string }[] = [
   { type: "zoom", label: "Zoom", icon: "🔍" },
 ];
 
-export function Toolbar({ currentTool, onToolChange, onReset }: ToolbarProps) {
+export function Toolbar({
+  currentTool,
+  onToolChange,
+  onReset,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+}: ToolbarProps) {
   return (
     <div
       style={{
@@ -44,6 +56,43 @@ export function Toolbar({ currentTool, onToolChange, onReset }: ToolbarProps) {
           {icon} {label}
         </button>
       ))}
+      <div style={{ width: 1, backgroundColor: "#ddd", margin: "0 8px" }} />
+      {onUndo && (
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          style={{
+            padding: "8px 16px",
+            border: "none",
+            borderRadius: 4,
+            cursor: canUndo ? "pointer" : "not-allowed",
+            backgroundColor: canUndo ? "#6c757d" : "#e9ecef",
+            color: canUndo ? "#fff" : "#999",
+          }}
+          title="Undo (Cmd+Z)"
+        >
+          ↩ Undo
+        </button>
+      )}
+      {onRedo && (
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          style={{
+            padding: "8px 16px",
+            border: "none",
+            borderRadius: 4,
+            cursor: canRedo ? "pointer" : "not-allowed",
+            backgroundColor: canRedo ? "#6c757d" : "#e9ecef",
+            color: canRedo ? "#fff" : "#999",
+          }}
+          title="Redo (Cmd+Shift+Z)"
+        >
+          ↪ Redo
+        </button>
+      )}
       <div style={{ width: 1, backgroundColor: "#ddd", margin: "0 8px" }} />
       <button
         type="button"

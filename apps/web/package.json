@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@headless-paint/engine": "workspace:*",
+    "@headless-paint/history": "workspace:*",
     "@headless-paint/input": "workspace:*",
     "lil-gui": "^0.20.0",
     "react": "^19.0.0",
