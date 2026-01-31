@@ -1,0 +1,132 @@
+import { useEffect, useRef } from "react";
+import type { Layer } from "@headless-paint/engine";
+import { renderLayerWithTransform } from "@headless-paint/engine";
+import type { Point, ViewTransform } from "@headless-paint/input";
+import { usePointerHandler, type ToolType } from "../hooks/usePointerHandler";
+
+interface PaintCanvasProps {
+  layer: Layer;
+  transform: ViewTransform;
+  tool: ToolType;
+  onPan: (dx: number, dy: number) => void;
+  onZoom: (scale: number, centerX: number, centerY: number) => void;
+  onRotate: (angleRad: number, centerX: number, centerY: number) => void;
+  onStrokeStart: (point: Point) => void;
+  onStrokeMove: (point: Point) => void;
+  onStrokeEnd: () => void;
+  width: number;
+  height: number;
+  /** 再描画トリガー用のバージョン番号 */
+  renderVersion?: number;
+}
+
+export function PaintCanvas({
+  layer,
+  transform,
+  tool,
+  onPan,
+  onZoom,
+  onRotate,
+  onStrokeStart,
+  onStrokeMove,
+  onStrokeEnd,
+  width,
+  height,
+  renderVersion = 0,
+}: PaintCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // 描画
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // DPR対応
+    const dpr = window.devicePixelRatio;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
+
+    // クリア
+    ctx.fillStyle = "#f0f0f0";
+    ctx.fillRect(0, 0, width, height);
+
+    // レイヤー描画
+    renderLayerWithTransform(layer, ctx, transform);
+
+    // レイヤーの外形矩形を描画
+    const layerCorners = [
+      { x: 0, y: 0 },
+      { x: layer.width, y: 0 },
+      { x: layer.width, y: layer.height },
+      { x: 0, y: layer.height },
+    ];
+
+    ctx.save();
+    ctx.strokeStyle = "#444";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+
+    layerCorners.forEach((corner, i) => {
+      // Layer Space → Screen Space
+      const sx = transform[0] * corner.x + transform[3] * corner.y + transform[6];
+      const sy = transform[1] * corner.x + transform[4] * corner.y + transform[7];
+
+      if (i === 0) {
+        ctx.moveTo(sx, sy);
+      } else {
+        ctx.lineTo(sx, sy);
+      }
+    });
+
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }, [layer, transform, width, height, renderVersion]);
+
+  const pointerHandlers = usePointerHandler(tool, {
+    transform,
+    onPan,
+    onZoom,
+    onRotate,
+    onStrokeStart,
+    onStrokeMove,
+    onStrokeEnd,
+    canvasWidth: width,
+    canvasHeight: height,
+  });
+
+  // wheelイベントはpassive: falseで登録する必要がある（preventDefaultを使うため）
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      pointerHandlers.onWheel(e);
+    };
+
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, [pointerHandlers]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        width,
+        height,
+        border: "1px solid #ccc",
+        cursor: tool === "pen" ? "crosshair" : "grab",
+        touchAction: "none",
+      }}
+      onPointerDown={pointerHandlers.onPointerDown}
+      onPointerMove={pointerHandlers.onPointerMove}
+      onPointerUp={pointerHandlers.onPointerUp}
+      onPointerLeave={pointerHandlers.onPointerUp}
+    />
+  );
+}

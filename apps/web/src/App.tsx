@@ -1,45 +1,87 @@
-import { createLayer, drawLine, getImageData } from "@headless-paint/engine";
-import { useMemo } from "react";
-import { Canvas } from "./components/Canvas";
+import { createLayer, drawPath } from "@headless-paint/engine";
+import type { Point } from "@headless-paint/input";
+import { useCallback, useMemo, useState } from "react";
+import { DebugPanel } from "./components/DebugPanel";
+import { Minimap } from "./components/Minimap";
+import { PaintCanvas } from "./components/PaintCanvas";
+import { Toolbar } from "./components/Toolbar";
+import type { ToolType } from "./hooks/usePointerHandler";
+import { useViewTransform } from "./hooks/useViewTransform";
 
-const LINE_COUNT = 100;
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 600;
+const LAYER_WIDTH = 1920;
+const LAYER_HEIGHT = 1080;
+
+const PEN_COLOR = { r: 50, g: 50, b: 50, a: 255 };
+const PEN_WIDTH = 3;
 
 export function App() {
-  const { imageData, drawTime } = useMemo(() => {
-    const layer = createLayer(1920, 1080);
+  const [tool, setTool] = useState<ToolType>("pen");
+  const { transform, handlePan, handleZoom, handleRotate, reset } =
+    useViewTransform();
 
-    const colors = [
-      { r: 255, g: 0, b: 0, a: 255 },
-      { r: 0, g: 200, b: 0, a: 255 },
-      { r: 0, g: 100, b: 255, a: 255 },
-      { r: 255, g: 200, b: 0, a: 255 },
-      { r: 200, g: 0, b: 200, a: 255 },
-    ];
+  const layer = useMemo(() => createLayer(LAYER_WIDTH, LAYER_HEIGHT), []);
 
-    const start = performance.now();
+  const [strokePoints, setStrokePoints] = useState<Point[]>([]);
+  const [strokeCount, setStrokeCount] = useState(0);
+  const [renderVersion, setRenderVersion] = useState(0);
 
-    for (let i = 0; i < LINE_COUNT; i++) {
-      const x1 = Math.random() * 1920;
-      const y1 = Math.random() * 1080;
-      const x2 = Math.random() * 1920;
-      const y2 = Math.random() * 1080;
-      const color = colors[i % colors.length];
-      drawLine(layer, { x: x1, y: y1 }, { x: x2, y: y2 }, color);
-    }
+  const onStrokeStart = useCallback((point: Point) => {
+    setStrokePoints([point]);
+  }, []);
 
-    const drawTime = performance.now() - start;
-    console.log(`Drew ${LINE_COUNT} lines in ${drawTime.toFixed(2)}ms`);
+  const onStrokeMove = useCallback(
+    (point: Point) => {
+      setStrokePoints((prev) => {
+        const newPoints = [...prev, point];
+        // 描画
+        if (newPoints.length >= 2) {
+          drawPath(layer, newPoints, PEN_COLOR, PEN_WIDTH);
+          setRenderVersion((n) => n + 1);
+        }
+        return newPoints;
+      });
+    },
+    [layer],
+  );
 
-    return { imageData: getImageData(layer), drawTime };
+  const onStrokeEnd = useCallback(() => {
+    setStrokePoints([]);
+    setStrokeCount((n) => n + 1);
   }, []);
 
   return (
-    <div>
-      <h1>Headless Paint</h1>
-      <p>
-        {LINE_COUNT} lines drawn in <strong>{drawTime.toFixed(2)}ms</strong>
-      </p>
-      <Canvas imageData={imageData} />
+    <div style={{ padding: 16 }}>
+      <h1 style={{ margin: "0 0 16px" }}>Headless Paint</h1>
+
+      <Toolbar currentTool={tool} onToolChange={setTool} onReset={reset} />
+
+      <div style={{ position: "relative", marginTop: 16 }}>
+        <PaintCanvas
+          layer={layer}
+          transform={transform}
+          tool={tool}
+          onPan={handlePan}
+          onZoom={handleZoom}
+          onRotate={handleRotate}
+          onStrokeStart={onStrokeStart}
+          onStrokeMove={onStrokeMove}
+          onStrokeEnd={onStrokeEnd}
+          width={CANVAS_WIDTH}
+          height={CANVAS_HEIGHT}
+          renderVersion={renderVersion}
+        />
+
+        <Minimap
+          layer={layer}
+          viewTransform={transform}
+          mainCanvasWidth={CANVAS_WIDTH}
+          mainCanvasHeight={CANVAS_HEIGHT}
+        />
+
+        <DebugPanel transform={transform} strokeCount={strokeCount} />
+      </div>
     </div>
   );
 }

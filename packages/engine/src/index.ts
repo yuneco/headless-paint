@@ -11,3 +11,4 @@ export {
   setPixel,
 } from "./layer";
 export { drawCircle, drawLine, drawPath } from "./draw";
+export { renderLayerWithTransform, renderLayers } from "./render";

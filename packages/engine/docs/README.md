@@ -69,6 +69,15 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `drawCircle(layer, center, radius, color)` | 塗りつぶし円を描画 |
 | `drawPath(layer, points, color, lineWidth?)` | パス（連続線）を描画 |
 
+### レンダリング関数
+
+詳細は [render-api.md](./render-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `renderLayerWithTransform(layer, ctx, transform)` | ビュー変換を適用してレイヤーを描画 |
+| `renderLayers(layers, ctx, transform)` | 複数レイヤーを合成描画 |
+
 ## アーキテクチャ
 
 - **Canvas2D ベース**: OffscreenCanvas を使用し、Node.js や Worker でも動作可能

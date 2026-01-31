@@ -32,6 +32,9 @@ importers:
       '@headless-paint/input':
         specifier: workspace:*
         version: link:../../packages/input
+      lil-gui:
+        specifier: ^0.20.0
+        version: 0.20.0
       react:
         specifier: ^19.0.0
         version: 19.2.3
@@ -70,9 +73,9 @@ importers:
 
   packages/input:
     dependencies:
-      '@headless-paint/engine':
-        specifier: workspace:*
-        version: link:../engine
+      gl-matrix:
+        specifier: ^3.4.3
+        version: 3.4.4
     devDependencies:
       vite:
         specifier: ^6.0.0
@@ -1605,6 +1608,10 @@ packages:
   /kolorist@1.8.0:
     resolution: {integrity: sha512-Y+60/zizpJ3HRH8DCss+q95yr6145JXZo46OTpFvDZWLfRCE4qChOyk1b26nMaNpfHHgxagk9dXT5OP0Tfe+dQ==}
     dev: true
+
+  /lil-gui@0.20.0:
+    resolution: {integrity: sha512-k7Ipr0ztqslMA2XvM5z5ZaWhxQtnEOwJBfI/hmSuRh6q4iMG9L0boqqrnZSzBR1jzyJ28OMl47l65ILzRe1TdA==}
+    dev: false
 
   /local-pkg@1.1.2:
     resolution: {integrity: sha512-arhlxbFRmoQHl33a0Zkle/YWlmNwoyt6QNZEIJcqNbdrsix5Lvc4HyyI3EnwxTYlZYc32EbYrQ8SzEZ7dqgg9A==}

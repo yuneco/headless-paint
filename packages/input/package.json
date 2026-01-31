@@ -16,7 +16,7 @@
     "dev": "vite build --watch"
   },
   "dependencies": {
-    "@headless-paint/engine": "workspace:*"
+    "gl-matrix": "^3.4.3"
   },
   "devDependencies": {
     "vite": "^6.0.0",
