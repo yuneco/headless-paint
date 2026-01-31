@@ -1,5 +1,5 @@
 ---
-description: 実装計画を立てる時、作業を計画する時、plan modeで作業する時のフロー
+description: 実装計画を立てる時、作業を計画する時、plan modeで作業する時に必ず従うフロー
 user-invocable: false
 ---
 
