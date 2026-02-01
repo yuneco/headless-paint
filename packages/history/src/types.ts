@@ -33,11 +33,22 @@ export interface ClearCommand {
   readonly timestamp: number;
 }
 
+/**
+ * 複数のコマンドをまとめるバッチコマンド
+ * 対称描画などで複数のストロークを1つの操作として扱う
+ */
+export interface BatchCommand {
+  readonly type: "batch";
+  readonly commands: readonly Command[];
+  readonly timestamp: number;
+}
+
 export type Command =
   | DrawPathCommand
   | DrawLineCommand
   | DrawCircleCommand
-  | ClearCommand;
+  | ClearCommand
+  | BatchCommand;
 
 // Checkpoint
 

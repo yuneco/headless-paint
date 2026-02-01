@@ -49,3 +49,37 @@ export interface TransformComponents {
   /** Y軸方向の平行移動 */
   readonly translateY: number;
 }
+
+// ============================================================
+// Symmetry（対称変換）
+// ============================================================
+
+/**
+ * 対称モードの種類
+ */
+export type SymmetryMode = "none" | "axial" | "radial" | "kaleidoscope";
+
+/**
+ * 対称変換の設定
+ */
+export interface SymmetryConfig {
+  /** 対称モード */
+  readonly mode: SymmetryMode;
+  /** 対称の中心点（Layer Space） */
+  readonly origin: Point;
+  /** 対称軸の角度（ラジアン、0=垂直軸、正=反時計回り） */
+  readonly angle: number;
+  /** 分割数（radial / kaleidoscope で使用、2以上） */
+  readonly divisions: number;
+}
+
+/**
+ * コンパイル済み対称変換（パフォーマンス最適化用）
+ * 設定変更時に compileSymmetry() で生成し、各点の変換時に使用
+ */
+export interface CompiledSymmetry {
+  /** 元の設定 */
+  readonly config: SymmetryConfig;
+  /** 事前計算された変換行列のリスト */
+  readonly matrices: readonly mat3[];
+}

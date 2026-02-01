@@ -1,13 +1,18 @@
 import { useEffect, useRef } from "react";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
+import type { SymmetryMode } from "@headless-paint/input";
 import type { GUI } from "lil-gui";
+import type { UseSymmetryResult } from "../hooks/useSymmetry";
 
 interface DebugPanelProps {
   transform: ViewTransform;
   strokeCount: number;
+  symmetry: UseSymmetryResult;
 }
 
-export function DebugPanel({ transform, strokeCount }: DebugPanelProps) {
+const SYMMETRY_MODES: SymmetryMode[] = ["none", "axial", "radial", "kaleidoscope"];
+
+export function DebugPanel({ transform, strokeCount, symmetry }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
   const dataRef = useRef({
@@ -18,6 +23,16 @@ export function DebugPanel({ transform, strokeCount }: DebugPanelProps) {
     translateY: 0,
     strokeCount: 0,
   });
+
+  const symmetryDataRef = useRef({
+    mode: "none" as SymmetryMode,
+    divisions: 6,
+    angleDeg: 0,
+  });
+
+  // symmetryの関数をrefで保持（GUIのコールバックで使用）
+  const symmetryRef = useRef(symmetry);
+  symmetryRef.current = symmetry;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -51,6 +66,32 @@ export function DebugPanel({ transform, strokeCount }: DebugPanelProps) {
         .listen()
         .disable();
       gui.add(dataRef.current, "strokeCount").name("Strokes").listen().disable();
+
+      // Symmetry folder
+      const symmetryFolder = gui.addFolder("Symmetry");
+
+      symmetryFolder
+        .add(symmetryDataRef.current, "mode", SYMMETRY_MODES)
+        .name("Mode")
+        .onChange((value: SymmetryMode) => {
+          symmetryRef.current.setMode(value);
+        });
+
+      symmetryFolder
+        .add(symmetryDataRef.current, "divisions", 2, 12, 1)
+        .name("Divisions")
+        .onChange((value: number) => {
+          symmetryRef.current.setDivisions(value);
+        });
+
+      symmetryFolder
+        .add(symmetryDataRef.current, "angleDeg", 0, 360, 1)
+        .name("Angle (deg)")
+        .onChange((value: number) => {
+          symmetryRef.current.setAngle((value * Math.PI) / 180);
+        });
+
+      symmetryFolder.open();
 
       guiRef.current = gui;
     });

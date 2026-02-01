@@ -3,6 +3,7 @@
 
 // Types
 export type {
+  BatchCommand,
   Checkpoint,
   ClearCommand,
   Command,
@@ -19,6 +20,7 @@ export { DEFAULT_HISTORY_CONFIG } from "./types";
 
 // Command creation (to be implemented)
 export {
+  createBatchCommand,
   createClearCommand,
   createDrawCircleCommand,
   createDrawLineCommand,

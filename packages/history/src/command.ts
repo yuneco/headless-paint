@@ -1,5 +1,6 @@
 import type { Color, Point } from "@headless-paint/engine";
 import type {
+  BatchCommand,
   ClearCommand,
   Command,
   DrawCircleCommand,
@@ -73,6 +74,19 @@ export function createClearCommand(): ClearCommand {
 }
 
 /**
+ * BatchCommand を作成（対称描画などで複数コマンドをまとめる）
+ */
+export function createBatchCommand(
+  commands: readonly Command[],
+): BatchCommand {
+  return {
+    type: "batch",
+    commands,
+    timestamp: Date.now(),
+  };
+}
+
+/**
  * コマンドの表示ラベルを取得
  */
 export function getCommandLabel(command: Command): string {
@@ -85,5 +99,7 @@ export function getCommandLabel(command: Command): string {
       return `drawCircle (r=${command.radius.toFixed(0)})`;
     case "clear":
       return "clear";
+    case "batch":
+      return `batch (${command.commands.length} commands)`;
   }
 }

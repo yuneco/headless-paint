@@ -21,6 +21,12 @@ export function applyCommand(layer: Layer, command: Command): void {
     case "clear":
       clearLayer(layer);
       break;
+    case "batch":
+      // バッチ内の全コマンドを順番に適用
+      for (const subCommand of command.commands) {
+        applyCommand(layer, subCommand);
+      }
+      break;
   }
 }
 
