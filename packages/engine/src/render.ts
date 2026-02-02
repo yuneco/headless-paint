@@ -19,6 +19,7 @@ export function renderLayerWithTransform(
   ctx.imageSmoothingEnabled = scale < 1;
 
   // mat3 を setTransform に適用
+  // 呼び出し側でDPRスケーリングを含めた変換行列を渡すことを期待
   // mat3: [a, b, 0, c, d, 0, tx, ty, 1] (column-major)
   // setTransform(a, b, c, d, tx, ty)
   ctx.setTransform(

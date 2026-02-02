@@ -55,8 +55,18 @@ export function PaintCanvas({
     ctx.fillStyle = "#f0f0f0";
     ctx.fillRect(0, 0, width, height);
 
+    // DPRを考慮した変換行列を作成
+    // setTransformはスケーリングをリセットするため、DPRを変換行列に含める
+    const dprTransform = new Float32Array(transform) as ViewTransform;
+    dprTransform[0] *= dpr;
+    dprTransform[1] *= dpr;
+    dprTransform[3] *= dpr;
+    dprTransform[4] *= dpr;
+    dprTransform[6] *= dpr;
+    dprTransform[7] *= dpr;
+
     // レイヤー描画
-    renderLayerWithTransform(layer, ctx, transform);
+    renderLayerWithTransform(layer, ctx, dprTransform);
 
     // レイヤーの外形矩形を描画
     const layerCorners = [
