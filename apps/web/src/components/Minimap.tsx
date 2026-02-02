@@ -13,8 +13,8 @@ interface MinimapProps {
   viewTransform: ViewTransform;
   mainCanvasWidth: number;
   mainCanvasHeight: number;
-  width?: number;
-  height?: number;
+  maxWidth?: number;
+  renderVersion?: number;
 }
 
 export function Minimap({
@@ -22,10 +22,16 @@ export function Minimap({
   viewTransform,
   mainCanvasWidth,
   mainCanvasHeight,
-  width = 200,
-  height = 150,
+  maxWidth = 200,
+  renderVersion,
 }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // レイヤーのアスペクト比に合わせてミニマップサイズを計算
+  const aspectRatio = layer.width / layer.height;
+  const width = maxWidth;
+  const height = maxWidth / aspectRatio;
+  const scale = maxWidth / layer.width;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -43,14 +49,21 @@ export function Minimap({
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, width, height);
 
-    // ミニマップ用のスケールを計算
-    const scaleX = width / layer.width;
-    const scaleY = height / layer.height;
-    const scale = Math.min(scaleX, scaleY);
-
     // レイヤー全体を表示するための変換
     const minimapTransform = zoom(createViewTransform(), scale, 0, 0);
-    renderLayerWithTransform(layer, ctx, minimapTransform);
+
+    // DPRを考慮した変換行列を作成
+    // renderLayerWithTransform内でsetTransformを使用するため、
+    // ctx.scale(dpr, dpr)がリセットされる。事前にDPRを適用する必要がある
+    const dprTransform = new Float32Array(minimapTransform) as ViewTransform;
+    dprTransform[0] *= dpr;
+    dprTransform[1] *= dpr;
+    dprTransform[3] *= dpr;
+    dprTransform[4] *= dpr;
+    dprTransform[6] *= dpr;
+    dprTransform[7] *= dpr;
+
+    renderLayerWithTransform(layer, ctx, dprTransform);
 
     // メインビューの表示範囲を赤枠で表示
     // メインキャンバスの4隅をLayer Spaceに変換
@@ -93,7 +106,7 @@ export function Minimap({
     ctx.strokeStyle = "#ccc";
     ctx.lineWidth = 1;
     ctx.strokeRect(0, 0, width, height);
-  }, [layer, viewTransform, mainCanvasWidth, mainCanvasHeight, width, height]);
+  }, [layer, viewTransform, mainCanvasWidth, mainCanvasHeight, width, height, scale, renderVersion]);
 
   return (
     <canvas
@@ -101,11 +114,7 @@ export function Minimap({
       style={{
         width,
         height,
-        position: "absolute",
-        top: 16,
-        right: 16,
-        borderRadius: 4,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+        display: "block",
       }}
     />
   );

@@ -120,9 +120,10 @@ export function DebugPanel({ transform, strokeCount, symmetry }: DebugPanelProps
     <div
       ref={containerRef}
       style={{
-        position: "absolute",
-        top: 180,
-        right: 16,
+        position: "fixed",
+        top: 0,
+        right: 0,
+        zIndex: 100,
       }}
     />
   );

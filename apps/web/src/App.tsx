@@ -15,9 +15,8 @@ import type { Point } from "@headless-paint/input";
 import { expandSymmetry } from "@headless-paint/input";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DebugPanel } from "./components/DebugPanel";
-import { HistoryDebugPanel } from "./components/HistoryDebugPanel";
-import { Minimap } from "./components/Minimap";
 import { PaintCanvas } from "./components/PaintCanvas";
+import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import type { ToolType } from "./hooks/usePointerHandler";
@@ -209,25 +208,23 @@ export function App() {
           height={CANVAS_HEIGHT}
         />
 
-        <Minimap
+        <SidebarPanel
           layer={layer}
           viewTransform={transform}
           mainCanvasWidth={CANVAS_WIDTH}
           mainCanvasHeight={CANVAS_HEIGHT}
+          renderVersion={renderVersion}
+          historyState={historyState}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={canUndo(historyState)}
+          canRedo={canRedo(historyState)}
         />
 
         <DebugPanel
           transform={transform}
           strokeCount={strokeCount}
           symmetry={symmetry}
-        />
-
-        <HistoryDebugPanel
-          historyState={historyState}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
-          canUndo={canUndo(historyState)}
-          canRedo={canRedo(historyState)}
         />
       </div>
     </div>
