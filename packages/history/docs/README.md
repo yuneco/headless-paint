@@ -64,6 +64,32 @@ if (canRedo(historyState)) {
 }
 ```
 
+### パイプラインAPIとの統合（推奨）
+
+```typescript
+import {
+  compilePipeline,
+  endStrokeSession,
+} from "@headless-paint/input";
+import {
+  createHistoryState,
+  createStrokeCommand,
+  pushCommand,
+} from "@headless-paint/history";
+
+// パイプラインAPIでストロークセッションを管理
+// ...（startStrokeSession, addPointToSession）
+
+// ストローク終了時
+const { inputPoints, pipelineConfig } = endStrokeSession(sessionState);
+
+// StrokeCommandを作成（入力点 + パイプライン設定のみ保存）
+const command = createStrokeCommand(inputPoints, pipelineConfig, color, lineWidth);
+historyState = pushCommand(historyState, command, layer, config);
+
+// → リプレイ時にパイプライン設定で自動的に展開される
+```
+
 ## API 一覧
 
 ### 状態操作
@@ -81,6 +107,7 @@ if (canRedo(historyState)) {
 
 | 関数 | 説明 |
 |------|------|
+| `createStrokeCommand(inputPoints, pipeline, color, lineWidth)` | ストロークコマンド（推奨） |
 | `createDrawPathCommand(points, color, lineWidth)` | パス描画コマンド |
 | `createDrawLineCommand(start, end, color, lineWidth)` | 直線描画コマンド |
 | `createDrawCircleCommand(center, radius, color, lineWidth)` | 円描画コマンド |

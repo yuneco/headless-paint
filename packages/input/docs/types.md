@@ -146,3 +146,192 @@ console.log(`Scale: ${components.scaleX}x${components.scaleY}`);
 console.log(`Rotation: ${rotationDeg}°`);
 console.log(`Translation: (${components.translateX}, ${components.translateY})`);
 ```
+
+---
+
+## SymmetryMode
+
+対称モードの種類。
+
+```typescript
+type SymmetryMode = "none" | "axial" | "radial" | "kaleidoscope";
+```
+
+| 値 | 説明 |
+|---|---|
+| `"none"` | 対称なし |
+| `"axial"` | 線対称（軸対称） |
+| `"radial"` | 点対称（回転対称） |
+| `"kaleidoscope"` | 万華鏡（回転 + 反射） |
+
+---
+
+## SymmetryConfig
+
+対称変換の設定。
+
+```typescript
+interface SymmetryConfig {
+  readonly mode: SymmetryMode;
+  readonly origin: Point;
+  readonly angle: number;
+  readonly divisions: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `mode` | `SymmetryMode` | 対称モード |
+| `origin` | `Point` | 対称の中心点（Layer Space） |
+| `angle` | `number` | 対称軸の角度（ラジアン、0=垂直軸） |
+| `divisions` | `number` | 分割数（radial/kaleidoscope で使用、2以上） |
+
+**使用例**:
+```typescript
+const config: SymmetryConfig = {
+  mode: "radial",
+  origin: { x: 500, y: 500 },
+  angle: 0,
+  divisions: 6,
+};
+```
+
+---
+
+## CompiledSymmetry
+
+コンパイル済み対称変換。`compileSymmetry()` で生成。
+
+```typescript
+interface CompiledSymmetry {
+  readonly config: SymmetryConfig;
+  readonly matrices: readonly mat3[];
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `config` | `SymmetryConfig` | 元の設定 |
+| `matrices` | `readonly mat3[]` | 事前計算された変換行列 |
+
+---
+
+## TransformConfig
+
+パイプラインの変換設定（Discriminated Union）。
+
+```typescript
+type TransformConfig =
+  | { type: "symmetry"; config: SymmetryConfig }
+  // 将来の拡張用
+  // | { type: "smoothing"; config: SmoothingConfig }
+  // | { type: "pattern"; config: PatternConfig }
+```
+
+**使用例**:
+```typescript
+const transform: TransformConfig = {
+  type: "symmetry",
+  config: symmetryConfig,
+};
+```
+
+---
+
+## PipelineConfig
+
+ストローク変換パイプラインの設定。
+
+```typescript
+interface PipelineConfig {
+  readonly transforms: readonly TransformConfig[];
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `transforms` | `readonly TransformConfig[]` | 適用する変換の配列（順序で直列適用） |
+
+**使用例**:
+```typescript
+// 対称変換を含むパイプライン
+const config: PipelineConfig = {
+  transforms: [
+    { type: "symmetry", config: symmetryConfig }
+  ]
+};
+
+// 変換なし（通常ペイント）
+const identityConfig: PipelineConfig = { transforms: [] };
+```
+
+---
+
+## CompiledPipeline
+
+コンパイル済みパイプライン。`compilePipeline()` で生成。
+
+```typescript
+interface CompiledPipeline {
+  readonly config: PipelineConfig;
+  readonly outputCount: number;
+  // 内部実装の詳細は非公開
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `config` | `PipelineConfig` | 元の設定（履歴保存用） |
+| `outputCount` | `number` | 1入力あたりの出力数 |
+
+---
+
+## StrokeSessionState
+
+ストロークセッションの状態（不透明型）。
+
+```typescript
+interface StrokeSessionState {
+  // 内部実装
+}
+```
+
+セッション管理関数間でのみ使用。直接参照しないでください。
+
+---
+
+## StrokeSessionResult
+
+セッション操作の結果。
+
+```typescript
+interface StrokeSessionResult {
+  readonly state: StrokeSessionState;
+  readonly expandedStrokes: readonly (readonly Point[])[];
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `state` | `StrokeSessionState` | 次の呼び出しに渡す状態 |
+| `expandedStrokes` | `readonly (readonly Point[])[]` | 現在の展開済みストローク群（描画用） |
+
+---
+
+## StrokeSessionEndResult
+
+セッション終了時の結果。
+
+```typescript
+interface StrokeSessionEndResult {
+  readonly inputPoints: readonly Point[];
+  readonly validStrokes: readonly (readonly Point[])[];
+  readonly pipelineConfig: PipelineConfig;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `inputPoints` | `readonly Point[]` | 元の入力点列（履歴保存用） |
+| `validStrokes` | `readonly (readonly Point[])[]` | 有効なストローク群（2点以上） |
+| `pipelineConfig` | `PipelineConfig` | 使用したパイプライン設定 |

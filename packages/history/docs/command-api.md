@@ -92,6 +92,71 @@ function createClearCommand(): ClearCommand
 
 `ClearCommand` - タイムスタンプ付きのクリアコマンド
 
+## createStrokeCommand
+
+ストロークコマンドを作成。パイプラインAPIと組み合わせて使用。
+
+```typescript
+function createStrokeCommand(
+  inputPoints: readonly Point[],
+  pipeline: PipelineConfig,
+  color: Color,
+  lineWidth: number,
+): StrokeCommand
+```
+
+### パラメータ
+
+| 名前 | 型 | 説明 |
+|------|-----|------|
+| `inputPoints` | `readonly Point[]` | 変換前の入力点列 |
+| `pipeline` | `PipelineConfig` | パイプライン設定（@headless-paint/input） |
+| `color` | `Color` | 描画色 |
+| `lineWidth` | `number` | 線の太さ |
+
+### 戻り値
+
+`StrokeCommand` - タイムスタンプ付きのストロークコマンド
+
+### 使用例
+
+```typescript
+import { endStrokeSession } from "@headless-paint/input";
+import { createStrokeCommand, pushCommand } from "@headless-paint/history";
+
+// ストローク終了時
+const { inputPoints, pipelineConfig } = endStrokeSession(sessionState);
+
+const command = createStrokeCommand(
+  inputPoints,
+  pipelineConfig,
+  { r: 0, g: 0, b: 0, a: 255 },
+  3
+);
+
+historyState = pushCommand(historyState, command, layer, config);
+```
+
+### 従来のDrawPathCommand との違い
+
+| 項目 | DrawPathCommand | StrokeCommand |
+|------|----------------|---------------|
+| 保存データ | 展開後の全点 | 入力点 + パイプライン設定 |
+| 対称6分割時 | 6倍のデータ量 | 1倍 + 設定 |
+| 再計算 | 不可 | 可能 |
+| 用途 | 単純なパス | 変換を伴うストローク |
+
+## createBatchCommand（廃止予定）
+
+> **注意**: BatchCommand は StrokeCommand に置き換えられます。
+> 新規コードでは StrokeCommand を使用してください。
+
+複数のコマンドをまとめるバッチコマンドを作成。
+
+```typescript
+function createBatchCommand(commands: readonly Command[]): BatchCommand
+```
+
 ## getCommandLabel
 
 コマンドの表示用ラベルを取得。
@@ -118,3 +183,5 @@ function getCommandLabel(command: Command): string
 | `drawLine` | `"drawLine"` |
 | `drawCircle` | `"drawCircle (r=50)"` |
 | `clear` | `"clear"` |
+| `stroke` | `"stroke (10 points, 6 strokes)"` |
+| `batch` | `"batch (3 commands)"` |

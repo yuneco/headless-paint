@@ -9,7 +9,9 @@ type Command =
   | DrawPathCommand
   | DrawLineCommand
   | DrawCircleCommand
-  | ClearCommand;
+  | ClearCommand
+  | StrokeCommand
+  | BatchCommand;  // 廃止予定
 ```
 
 ### DrawPathCommand
@@ -55,6 +57,66 @@ interface DrawCircleCommand {
 ```typescript
 interface ClearCommand {
   readonly type: "clear";
+  readonly timestamp: number;
+}
+```
+
+### StrokeCommand
+
+ストローク描画コマンド。入力点とパイプライン設定を保存し、リプレイ時に展開する。
+
+```typescript
+interface StrokeCommand {
+  readonly type: "stroke";
+  readonly inputPoints: readonly Point[];
+  readonly pipeline: PipelineConfig;
+  readonly color: Color;
+  readonly lineWidth: number;
+  readonly timestamp: number;
+}
+```
+
+| プロパティ | 型 | 説明 |
+|-----------|-----|------|
+| `type` | `"stroke"` | コマンド種別 |
+| `inputPoints` | `readonly Point[]` | 変換前の入力点列 |
+| `pipeline` | `PipelineConfig` | パイプライン設定（@headless-paint/input） |
+| `color` | `Color` | 描画色 |
+| `lineWidth` | `number` | 線の太さ |
+| `timestamp` | `number` | 作成時刻 |
+
+**特徴**:
+- 対称描画などでも入力点のみを保存（展開後のデータは保存しない）
+- リプレイ時にパイプライン設定で再展開
+- データサイズが小さい（6分割対称でも1/6）
+
+**使用例**:
+```typescript
+// 履歴に保存されるデータ
+const command: StrokeCommand = {
+  type: "stroke",
+  inputPoints: [{ x: 100, y: 100 }, { x: 150, y: 120 }],
+  pipeline: {
+    transforms: [{ type: "symmetry", config: { mode: "radial", divisions: 6, ... } }]
+  },
+  color: { r: 0, g: 0, b: 0, a: 255 },
+  lineWidth: 3,
+  timestamp: 1706841600000
+};
+// → リプレイ時に6本のストロークに展開される
+```
+
+### BatchCommand（廃止予定）
+
+> **注意**: BatchCommand は StrokeCommand に置き換えられます。
+> 新規コードでは StrokeCommand を使用してください。
+
+複数のコマンドをまとめるバッチコマンド。
+
+```typescript
+interface BatchCommand {
+  readonly type: "batch";
+  readonly commands: readonly Command[];
   readonly timestamp: number;
 }
 ```

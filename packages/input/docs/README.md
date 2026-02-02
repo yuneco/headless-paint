@@ -12,14 +12,24 @@ pnpm add @headless-paint/input
 
 ```typescript
 import {
+  // ビュー変換
   createViewTransform,
   pan,
   zoom,
   rotate,
   decomposeTransform,
+  // 座標変換
   screenToLayer,
   layerToScreen,
+  // 間引き
   shouldAcceptPoint,
+  // ストローク変換パイプライン
+  compilePipeline,
+  expandPoint,
+  expandStroke,
+  startStrokeSession,
+  addPointToSession,
+  endStrokeSession,
 } from "@headless-paint/input";
 
 // ビュー変換を作成
@@ -55,6 +65,11 @@ const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
 | `SamplingConfig` | 間引き設定 |
 | `SamplingState` | 間引き状態 |
 | `TransformComponents` | 変換成分（スケール、回転、平行移動） |
+| `SymmetryConfig` | 対称変換設定 |
+| `PipelineConfig` | パイプライン設定 |
+| `CompiledPipeline` | コンパイル済みパイプライン |
+| `StrokeSessionState` | ストロークセッション状態 |
+| `StrokeSessionResult` | セッション操作結果 |
 
 ### ビュー変換関数
 
@@ -85,6 +100,30 @@ const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
 | 関数 | 説明 |
 |---|---|
 | `shouldAcceptPoint(point, timestamp, state, config)` | 間引き判定 |
+
+### ストローク変換パイプライン
+
+詳細は [pipeline-api.md](./pipeline-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `compilePipeline(config)` | パイプライン設定をコンパイル |
+| `expandPoint(point, compiled)` | 単一点を展開 |
+| `expandStroke(points, compiled)` | ストローク全体を展開 |
+| `startStrokeSession(point, compiled)` | ストロークセッション開始 |
+| `addPointToSession(state, point, compiled)` | セッションに点を追加 |
+| `endStrokeSession(state)` | セッション終了 |
+
+### 対称変換（低レベルAPI）
+
+パイプラインAPIの内部で使用。通常はパイプラインAPIを使用してください。
+
+| 関数 | 説明 |
+|---|---|
+| `compileSymmetry(config)` | 対称設定をコンパイル |
+| `expandSymmetry(point, compiled)` | 点を対称展開 |
+| `getSymmetryCount(config)` | 対称変換の出力数を取得 |
+| `createDefaultSymmetryConfig(width, height)` | デフォルト設定を作成 |
 
 ## 座標系
 
