@@ -18,10 +18,12 @@
     "test:watch": "vitest"
   },
   "peerDependencies": {
-    "@headless-paint/engine": "workspace:*"
+    "@headless-paint/engine": "workspace:*",
+    "@headless-paint/input": "workspace:*"
   },
   "devDependencies": {
     "@headless-paint/engine": "workspace:*",
+    "@headless-paint/input": "workspace:*",
     "vite": "^6.0.0",
     "vite-plugin-dts": "^4.4.0",
     "vitest": "^2.0.0"

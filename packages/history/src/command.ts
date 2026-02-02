@@ -1,4 +1,6 @@
 import type { Color, Point } from "@headless-paint/engine";
+import type { PipelineConfig } from "@headless-paint/input";
+import { compilePipeline } from "@headless-paint/input";
 import type {
   BatchCommand,
   ClearCommand,
@@ -6,6 +8,7 @@ import type {
   DrawCircleCommand,
   DrawLineCommand,
   DrawPathCommand,
+  StrokeCommand,
 } from "./types";
 
 /**
@@ -75,6 +78,7 @@ export function createClearCommand(): ClearCommand {
 
 /**
  * BatchCommand を作成（対称描画などで複数コマンドをまとめる）
+ * @deprecated StrokeCommand に置き換えられます。新規コードでは createStrokeCommand を使用してください。
  */
 export function createBatchCommand(
   commands: readonly Command[],
@@ -82,6 +86,26 @@ export function createBatchCommand(
   return {
     type: "batch",
     commands,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * StrokeCommand を作成
+ * パイプラインAPIと組み合わせて使用
+ */
+export function createStrokeCommand(
+  inputPoints: readonly Point[],
+  pipeline: PipelineConfig,
+  color: Color,
+  lineWidth: number,
+): StrokeCommand {
+  return {
+    type: "stroke",
+    inputPoints,
+    pipeline,
+    color,
+    lineWidth,
     timestamp: Date.now(),
   };
 }
@@ -101,5 +125,9 @@ export function getCommandLabel(command: Command): string {
       return "clear";
     case "batch":
       return `batch (${command.commands.length} commands)`;
+    case "stroke": {
+      const compiled = compilePipeline(command.pipeline);
+      return `stroke (${command.inputPoints.length} points, ${compiled.outputCount} strokes)`;
+    }
   }
 }

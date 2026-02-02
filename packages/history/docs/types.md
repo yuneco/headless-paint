@@ -11,7 +11,7 @@ type Command =
   | DrawCircleCommand
   | ClearCommand
   | StrokeCommand
-  | BatchCommand;  // 廃止予定
+  | BatchCommand;
 ```
 
 ### DrawPathCommand
@@ -106,10 +106,7 @@ const command: StrokeCommand = {
 // → リプレイ時に6本のストロークに展開される
 ```
 
-### BatchCommand（廃止予定）
-
-> **注意**: BatchCommand は StrokeCommand に置き換えられます。
-> 新規コードでは StrokeCommand を使用してください。
+### BatchCommand
 
 複数のコマンドをまとめるバッチコマンド。
 
@@ -120,6 +117,8 @@ interface BatchCommand {
   readonly timestamp: number;
 }
 ```
+
+> **Note**: ストローク描画には `StrokeCommand` の使用を推奨します。
 
 ## Checkpoint 型
 

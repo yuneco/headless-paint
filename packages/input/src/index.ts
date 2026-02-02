@@ -8,6 +8,16 @@ export type {
   SymmetryMode,
   SymmetryConfig,
   CompiledSymmetry,
+  // Pipeline types
+  TransformConfig,
+  PipelineConfig,
+  CompiledPipeline,
+  StrokeSessionState,
+  StrokeSessionResult,
+  StrokeSessionEndResult,
+  // Plugin types
+  TransformPlugin,
+  CompiledTransform,
 } from "./types";
 
 // Transform functions
@@ -33,3 +43,16 @@ export {
   expandSymmetry,
   getSymmetryCount,
 } from "./symmetry";
+
+// Pipeline functions
+export { compilePipeline, expandPoint, expandStroke } from "./pipeline";
+
+// Plugin functions (for extension)
+export { registerPlugin } from "./plugins";
+
+// Session functions
+export {
+  startStrokeSession,
+  addPointToSession,
+  endStrokeSession,
+} from "./session";

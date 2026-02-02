@@ -137,25 +137,15 @@ const command = createStrokeCommand(
 historyState = pushCommand(historyState, command, layer, config);
 ```
 
-### 従来のDrawPathCommand との違い
-
-| 項目 | DrawPathCommand | StrokeCommand |
-|------|----------------|---------------|
-| 保存データ | 展開後の全点 | 入力点 + パイプライン設定 |
-| 対称6分割時 | 6倍のデータ量 | 1倍 + 設定 |
-| 再計算 | 不可 | 可能 |
-| 用途 | 単純なパス | 変換を伴うストローク |
-
-## createBatchCommand（廃止予定）
-
-> **注意**: BatchCommand は StrokeCommand に置き換えられます。
-> 新規コードでは StrokeCommand を使用してください。
+## createBatchCommand
 
 複数のコマンドをまとめるバッチコマンドを作成。
 
 ```typescript
 function createBatchCommand(commands: readonly Command[]): BatchCommand
 ```
+
+> **Note**: ストローク描画には `createStrokeCommand` の使用を推奨します。
 
 ## getCommandLabel
 

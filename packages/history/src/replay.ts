@@ -1,5 +1,6 @@
 import type { Layer } from "@headless-paint/engine";
 import { clearLayer, drawCircle, drawLine, drawPath } from "@headless-paint/engine";
+import { compilePipeline, expandStroke } from "@headless-paint/input";
 import { restoreFromCheckpoint } from "./checkpoint";
 import { findBestCheckpoint, getCommandsToReplay } from "./history";
 import type { Command, HistoryState } from "./types";
@@ -27,6 +28,17 @@ export function applyCommand(layer: Layer, command: Command): void {
         applyCommand(layer, subCommand);
       }
       break;
+    case "stroke": {
+      // パイプラインで入力点を展開して描画
+      const compiled = compilePipeline(command.pipeline);
+      const strokes = expandStroke(command.inputPoints, compiled);
+      for (const strokePoints of strokes) {
+        if (strokePoints.length >= 2) {
+          drawPath(layer, strokePoints, command.color, command.lineWidth);
+        }
+      }
+      break;
+    }
   }
 }
 

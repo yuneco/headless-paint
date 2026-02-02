@@ -1,4 +1,5 @@
 import type { Color, Point } from "@headless-paint/engine";
+import type { PipelineConfig } from "@headless-paint/input";
 
 // Command Types (Discriminated Union)
 
@@ -35,11 +36,24 @@ export interface ClearCommand {
 
 /**
  * 複数のコマンドをまとめるバッチコマンド
- * 対称描画などで複数のストロークを1つの操作として扱う
+ * @deprecated StrokeCommand に置き換えられます。新規コードでは StrokeCommand を使用してください。
  */
 export interface BatchCommand {
   readonly type: "batch";
   readonly commands: readonly Command[];
+  readonly timestamp: number;
+}
+
+/**
+ * ストローク描画コマンド
+ * 入力点とパイプライン設定を保存し、リプレイ時に展開する
+ */
+export interface StrokeCommand {
+  readonly type: "stroke";
+  readonly inputPoints: readonly Point[];
+  readonly pipeline: PipelineConfig;
+  readonly color: Color;
+  readonly lineWidth: number;
   readonly timestamp: number;
 }
 
@@ -48,7 +62,8 @@ export type Command =
   | DrawLineCommand
   | DrawCircleCommand
   | ClearCommand
-  | BatchCommand;
+  | BatchCommand
+  | StrokeCommand;
 
 // Checkpoint
 

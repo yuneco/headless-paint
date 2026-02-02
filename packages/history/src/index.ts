@@ -14,17 +14,19 @@ export type {
   HistoryEntry,
   HistoryState,
   MemoryUsageInfo,
+  StrokeCommand,
 } from "./types";
 
 export { DEFAULT_HISTORY_CONFIG } from "./types";
 
-// Command creation (to be implemented)
+// Command creation
 export {
   createBatchCommand,
   createClearCommand,
   createDrawCircleCommand,
   createDrawLineCommand,
   createDrawPathCommand,
+  createStrokeCommand,
   getCommandLabel,
 } from "./command";
 

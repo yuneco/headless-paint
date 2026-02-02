@@ -83,3 +83,97 @@ export interface CompiledSymmetry {
   /** 事前計算された変換行列のリスト */
   readonly matrices: readonly mat3[];
 }
+
+// ============================================================
+// Pipeline（ストローク変換パイプライン）
+// ============================================================
+
+/**
+ * パイプラインの変換設定（Discriminated Union）
+ * 将来の拡張: smoothing, pattern など
+ */
+export type TransformConfig = { type: "symmetry"; config: SymmetryConfig };
+// 将来の拡張用:
+// | { type: "smoothing"; config: SmoothingConfig }
+// | { type: "pattern"; config: PatternConfig }
+
+/**
+ * ストローク変換パイプラインの設定
+ * transforms 配列の順序で変換が直列適用される
+ */
+export interface PipelineConfig {
+  readonly transforms: readonly TransformConfig[];
+}
+
+/**
+ * 変換プラグインのインターフェース
+ * 各変換タイプはこのインターフェースを実装する
+ */
+export interface TransformPlugin<TConfig, TCompiled> {
+  readonly type: string;
+  compile(config: TConfig): TCompiled;
+  expand(points: readonly Point[], compiled: TCompiled): Point[];
+  getOutputCount(config: TConfig): number;
+}
+
+/**
+ * 型消去されたコンパイル済み変換
+ * パイプライン内部で使用
+ */
+export interface CompiledTransform {
+  readonly type: string;
+  readonly outputCount: number;
+  readonly _expand: (points: readonly Point[]) => Point[];
+}
+
+/**
+ * コンパイル済みパイプライン
+ * compilePipeline() で生成し、各点の変換時に使用
+ */
+export interface CompiledPipeline {
+  /** 元の設定（履歴保存用） */
+  readonly config: PipelineConfig;
+  /** 1入力あたりの出力数 */
+  readonly outputCount: number;
+  /** 内部: コンパイル済み変換の配列（非公開） */
+  readonly _transforms: readonly CompiledTransform[];
+}
+
+// ============================================================
+// Stroke Session（ストロークセッション管理）
+// ============================================================
+
+/**
+ * ストロークセッションの状態
+ * セッション管理関数間でのみ使用。直接参照しないでください。
+ */
+export interface StrokeSessionState {
+  /** 入力点列（変換前） */
+  readonly inputPoints: Point[];
+  /** 展開済みストローク群 */
+  readonly expandedStrokes: Point[][];
+  /** 使用したパイプライン設定 */
+  readonly pipelineConfig: PipelineConfig;
+}
+
+/**
+ * セッション操作の結果
+ */
+export interface StrokeSessionResult {
+  /** 次の呼び出しに渡すセッション状態 */
+  readonly state: StrokeSessionState;
+  /** 現在の展開済みストローク群（描画用） */
+  readonly expandedStrokes: readonly (readonly Point[])[];
+}
+
+/**
+ * セッション終了時の結果
+ */
+export interface StrokeSessionEndResult {
+  /** 元の入力点列（履歴保存用） */
+  readonly inputPoints: readonly Point[];
+  /** 有効なストローク群（2点以上のもの） */
+  readonly validStrokes: readonly (readonly Point[])[];
+  /** 使用したパイプライン設定 */
+  readonly pipelineConfig: PipelineConfig;
+}
