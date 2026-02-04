@@ -361,10 +361,12 @@ app（全てに依存）
 7. `src/index.ts` - エクスポート更新
 
 8. **セルフレビュー**
-   - [ ] input が engine/stroke に依存していないこと
-   - [ ] FilterPlugin インターフェースでプラグインパターンが実現できていること
-   - [ ] filter-pipeline.ts にフィルタタイプ固有の分岐がないこと
-   - [ ] processPoint が committed/pending を正しく分離して返すこと
+   - [x] input が engine/stroke に依存していないこと
+   - [x] FilterPlugin インターフェースでプラグインパターンが実現できていること
+   - [x] filter-pipeline.ts にフィルタタイプ固有の分岐がないこと
+   - [x] processPoint が committed/pending を正しく分離して返すこと
+
+**Phase 2 完了: 2026-02-04**
 
 ### Phase 3: stroke パッケージ作成
 

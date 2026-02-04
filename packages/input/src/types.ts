@@ -51,129 +51,117 @@ export interface TransformComponents {
 }
 
 // ============================================================
-// Symmetry（対称変換）
+// InputPoint（入力点）
 // ============================================================
 
 /**
- * 対称モードの種類
+ * 入力点を表す型
+ * 座標に加えて筆圧とタイムスタンプを持つ
  */
-export type SymmetryMode = "none" | "axial" | "radial" | "kaleidoscope";
-
-/**
- * 対称変換の設定
- */
-export interface SymmetryConfig {
-  /** 対称モード */
-  readonly mode: SymmetryMode;
-  /** 対称の中心点（Layer Space） */
-  readonly origin: Point;
-  /** 対称軸の角度（ラジアン、0=垂直軸、正=反時計回り） */
-  readonly angle: number;
-  /** 分割数（radial / kaleidoscope で使用、2以上） */
-  readonly divisions: number;
-}
-
-/**
- * コンパイル済み対称変換（パフォーマンス最適化用）
- * 設定変更時に compileSymmetry() で生成し、各点の変換時に使用
- */
-export interface CompiledSymmetry {
-  /** 元の設定 */
-  readonly config: SymmetryConfig;
-  /** 事前計算された変換行列のリスト */
-  readonly matrices: readonly mat3[];
+export interface InputPoint {
+  readonly x: number;
+  readonly y: number;
+  /** 筆圧（0.0-1.0、オプション） */
+  readonly pressure?: number;
+  /** タイムスタンプ（ミリ秒） */
+  readonly timestamp: number;
 }
 
 // ============================================================
-// Pipeline（ストローク変換パイプライン）
+// Filter Plugin（フィルタプラグイン）
 // ============================================================
 
 /**
- * パイプラインの変換設定（Discriminated Union）
- * 将来の拡張: smoothing, pattern など
+ * フィルタの状態（各プラグインで拡張）
  */
-export type TransformConfig = { type: "symmetry"; config: SymmetryConfig };
-// 将来の拡張用:
-// | { type: "smoothing"; config: SmoothingConfig }
-// | { type: "pattern"; config: PatternConfig }
-
-/**
- * ストローク変換パイプラインの設定
- * transforms 配列の順序で変換が直列適用される
- */
-export interface PipelineConfig {
-  readonly transforms: readonly TransformConfig[];
+export interface FilterState {
+  // プラグイン固有の状態
 }
 
 /**
- * 変換プラグインのインターフェース
- * 各変換タイプはこのインターフェースを実装する
+ * フィルタ処理1ステップの結果
  */
-export interface TransformPlugin<TConfig, TCompiled> {
+export interface FilterStepResult {
+  readonly state: FilterState;
+  readonly committed: readonly InputPoint[];
+  readonly pending: readonly InputPoint[];
+}
+
+/**
+ * フィルタプラグインのインターフェース
+ */
+export interface FilterPlugin {
   readonly type: string;
-  compile(config: TConfig): TCompiled;
-  expand(points: readonly Point[], compiled: TCompiled): Point[];
-  getOutputCount(config: TConfig): number;
-}
-
-/**
- * 型消去されたコンパイル済み変換
- * パイプライン内部で使用
- */
-export interface CompiledTransform {
-  readonly type: string;
-  readonly outputCount: number;
-  readonly _expand: (points: readonly Point[]) => Point[];
-}
-
-/**
- * コンパイル済みパイプライン
- * compilePipeline() で生成し、各点の変換時に使用
- */
-export interface CompiledPipeline {
-  /** 元の設定（履歴保存用） */
-  readonly config: PipelineConfig;
-  /** 1入力あたりの出力数 */
-  readonly outputCount: number;
-  /** 内部: コンパイル済み変換の配列（非公開） */
-  readonly _transforms: readonly CompiledTransform[];
+  createState(config: unknown): FilterState;
+  process(state: FilterState, point: InputPoint): FilterStepResult;
+  finalize(state: FilterState): FilterStepResult;
 }
 
 // ============================================================
-// Stroke Session（ストロークセッション管理）
+// Filter Config（フィルタ設定）
 // ============================================================
 
 /**
- * ストロークセッションの状態
- * セッション管理関数間でのみ使用。直接参照しないでください。
+ * フィルタの種類
  */
-export interface StrokeSessionState {
-  /** 入力点列（変換前） */
-  readonly inputPoints: Point[];
-  /** 展開済みストローク群 */
-  readonly expandedStrokes: Point[][];
-  /** 使用したパイプライン設定 */
-  readonly pipelineConfig: PipelineConfig;
+export type FilterType = "smoothing";
+
+/**
+ * スムージングフィルタの設定
+ */
+export interface SmoothingConfig {
+  /** 移動平均のウィンドウサイズ（3以上の奇数推奨） */
+  readonly windowSize: number;
 }
 
 /**
- * セッション操作の結果
+ * フィルタ設定（Discriminated Union）
  */
-export interface StrokeSessionResult {
-  /** 次の呼び出しに渡すセッション状態 */
-  readonly state: StrokeSessionState;
-  /** 現在の展開済みストローク群（描画用） */
-  readonly expandedStrokes: readonly (readonly Point[])[];
+export type FilterConfig = { type: "smoothing"; config: SmoothingConfig };
+// 将来の拡張:
+// | { type: "pressure-curve"; config: PressureCurveConfig }
+
+// ============================================================
+// Filter Pipeline（フィルタパイプライン）
+// ============================================================
+
+/**
+ * フィルタパイプラインの設定
+ */
+export interface FilterPipelineConfig {
+  readonly filters: readonly FilterConfig[];
 }
 
 /**
- * セッション終了時の結果
+ * コンパイル済みフィルタパイプライン
  */
-export interface StrokeSessionEndResult {
-  /** 元の入力点列（履歴保存用） */
-  readonly inputPoints: readonly Point[];
-  /** 有効なストローク群（2点以上のもの） */
-  readonly validStrokes: readonly (readonly Point[])[];
-  /** 使用したパイプライン設定 */
-  readonly pipelineConfig: PipelineConfig;
+export interface CompiledFilterPipeline {
+  readonly config: FilterPipelineConfig;
+  readonly plugins: readonly FilterPlugin[];
+}
+
+/**
+ * フィルタパイプラインの状態
+ */
+export interface FilterPipelineState {
+  readonly filterStates: readonly FilterState[];
+  readonly allCommitted: readonly InputPoint[];
+}
+
+/**
+ * フィルタパイプラインの出力
+ */
+export interface FilterOutput {
+  /** 確定済みの点（座標変更なし） */
+  readonly committed: readonly InputPoint[];
+  /** 未確定の点（座標変更の可能性あり） */
+  readonly pending: readonly InputPoint[];
+}
+
+/**
+ * フィルタ処理の結果
+ */
+export interface FilterProcessResult {
+  readonly state: FilterPipelineState;
+  readonly output: FilterOutput;
 }
