@@ -29,12 +29,12 @@ importers:
       '@headless-paint/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@headless-paint/history':
-        specifier: workspace:*
-        version: link:../../packages/history
       '@headless-paint/input':
         specifier: workspace:*
         version: link:../../packages/input
+      '@headless-paint/stroke':
+        specifier: workspace:*
+        version: link:../../packages/stroke
       lil-gui:
         specifier: ^0.20.0
         version: 0.20.0
@@ -73,24 +73,6 @@ importers:
       vite-plugin-dts:
         specifier: ^4.4.0
         version: 4.5.4(typescript@5.9.3)(vite@6.4.1)
-
-  packages/history:
-    devDependencies:
-      '@headless-paint/engine':
-        specifier: workspace:*
-        version: link:../engine
-      '@headless-paint/input':
-        specifier: workspace:*
-        version: link:../input
-      vite:
-        specifier: ^6.0.0
-        version: 6.4.1
-      vite-plugin-dts:
-        specifier: ^4.4.0
-        version: 4.5.4(typescript@5.9.3)(vite@6.4.1)
-      vitest:
-        specifier: ^2.0.0
-        version: 2.1.9(@vitest/browser@3.2.4)
 
   packages/input:
     dependencies:

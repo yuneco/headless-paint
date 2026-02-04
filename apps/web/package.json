@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@headless-paint/engine": "workspace:*",
-    "@headless-paint/history": "workspace:*",
     "@headless-paint/input": "workspace:*",
+    "@headless-paint/stroke": "workspace:*",
     "lil-gui": "^0.20.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

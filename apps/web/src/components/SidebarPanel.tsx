@@ -1,5 +1,5 @@
 import type { Layer } from "@headless-paint/engine";
-import type { HistoryState } from "@headless-paint/history";
+import type { HistoryState } from "@headless-paint/stroke";
 import type { ViewTransform } from "@headless-paint/input";
 import { AccordionPanel } from "./AccordionPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";

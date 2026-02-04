@@ -1,5 +1,25 @@
-import { clearLayer, createLayer, drawPath } from "@headless-paint/engine";
 import {
+  appendToCommittedLayer,
+  clearLayer,
+  createLayer,
+  renderPendingLayer,
+} from "@headless-paint/engine";
+import type { CompiledExpand, Layer } from "@headless-paint/engine";
+import {
+  compileFilterPipeline,
+  createFilterPipelineState,
+  finalizePipeline,
+  processPoint,
+} from "@headless-paint/input";
+import type {
+  CompiledFilterPipeline,
+  FilterPipelineConfig,
+  FilterPipelineState,
+  InputPoint,
+  Point,
+} from "@headless-paint/input";
+import {
+  addPointToSession,
   canRedo,
   canUndo,
   createHistoryState,
@@ -7,24 +27,23 @@ import {
   pushCommand,
   rebuildLayerState,
   redo,
-  undo,
-} from "@headless-paint/history";
-import type { HistoryConfig, HistoryState } from "@headless-paint/history";
-import type { Point, StrokeSessionState } from "@headless-paint/input";
-import {
-  addPointToSession,
-  compilePipeline,
-  endStrokeSession,
   startStrokeSession,
-} from "@headless-paint/input";
+  undo,
+} from "@headless-paint/stroke";
+import type {
+  HistoryConfig,
+  HistoryState,
+  StrokeSessionState,
+  StrokeStyle,
+} from "@headless-paint/stroke";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
 import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
+import { useExpand } from "./hooks/useExpand";
 import type { ToolType } from "./hooks/usePointerHandler";
-import { useSymmetry } from "./hooks/useSymmetry";
 import { useViewTransform } from "./hooks/useViewTransform";
 
 const CANVAS_WIDTH = 800;
@@ -41,67 +60,151 @@ const HISTORY_CONFIG: HistoryConfig = {
   maxCheckpoints: 10,
 };
 
+const DEFAULT_FILTER_PIPELINE: FilterPipelineConfig = {
+  filters: [],
+};
+
 export function App() {
   const [tool, setTool] = useState<ToolType>("pen");
   const { transform, handlePan, handleZoom, handleRotate, reset } =
     useViewTransform();
 
-  const layer = useMemo(() => createLayer(LAYER_WIDTH, LAYER_HEIGHT), []);
+  const committedLayer = useMemo(
+    () => createLayer(LAYER_WIDTH, LAYER_HEIGHT),
+    [],
+  );
+  const pendingLayer = useMemo(
+    () => createLayer(LAYER_WIDTH, LAYER_HEIGHT),
+    [],
+  );
 
   const [strokePoints, setStrokePoints] = useState<Point[]>([]);
   const [renderVersion, setRenderVersion] = useState(0);
 
-  // 対称設定
-  const symmetry = useSymmetry(LAYER_WIDTH, LAYER_HEIGHT);
+  const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
 
-  // 履歴管理
   const [historyState, setHistoryState] = useState<HistoryState>(() =>
     createHistoryState(LAYER_WIDTH, LAYER_HEIGHT),
   );
 
-  // パイプライン設定（対称設定からPipelineConfigを生成）
-  const compiledPipeline = useMemo(() => {
-    if (symmetry.config.mode === "none") {
-      return compilePipeline({ transforms: [] });
-    }
-    return compilePipeline({
-      transforms: [{ type: "symmetry", config: symmetry.config }],
-    });
-  }, [symmetry.config]);
+  const compiledFilterPipeline = useMemo(
+    () => compileFilterPipeline(DEFAULT_FILTER_PIPELINE),
+    [],
+  );
 
-  // ストロークセッション状態
-  const sessionRef = useRef<StrokeSessionState | null>(null);
-  const compiledPipelineRef = useRef(compiledPipeline);
-  compiledPipelineRef.current = compiledPipeline;
+  const strokeStyle: StrokeStyle = useMemo(
+    () => ({
+      color: PEN_COLOR,
+      lineWidth: PEN_WIDTH,
+    }),
+    [],
+  );
 
-  const onStrokeStart = useCallback((point: Point) => {
-    const result = startStrokeSession(point, compiledPipelineRef.current);
-    sessionRef.current = result.state;
-    setStrokePoints([point]);
-  }, []);
+  const sessionRef = useRef<{
+    strokeSession: StrokeSessionState;
+    filterState: FilterPipelineState;
+    inputPoints: InputPoint[];
+    compiledExpand: CompiledExpand;
+    compiledFilterPipeline: CompiledFilterPipeline;
+  } | null>(null);
+
+  const expandRef = useRef(expand);
+  expandRef.current = expand;
+
+  const onStrokeStart = useCallback(
+    (point: Point) => {
+      const inputPoint: InputPoint = {
+        x: point.x,
+        y: point.y,
+        timestamp: Date.now(),
+      };
+
+      const compiled = expandRef.current.compiled;
+      const filterState = createFilterPipelineState(compiledFilterPipeline);
+      const filterResult = processPoint(
+        filterState,
+        inputPoint,
+        compiledFilterPipeline,
+      );
+
+      const strokeResult = startStrokeSession(
+        filterResult.output,
+        strokeStyle,
+        expandRef.current.config,
+      );
+
+      sessionRef.current = {
+        strokeSession: strokeResult.state,
+        filterState: filterResult.state,
+        inputPoints: [inputPoint],
+        compiledExpand: compiled,
+        compiledFilterPipeline,
+      };
+
+      appendToCommittedLayer(
+        committedLayer,
+        strokeResult.renderUpdate.newlyCommitted,
+        strokeStyle,
+        compiled,
+      );
+      renderPendingLayer(
+        pendingLayer,
+        strokeResult.renderUpdate.currentPending,
+        strokeStyle,
+        compiled,
+      );
+
+      setStrokePoints([point]);
+      setRenderVersion((n) => n + 1);
+    },
+    [committedLayer, pendingLayer, compiledFilterPipeline, strokeStyle],
+  );
 
   const onStrokeMove = useCallback(
     (point: Point) => {
       if (!sessionRef.current) return;
 
-      const result = addPointToSession(
-        sessionRef.current,
-        point,
-        compiledPipelineRef.current,
+      const inputPoint: InputPoint = {
+        x: point.x,
+        y: point.y,
+        timestamp: Date.now(),
+      };
+
+      const filterResult = processPoint(
+        sessionRef.current.filterState,
+        inputPoint,
+        sessionRef.current.compiledFilterPipeline,
       );
-      sessionRef.current = result.state;
+
+      const strokeResult = addPointToSession(
+        sessionRef.current.strokeSession,
+        filterResult.output,
+      );
+
+      sessionRef.current = {
+        ...sessionRef.current,
+        strokeSession: strokeResult.state,
+        filterState: filterResult.state,
+        inputPoints: [...sessionRef.current.inputPoints, inputPoint],
+      };
+
+      appendToCommittedLayer(
+        committedLayer,
+        strokeResult.renderUpdate.newlyCommitted,
+        strokeStyle,
+        sessionRef.current.compiledExpand,
+      );
+      renderPendingLayer(
+        pendingLayer,
+        strokeResult.renderUpdate.currentPending,
+        strokeStyle,
+        sessionRef.current.compiledExpand,
+      );
 
       setStrokePoints((prev) => [...prev, point]);
-
-      // 各展開ストロークを描画
-      for (const strokePath of result.expandedStrokes) {
-        if (strokePath.length >= 2) {
-          drawPath(layer, strokePath, PEN_COLOR, PEN_WIDTH);
-        }
-      }
       setRenderVersion((n) => n + 1);
     },
-    [layer],
+    [committedLayer, pendingLayer, strokeStyle],
   );
 
   const onStrokeEnd = useCallback(() => {
@@ -110,51 +213,56 @@ export function App() {
       return;
     }
 
-    const { inputPoints, validStrokes, pipelineConfig } = endStrokeSession(
-      sessionRef.current,
-    );
+    const { inputPoints, strokeSession, filterState, compiledFilterPipeline } =
+      sessionRef.current;
 
-    if (validStrokes.length > 0) {
+    const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
+
+    const totalPoints =
+      strokeSession.allCommitted.length + finalOutput.pending.length;
+
+    if (totalPoints >= 2) {
       const command = createStrokeCommand(
         inputPoints,
-        pipelineConfig,
-        PEN_COLOR,
-        PEN_WIDTH,
+        compiledFilterPipeline.config,
+        strokeSession.expand,
+        strokeStyle.color,
+        strokeStyle.lineWidth,
       );
       setHistoryState((prev) =>
-        pushCommand(prev, command, layer, HISTORY_CONFIG),
+        pushCommand(prev, command, committedLayer, HISTORY_CONFIG),
       );
     }
 
+    clearLayer(pendingLayer);
+    setRenderVersion((n) => n + 1);
+
     sessionRef.current = null;
     setStrokePoints([]);
-  }, [layer]);
+  }, [committedLayer, pendingLayer, strokeStyle]);
 
-  // Undo
   const handleUndo = useCallback(() => {
     setHistoryState((prev) => {
       if (!canUndo(prev)) return prev;
       const newState = undo(prev);
-      clearLayer(layer);
-      rebuildLayerState(layer, newState);
+      clearLayer(committedLayer);
+      rebuildLayerState(committedLayer, newState);
       setRenderVersion((n) => n + 1);
       return newState;
     });
-  }, [layer]);
+  }, [committedLayer]);
 
-  // Redo
   const handleRedo = useCallback(() => {
     setHistoryState((prev) => {
       if (!canRedo(prev)) return prev;
       const newState = redo(prev);
-      clearLayer(layer);
-      rebuildLayerState(layer, newState);
+      clearLayer(committedLayer);
+      rebuildLayerState(committedLayer, newState);
       setRenderVersion((n) => n + 1);
       return newState;
     });
-  }, [layer]);
+  }, [committedLayer]);
 
-  // キーボードショートカット
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey;
@@ -174,6 +282,11 @@ export function App() {
 
   const strokeCount = historyState.currentIndex + 1;
 
+  const layers: Layer[] = useMemo(
+    () => [committedLayer, pendingLayer],
+    [committedLayer, pendingLayer],
+  );
+
   return (
     <div style={{ padding: 16 }}>
       <h1 style={{ margin: "0 0 16px" }}>Headless Paint</h1>
@@ -190,7 +303,7 @@ export function App() {
 
       <div style={{ position: "relative", marginTop: 16 }}>
         <PaintCanvas
-          layer={layer}
+          layers={layers}
           transform={transform}
           tool={tool}
           onPan={handlePan}
@@ -201,18 +314,20 @@ export function App() {
           onStrokeEnd={onStrokeEnd}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
+          layerWidth={LAYER_WIDTH}
+          layerHeight={LAYER_HEIGHT}
           renderVersion={renderVersion}
         />
 
         <SymmetryOverlay
-          config={symmetry.config}
+          config={expand.config}
           transform={transform}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
         />
 
         <SidebarPanel
-          layer={layer}
+          layer={committedLayer}
           viewTransform={transform}
           mainCanvasWidth={CANVAS_WIDTH}
           mainCanvasHeight={CANVAS_HEIGHT}
@@ -227,7 +342,7 @@ export function App() {
         <DebugPanel
           transform={transform}
           strokeCount={strokeCount}
-          symmetry={symmetry}
+          expand={expand}
         />
       </div>
     </div>

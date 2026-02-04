@@ -1,11 +1,31 @@
-import {
-  estimateMemoryUsage,
-  generateThumbnailDataUrl,
-  getCommandLabel,
-  getHistoryEntries,
-} from "@headless-paint/history";
-import type { HistoryState } from "@headless-paint/history";
+import type { Command, HistoryState } from "@headless-paint/stroke";
 import { useMemo } from "react";
+
+function getCommandLabel(command: Command): string {
+  switch (command.type) {
+    case "stroke":
+      return `Stroke (${command.inputPoints.length} pts)`;
+    case "clear":
+      return "Clear";
+    default:
+      return "Unknown";
+  }
+}
+
+interface HistoryEntry {
+  index: number;
+  command: Command;
+  hasCheckpoint: boolean;
+}
+
+function getHistoryEntries(state: HistoryState): HistoryEntry[] {
+  const checkpointIndices = new Set(state.checkpoints.map((cp) => cp.commandIndex));
+  return state.commands.map((command, index) => ({
+    index,
+    command,
+    hasCheckpoint: checkpointIndices.has(index),
+  }));
+}
 
 interface HistoryContentProps {
   historyState: HistoryState;
@@ -27,47 +47,8 @@ export function HistoryContent({
     [historyState],
   );
 
-  const memoryUsage = useMemo(
-    () => estimateMemoryUsage(historyState),
-    [historyState],
-  );
-
-  const thumbnails = useMemo(() => {
-    const map: Record<number, string> = {};
-    for (const checkpoint of historyState.checkpoints) {
-      map[checkpoint.commandIndex] = generateThumbnailDataUrl(
-        checkpoint.imageData,
-        24,
-        24,
-      );
-    }
-    return map;
-  }, [historyState.checkpoints]);
-
-  const formatMemory = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
   return (
     <>
-      {/* Memory Usage */}
-      <div
-        style={{
-          marginBottom: 8,
-          padding: 6,
-          backgroundColor: "#f8f9fa",
-          borderRadius: 4,
-        }}
-      >
-        <div>Memory: {memoryUsage.formatted}</div>
-        <div style={{ color: "#666", fontSize: 10 }}>
-          CP: {formatMemory(memoryUsage.checkpointsBytes)} / Cmd:{" "}
-          {formatMemory(memoryUsage.commandsBytes)}
-        </div>
-      </div>
-
       {/* Undo/Redo Buttons */}
       <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
         <button
@@ -138,26 +119,6 @@ export function HistoryContent({
                   opacity: isAfterCurrent ? 0.5 : 1,
                 }}
               >
-                {/* Thumbnail */}
-                <div
-                  style={{
-                    width: 24,
-                    height: 24,
-                    backgroundColor: "#f0f0f0",
-                    borderRadius: 2,
-                    overflow: "hidden",
-                    flexShrink: 0,
-                  }}
-                >
-                  {entry.hasCheckpoint && thumbnails[entry.index] && (
-                    <img
-                      src={thumbnails[entry.index]}
-                      alt=""
-                      style={{ width: "100%", height: "100%" }}
-                    />
-                  )}
-                </div>
-
                 {/* Command Info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
