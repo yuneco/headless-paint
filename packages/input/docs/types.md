@@ -149,149 +149,139 @@ console.log(`Translation: (${components.translateX}, ${components.translateY})`)
 
 ---
 
-## SymmetryMode
+## InputPoint
 
-対称モードの種類。
+入力点を表す型。座標に加えて筆圧とタイムスタンプを持つ。
 
 ```typescript
-type SymmetryMode = "none" | "axial" | "radial" | "kaleidoscope";
+interface InputPoint {
+  x: number;
+  y: number;
+  pressure?: number;   // 筆圧（0.0-1.0、オプション）
+  timestamp: number;   // タイムスタンプ（ミリ秒）
+}
+```
+
+**使用例**:
+```typescript
+const point: InputPoint = {
+  x: 100,
+  y: 200,
+  pressure: 0.8,
+  timestamp: Date.now(),
+};
+```
+
+---
+
+## FilterType
+
+フィルタの種類。
+
+```typescript
+type FilterType = "smoothing";
 ```
 
 | 値 | 説明 |
 |---|---|
-| `"none"` | 対称なし |
-| `"axial"` | 線対称（軸対称） |
-| `"radial"` | 点対称（回転対称） |
-| `"kaleidoscope"` | 万華鏡（回転 + 反射） |
+| `"smoothing"` | スムージング（移動平均）フィルタ |
 
 ---
 
-## SymmetryConfig
+## SmoothingConfig
 
-対称変換の設定。
+スムージングフィルタの設定。
 
 ```typescript
-interface SymmetryConfig {
-  readonly mode: SymmetryMode;
-  readonly origin: Point;
-  readonly angle: number;
-  readonly divisions: number;
+interface SmoothingConfig {
+  readonly windowSize: number;  // 移動平均のウィンドウサイズ（3以上の奇数推奨）
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `mode` | `SymmetryMode` | 対称モード |
-| `origin` | `Point` | 対称の中心点（Layer Space） |
-| `angle` | `number` | 対称軸の角度（ラジアン、0=垂直軸） |
-| `divisions` | `number` | 分割数（radial/kaleidoscope で使用、2以上） |
+| `windowSize` | `number` | 平滑化に使う点数。大きいほど滑らか。 |
 
 **使用例**:
 ```typescript
-const config: SymmetryConfig = {
-  mode: "radial",
-  origin: { x: 500, y: 500 },
-  angle: 0,
-  divisions: 6,
-};
+const config: SmoothingConfig = { windowSize: 5 };
 ```
 
 ---
 
-## CompiledSymmetry
+## FilterConfig
 
-コンパイル済み対称変換。`compileSymmetry()` で生成。
-
-```typescript
-interface CompiledSymmetry {
-  readonly config: SymmetryConfig;
-  readonly matrices: readonly mat3[];
-}
-```
-
-| フィールド | 型 | 説明 |
-|---|---|---|
-| `config` | `SymmetryConfig` | 元の設定 |
-| `matrices` | `readonly mat3[]` | 事前計算された変換行列 |
-
----
-
-## TransformConfig
-
-パイプラインの変換設定（Discriminated Union）。
+フィルタ設定（Discriminated Union）。
 
 ```typescript
-type TransformConfig =
-  | { type: "symmetry"; config: SymmetryConfig }
+type FilterConfig =
+  | { type: "smoothing"; config: SmoothingConfig }
   // 将来の拡張用
-  // | { type: "smoothing"; config: SmoothingConfig }
-  // | { type: "pattern"; config: PatternConfig }
+  // | { type: "pressure-curve"; config: PressureCurveConfig }
 ```
 
 **使用例**:
 ```typescript
-const transform: TransformConfig = {
-  type: "symmetry",
-  config: symmetryConfig,
+const filter: FilterConfig = {
+  type: "smoothing",
+  config: { windowSize: 5 },
 };
 ```
 
 ---
 
-## PipelineConfig
+## FilterPipelineConfig
 
-ストローク変換パイプラインの設定。
+フィルタパイプラインの設定。
 
 ```typescript
-interface PipelineConfig {
-  readonly transforms: readonly TransformConfig[];
+interface FilterPipelineConfig {
+  readonly filters: readonly FilterConfig[];
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `transforms` | `readonly TransformConfig[]` | 適用する変換の配列（順序で直列適用） |
+| `filters` | `readonly FilterConfig[]` | 適用するフィルタの配列（順序で直列適用） |
 
 **使用例**:
 ```typescript
-// 対称変換を含むパイプライン
-const config: PipelineConfig = {
-  transforms: [
-    { type: "symmetry", config: symmetryConfig }
+// スムージングを含むパイプライン
+const config: FilterPipelineConfig = {
+  filters: [
+    { type: "smoothing", config: { windowSize: 5 } }
   ]
 };
 
-// 変換なし（通常ペイント）
-const identityConfig: PipelineConfig = { transforms: [] };
+// フィルタなし（通常ペイント）
+const identityConfig: FilterPipelineConfig = { filters: [] };
 ```
 
 ---
 
-## CompiledPipeline
+## CompiledFilterPipeline
 
-コンパイル済みパイプライン。`compilePipeline()` で生成。
+コンパイル済みフィルタパイプライン。`compileFilterPipeline()` で生成。
 
 ```typescript
-interface CompiledPipeline {
-  readonly config: PipelineConfig;
-  readonly outputCount: number;
+interface CompiledFilterPipeline {
+  readonly config: FilterPipelineConfig;
   // 内部実装の詳細は非公開
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `config` | `PipelineConfig` | 元の設定（履歴保存用） |
-| `outputCount` | `number` | 1入力あたりの出力数 |
+| `config` | `FilterPipelineConfig` | 元の設定（履歴保存用） |
 
 ---
 
-## StrokeSessionState
+## FilterPipelineState
 
-ストロークセッションの状態（不透明型）。
+フィルタパイプラインの状態。
 
 ```typescript
-interface StrokeSessionState {
+interface FilterPipelineState {
   // 内部実装
 }
 ```
@@ -300,38 +290,41 @@ interface StrokeSessionState {
 
 ---
 
-## StrokeSessionResult
+## FilterOutput
 
-セッション操作の結果。
+フィルタパイプラインの出力。
 
 ```typescript
-interface StrokeSessionResult {
-  readonly state: StrokeSessionState;
-  readonly expandedStrokes: readonly (readonly Point[])[];
+interface FilterOutput {
+  readonly committed: readonly InputPoint[];  // 確定済みの点
+  readonly pending: readonly InputPoint[];    // 未確定の点
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `state` | `StrokeSessionState` | 次の呼び出しに渡す状態 |
-| `expandedStrokes` | `readonly (readonly Point[])[]` | 現在の展開済みストローク群（描画用） |
+| `committed` | `readonly InputPoint[]` | 座標確定済み。確定レイヤーに永続描画 |
+| `pending` | `readonly InputPoint[]` | 座標変更の可能性あり。作業レイヤーに毎回再描画 |
+
+**committed/pendingの違い**:
+- **committed**: 新しい入力が来ても座標が変わらない。追加描画のみで良い。
+- **pending**: 新しい入力が来ると座標が変わる可能性がある。毎回クリア→再描画が必要。
 
 ---
 
-## StrokeSessionEndResult
+## FilterProcessResult
 
-セッション終了時の結果。
+フィルタ処理の結果。
 
 ```typescript
-interface StrokeSessionEndResult {
-  readonly inputPoints: readonly Point[];
-  readonly validStrokes: readonly (readonly Point[])[];
-  readonly pipelineConfig: PipelineConfig;
+interface FilterProcessResult {
+  readonly state: FilterPipelineState;
+  readonly output: FilterOutput;
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `inputPoints` | `readonly Point[]` | 元の入力点列（履歴保存用） |
-| `validStrokes` | `readonly (readonly Point[])[]` | 有効なストローク群（2点以上） |
-| `pipelineConfig` | `PipelineConfig` | 使用したパイプライン設定 |
+| `state` | `FilterPipelineState` | 次の呼び出しに渡す状態 |
+| `output` | `FilterOutput` | committed/pendingに分離された出力 |
+

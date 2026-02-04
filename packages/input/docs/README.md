@@ -23,13 +23,11 @@ import {
   layerToScreen,
   // 間引き
   shouldAcceptPoint,
-  // ストローク変換パイプライン
-  compilePipeline,
-  expandPoint,
-  expandStroke,
-  startStrokeSession,
-  addPointToSession,
-  endStrokeSession,
+  // フィルタパイプライン
+  compileFilterPipeline,
+  createFilterPipelineState,
+  processPoint,
+  finalizePipeline,
 } from "@headless-paint/input";
 
 // ビュー変換を作成
@@ -50,6 +48,18 @@ console.log(`Scale: ${components.scaleX}, Rotation: ${components.rotation}`);
 
 // 入力間引き
 const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
+
+// フィルタパイプライン（スムージング等）
+const compiled = compileFilterPipeline({
+  filters: [{ type: "smoothing", config: { windowSize: 5 } }]
+});
+let pipelineState = createFilterPipelineState(compiled);
+
+// 入力点を処理
+const result = processPoint(pipelineState, { x: 100, y: 100, pressure: 0.5, timestamp: Date.now() }, compiled);
+pipelineState = result.state;
+// result.output.committed - 確定した点
+// result.output.pending - 未確定の点
 ```
 
 ## API リファレンス
@@ -61,15 +71,16 @@ const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
 | 型 | 説明 |
 |---|---|
 | `Point` | 2D座標 `{ x, y }` |
+| `InputPoint` | 入力点 `{ x, y, pressure?, timestamp }` |
 | `ViewTransform` | ビュー変換行列（mat3 形式） |
 | `SamplingConfig` | 間引き設定 |
 | `SamplingState` | 間引き状態 |
 | `TransformComponents` | 変換成分（スケール、回転、平行移動） |
-| `SymmetryConfig` | 対称変換設定 |
-| `PipelineConfig` | パイプライン設定 |
-| `CompiledPipeline` | コンパイル済みパイプライン |
-| `StrokeSessionState` | ストロークセッション状態 |
-| `StrokeSessionResult` | セッション操作結果 |
+| `FilterConfig` | フィルタ設定（Discriminated Union） |
+| `FilterPipelineConfig` | フィルタパイプライン設定 |
+| `CompiledFilterPipeline` | コンパイル済みフィルタパイプライン |
+| `FilterPipelineState` | フィルタパイプライン状態 |
+| `FilterOutput` | フィルタ出力（committed/pending） |
 
 ### ビュー変換関数
 
@@ -101,29 +112,17 @@ const [accepted, newState] = shouldAcceptPoint(point, timestamp, state, config);
 |---|---|
 | `shouldAcceptPoint(point, timestamp, state, config)` | 間引き判定 |
 
-### ストローク変換パイプライン
+### フィルタパイプライン
 
-詳細は [pipeline-api.md](./pipeline-api.md) を参照。
-
-| 関数 | 説明 |
-|---|---|
-| `compilePipeline(config)` | パイプライン設定をコンパイル |
-| `expandPoint(point, compiled)` | 単一点を展開 |
-| `expandStroke(points, compiled)` | ストローク全体を展開 |
-| `startStrokeSession(point, compiled)` | ストロークセッション開始 |
-| `addPointToSession(state, point, compiled)` | セッションに点を追加 |
-| `endStrokeSession(state)` | セッション終了 |
-
-### 対称変換（低レベルAPI）
-
-パイプラインAPIの内部で使用。通常はパイプラインAPIを使用してください。
+詳細は [filter-pipeline-api.md](./filter-pipeline-api.md) を参照。
 
 | 関数 | 説明 |
 |---|---|
-| `compileSymmetry(config)` | 対称設定をコンパイル |
-| `expandSymmetry(point, compiled)` | 点を対称展開 |
-| `getSymmetryCount(config)` | 対称変換の出力数を取得 |
-| `createDefaultSymmetryConfig(width, height)` | デフォルト設定を作成 |
+| `compileFilterPipeline(config)` | パイプライン設定をコンパイル |
+| `createFilterPipelineState(compiled)` | パイプライン状態を作成 |
+| `processPoint(state, point, compiled)` | 点を処理 |
+| `finalizePipeline(state, compiled)` | パイプラインを終了 |
+| `processAllPoints(points, compiled)` | 全点を一括処理（リプレイ用） |
 
 ## 座標系
 
