@@ -317,9 +317,11 @@ app（全てに依存）
    - `src/incremental-render.test.ts`
 
 6. **セルフレビュー**
-   - [ ] engine が input/stroke に依存していないこと
-   - [ ] expand関数がドキュメント通りの入出力であること
-   - [ ] incremental-render が確定/未確定を正しく分離して扱えること
+   - [x] engine が input/stroke に依存していないこと
+   - [x] expand関数がドキュメント通りの入出力であること
+   - [x] incremental-render が確定/未確定を正しく分離して扱えること
+
+**Phase 1 完了: 2026-02-04**
 
 ### Phase 2: input パッケージ再設計
 

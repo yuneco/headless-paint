@@ -27,3 +27,31 @@ export interface Layer {
   readonly ctx: OffscreenCanvasRenderingContext2D;
   readonly meta: LayerMeta;
 }
+
+// ============================================================
+// Expand (対称展開) 関連
+// ============================================================
+
+export type ExpandMode = "none" | "axial" | "radial" | "kaleidoscope";
+
+export interface ExpandConfig {
+  readonly mode: ExpandMode;
+  readonly origin: Point;
+  readonly angle: number;
+  readonly divisions: number;
+}
+
+export interface CompiledExpand {
+  readonly config: ExpandConfig;
+  readonly matrices: readonly Float32Array[];
+  readonly outputCount: number;
+}
+
+// ============================================================
+// StrokeStyle
+// ============================================================
+
+export interface StrokeStyle {
+  readonly color: Color;
+  readonly lineWidth: number;
+}
