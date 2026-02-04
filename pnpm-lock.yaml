@@ -105,6 +105,24 @@ importers:
         specifier: ^4.4.0
         version: 4.5.4(typescript@5.9.3)(vite@6.4.1)
 
+  packages/stroke:
+    devDependencies:
+      '@headless-paint/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@headless-paint/input':
+        specifier: workspace:*
+        version: link:../input
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.1
+      vite-plugin-dts:
+        specifier: ^4.4.0
+        version: 4.5.4(typescript@5.9.3)(vite@6.4.1)
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@vitest/browser@3.2.4)
+
 packages:
 
   /@babel/code-frame@7.28.6:

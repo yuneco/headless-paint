@@ -403,10 +403,12 @@ app（全てに依存）
    - `src/replay.test.ts`（既存テストを移動・更新）
 
 9. **セルフレビュー**
-   - [ ] session.ts が `Point[][]` ではなく `Point[]` を扱っていること（1ストローク原則）
-   - [ ] RenderUpdate に newlyCommitted/currentPending が分離されていること
-   - [ ] replay.ts が engine の expand を使用していること
-   - [ ] ExpandConfig は engine から import していること
+   - [x] session.ts が `Point[][]` ではなく `Point[]` を扱っていること（1ストローク原則）
+   - [x] RenderUpdate に newlyCommitted/currentPending が分離されていること
+   - [x] replay.ts が engine の expand を使用していること
+   - [x] ExpandConfig は engine から import していること
+
+**Phase 3 完了: 2026-02-04**
 
 ### Phase 4: 統合・クリーンアップ
 
