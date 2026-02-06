@@ -74,12 +74,10 @@ Expandは**入力時ではなく描画時**に適用される。SessionはExpand
 
 ## スキルと作業フロー
 
-### 計画 (planning-flow)
+### Doc-First開発 (planning-flow)
 
-- planning-flow スキルを使用して計画を立てる
-- 計画は `/plans/yyyy-mm-dd-hh-mm_plan-name.md` に保存
-- `/docs` と `/packages/*/docs/` を参照して計画を立てる
-- 実装中の方針変更もmdに反映
+このプロジェクトではDoc-Firstで開発する。planning-flowスキルに従い、以下の順で進める:
+1. 調査・計画 → 2. API設計・ドキュメント作成 → 3. 利用イメージレビュー(承認まで実装に進まない) → 4. 実装 → 5. アーキテクトレビュー(通過して初めて完了報告)
 
 ### セルフレビュー (review-library-usage)
 
