@@ -9,26 +9,24 @@
 import type { InputPoint, FilterPipelineConfig, FilterOutput } from "@headless-paint/input";
 
 // @headless-paint/engine から
-import type { ExpandConfig, Color, Layer, Point } from "@headless-paint/engine";
+import type { ExpandConfig, Color, StrokePoint } from "@headless-paint/engine";
+// re-export
+export type { StrokeStyle } from "@headless-paint/engine";
 ```
 
 ---
 
 ## StrokeStyle
 
-ストロークの描画スタイル。
+`@headless-paint/engine` からの re-export。詳細は [engine/docs/types.md](../../engine/docs/types.md#strokestyle) を参照。
 
 ```typescript
 interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
+  readonly pressureSensitivity?: number;  // 0.0=均一, 1.0=最大感度
 }
 ```
-
-| フィールド | 型 | 説明 |
-|---|---|---|
-| `color` | `Color` | 描画色（@headless-paint/engine から） |
-| `lineWidth` | `number` | 線の太さ |
 
 ---
 
@@ -80,8 +78,8 @@ interface StrokeSessionResult {
 
 ```typescript
 interface RenderUpdate {
-  readonly newlyCommitted: readonly Point[];
-  readonly currentPending: readonly Point[];
+  readonly newlyCommitted: readonly StrokePoint[];
+  readonly currentPending: readonly StrokePoint[];
   readonly style: StrokeStyle;
   readonly expand: ExpandConfig;
 }
@@ -89,14 +87,16 @@ interface RenderUpdate {
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `newlyCommitted` | `readonly Point[]` | 今回新たに確定した点（差分） |
-| `currentPending` | `readonly Point[]` | 現在のpending全体 |
+| `newlyCommitted` | `readonly StrokePoint[]` | 今回新たに確定した点（差分、pressure含む） |
+| `currentPending` | `readonly StrokePoint[]` | 現在のpending全体（pressure含む） |
 | `style` | `StrokeStyle` | 描画スタイル |
 | `expand` | `ExpandConfig` | 展開設定 |
 
 **newlyCommittedとcurrentPendingの違い**:
 - `newlyCommitted`: 前回の `addPointToSession` 以降に新しく確定した点のみ
 - `currentPending`: 現在のpending全体（毎回全て再描画するため）
+
+**StrokePoint型への変更理由**: 筆圧情報（pressure）をengineの描画関数まで伝達するため。InputPointからpressureを保持したままStrokePointに変換される。
 
 ---
 
@@ -112,6 +112,7 @@ interface StrokeCommand {
   readonly expand: ExpandConfig;
   readonly color: Color;
   readonly lineWidth: number;
+  readonly pressureSensitivity?: number;
   readonly timestamp: number;
 }
 ```
@@ -124,6 +125,7 @@ interface StrokeCommand {
 | `expand` | `ExpandConfig` | 展開設定 |
 | `color` | `Color` | 描画色 |
 | `lineWidth` | `number` | 線の太さ |
+| `pressureSensitivity` | `number` | 筆圧感度（optional、後方互換: undefined→0扱い） |
 | `timestamp` | `number` | 作成時刻 |
 
 **特徴**:

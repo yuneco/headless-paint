@@ -1,9 +1,9 @@
-import type { Layer } from "@headless-paint/engine";
+import type { Layer, StrokePoint } from "@headless-paint/engine";
 import {
   clearLayer,
   compileExpand,
-  drawPath,
-  expandStroke,
+  drawVariableWidthPath,
+  expandStrokePoints,
 } from "@headless-paint/engine";
 import {
   compileFilterPipeline,
@@ -17,7 +17,7 @@ import type { Command, HistoryState, StrokeCommand } from "./types";
  * ストロークコマンドをリプレイする
  * - inputPoints を filterPipeline で処理
  * - 結果を expand で展開
- * - 各ストロークを描画
+ * - 各ストロークを可変太さで描画
  */
 function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
   // フィルタパイプラインで入力点を処理
@@ -27,13 +27,18 @@ function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
   // 展開設定をコンパイル
   const compiledExpand = compileExpand(command.expand);
 
-  // ストロークを展開して描画
-  const expandedPoints = filteredPoints.map((p) => ({ x: p.x, y: p.y }));
-  const strokes = expandStroke(expandedPoints, compiledExpand);
+  // StrokePoint に変換（pressure 保持）
+  const strokePoints: StrokePoint[] = filteredPoints.map((p) => ({
+    x: p.x,
+    y: p.y,
+    pressure: p.pressure,
+  }));
+  const strokes = expandStrokePoints(strokePoints, compiledExpand);
 
-  for (const strokePoints of strokes) {
-    if (strokePoints.length >= 2) {
-      drawPath(layer, strokePoints, command.color, command.lineWidth);
+  const pressureSensitivity = command.pressureSensitivity ?? 0;
+  for (const points of strokes) {
+    if (points.length > 0) {
+      drawVariableWidthPath(layer, points, command.color, command.lineWidth, pressureSensitivity);
     }
   }
 }

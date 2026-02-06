@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
 import type { ExpandMode } from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
 import type { GUI } from "lil-gui";
+import { useEffect, useRef } from "react";
 import type { UseExpandResult } from "../hooks/useExpand";
+import type { UsePenSettingsResult } from "../hooks/usePenSettings";
 import type { UseSmoothingResult } from "../hooks/useSmoothing";
 
 interface DebugPanelProps {
@@ -10,11 +11,18 @@ interface DebugPanelProps {
   strokeCount: number;
   expand: UseExpandResult;
   smoothing: UseSmoothingResult;
+  penSettings: UsePenSettingsResult;
 }
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 
-export function DebugPanel({ transform, strokeCount, expand, smoothing }: DebugPanelProps) {
+export function DebugPanel({
+  transform,
+  strokeCount,
+  expand,
+  smoothing,
+  penSettings,
+}: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
   const dataRef = useRef({
@@ -37,11 +45,19 @@ export function DebugPanel({ transform, strokeCount, expand, smoothing }: DebugP
     windowSize: 5,
   });
 
+  const penDataRef = useRef({
+    lineWidth: 3,
+    pressureSensitivity: 0,
+  });
+
   const expandRef = useRef(expand);
   expandRef.current = expand;
 
   const smoothingRef = useRef(smoothing);
   smoothingRef.current = smoothing;
+
+  const penSettingsRef = useRef(penSettings);
+  penSettingsRef.current = penSettings;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -74,7 +90,11 @@ export function DebugPanel({ transform, strokeCount, expand, smoothing }: DebugP
         .name("Translate Y")
         .listen()
         .disable();
-      gui.add(dataRef.current, "strokeCount").name("Strokes").listen().disable();
+      gui
+        .add(dataRef.current, "strokeCount")
+        .name("Strokes")
+        .listen()
+        .disable();
 
       const expandFolder = gui.addFolder("Symmetry");
 
@@ -118,6 +138,24 @@ export function DebugPanel({ transform, strokeCount, expand, smoothing }: DebugP
         });
 
       smoothingFolder.open();
+
+      const penFolder = gui.addFolder("Pen Settings");
+
+      penFolder
+        .add(penDataRef.current, "lineWidth", 1, 50, 1)
+        .name("Line Width")
+        .onChange((value: number) => {
+          penSettingsRef.current.setLineWidth(value);
+        });
+
+      penFolder
+        .add(penDataRef.current, "pressureSensitivity", 0, 1, 0.05)
+        .name("Pressure")
+        .onChange((value: number) => {
+          penSettingsRef.current.setPressureSensitivity(value);
+        });
+
+      penFolder.open();
 
       guiRef.current = gui;
     });

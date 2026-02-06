@@ -22,13 +22,21 @@ export {
   getPixel,
   setPixel,
 } from "./layer";
-export { drawCircle, drawLine, drawPath } from "./draw";
+export {
+  calculateRadius,
+  drawCircle,
+  drawLine,
+  drawPath,
+  drawVariableWidthPath,
+  interpolateStrokePoints,
+} from "./draw";
 export { renderLayerWithTransform, renderLayers, type RenderOptions } from "./render";
 export {
   compileExpand,
   createDefaultExpandConfig,
   expandPoint,
   expandStroke,
+  expandStrokePoints,
   getExpandCount,
 } from "./expand";
 export {

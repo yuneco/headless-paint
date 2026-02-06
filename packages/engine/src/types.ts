@@ -70,4 +70,5 @@ export const DEFAULT_BACKGROUND_COLOR: Color = {
 export interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
+  readonly pressureSensitivity?: number;
 }

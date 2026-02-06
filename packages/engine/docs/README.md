@@ -69,6 +69,9 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `drawLine(layer, from, to, color, lineWidth?)` | 直線を描画 |
 | `drawCircle(layer, center, radius, color)` | 塗りつぶし円を描画 |
 | `drawPath(layer, points, color, lineWidth?)` | パス（連続線）を描画 |
+| `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSensitivity)` | 可変太さパス描画（筆圧対応） |
+| `calculateRadius(pressure, baseLineWidth, pressureSensitivity)` | 筆圧から描画半径を計算 |
+| `interpolateStrokePoints(points)` | Catmull-Romスプライン補間 |
 
 ### レンダリング関数
 
@@ -87,7 +90,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 |---|---|
 | `compileExpand(config)` | 展開設定をコンパイル |
 | `expandPoint(point, compiled)` | 単一点を展開 |
-| `expandStroke(points, compiled)` | ストローク全体を展開 |
+| `expandStroke(points, compiled)` | ストローク全体を展開（Point版） |
+| `expandStrokePoints(points, compiled)` | ストローク全体を展開（StrokePoint版、pressure保持） |
 | `getExpandCount(config)` | 展開の出力数を取得 |
 | `createDefaultExpandConfig(width, height)` | デフォルト設定を作成 |
 

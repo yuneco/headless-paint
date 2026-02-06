@@ -1,4 +1,4 @@
-import type { ExpandConfig } from "@headless-paint/engine";
+import type { ExpandConfig, StrokePoint } from "@headless-paint/engine";
 import type { FilterOutput, FilterPipelineConfig, InputPoint } from "@headless-paint/input";
 import type {
   RenderUpdate,
@@ -9,17 +9,17 @@ import type {
 } from "./types";
 
 /**
- * InputPoint から Point への変換（座標のみ抽出）
+ * InputPoint から StrokePoint への変換（座標 + pressure を保持）
  */
-function toPoints(inputPoints: readonly InputPoint[]): readonly { x: number; y: number }[] {
-  return inputPoints.map((p) => ({ x: p.x, y: p.y }));
+function toStrokePoints(inputPoints: readonly InputPoint[]): readonly StrokePoint[] {
+  return inputPoints.map((p) => ({ x: p.x, y: p.y, pressure: p.pressure }));
 }
 
 /**
- * InputPoint から座標のみ抽出（単一点用）
+ * InputPoint から StrokePoint への変換（単一点用）
  */
-function toPoint(p: InputPoint): { x: number; y: number } {
-  return { x: p.x, y: p.y };
+function toStrokePoint(p: InputPoint): StrokePoint {
+  return { x: p.x, y: p.y, pressure: p.pressure };
 }
 
 /**
@@ -30,9 +30,9 @@ function toPoint(p: InputPoint): { x: number; y: number } {
  * これにより両レイヤーのパスが同一座標で重なり、視覚的に連続した線になる。
  */
 function buildPendingWithOverlap(
-  pendingPoints: readonly { x: number; y: number }[],
-  lastCommittedPoint: { x: number; y: number } | null,
-): readonly { x: number; y: number }[] {
+  pendingPoints: readonly StrokePoint[],
+  lastCommittedPoint: StrokePoint | null,
+): readonly StrokePoint[] {
   if (pendingPoints.length === 0) {
     return pendingPoints;
   }
@@ -50,8 +50,8 @@ export function startStrokeSession(
   style: StrokeStyle,
   expand: ExpandConfig,
 ): StrokeSessionResult {
-  const committedPoints = toPoints(filterOutput.committed);
-  const pendingPoints = toPoints(filterOutput.pending);
+  const committedPoints = toStrokePoints(filterOutput.committed);
+  const pendingPoints = toStrokePoints(filterOutput.pending);
 
   // lastRenderedCommitIndex: 描画済み committed の最終インデックス
   // 初回で committed があればそのインデックス、なければ -1（未描画）
@@ -94,11 +94,11 @@ export function addPointToSession(
   // lastRenderedCommitIndex から開始し、1点のオーバーラップを含めることで
   // 前回描画のパス終端と今回のパス始端が同一座標で接続される
   const newlyCommittedStartIndex = Math.max(0, state.lastRenderedCommitIndex);
-  const newlyCommittedPoints = toPoints(newAllCommitted.slice(newlyCommittedStartIndex));
+  const newlyCommittedPoints = toStrokePoints(newAllCommitted.slice(newlyCommittedStartIndex));
 
-  const pendingPoints = toPoints(newCurrentPending);
+  const pendingPoints = toStrokePoints(newCurrentPending);
   const lastCommittedPoint =
-    newAllCommitted.length > 0 ? toPoint(newAllCommitted[newAllCommitted.length - 1]) : null;
+    newAllCommitted.length > 0 ? toStrokePoint(newAllCommitted[newAllCommitted.length - 1]) : null;
 
   const newState: StrokeSessionState = {
     allCommitted: newAllCommitted,
@@ -139,6 +139,7 @@ export function endStrokeSession(
     expand: state.expand,
     color: state.style.color,
     lineWidth: state.style.lineWidth,
+    pressureSensitivity: state.style.pressureSensitivity,
     timestamp: Date.now(),
   };
 }
@@ -152,6 +153,7 @@ export function createStrokeCommand(
   expand: ExpandConfig,
   color: StrokeStyle["color"],
   lineWidth: number,
+  pressureSensitivity?: number,
 ): StrokeCommand {
   return {
     type: "stroke",
@@ -160,6 +162,7 @@ export function createStrokeCommand(
     expand,
     color,
     lineWidth,
+    pressureSensitivity,
     timestamp: Date.now(),
   };
 }

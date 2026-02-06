@@ -93,7 +93,7 @@ function addPointToSession(
 1. filterOutput.committed を allCommitted に追加
 2. filterOutput.pending を currentPending に設定
 3. lastRenderedCommitIndex から新しく追加された点を newlyCommitted として計算
-4. RenderUpdate を生成
+4. InputPointからStrokePoint（pressure保持）に変換してRenderUpdateを生成
 
 **使用例**:
 ```typescript

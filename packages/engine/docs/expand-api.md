@@ -171,3 +171,41 @@ function createDefaultExpandConfig(width: number, height: number): ExpandConfig
 const config = createDefaultExpandConfig(1920, 1080);
 // { mode: "none", origin: { x: 960, y: 540 }, angle: 0, divisions: 1 }
 ```
+
+---
+
+## expandStrokePoints
+
+StrokePoint版のストローク展開。座標を変換しつつ、pressure値をそのまま保持する。
+
+```typescript
+function expandStrokePoints(
+  points: readonly StrokePoint[],
+  compiled: CompiledExpand,
+): StrokePoint[][]
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `points` | `readonly StrokePoint[]` | ○ | 入力StrokePoint列 |
+| `compiled` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
+
+**戻り値**: `StrokePoint[][]` - 展開されたストローク群（各ストロークはStrokePointの配列）
+
+**動作**:
+- 座標（x, y）は `expandPoint` と同様に変換行列で変換
+- `pressure` は元の値をそのままコピー（全展開ストロークで同じ筆圧）
+
+**使用例**:
+```typescript
+const strokePoints: StrokePoint[] = [
+  { x: 100, y: 100, pressure: 0.5 },
+  { x: 150, y: 120, pressure: 0.8 },
+];
+
+const strokes = expandStrokePoints(strokePoints, compiled);
+for (const stroke of strokes) {
+  drawVariableWidthPath(layer, stroke, color, lineWidth, pressureSensitivity);
+}
+```

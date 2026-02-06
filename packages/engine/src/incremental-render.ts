@@ -1,7 +1,7 @@
-import { drawPath } from "./draw";
-import { expandStroke } from "./expand";
-import { clearLayer, colorToStyle } from "./layer";
-import type { CompiledExpand, Layer, Point, StrokeStyle } from "./types";
+import { drawVariableWidthPath } from "./draw";
+import { expandStrokePoints } from "./expand";
+import { clearLayer } from "./layer";
+import type { CompiledExpand, Layer, StrokePoint, StrokeStyle } from "./types";
 
 /**
  * 確定レイヤーに新しく確定した点を追加描画する
@@ -9,16 +9,16 @@ import type { CompiledExpand, Layer, Point, StrokeStyle } from "./types";
  */
 export function appendToCommittedLayer(
   layer: Layer,
-  points: readonly Point[],
+  points: readonly StrokePoint[],
   style: StrokeStyle,
   compiledExpand: CompiledExpand,
 ): void {
   if (points.length === 0) return;
 
-  const strokes = expandStroke(points, compiledExpand);
+  const strokes = expandStrokePoints(points, compiledExpand);
   for (const stroke of strokes) {
     if (stroke.length > 0) {
-      drawPath(layer, stroke, style.color, style.lineWidth);
+      drawVariableWidthPath(layer, stroke, style.color, style.lineWidth, style.pressureSensitivity ?? 0);
     }
   }
 }
@@ -28,7 +28,7 @@ export function appendToCommittedLayer(
  */
 export function renderPendingLayer(
   layer: Layer,
-  points: readonly Point[],
+  points: readonly StrokePoint[],
   style: StrokeStyle,
   compiledExpand: CompiledExpand,
 ): void {
@@ -36,10 +36,10 @@ export function renderPendingLayer(
 
   if (points.length === 0) return;
 
-  const strokes = expandStroke(points, compiledExpand);
+  const strokes = expandStrokePoints(points, compiledExpand);
   for (const stroke of strokes) {
     if (stroke.length > 0) {
-      drawPath(layer, stroke, style.color, style.lineWidth);
+      drawVariableWidthPath(layer, stroke, style.color, style.lineWidth, style.pressureSensitivity ?? 0);
     }
   }
 }

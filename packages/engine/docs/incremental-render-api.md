@@ -42,8 +42,8 @@
 
 ```typescript
 interface RenderUpdate {
-  readonly newlyCommitted: readonly Point[];  // 今回新たに確定した点
-  readonly currentPending: readonly Point[];  // 現在のpending全体
+  readonly newlyCommitted: readonly StrokePoint[];  // 今回新たに確定した点（pressure含む）
+  readonly currentPending: readonly StrokePoint[];  // 現在のpending全体（pressure含む）
   readonly style: StrokeStyle;
   readonly expand: ExpandConfig;
 }
@@ -58,7 +58,7 @@ interface RenderUpdate {
 ```typescript
 function appendToCommittedLayer(
   layer: Layer,
-  points: readonly Point[],
+  points: readonly StrokePoint[],
   style: StrokeStyle,
   compiledExpand: CompiledExpand
 ): void
@@ -68,13 +68,13 @@ function appendToCommittedLayer(
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 確定レイヤー |
-| `points` | `readonly Point[]` | ○ | 新しく確定した点（連続パス用） |
-| `style` | `StrokeStyle` | ○ | 描画スタイル |
+| `points` | `readonly StrokePoint[]` | ○ | 新しく確定した点（pressure含む） |
+| `style` | `StrokeStyle` | ○ | 描画スタイル（pressureSensitivity含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 
 **動作**:
-1. pointsをexpandで展開
-2. 各展開ストロークについて、連続した点間を線で結ぶ
+1. pointsを`expandStrokePoints`で展開（pressure保持）
+2. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画
 3. 既存の描画は保持される（追加描画のみ）
 
 **使用例**:
@@ -97,7 +97,7 @@ appendToCommittedLayer(
 ```typescript
 function renderPendingLayer(
   layer: Layer,
-  points: readonly Point[],
+  points: readonly StrokePoint[],
   style: StrokeStyle,
   compiledExpand: CompiledExpand
 ): void
@@ -107,14 +107,14 @@ function renderPendingLayer(
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 作業レイヤー |
-| `points` | `readonly Point[]` | ○ | 未確定点全体 |
-| `style` | `StrokeStyle` | ○ | 描画スタイル |
+| `points` | `readonly StrokePoint[]` | ○ | 未確定点全体（pressure含む） |
+| `style` | `StrokeStyle` | ○ | 描画スタイル（pressureSensitivity含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 
 **動作**:
 1. レイヤーをクリア
-2. pointsをexpandで展開
-3. 各展開ストロークを描画
+2. pointsを`expandStrokePoints`で展開（pressure保持）
+3. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画
 
 **使用例**:
 ```typescript

@@ -1,14 +1,7 @@
-import type { Color, ExpandConfig, Point } from "@headless-paint/engine";
+import type { Color, ExpandConfig, StrokePoint, StrokeStyle } from "@headless-paint/engine";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
 
-// ============================================================
-// StrokeStyle
-// ============================================================
-
-export interface StrokeStyle {
-  readonly color: Color;
-  readonly lineWidth: number;
-}
+export type { StrokeStyle } from "@headless-paint/engine";
 
 // ============================================================
 // Session State
@@ -23,8 +16,8 @@ export interface StrokeSessionState {
 }
 
 export interface RenderUpdate {
-  readonly newlyCommitted: readonly Point[];
-  readonly currentPending: readonly Point[];
+  readonly newlyCommitted: readonly StrokePoint[];
+  readonly currentPending: readonly StrokePoint[];
   readonly style: StrokeStyle;
   readonly expand: ExpandConfig;
 }
@@ -45,6 +38,7 @@ export interface StrokeCommand {
   readonly expand: ExpandConfig;
   readonly color: Color;
   readonly lineWidth: number;
+  readonly pressureSensitivity?: number;
   readonly timestamp: number;
 }
 

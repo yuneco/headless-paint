@@ -19,7 +19,6 @@ import type {
   CompiledFilterPipeline,
   FilterPipelineState,
   InputPoint,
-  Point,
 } from "@headless-paint/input";
 import {
   addPointToSession,
@@ -37,7 +36,6 @@ import type {
   HistoryConfig,
   HistoryState,
   StrokeSessionState,
-  StrokeStyle,
 } from "@headless-paint/stroke";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DebugPanel } from "./components/DebugPanel";
@@ -46,16 +44,14 @@ import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import { useExpand } from "./hooks/useExpand";
-import { useSmoothing } from "./hooks/useSmoothing";
+import { usePenSettings } from "./hooks/usePenSettings";
 import type { ToolType } from "./hooks/usePointerHandler";
+import { useSmoothing } from "./hooks/useSmoothing";
 import { useViewTransform } from "./hooks/useViewTransform";
 import { useWindowSize } from "./hooks/useWindowSize";
 
 const LAYER_WIDTH = 1024;
 const LAYER_HEIGHT = 1024;
-
-const PEN_COLOR = { r: 50, g: 50, b: 50, a: 255 };
-const PEN_WIDTH = 3;
 
 const HISTORY_CONFIG: HistoryConfig = {
   maxHistorySize: 100,
@@ -66,13 +62,8 @@ const HISTORY_CONFIG: HistoryConfig = {
 export function App() {
   const [tool, setTool] = useState<ToolType>("pen");
   const { width: viewWidth, height: viewHeight } = useWindowSize();
-  const {
-    transform,
-    handlePan,
-    handleZoom,
-    handleRotate,
-    setInitialFit,
-  } = useViewTransform();
+  const { transform, handlePan, handleZoom, handleRotate, setInitialFit } =
+    useViewTransform();
 
   const fitToView = useCallback(() => {
     setInitialFit(viewWidth, viewHeight, LAYER_WIDTH, LAYER_HEIGHT);
@@ -96,7 +87,7 @@ export function App() {
     [],
   );
 
-  const [strokePoints, setStrokePoints] = useState<Point[]>([]);
+  const [strokePoints, setStrokePoints] = useState<InputPoint[]>([]);
   const [renderVersion, setRenderVersion] = useState(0);
 
   const [background] = useState<BackgroundSettings>({
@@ -112,13 +103,8 @@ export function App() {
     createHistoryState(LAYER_WIDTH, LAYER_HEIGHT),
   );
 
-  const strokeStyle: StrokeStyle = useMemo(
-    () => ({
-      color: PEN_COLOR,
-      lineWidth: PEN_WIDTH,
-    }),
-    [],
-  );
+  const penSettings = usePenSettings();
+  const { strokeStyle } = penSettings;
 
   const sessionRef = useRef<{
     strokeSession: StrokeSessionState;
@@ -132,13 +118,7 @@ export function App() {
   expandRef.current = expand;
 
   const onStrokeStart = useCallback(
-    (point: Point) => {
-      const inputPoint: InputPoint = {
-        x: point.x,
-        y: point.y,
-        timestamp: Date.now(),
-      };
-
+    (inputPoint: InputPoint) => {
       const compiled = expandRef.current.compiled;
       const filterState = createFilterPipelineState(compiledFilterPipeline);
       const filterResult = processPoint(
@@ -174,21 +154,15 @@ export function App() {
         compiled,
       );
 
-      setStrokePoints([point]);
+      setStrokePoints([inputPoint]);
       setRenderVersion((n) => n + 1);
     },
     [committedLayer, pendingLayer, compiledFilterPipeline, strokeStyle],
   );
 
   const onStrokeMove = useCallback(
-    (point: Point) => {
+    (inputPoint: InputPoint) => {
       if (!sessionRef.current) return;
-
-      const inputPoint: InputPoint = {
-        x: point.x,
-        y: point.y,
-        timestamp: Date.now(),
-      };
 
       const filterResult = processPoint(
         sessionRef.current.filterState,
@@ -221,7 +195,7 @@ export function App() {
         sessionRef.current.compiledExpand,
       );
 
-      setStrokePoints((prev) => [...prev, point]);
+      setStrokePoints((prev) => [...prev, inputPoint]);
       setRenderVersion((n) => n + 1);
     },
     [committedLayer, pendingLayer, strokeStyle],
@@ -258,6 +232,7 @@ export function App() {
         strokeSession.expand,
         strokeStyle.color,
         strokeStyle.lineWidth,
+        strokeStyle.pressureSensitivity,
       );
       setHistoryState((prev) =>
         pushCommand(prev, command, committedLayer, HISTORY_CONFIG),
@@ -383,6 +358,7 @@ export function App() {
         strokeCount={strokeCount}
         expand={expand}
         smoothing={smoothing}
+        penSettings={penSettings}
       />
     </div>
   );

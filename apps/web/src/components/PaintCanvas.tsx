@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
 import type { BackgroundSettings, Layer } from "@headless-paint/engine";
 import { renderLayers } from "@headless-paint/engine";
-import type { Point, ViewTransform } from "@headless-paint/input";
+import type { InputPoint, ViewTransform } from "@headless-paint/input";
 import { layerToScreen } from "@headless-paint/input";
-import { usePointerHandler, type ToolType } from "../hooks/usePointerHandler";
+import { useEffect, useRef } from "react";
+import { type ToolType, usePointerHandler } from "../hooks/usePointerHandler";
 
 interface PaintCanvasProps {
   layers: readonly Layer[];
@@ -13,8 +13,8 @@ interface PaintCanvasProps {
   onPan: (dx: number, dy: number) => void;
   onZoom: (scale: number, centerX: number, centerY: number) => void;
   onRotate: (angleRad: number, centerX: number, centerY: number) => void;
-  onStrokeStart: (point: Point) => void;
-  onStrokeMove: (point: Point) => void;
+  onStrokeStart: (point: InputPoint) => void;
+  onStrokeMove: (point: InputPoint) => void;
   onStrokeEnd: () => void;
   width: number;
   height: number;
@@ -92,7 +92,16 @@ export function PaintCanvas({
     ctx.closePath();
     ctx.stroke();
     ctx.restore();
-  }, [layers, transform, background, width, height, layerWidth, layerHeight, renderVersion]);
+  }, [
+    layers,
+    transform,
+    background,
+    width,
+    height,
+    layerWidth,
+    layerHeight,
+    renderVersion,
+  ]);
 
   const pointerHandlers = usePointerHandler(tool, {
     transform,

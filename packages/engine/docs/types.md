@@ -193,10 +193,17 @@ const DEFAULT_BACKGROUND_COLOR: Color = { r: 255, g: 255, b: 255, a: 255 };
 interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
+  readonly pressureSensitivity?: number;
 }
 ```
 
-| フィールド | 型 | 説明 |
-|---|---|---|
-| `color` | `Color` | 描画色 |
-| `lineWidth` | `number` | 線の太さ |
+| フィールド | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `color` | `Color` | - | 描画色 |
+| `lineWidth` | `number` | - | 線の基準太さ |
+| `pressureSensitivity` | `number` | `0` | 筆圧感度（0.0=均一太さ、1.0=最大感度） |
+
+**筆圧感度の動作**:
+- `0`: 全ポイントが `lineWidth` で均一描画（従来互換）
+- `1`: 筆圧に完全比例（`lineWidth * pressure` が直径）
+- `0〜1`: 均一太さと筆圧太さの線形補間

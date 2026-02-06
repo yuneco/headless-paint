@@ -1,5 +1,5 @@
 import { mat3, vec2 } from "gl-matrix";
-import type { CompiledExpand, ExpandConfig, Point } from "./types";
+import type { CompiledExpand, ExpandConfig, Point, StrokePoint } from "./types";
 
 /**
  * デフォルトの展開設定を作成
@@ -120,6 +120,36 @@ export function getExpandCount(config: ExpandConfig): number {
     case "kaleidoscope":
       return config.divisions * 2;
   }
+}
+
+/**
+ * StrokePoint版ストローク展開（pressure保持）
+ */
+export function expandStrokePoints(
+  points: readonly StrokePoint[],
+  compiled: CompiledExpand,
+): StrokePoint[][] {
+  if (points.length === 0) {
+    return Array(compiled.outputCount)
+      .fill(null)
+      .map(() => []);
+  }
+
+  const inputVec = vec2.create();
+  const outputVec = vec2.create();
+  const strokes: StrokePoint[][] = Array(compiled.outputCount)
+    .fill(null)
+    .map(() => []);
+
+  for (const point of points) {
+    vec2.set(inputVec, point.x, point.y);
+    for (let i = 0; i < compiled.matrices.length; i++) {
+      vec2.transformMat3(outputVec, inputVec, compiled.matrices[i] as unknown as mat3);
+      strokes[i].push({ x: outputVec[0], y: outputVec[1], pressure: point.pressure });
+    }
+  }
+
+  return strokes;
 }
 
 // ============================================================

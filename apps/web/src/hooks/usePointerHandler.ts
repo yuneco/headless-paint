@@ -1,6 +1,5 @@
-import { useCallback, useRef } from "react";
 import {
-  type Point,
+  type InputPoint,
   type SamplingConfig,
   type SamplingState,
   type ViewTransform,
@@ -8,6 +7,7 @@ import {
   screenToLayer,
   shouldAcceptPoint,
 } from "@headless-paint/input";
+import { useCallback, useRef } from "react";
 
 export type ToolType = "pen" | "scroll" | "rotate" | "zoom";
 
@@ -16,8 +16,8 @@ export interface UsePointerHandlerOptions {
   onPan: (dx: number, dy: number) => void;
   onZoom: (scale: number, centerX: number, centerY: number) => void;
   onRotate: (angleRad: number, centerX: number, centerY: number) => void;
-  onStrokeStart: (point: Point) => void;
-  onStrokeMove: (point: Point) => void;
+  onStrokeStart: (point: InputPoint) => void;
+  onStrokeMove: (point: InputPoint) => void;
   onStrokeEnd: () => void;
   canvasWidth: number;
   canvasHeight: number;
@@ -58,11 +58,17 @@ export function usePointerHandler(
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       isDrawingRef.current = true;
-      lastPosRef.current = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
+      lastPosRef.current = {
+        x: e.nativeEvent.offsetX,
+        y: e.nativeEvent.offsetY,
+      };
 
       if (tool === "pen") {
         samplingStateRef.current = createSamplingState();
-        const screenPoint = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
+        const screenPoint = {
+          x: e.nativeEvent.offsetX,
+          y: e.nativeEvent.offsetY,
+        };
         const layerPoint = screenToLayer(screenPoint, transform);
         if (layerPoint) {
           const [accepted, newState] = shouldAcceptPoint(
@@ -73,7 +79,12 @@ export function usePointerHandler(
           );
           samplingStateRef.current = newState;
           if (accepted) {
-            onStrokeStart(layerPoint);
+            onStrokeStart({
+              x: layerPoint.x,
+              y: layerPoint.y,
+              pressure: e.nativeEvent.pressure,
+              timestamp: e.timeStamp,
+            });
           }
         }
       }
@@ -105,7 +116,12 @@ export function usePointerHandler(
             );
             samplingStateRef.current = newState;
             if (accepted) {
-              onStrokeMove(layerPoint);
+              onStrokeMove({
+                x: layerPoint.x,
+                y: layerPoint.y,
+                pressure: e.nativeEvent.pressure,
+                timestamp: e.timeStamp,
+              });
             }
           }
           break;
@@ -119,21 +135,35 @@ export function usePointerHandler(
             lastPosRef.current.y - centerY,
             lastPosRef.current.x - centerX,
           );
-          const currentAngle = Math.atan2(currentY - centerY, currentX - centerX);
+          const currentAngle = Math.atan2(
+            currentY - centerY,
+            currentX - centerX,
+          );
           const deltaAngle = currentAngle - prevAngle;
           onRotate(deltaAngle, centerX, centerY);
           break;
         }
-        case "zoom":
+        case "zoom": {
           // 垂直ドラッグでズーム
           const scale = 1 - dy / 200;
           onZoom(scale, centerX, centerY);
           break;
+        }
       }
 
       lastPosRef.current = { x: currentX, y: currentY };
     },
-    [tool, transform, onPan, onZoom, onRotate, onStrokeMove, centerX, centerY, samplingConfig],
+    [
+      tool,
+      transform,
+      onPan,
+      onZoom,
+      onRotate,
+      onStrokeMove,
+      centerX,
+      centerY,
+      samplingConfig,
+    ],
   );
 
   const onPointerUp = useCallback(
