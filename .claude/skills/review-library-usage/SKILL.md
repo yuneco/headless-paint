@@ -40,13 +40,15 @@ user-invocable: true
 
 ### 必須参照
 
-- `packages/input/docs/README.md` - 入力・座標変換パッケージの概要とAPI一覧
 - `packages/engine/docs/README.md` - 描画・レイヤーパッケージの概要とAPI一覧
+- `packages/input/docs/README.md` - 入力・座標変換パッケージの概要とAPI一覧
+- `packages/stroke/docs/README.md` - ストロークセッション・履歴管理パッケージの概要とAPI一覧
 
 ### 詳細確認時
 
-- `packages/input/docs/` - 各API詳細
 - `packages/engine/docs/` - 各API詳細
+- `packages/input/docs/` - 各API詳細
+- `packages/stroke/docs/` - 各API詳細
 - `docs/` - プロジェクト全体のアーキテクチャ
 
 ## レビュー手順

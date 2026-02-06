@@ -1,0 +1,94 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## プロジェクト概要
+
+Canvas2Dベースのペイントライブラリ。OffscreenCanvasを使用しヘッドレス環境(Node.js, Worker)で動作する。関数型設計で純粋関数+イミュータブルデータ構造を採用。
+
+## コマンド
+
+```bash
+pnpm dev                  # Webデモアプリの開発サーバー起動
+pnpm build                # 全パッケージビルド
+pnpm test                 # 全テスト実行 (Playwright + Chromium でブラウザテスト)
+pnpm lint                 # Biome lint
+pnpm format               # Biome format
+
+# パッケージ単体
+pnpm --filter @headless-paint/engine test
+pnpm --filter @headless-paint/stroke test
+pnpm --filter @headless-paint/input test
+```
+
+テストはVitest + Playwright (Chromium) でブラウザ上実行される。`packages/**/*.test.ts` が対象。
+
+## パッケージ構成と依存関係
+
+```
+engine (描画エンジン)          ← culori, gl-matrix
+  Layer管理、描画プリミティブ、Expand(対称展開)、差分レンダリング
+
+input (入力処理)              ← gl-matrix
+  座標変換(Screen↔Layer)、ビュー変換(pan/zoom/rotate)、FilterPipeline
+
+stroke (ストローク管理)        ← engine, input (peer deps)
+  セッション管理(1ストロークのライフサイクル)、Undo/Redo履歴、コマンド生成
+
+web (apps/web, Reactデモ)     ← engine, input, stroke, react, lil-gui
+  UIとイベントハンドリング統合層
+```
+
+## アーキテクチャの要点
+
+### データフロー
+
+```
+PointerEvent → 座標変換(ViewTransform) → FilterPipeline(smoothing等)
+  → StrokeSession → RenderUpdate → Engine(差分レンダリング)
+```
+
+### committed/pending モデル
+
+描画は2レイヤーに分離される:
+- **committedLayer**: 確定済みポイントの累積描画。新規確定分のみ追記(差分)
+- **pendingLayer**: 未確定ポイント。毎フレーム全消去→再描画
+
+FilterPipelineのsmoothing windowにより、末尾のポイントはpending(座標が変わりうる)。ストローク終了時にfinalizeで全て確定。
+
+### Expand(対称展開)のタイミング
+
+Expandは**入力時ではなく描画時**に適用される。SessionはExpandを意識せず常に1ストロークを管理。`appendToCommittedLayer`/`renderPendingLayer`に`ExpandConfig`を渡す。
+
+### 履歴(Undo/Redo)
+
+- `StrokeCommand`に入力ポイント+FilterConfig+Expand設定を保存
+- Undo時はコマンド列をリプレイ(Filterを再適用)
+- Checkpoint(ImageDataスナップショット)で効率化
+
+## コーディング規約
+
+- **Biome**: スペース2、ダブルクォート、セミコロンあり、import自動整理
+- **関数型API**: クラスではなく純粋関数。状態は明示的に受け渡し
+- **readonly**: 型定義のフィールドはreadonly
+
+## スキルと作業フロー
+
+### 計画 (planning-flow)
+
+- planning-flow スキルを使用して計画を立てる
+- 計画は `/plans/yyyy-mm-dd-hh-mm_plan-name.md` に保存
+- `/docs` と `/packages/*/docs/` を参照して計画を立てる
+- 実装中の方針変更もmdに反映
+
+### セルフレビュー (review-library-usage)
+
+実装完了後、報告前にセルフレビューを行う:
+- review-library-usage スキルを使用してセルフレビューを行う
+- パッケージAPIの活用漏れがないか
+- 既存コードとの実装パターンの一貫性
+- ドキュメント(`packages/*/docs/README.md`)との整合性
+
+## ドキュメント
+
+各パッケージの詳細APIは `packages/*/docs/` にある。新機能追加時はこれらを参照し、影響範囲のドキュメント更新漏れがないか確認する。

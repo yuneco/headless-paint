@@ -11,8 +11,9 @@ user-invocable: false
 
 1. `/docs` および `/packages/*/docs/` の関連ドキュメントを参照
 2. 計画を立てたら `/plans` に保存
-   - ファイル名: `yyyy-mm-dd-hh-mm_プラン名.md`
+   - ファイル名: `yyyy-mm-dd-hh-mm_plan-name.md`
    - 例: `2026-01-30-14-30_add-gradient-support.md`
+   - タイムスタンプは`date`コマンドで取得し、`yyyy-mm-dd-hh-mm`の形式で保存
 3. 計画を更新したらmdもアップデート
 
 ## 計画更新・軌道修正・追加対応時
