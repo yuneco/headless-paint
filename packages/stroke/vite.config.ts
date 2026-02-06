@@ -10,7 +10,7 @@ export default defineConfig({
       fileName: "index",
     },
     rollupOptions: {
-      external: ["@headless-paint/engine"],
+      external: ["@headless-paint/engine", "@headless-paint/input"],
     },
   },
   plugins: [

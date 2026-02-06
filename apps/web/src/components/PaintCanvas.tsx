@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 import type { Layer } from "@headless-paint/engine";
-import { renderLayerWithTransform } from "@headless-paint/engine";
+import { renderLayers } from "@headless-paint/engine";
 import type { Point, ViewTransform } from "@headless-paint/input";
 import { layerToScreen } from "@headless-paint/input";
 import { usePointerHandler, type ToolType } from "../hooks/usePointerHandler";
 
 interface PaintCanvasProps {
-  layer: Layer;
+  layers: readonly Layer[];
   transform: ViewTransform;
   tool: ToolType;
   onPan: (dx: number, dy: number) => void;
@@ -17,12 +17,13 @@ interface PaintCanvasProps {
   onStrokeEnd: () => void;
   width: number;
   height: number;
-  /** 再描画トリガー用のバージョン番号 */
+  layerWidth: number;
+  layerHeight: number;
   renderVersion?: number;
 }
 
 export function PaintCanvas({
-  layer,
+  layers,
   transform,
   tool,
   onPan,
@@ -33,11 +34,12 @@ export function PaintCanvas({
   onStrokeEnd,
   width,
   height,
+  layerWidth,
+  layerHeight,
   renderVersion = 0,
 }: PaintCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // 描画
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -45,18 +47,14 @@ export function PaintCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // DPR対応
     const dpr = window.devicePixelRatio;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    // クリア
     ctx.fillStyle = "#f0f0f0";
     ctx.fillRect(0, 0, width, height);
 
-    // DPRを考慮した変換行列を作成
-    // setTransformはスケーリングをリセットするため、DPRを変換行列に含める
     const dprTransform = new Float32Array(transform) as ViewTransform;
     dprTransform[0] *= dpr;
     dprTransform[1] *= dpr;
@@ -65,15 +63,13 @@ export function PaintCanvas({
     dprTransform[6] *= dpr;
     dprTransform[7] *= dpr;
 
-    // レイヤー描画
-    renderLayerWithTransform(layer, ctx, dprTransform);
+    renderLayers(layers, ctx, dprTransform);
 
-    // レイヤーの外形矩形を描画
     const layerCorners = [
       { x: 0, y: 0 },
-      { x: layer.width, y: 0 },
-      { x: layer.width, y: layer.height },
-      { x: 0, y: layer.height },
+      { x: layerWidth, y: 0 },
+      { x: layerWidth, y: layerHeight },
+      { x: 0, y: layerHeight },
     ];
 
     ctx.save();
@@ -94,7 +90,7 @@ export function PaintCanvas({
     ctx.closePath();
     ctx.stroke();
     ctx.restore();
-  }, [layer, transform, width, height, renderVersion]);
+  }, [layers, transform, width, height, layerWidth, layerHeight, renderVersion]);
 
   const pointerHandlers = usePointerHandler(tool, {
     transform,
@@ -108,7 +104,6 @@ export function PaintCanvas({
     canvasHeight: height,
   });
 
-  // wheelイベントはpassive: falseで登録する必要がある（preventDefaultを使うため）
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;

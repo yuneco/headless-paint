@@ -1,22 +1,12 @@
 import type { Layer } from "@headless-paint/engine";
 import { createCheckpoint } from "./checkpoint";
-import type {
-  Checkpoint,
-  Command,
-  HistoryConfig,
-  HistoryEntry,
-  HistoryState,
-  MemoryUsageInfo,
-} from "./types";
+import type { Checkpoint, Command, HistoryConfig, HistoryState } from "./types";
 import { DEFAULT_HISTORY_CONFIG } from "./types";
 
 /**
  * 新しい履歴状態を作成
  */
-export function createHistoryState(
-  width: number,
-  height: number,
-): HistoryState {
+export function createHistoryState(width: number, height: number): HistoryState {
   return {
     commands: [],
     checkpoints: [],
@@ -43,13 +33,10 @@ export function pushCommand(
   const newIndex = newCommands.length - 1;
 
   // 現在位置より後のチェックポイントを削除
-  let newCheckpoints = state.checkpoints.filter(
-    (cp) => cp.commandIndex <= state.currentIndex,
-  );
+  let newCheckpoints = state.checkpoints.filter((cp) => cp.commandIndex <= state.currentIndex);
 
   // チェックポイント作成の判定
-  const shouldCreateCheckpoint =
-    (newIndex + 1) % config.checkpointInterval === 0;
+  const shouldCreateCheckpoint = (newIndex + 1) % config.checkpointInterval === 0;
 
   if (shouldCreateCheckpoint) {
     const checkpoint = createCheckpoint(layer, newIndex);
@@ -133,9 +120,7 @@ export function redo(state: HistoryState): HistoryState {
 /**
  * 現在位置に対応する最適なチェックポイントを取得
  */
-export function findBestCheckpoint(
-  state: HistoryState,
-): Checkpoint | undefined {
+export function findBestCheckpoint(state: HistoryState): Checkpoint | undefined {
   // currentIndex以下で最も近いチェックポイントを探す
   let bestCheckpoint: Checkpoint | undefined;
   for (const cp of state.checkpoints) {
@@ -157,52 +142,4 @@ export function getCommandsToReplay(
 ): readonly Command[] {
   const startIndex = fromCheckpoint ? fromCheckpoint.commandIndex + 1 : 0;
   return state.commands.slice(startIndex, state.currentIndex + 1);
-}
-
-/**
- * デバッグUI用の履歴エントリ一覧を取得
- */
-export function getHistoryEntries(state: HistoryState): readonly HistoryEntry[] {
-  return state.commands.map((command, index) => {
-    const checkpoint = state.checkpoints.find((cp) => cp.commandIndex === index);
-    return {
-      index,
-      command,
-      hasCheckpoint: !!checkpoint,
-    };
-  });
-}
-
-/**
- * メモリ使用量を推定
- */
-export function estimateMemoryUsage(state: HistoryState): MemoryUsageInfo {
-  // Checkpoint: ImageData のサイズ（width * height * 4 bytes）
-  const checkpointsBytes = state.checkpoints.reduce((total, cp) => {
-    return total + cp.imageData.data.byteLength;
-  }, 0);
-
-  // Commands: おおよその推定
-  const commandsBytes = state.commands.reduce((total, cmd) => {
-    let size = 100; // 基本サイズ
-    if (cmd.type === "drawPath") {
-      size += cmd.points.length * 16; // Point 1つあたり 16 bytes
-    }
-    return total + size;
-  }, 0);
-
-  const totalBytes = checkpointsBytes + commandsBytes;
-
-  return {
-    checkpointsBytes,
-    commandsBytes,
-    totalBytes,
-    formatted: formatBytes(totalBytes),
-  };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

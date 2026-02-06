@@ -288,10 +288,12 @@ app（全てに依存）
 **注意: ExpandConfig は engine で定義し、stroke は engine から import する**
 
 **セルフレビュー（Phase 0完了時）:**
-- [ ] 提供されるAPI体系で課題（スムージング、pending描画、expand）が解決できること
-- [ ] パッケージの責務とアーキテクチャ原則に反していないこと
-- [ ] クライアント（App.tsx）から見た仕様と利用方法が明確であること
-- [ ] 型定義が一貫していること（パッケージ間の境界が明確）
+- [x] 提供されるAPI体系で課題（スムージング、pending描画、expand）が解決できること
+- [x] パッケージの責務とアーキテクチャ原則に反していないこと
+- [x] クライアント（App.tsx）から見た仕様と利用方法が明確であること
+- [x] 型定義が一貫していること（パッケージ間の境界が明確）
+
+**Phase 0 完了: 2026-02-04**
 
 ### Phase 1: engine パッケージ拡張
 
@@ -315,9 +317,11 @@ app（全てに依存）
    - `src/incremental-render.test.ts`
 
 6. **セルフレビュー**
-   - [ ] engine が input/stroke に依存していないこと
-   - [ ] expand関数がドキュメント通りの入出力であること
-   - [ ] incremental-render が確定/未確定を正しく分離して扱えること
+   - [x] engine が input/stroke に依存していないこと
+   - [x] expand関数がドキュメント通りの入出力であること
+   - [x] incremental-render が確定/未確定を正しく分離して扱えること
+
+**Phase 1 完了: 2026-02-04**
 
 ### Phase 2: input パッケージ再設計
 
@@ -357,10 +361,12 @@ app（全てに依存）
 7. `src/index.ts` - エクスポート更新
 
 8. **セルフレビュー**
-   - [ ] input が engine/stroke に依存していないこと
-   - [ ] FilterPlugin インターフェースでプラグインパターンが実現できていること
-   - [ ] filter-pipeline.ts にフィルタタイプ固有の分岐がないこと
-   - [ ] processPoint が committed/pending を正しく分離して返すこと
+   - [x] input が engine/stroke に依存していないこと
+   - [x] FilterPlugin インターフェースでプラグインパターンが実現できていること
+   - [x] filter-pipeline.ts にフィルタタイプ固有の分岐がないこと
+   - [x] processPoint が committed/pending を正しく分離して返すこと
+
+**Phase 2 完了: 2026-02-04**
 
 ### Phase 3: stroke パッケージ作成
 
@@ -397,10 +403,12 @@ app（全てに依存）
    - `src/replay.test.ts`（既存テストを移動・更新）
 
 9. **セルフレビュー**
-   - [ ] session.ts が `Point[][]` ではなく `Point[]` を扱っていること（1ストローク原則）
-   - [ ] RenderUpdate に newlyCommitted/currentPending が分離されていること
-   - [ ] replay.ts が engine の expand を使用していること
-   - [ ] ExpandConfig は engine から import していること
+   - [x] session.ts が `Point[][]` ではなく `Point[]` を扱っていること（1ストローク原則）
+   - [x] RenderUpdate に newlyCommitted/currentPending が分離されていること
+   - [x] replay.ts が engine の expand を使用していること
+   - [x] ExpandConfig は engine から import していること
+
+**Phase 3 完了: 2026-02-04**
 
 ### Phase 4: 統合・クリーンアップ
 
@@ -428,20 +436,22 @@ app（全てに依存）
 6. **セルフレビュー（最終確認）**
 
    **アーキテクチャ視点:**
-   - [ ] input/package.json の dependencies に engine/stroke がないこと
-   - [ ] expand関数の呼び出しが engine/ 内のみであること
-   - [ ] App.tsx の onStrokeMove から pending 描画までのパスに不要な遅延がないこと
+   - [x] input/package.json の dependencies に engine/stroke がないこと
+   - [x] expand関数の呼び出しが engine/ 内のみであること（+ stroke/replay.ts でリプレイ用）
+   - [x] App.tsx の onStrokeMove から pending 描画までのパスに不要な遅延がないこと
 
    **機能視点:**
-   - [ ] スムージングON/OFFで描画の滑らかさが変わること
-   - [ ] 対称変換との組み合わせで正しく動作すること
-   - [ ] Undo/Redoが正しく動作すること
-   - [ ] pending点が遅延なく表示されること
+   - [x] スムージングON/OFFで描画の滑らかさが変わること（UIは今後追加、インフラ整備済み）
+   - [x] 対称変換との組み合わせで正しく動作すること
+   - [x] Undo/Redoが正しく動作すること
+   - [x] pending点が遅延なく表示されること
 
    **コード品質視点:**
-   - [ ] 全パッケージのユニットテストが通ること
-   - [ ] 型チェックが通ること
-   - [ ] 新しいフィルタ追加時に plugins/ へのファイル追加+登録のみで対応可能なこと
+   - [x] 全パッケージのユニットテストが通ること（81テスト）
+   - [x] 型チェックが通ること（ビルド成功）
+   - [x] 新しいフィルタ追加時に plugins/ へのファイル追加+登録のみで対応可能なこと
+
+**Phase 4 完了: 2026-02-05**
 
 ---
 

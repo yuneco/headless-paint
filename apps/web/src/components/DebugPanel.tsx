@@ -1,18 +1,20 @@
 import { useEffect, useRef } from "react";
+import type { ExpandMode } from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
-import type { SymmetryMode } from "@headless-paint/input";
 import type { GUI } from "lil-gui";
-import type { UseSymmetryResult } from "../hooks/useSymmetry";
+import type { UseExpandResult } from "../hooks/useExpand";
+import type { UseSmoothingResult } from "../hooks/useSmoothing";
 
 interface DebugPanelProps {
   transform: ViewTransform;
   strokeCount: number;
-  symmetry: UseSymmetryResult;
+  expand: UseExpandResult;
+  smoothing: UseSmoothingResult;
 }
 
-const SYMMETRY_MODES: SymmetryMode[] = ["none", "axial", "radial", "kaleidoscope"];
+const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 
-export function DebugPanel({ transform, strokeCount, symmetry }: DebugPanelProps) {
+export function DebugPanel({ transform, strokeCount, expand, smoothing }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
   const dataRef = useRef({
@@ -24,15 +26,22 @@ export function DebugPanel({ transform, strokeCount, symmetry }: DebugPanelProps
     strokeCount: 0,
   });
 
-  const symmetryDataRef = useRef({
-    mode: "none" as SymmetryMode,
+  const expandDataRef = useRef({
+    mode: "none" as ExpandMode,
     divisions: 6,
     angleDeg: 0,
   });
 
-  // symmetryの関数をrefで保持（GUIのコールバックで使用）
-  const symmetryRef = useRef(symmetry);
-  symmetryRef.current = symmetry;
+  const smoothingDataRef = useRef({
+    enabled: false,
+    windowSize: 5,
+  });
+
+  const expandRef = useRef(expand);
+  expandRef.current = expand;
+
+  const smoothingRef = useRef(smoothing);
+  smoothingRef.current = smoothing;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -67,31 +76,48 @@ export function DebugPanel({ transform, strokeCount, symmetry }: DebugPanelProps
         .disable();
       gui.add(dataRef.current, "strokeCount").name("Strokes").listen().disable();
 
-      // Symmetry folder
-      const symmetryFolder = gui.addFolder("Symmetry");
+      const expandFolder = gui.addFolder("Symmetry");
 
-      symmetryFolder
-        .add(symmetryDataRef.current, "mode", SYMMETRY_MODES)
+      expandFolder
+        .add(expandDataRef.current, "mode", EXPAND_MODES)
         .name("Mode")
-        .onChange((value: SymmetryMode) => {
-          symmetryRef.current.setMode(value);
+        .onChange((value: ExpandMode) => {
+          expandRef.current.setMode(value);
         });
 
-      symmetryFolder
-        .add(symmetryDataRef.current, "divisions", 2, 12, 1)
+      expandFolder
+        .add(expandDataRef.current, "divisions", 2, 12, 1)
         .name("Divisions")
         .onChange((value: number) => {
-          symmetryRef.current.setDivisions(value);
+          expandRef.current.setDivisions(value);
         });
 
-      symmetryFolder
-        .add(symmetryDataRef.current, "angleDeg", 0, 360, 1)
+      expandFolder
+        .add(expandDataRef.current, "angleDeg", 0, 360, 1)
         .name("Angle (deg)")
         .onChange((value: number) => {
-          symmetryRef.current.setAngle((value * Math.PI) / 180);
+          expandRef.current.setAngle((value * Math.PI) / 180);
         });
 
-      symmetryFolder.open();
+      expandFolder.open();
+
+      const smoothingFolder = gui.addFolder("Smoothing");
+
+      smoothingFolder
+        .add(smoothingDataRef.current, "enabled")
+        .name("Enable")
+        .onChange((value: boolean) => {
+          smoothingRef.current.setEnabled(value);
+        });
+
+      smoothingFolder
+        .add(smoothingDataRef.current, "windowSize", 3, 13, 2)
+        .name("Window Size")
+        .onChange((value: number) => {
+          smoothingRef.current.setWindowSize(value);
+        });
+
+      smoothingFolder.open();
 
       guiRef.current = gui;
     });

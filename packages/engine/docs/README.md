@@ -78,6 +78,28 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `renderLayerWithTransform(layer, ctx, transform)` | ビュー変換を適用してレイヤーを描画 |
 | `renderLayers(layers, ctx, transform)` | 複数レイヤーを合成描画 |
 
+### Expand 関数
+
+詳細は [expand-api.md](./expand-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `compileExpand(config)` | 展開設定をコンパイル |
+| `expandPoint(point, compiled)` | 単一点を展開 |
+| `expandStroke(points, compiled)` | ストローク全体を展開 |
+| `getExpandCount(config)` | 展開の出力数を取得 |
+| `createDefaultExpandConfig(width, height)` | デフォルト設定を作成 |
+
+### 差分描画 API
+
+詳細は [incremental-render-api.md](./incremental-render-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `appendToCommittedLayer(layer, points, style, expand)` | 確定レイヤーに追加描画 |
+| `renderPendingLayer(layer, points, style, expand)` | 作業レイヤーを再描画 |
+| `composeLayers(target, layers, transform?)` | レイヤーを合成 |
+
 ## アーキテクチャ
 
 - **Canvas2D ベース**: OffscreenCanvas を使用し、Node.js や Worker でも動作可能

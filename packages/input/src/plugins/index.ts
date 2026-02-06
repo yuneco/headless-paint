@@ -1,32 +1,28 @@
-import type { TransformPlugin } from "../types";
-import { symmetryPlugin } from "./symmetry-plugin";
+import type { FilterPlugin } from "../types";
+import { smoothingPlugin } from "./smoothing-plugin";
 
 /**
- * プラグインレジストリ
- * eslint-disable-next-line のための型キャスト
+ * フィルタプラグインレジストリ
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const pluginRegistry = new Map<string, TransformPlugin<any, any>>([
-  [symmetryPlugin.type, symmetryPlugin],
+const filterPluginRegistry = new Map<string, FilterPlugin>([
+  [smoothingPlugin.type, smoothingPlugin],
 ]);
 
 /**
- * 変換タイプに対応するプラグインを取得
+ * フィルタタイプに対応するプラグインを取得
  * @throws 未登録のタイプの場合
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getPlugin(type: string): TransformPlugin<any, any> {
-  const plugin = pluginRegistry.get(type);
+export function getFilterPlugin(type: string): FilterPlugin {
+  const plugin = filterPluginRegistry.get(type);
   if (!plugin) {
-    throw new Error(`Unknown transform type: ${type}`);
+    throw new Error(`Unknown filter type: ${type}`);
   }
   return plugin;
 }
 
 /**
- * プラグインを登録（将来の拡張用）
+ * フィルタプラグインを登録（将来の拡張用）
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function registerPlugin(plugin: TransformPlugin<any, any>): void {
-  pluginRegistry.set(plugin.type, plugin);
+export function registerFilterPlugin(plugin: FilterPlugin): void {
+  filterPluginRegistry.set(plugin.type, plugin);
 }

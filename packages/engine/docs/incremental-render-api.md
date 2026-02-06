@@ -1,0 +1,211 @@
+# Incremental Render API
+
+確定点と未確定点を分離して描画する差分描画API。
+
+## 概要
+
+### 背景
+
+スムージング処理では、直近の数点が「未確定」（後から座標が変わる可能性がある）となる。未確定点を描画しないとペン位置より手前までしか線が出ず「もっさり」するが、未確定点は座標変更時に再描画が必要になる。
+
+### 二層レンダリング
+
+この問題を解決するため、2つのレイヤーを使い分ける：
+
+```
+┌─────────────────────────────────────┐
+│         Committed Layer             │  確定レイヤー
+│  座標確定済みの点を追加描画         │  （永続的）
+└─────────────────────────────────────┘
+              ↓ 合成
+┌─────────────────────────────────────┐
+│          Pending Layer              │  作業レイヤー
+│  未確定点を毎回クリア→再描画        │  （一時的）
+└─────────────────────────────────────┘
+              ↓ 合成
+┌─────────────────────────────────────┐
+│         Display Canvas              │  表示用キャンバス
+└─────────────────────────────────────┘
+```
+
+### パフォーマンス
+
+- **確定点**: 追加描画のみ（既存描画を保持）
+- **未確定点**: クリア→再描画（点数が少ないので高速）
+- **合成**: Canvas to Canvas転写（GPU最適化されている）
+
+---
+
+## RenderUpdate
+
+描画更新のデータ構造。strokeパッケージから渡される。
+
+```typescript
+interface RenderUpdate {
+  readonly newlyCommitted: readonly Point[];  // 今回新たに確定した点
+  readonly currentPending: readonly Point[];  // 現在のpending全体
+  readonly style: StrokeStyle;
+  readonly expand: ExpandConfig;
+}
+```
+
+---
+
+## appendToCommittedLayer
+
+確定レイヤーに新しく確定した点を追加描画する。
+
+```typescript
+function appendToCommittedLayer(
+  layer: Layer,
+  points: readonly Point[],
+  style: StrokeStyle,
+  compiledExpand: CompiledExpand
+): void
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `layer` | `Layer` | ○ | 確定レイヤー |
+| `points` | `readonly Point[]` | ○ | 新しく確定した点（連続パス用） |
+| `style` | `StrokeStyle` | ○ | 描画スタイル |
+| `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
+
+**動作**:
+1. pointsをexpandで展開
+2. 各展開ストロークについて、連続した点間を線で結ぶ
+3. 既存の描画は保持される（追加描画のみ）
+
+**使用例**:
+```typescript
+// 新しく確定した点を描画
+appendToCommittedLayer(
+  committedLayer,
+  renderUpdate.newlyCommitted,
+  renderUpdate.style,
+  compiledExpand
+);
+```
+
+---
+
+## renderPendingLayer
+
+作業レイヤーを再描画する（クリア→描画）。
+
+```typescript
+function renderPendingLayer(
+  layer: Layer,
+  points: readonly Point[],
+  style: StrokeStyle,
+  compiledExpand: CompiledExpand
+): void
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `layer` | `Layer` | ○ | 作業レイヤー |
+| `points` | `readonly Point[]` | ○ | 未確定点全体 |
+| `style` | `StrokeStyle` | ○ | 描画スタイル |
+| `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
+
+**動作**:
+1. レイヤーをクリア
+2. pointsをexpandで展開
+3. 各展開ストロークを描画
+
+**使用例**:
+```typescript
+// 未確定点を再描画
+renderPendingLayer(
+  pendingLayer,
+  renderUpdate.currentPending,
+  renderUpdate.style,
+  compiledExpand
+);
+```
+
+---
+
+## composeLayers
+
+複数のレイヤーを表示用キャンバスに合成する。
+
+```typescript
+function composeLayers(
+  target: CanvasRenderingContext2D,
+  layers: readonly Layer[],
+  transform?: ViewTransform
+): void
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `target` | `CanvasRenderingContext2D` | ○ | 出力先のコンテキスト |
+| `layers` | `readonly Layer[]` | ○ | 合成するレイヤー（下から順） |
+| `transform` | `ViewTransform` | - | ビュー変換（省略時は単位行列） |
+
+**使用例**:
+```typescript
+// 確定レイヤー + 作業レイヤーを合成
+composeLayers(displayCtx, [committedLayer, pendingLayer], viewTransform);
+```
+
+---
+
+## 典型的な使用パターン
+
+```typescript
+import {
+  createLayer,
+  compileExpand,
+  appendToCommittedLayer,
+  renderPendingLayer,
+  composeLayers,
+} from "@headless-paint/engine";
+
+// レイヤー作成
+const committedLayer = createLayer(width, height, { name: "Committed" });
+const pendingLayer = createLayer(width, height, { name: "Pending" });
+
+// 展開設定をコンパイル
+const compiledExpand = compileExpand(expandConfig);
+
+// ストローク中の描画更新
+function onRenderUpdate(update: RenderUpdate) {
+  // 1. 新しく確定した点を確定レイヤーに追加
+  if (update.newlyCommitted.length > 0) {
+    appendToCommittedLayer(
+      committedLayer,
+      update.newlyCommitted,
+      update.style,
+      compiledExpand
+    );
+  }
+
+  // 2. 未確定点を作業レイヤーに再描画
+  renderPendingLayer(
+    pendingLayer,
+    update.currentPending,
+    update.style,
+    compiledExpand
+  );
+
+  // 3. 合成して表示
+  displayCtx.clearRect(0, 0, width, height);
+  composeLayers(displayCtx, [committedLayer, pendingLayer], viewTransform);
+}
+
+// ストローク終了時
+function onStrokeEnd() {
+  // 作業レイヤーをクリア
+  clearLayer(pendingLayer);
+
+  // 最終合成
+  displayCtx.clearRect(0, 0, width, height);
+  composeLayers(displayCtx, [committedLayer], viewTransform);
+}
+```

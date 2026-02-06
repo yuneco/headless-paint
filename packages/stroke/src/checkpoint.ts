@@ -14,10 +14,7 @@ function generateCheckpointId(): string {
 /**
  * レイヤーの現在状態からチェックポイントを作成
  */
-export function createCheckpoint(
-  layer: Layer,
-  commandIndex: number,
-): Checkpoint {
+export function createCheckpoint(layer: Layer, commandIndex: number): Checkpoint {
   const imageData = getImageData(layer);
 
   return {
@@ -31,9 +28,6 @@ export function createCheckpoint(
 /**
  * チェックポイントからレイヤーを復元
  */
-export function restoreFromCheckpoint(
-  layer: Layer,
-  checkpoint: Checkpoint,
-): void {
+export function restoreFromCheckpoint(layer: Layer, checkpoint: Checkpoint): void {
   layer.ctx.putImageData(checkpoint.imageData, 0, 0);
 }

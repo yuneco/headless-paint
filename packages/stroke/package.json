@@ -1,5 +1,5 @@
 {
-  "name": "@headless-paint/history",
+  "name": "@headless-paint/stroke",
   "version": "0.0.1",
   "type": "module",
   "main": "./dist/index.js",

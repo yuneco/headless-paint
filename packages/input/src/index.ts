@@ -5,19 +5,20 @@ export type {
   SamplingConfig,
   SamplingState,
   TransformComponents,
-  SymmetryMode,
-  SymmetryConfig,
-  CompiledSymmetry,
-  // Pipeline types
-  TransformConfig,
-  PipelineConfig,
-  CompiledPipeline,
-  StrokeSessionState,
-  StrokeSessionResult,
-  StrokeSessionEndResult,
-  // Plugin types
-  TransformPlugin,
-  CompiledTransform,
+  // Filter types
+  InputPoint,
+  FilterType,
+  SmoothingConfig,
+  FilterConfig,
+  FilterPipelineConfig,
+  CompiledFilterPipeline,
+  FilterPipelineState,
+  FilterOutput,
+  FilterProcessResult,
+  // Plugin types (for extension)
+  FilterPlugin,
+  FilterState,
+  FilterStepResult,
 } from "./types";
 
 // Transform functions
@@ -36,23 +37,14 @@ export { screenToLayer, layerToScreen } from "./coordinate";
 // Sampling functions
 export { shouldAcceptPoint, createSamplingState } from "./sampling";
 
-// Symmetry functions
+// Filter Pipeline functions
 export {
-  createDefaultSymmetryConfig,
-  compileSymmetry,
-  expandSymmetry,
-  getSymmetryCount,
-} from "./symmetry";
-
-// Pipeline functions
-export { compilePipeline, expandPoint, expandStroke } from "./pipeline";
+  compileFilterPipeline,
+  createFilterPipelineState,
+  processPoint,
+  finalizePipeline,
+  processAllPoints,
+} from "./filter-pipeline";
 
 // Plugin functions (for extension)
-export { registerPlugin } from "./plugins";
-
-// Session functions
-export {
-  startStrokeSession,
-  addPointToSession,
-  endStrokeSession,
-} from "./session";
+export { getFilterPlugin, registerFilterPlugin } from "./plugins";
