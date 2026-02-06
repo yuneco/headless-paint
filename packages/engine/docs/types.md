@@ -158,6 +158,33 @@ interface CompiledExpand {
 
 ---
 
+## BackgroundSettings
+
+背景色の設定。ピクセルデータを持たず、色と表示/非表示のみを管理する。
+
+```typescript
+interface BackgroundSettings {
+  readonly color: Color;   // 背景色
+  readonly visible: boolean; // 表示/非表示
+}
+```
+
+**使用例**:
+```typescript
+const bg: BackgroundSettings = {
+  color: { r: 255, g: 255, b: 255, a: 255 },
+  visible: true,
+};
+```
+
+**関連定数**:
+
+```typescript
+const DEFAULT_BACKGROUND_COLOR: Color = { r: 255, g: 255, b: 255, a: 255 };
+```
+
+---
+
 ## StrokeStyle
 
 ストローク描画のスタイル設定。

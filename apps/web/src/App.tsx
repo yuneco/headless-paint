@@ -1,10 +1,15 @@
 import {
+  DEFAULT_BACKGROUND_COLOR,
   appendToCommittedLayer,
   clearLayer,
   createLayer,
   renderPendingLayer,
 } from "@headless-paint/engine";
-import type { CompiledExpand, Layer } from "@headless-paint/engine";
+import type {
+  BackgroundSettings,
+  CompiledExpand,
+  Layer,
+} from "@headless-paint/engine";
 import {
   createFilterPipelineState,
   finalizePipeline,
@@ -93,6 +98,11 @@ export function App() {
 
   const [strokePoints, setStrokePoints] = useState<Point[]>([]);
   const [renderVersion, setRenderVersion] = useState(0);
+
+  const [background] = useState<BackgroundSettings>({
+    color: DEFAULT_BACKGROUND_COLOR,
+    visible: true,
+  });
 
   const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
   const smoothing = useSmoothing();
@@ -312,6 +322,7 @@ export function App() {
       <PaintCanvas
         layers={layers}
         transform={transform}
+        background={background}
         tool={tool}
         onPan={handlePan}
         onZoom={handleZoom}

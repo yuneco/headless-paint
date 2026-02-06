@@ -2,6 +2,7 @@
 // Core paint engine - Canvas2D based
 
 export type {
+  BackgroundSettings,
   Color,
   CompiledExpand,
   ExpandConfig,
@@ -12,6 +13,7 @@ export type {
   StrokePoint,
   StrokeStyle,
 } from "./types";
+export { DEFAULT_BACKGROUND_COLOR } from "./types";
 export {
   clearLayer,
   colorToStyle,
@@ -21,7 +23,7 @@ export {
   setPixel,
 } from "./layer";
 export { drawCircle, drawLine, drawPath } from "./draw";
-export { renderLayerWithTransform, renderLayers } from "./render";
+export { renderLayerWithTransform, renderLayers, type RenderOptions } from "./render";
 export {
   compileExpand,
   createDefaultExpandConfig,

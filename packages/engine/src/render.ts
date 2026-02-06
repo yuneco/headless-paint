@@ -1,5 +1,10 @@
 import type { mat3 } from "gl-matrix";
-import type { Layer } from "./types";
+import { colorToStyle } from "./layer";
+import type { BackgroundSettings, Layer } from "./types";
+
+export interface RenderOptions {
+  background?: BackgroundSettings;
+}
 
 /**
  * ビュー変換を適用してレイヤーを描画
@@ -45,10 +50,28 @@ export function renderLayers(
   layers: readonly Layer[],
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   transform: mat3,
+  options?: RenderOptions,
 ): void {
   // 拡大時（scale >= 1）はスムージングを無効にしてにじみを防ぐ
   const scale = Math.hypot(transform[0], transform[1]);
   const smoothing = scale < 1;
+
+  // 背景描画（レイヤー領域にビュー変換を適用して描画）
+  if (options?.background?.visible && layers.length > 0) {
+    const { width, height } = layers[0];
+    ctx.save();
+    ctx.setTransform(
+      transform[0],
+      transform[1],
+      transform[3],
+      transform[4],
+      transform[6],
+      transform[7],
+    );
+    ctx.fillStyle = colorToStyle(options.background.color);
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
 
   for (const layer of layers) {
     // 非表示レイヤーはスキップ

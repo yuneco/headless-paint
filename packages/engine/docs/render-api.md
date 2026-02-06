@@ -57,6 +57,22 @@ renderLayerWithTransform(layer, ctx, transform);
 
 ---
 
+## RenderOptions
+
+`renderLayers` に渡すオプション。
+
+```typescript
+interface RenderOptions {
+  background?: BackgroundSettings;
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `background` | `BackgroundSettings` | - | 背景設定。`visible: true` の場合、レイヤー領域に背景色を描画 |
+
+---
+
 ## renderLayers
 
 複数レイヤーを順番に合成描画する。
@@ -64,8 +80,9 @@ renderLayerWithTransform(layer, ctx, transform);
 ```typescript
 function renderLayers(
   layers: readonly Layer[],
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   transform: ViewTransform,
+  options?: RenderOptions,
 ): void
 ```
 
@@ -73,24 +90,32 @@ function renderLayers(
 | 名前 | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `layers` | `readonly Layer[]` | ○ | 描画するレイヤーの配列（背面から前面順） |
-| `ctx` | `CanvasRenderingContext2D` | ○ | 描画先のコンテキスト |
+| `ctx` | `CanvasRenderingContext2D \| OffscreenCanvasRenderingContext2D` | ○ | 描画先のコンテキスト |
 | `transform` | `ViewTransform` | ○ | 適用するビュー変換 |
+| `options` | `RenderOptions` | - | 背景設定などのオプション |
 
 **処理内容**:
-- 配列の先頭から順に（背面→前面）描画
-- 各レイヤーの `meta.visible` が false のものはスキップ
-- 各レイヤーの `meta.opacity` を `globalAlpha` に適用
+1. `options.background` が `visible: true` の場合、ビュー変換を適用してレイヤー領域に背景色を描画
+2. 配列の先頭から順に（背面→前面）描画
+3. 各レイヤーの `meta.visible` が false のものはスキップ
+4. 各レイヤーの `meta.opacity` を `globalAlpha` に適用
 
 **使用例**:
 ```typescript
-import { createLayer } from "@headless-paint/engine";
+import { createLayer, DEFAULT_BACKGROUND_COLOR } from "@headless-paint/engine";
 import { createViewTransform } from "@headless-paint/input";
 
-const background = createLayer(1920, 1080, { name: "Background" });
 const drawing = createLayer(1920, 1080, { name: "Drawing" });
-const layers = [background, drawing];
+const layers = [drawing];
 
 const transform = createViewTransform();
+
+// 背景付きで描画
+renderLayers(layers, ctx, transform, {
+  background: { color: DEFAULT_BACKGROUND_COLOR, visible: true },
+});
+
+// 背景なし（従来互換）
 renderLayers(layers, ctx, transform);
 ```
 

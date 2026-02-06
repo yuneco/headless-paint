@@ -45,6 +45,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity }` |
 | `Layer` | レイヤー本体（width, height, canvas, ctx, meta） |
+| `BackgroundSettings` | 背景設定 `{ color, visible }` |
 
 ### Layer 管理関数
 
@@ -76,7 +77,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `renderLayerWithTransform(layer, ctx, transform)` | ビュー変換を適用してレイヤーを描画 |
-| `renderLayers(layers, ctx, transform)` | 複数レイヤーを合成描画 |
+| `renderLayers(layers, ctx, transform, options?)` | 複数レイヤーを合成描画（背景設定対応） |
 
 ### Expand 関数
 

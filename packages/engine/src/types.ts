@@ -48,6 +48,22 @@ export interface CompiledExpand {
 }
 
 // ============================================================
+// Background
+// ============================================================
+
+export interface BackgroundSettings {
+  readonly color: Color;
+  readonly visible: boolean;
+}
+
+export const DEFAULT_BACKGROUND_COLOR: Color = {
+  r: 255,
+  g: 255,
+  b: 255,
+  a: 255,
+};
+
+// ============================================================
 // StrokeStyle
 // ============================================================
 
