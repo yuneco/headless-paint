@@ -3,16 +3,18 @@ import type { ExpandMode } from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
 import type { GUI } from "lil-gui";
 import type { UseExpandResult } from "../hooks/useExpand";
+import type { UseSmoothingResult } from "../hooks/useSmoothing";
 
 interface DebugPanelProps {
   transform: ViewTransform;
   strokeCount: number;
   expand: UseExpandResult;
+  smoothing: UseSmoothingResult;
 }
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 
-export function DebugPanel({ transform, strokeCount, expand }: DebugPanelProps) {
+export function DebugPanel({ transform, strokeCount, expand, smoothing }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
   const dataRef = useRef({
@@ -30,8 +32,16 @@ export function DebugPanel({ transform, strokeCount, expand }: DebugPanelProps) 
     angleDeg: 0,
   });
 
+  const smoothingDataRef = useRef({
+    enabled: false,
+    windowSize: 5,
+  });
+
   const expandRef = useRef(expand);
   expandRef.current = expand;
+
+  const smoothingRef = useRef(smoothing);
+  smoothingRef.current = smoothing;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -90,6 +100,24 @@ export function DebugPanel({ transform, strokeCount, expand }: DebugPanelProps) 
         });
 
       expandFolder.open();
+
+      const smoothingFolder = gui.addFolder("Smoothing");
+
+      smoothingFolder
+        .add(smoothingDataRef.current, "enabled")
+        .name("Enable")
+        .onChange((value: boolean) => {
+          smoothingRef.current.setEnabled(value);
+        });
+
+      smoothingFolder
+        .add(smoothingDataRef.current, "windowSize", 3, 13, 2)
+        .name("Window Size")
+        .onChange((value: number) => {
+          smoothingRef.current.setWindowSize(value);
+        });
+
+      smoothingFolder.open();
 
       guiRef.current = gui;
     });

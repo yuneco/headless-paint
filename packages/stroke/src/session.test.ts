@@ -34,7 +34,8 @@ describe("session", () => {
 
       expect(result.state.allCommitted).toEqual([{ x: 10, y: 20, timestamp: 1000 }]);
       expect(result.state.currentPending).toEqual([]);
-      expect(result.state.lastRenderedCommitIndex).toBe(-1);
+      // lastRenderedCommitIndex は描画済み committed の最終インデックス
+      expect(result.state.lastRenderedCommitIndex).toBe(0);
       expect(result.state.style).toEqual(style);
       expect(result.state.expand).toEqual(expandConfig);
     });
@@ -48,57 +49,82 @@ describe("session", () => {
       const result = startStrokeSession(filterOutput, style, expandConfig);
 
       expect(result.renderUpdate.newlyCommitted).toEqual([{ x: 10, y: 20 }]);
-      expect(result.renderUpdate.currentPending).toEqual([{ x: 15, y: 25 }]);
+      // currentPending includes last committed point for visual continuity
+      expect(result.renderUpdate.currentPending).toEqual([
+        { x: 10, y: 20 },
+        { x: 15, y: 25 },
+      ]);
     });
   });
 
   describe("addPointToSession", () => {
-    it("should accumulate committed points and calculate newlyCommitted", () => {
+    it("should replace committed from cumulative filterOutput and calculate newlyCommitted", () => {
       const filterOutput1 = {
         committed: [{ x: 10, y: 20, timestamp: 1000 }],
         pending: [],
       };
       const result1 = startStrokeSession(filterOutput1, style, expandConfig);
 
+      // filterOutput.committed is cumulative (all committed from pipeline start)
       const filterOutput2 = {
-        committed: [{ x: 30, y: 40, timestamp: 1002 }],
+        committed: [
+          { x: 10, y: 20, timestamp: 1000 },
+          { x: 30, y: 40, timestamp: 1002 },
+        ],
         pending: [{ x: 35, y: 45, timestamp: 1003 }],
       };
       const result2 = addPointToSession(result1.state, filterOutput2);
 
       expect(result2.state.allCommitted).toHaveLength(2);
       expect(result2.state.currentPending).toHaveLength(1);
-      // newlyCommitted should include all points from lastRenderedCommitIndex(-1) + 1 = 0
+      // newlyCommitted: max(0, lastRenderedCommitIndex=0)=0 から開始
+      // オーバーラップ1点を含み、パスの連続性を確保
       expect(result2.renderUpdate.newlyCommitted).toEqual([
         { x: 10, y: 20 },
         { x: 30, y: 40 },
       ]);
+      // currentPending includes last committed point for visual continuity
+      expect(result2.renderUpdate.currentPending).toEqual([
+        { x: 30, y: 40 },
+        { x: 35, y: 45 },
+      ]);
     });
 
-    it("should update lastRenderedCommitIndex after adding points", () => {
+    it("should update lastRenderedCommitIndex and include overlap for continuity", () => {
       const filterOutput1 = {
         committed: [{ x: 10, y: 20, timestamp: 1000 }],
         pending: [],
       };
       const result1 = startStrokeSession(filterOutput1, style, expandConfig);
 
+      // Cumulative committed
       const filterOutput2 = {
-        committed: [{ x: 30, y: 40, timestamp: 1002 }],
+        committed: [
+          { x: 10, y: 20, timestamp: 1000 },
+          { x: 30, y: 40, timestamp: 1002 },
+        ],
         pending: [],
       };
       const result2 = addPointToSession(result1.state, filterOutput2);
 
-      // After adding, lastRenderedCommitIndex should be allCommitted.length - 1
       expect(result2.state.lastRenderedCommitIndex).toBe(1);
 
-      // Next add should only return newly committed
+      // Next add: newlyCommitted includes overlap point for path continuity
       const filterOutput3 = {
-        committed: [{ x: 50, y: 60, timestamp: 1004 }],
+        committed: [
+          { x: 10, y: 20, timestamp: 1000 },
+          { x: 30, y: 40, timestamp: 1002 },
+          { x: 50, y: 60, timestamp: 1004 },
+        ],
         pending: [],
       };
       const result3 = addPointToSession(result2.state, filterOutput3);
 
-      expect(result3.renderUpdate.newlyCommitted).toEqual([{ x: 50, y: 60 }]);
+      // Starts from max(0, lastRenderedCommitIndex=1) = index 1
+      expect(result3.renderUpdate.newlyCommitted).toEqual([
+        { x: 30, y: 40 },
+        { x: 50, y: 60 },
+      ]);
     });
   });
 

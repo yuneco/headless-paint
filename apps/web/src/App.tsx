@@ -6,14 +6,12 @@ import {
 } from "@headless-paint/engine";
 import type { CompiledExpand, Layer } from "@headless-paint/engine";
 import {
-  compileFilterPipeline,
   createFilterPipelineState,
   finalizePipeline,
   processPoint,
 } from "@headless-paint/input";
 import type {
   CompiledFilterPipeline,
-  FilterPipelineConfig,
   FilterPipelineState,
   InputPoint,
   Point,
@@ -43,6 +41,7 @@ import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import { useExpand } from "./hooks/useExpand";
+import { useSmoothing } from "./hooks/useSmoothing";
 import type { ToolType } from "./hooks/usePointerHandler";
 import { useViewTransform } from "./hooks/useViewTransform";
 
@@ -58,10 +57,6 @@ const HISTORY_CONFIG: HistoryConfig = {
   maxHistorySize: 100,
   checkpointInterval: 10,
   maxCheckpoints: 10,
-};
-
-const DEFAULT_FILTER_PIPELINE: FilterPipelineConfig = {
-  filters: [],
 };
 
 export function App() {
@@ -82,14 +77,11 @@ export function App() {
   const [renderVersion, setRenderVersion] = useState(0);
 
   const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
+  const smoothing = useSmoothing();
+  const { compiledFilterPipeline } = smoothing;
 
   const [historyState, setHistoryState] = useState<HistoryState>(() =>
     createHistoryState(LAYER_WIDTH, LAYER_HEIGHT),
-  );
-
-  const compiledFilterPipeline = useMemo(
-    () => compileFilterPipeline(DEFAULT_FILTER_PIPELINE),
-    [],
   );
 
   const strokeStyle: StrokeStyle = useMemo(
@@ -218,8 +210,18 @@ export function App() {
 
     const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
 
-    const totalPoints =
-      strokeSession.allCommitted.length + finalOutput.pending.length;
+    // finalize で確定した残りの点を session に反映し、描画更新を取得
+    const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
+
+    // finalize で新たに確定した点を committed layer に描画
+    appendToCommittedLayer(
+      committedLayer,
+      finalStrokeResult.renderUpdate.newlyCommitted,
+      strokeStyle,
+      sessionRef.current.compiledExpand,
+    );
+
+    const totalPoints = finalStrokeResult.state.allCommitted.length;
 
     if (totalPoints >= 2) {
       const command = createStrokeCommand(
@@ -343,6 +345,7 @@ export function App() {
           transform={transform}
           strokeCount={strokeCount}
           expand={expand}
+          smoothing={smoothing}
         />
       </div>
     </div>

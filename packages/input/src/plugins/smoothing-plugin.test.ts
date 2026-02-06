@@ -55,9 +55,11 @@ describe("smoothingPlugin", () => {
       expect(result3.pending).toHaveLength(3);
 
       // Fourth point - should emit first committed
+      // windowSize=3, halfWindow=1: first commit includes edge point + center = 2 points
       const result4 = smoothingPlugin.process(state, createPoint(40, 40));
-      expect(result4.committed).toHaveLength(1);
-      expect(result4.pending).toHaveLength(3);
+      expect(result4.committed).toHaveLength(2);
+      // pending starts from halfWindow onwards: windowSize - halfWindow = 2 points
+      expect(result4.pending).toHaveLength(2);
     });
 
     it("should produce smoothed coordinates", () => {

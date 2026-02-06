@@ -16,6 +16,33 @@ function toPoints(inputPoints: readonly InputPoint[]): readonly { x: number; y: 
 }
 
 /**
+ * InputPoint から座標のみ抽出（単一点用）
+ */
+function toPoint(p: InputPoint): { x: number; y: number } {
+  return { x: p.x, y: p.y };
+}
+
+/**
+ * pending 描画用のポイント配列を構築
+ *
+ * committed layer と pending layer は別々に描画されるため、
+ * 接続部分で隙間が生じないよう、最後の committed 点を pending の先頭に付与する。
+ * これにより両レイヤーのパスが同一座標で重なり、視覚的に連続した線になる。
+ */
+function buildPendingWithOverlap(
+  pendingPoints: readonly { x: number; y: number }[],
+  lastCommittedPoint: { x: number; y: number } | null,
+): readonly { x: number; y: number }[] {
+  if (pendingPoints.length === 0) {
+    return pendingPoints;
+  }
+  if (lastCommittedPoint === null) {
+    return pendingPoints;
+  }
+  return [lastCommittedPoint, ...pendingPoints];
+}
+
+/**
  * 新しいストロークセッションを開始する
  */
 export function startStrokeSession(
@@ -23,17 +50,27 @@ export function startStrokeSession(
   style: StrokeStyle,
   expand: ExpandConfig,
 ): StrokeSessionResult {
+  const committedPoints = toPoints(filterOutput.committed);
+  const pendingPoints = toPoints(filterOutput.pending);
+
+  // lastRenderedCommitIndex: 描画済み committed の最終インデックス
+  // 初回で committed があればそのインデックス、なければ -1（未描画）
+  const lastRenderedCommitIndex = filterOutput.committed.length - 1;
+
+  const lastCommittedPoint =
+    committedPoints.length > 0 ? committedPoints[committedPoints.length - 1] : null;
+
   const state: StrokeSessionState = {
     allCommitted: [...filterOutput.committed],
     currentPending: [...filterOutput.pending],
-    lastRenderedCommitIndex: -1,
+    lastRenderedCommitIndex,
     style,
     expand,
   };
 
   const renderUpdate: RenderUpdate = {
-    newlyCommitted: toPoints(filterOutput.committed),
-    currentPending: toPoints(filterOutput.pending),
+    newlyCommitted: committedPoints,
+    currentPending: buildPendingWithOverlap(pendingPoints, lastCommittedPoint),
     style,
     expand,
   };
@@ -48,15 +85,20 @@ export function addPointToSession(
   state: StrokeSessionState,
   filterOutput: FilterOutput,
 ): StrokeSessionResult {
-  // filterOutput.committed を allCommitted に追加
-  const newAllCommitted = [...state.allCommitted, ...filterOutput.committed];
-
-  // filterOutput.pending を currentPending に設定
+  // filterOutput.committed は filter-pipeline が返す累積値（全 committed 点）
+  // session 側で追記すると二重になるため、置換で受け取る
+  const newAllCommitted = [...filterOutput.committed];
   const newCurrentPending = [...filterOutput.pending];
 
-  // lastRenderedCommitIndex から新しく追加された点を newlyCommitted として計算
-  const newlyCommittedStartIndex = state.lastRenderedCommitIndex + 1;
-  const newlyCommittedPoints = newAllCommitted.slice(newlyCommittedStartIndex);
+  // newlyCommitted: 今回 appendToCommittedLayer に渡す点列
+  // lastRenderedCommitIndex から開始し、1点のオーバーラップを含めることで
+  // 前回描画のパス終端と今回のパス始端が同一座標で接続される
+  const newlyCommittedStartIndex = Math.max(0, state.lastRenderedCommitIndex);
+  const newlyCommittedPoints = toPoints(newAllCommitted.slice(newlyCommittedStartIndex));
+
+  const pendingPoints = toPoints(newCurrentPending);
+  const lastCommittedPoint =
+    newAllCommitted.length > 0 ? toPoint(newAllCommitted[newAllCommitted.length - 1]) : null;
 
   const newState: StrokeSessionState = {
     allCommitted: newAllCommitted,
@@ -67,8 +109,8 @@ export function addPointToSession(
   };
 
   const renderUpdate: RenderUpdate = {
-    newlyCommitted: toPoints(newlyCommittedPoints),
-    currentPending: toPoints(newCurrentPending),
+    newlyCommitted: newlyCommittedPoints,
+    currentPending: buildPendingWithOverlap(pendingPoints, lastCommittedPoint),
     style: state.style,
     expand: state.expand,
   };
