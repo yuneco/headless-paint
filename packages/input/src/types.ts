@@ -74,9 +74,8 @@ export interface InputPoint {
 /**
  * フィルタの状態（各プラグインで拡張）
  */
-export interface FilterState {
-  // プラグイン固有の状態
-}
+// biome-ignore lint/suspicious/noEmptyInterface: プラグインが extends で拡張するための基底interface
+export interface FilterState {}
 
 /**
  * フィルタ処理1ステップの結果

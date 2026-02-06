@@ -1,4 +1,3 @@
-import { useCallback, useMemo, useState } from "react";
 import type {
   CompiledExpand,
   ExpandConfig,
@@ -8,6 +7,7 @@ import {
   compileExpand,
   createDefaultExpandConfig,
 } from "@headless-paint/engine";
+import { useCallback, useMemo, useState } from "react";
 
 export interface UseExpandResult {
   config: ExpandConfig;

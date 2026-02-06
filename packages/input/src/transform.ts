@@ -1,5 +1,5 @@
 import { mat3 } from "gl-matrix";
-import type { ViewTransform, TransformComponents } from "./types";
+import type { TransformComponents, ViewTransform } from "./types";
 
 /**
  * 単位行列のビュー変換を作成

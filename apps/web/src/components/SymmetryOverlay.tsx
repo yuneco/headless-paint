@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
 import type { ExpandConfig } from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
 import { layerToScreen } from "@headless-paint/input";
+import { useEffect, useRef } from "react";
 
 interface SymmetryOverlayProps {
   config: ExpandConfig;

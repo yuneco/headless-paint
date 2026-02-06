@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
 import type {
   CompiledFilterPipeline,
   FilterPipelineConfig,
 } from "@headless-paint/input";
 import { compileFilterPipeline } from "@headless-paint/input";
+import { useCallback, useMemo, useState } from "react";
 
 export interface UseSmoothingResult {
   enabled: boolean;

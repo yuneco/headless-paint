@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type CSSProperties } from "react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 
 interface AccordionPanelProps {
   title: string;

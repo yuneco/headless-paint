@@ -1,12 +1,12 @@
-import { useEffect, useRef } from "react";
 import type { Layer } from "@headless-paint/engine";
 import { renderLayerWithTransform } from "@headless-paint/engine";
 import {
   type ViewTransform,
   createViewTransform,
-  zoom,
   screenToLayer,
+  zoom,
 } from "@headless-paint/input";
+import { useEffect, useRef } from "react";
 
 interface MinimapProps {
   layer: Layer;
@@ -33,6 +33,7 @@ export function Minimap({
   const height = maxWidth / aspectRatio;
   const scale = maxWidth / layer.width;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: renderVersionはlayer内部のImageData更新を検知する再描画トリガー
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;

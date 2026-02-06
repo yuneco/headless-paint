@@ -1,6 +1,6 @@
 import type { Layer } from "@headless-paint/engine";
-import type { HistoryState } from "@headless-paint/stroke";
 import type { ViewTransform } from "@headless-paint/input";
+import type { HistoryState } from "@headless-paint/stroke";
 import { AccordionPanel } from "./AccordionPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";
 import { Minimap } from "./Minimap";
@@ -37,7 +37,7 @@ export function SidebarPanel({
       style={{
         position: "absolute",
         top: 16,
-        right: 16,
+        left: 16,
         width: 280,
       }}
     >

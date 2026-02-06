@@ -42,6 +42,7 @@ export function PaintCanvas({
 }: PaintCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: renderVersionはlayers内部のImageData更新を検知する再描画トリガー
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
