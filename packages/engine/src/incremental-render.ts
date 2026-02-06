@@ -18,7 +18,14 @@ export function appendToCommittedLayer(
   const strokes = expandStrokePoints(points, compiledExpand);
   for (const stroke of strokes) {
     if (stroke.length > 0) {
-      drawVariableWidthPath(layer, stroke, style.color, style.lineWidth, style.pressureSensitivity ?? 0);
+      drawVariableWidthPath(
+        layer,
+        stroke,
+        style.color,
+        style.lineWidth,
+        style.pressureSensitivity ?? 0,
+        style.pressureCurve,
+      );
     }
   }
 }
@@ -39,7 +46,14 @@ export function renderPendingLayer(
   const strokes = expandStrokePoints(points, compiledExpand);
   for (const stroke of strokes) {
     if (stroke.length > 0) {
-      drawVariableWidthPath(layer, stroke, style.color, style.lineWidth, style.pressureSensitivity ?? 0);
+      drawVariableWidthPath(
+        layer,
+        stroke,
+        style.color,
+        style.lineWidth,
+        style.pressureSensitivity ?? 0,
+        style.pressureCurve,
+      );
     }
   }
 }

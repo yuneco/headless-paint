@@ -122,6 +122,29 @@ drawPath(layer, freehand, green);
 
 ---
 
+## applyPressureCurve
+
+筆圧カーブを適用する。パラメトリック cubic-bezier で入力筆圧を変換する。
+
+```typescript
+function applyPressureCurve(
+  pressure: number,
+  curve: PressureCurve,
+): number
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `pressure` | `number` | ○ | 入力筆圧（0.0〜1.0） |
+| `curve` | `PressureCurve` | ○ | カーブの制御点 |
+
+**戻り値**: `number` - 変換後の筆圧（0.0〜1.0）
+
+**計算式**: `output = 3 * mt² * t * y1 + 3 * mt * t² * y2 + t³` (t=pressure, mt=1-t)
+
+---
+
 ## calculateRadius
 
 筆圧から描画半径を計算する。
@@ -131,6 +154,7 @@ function calculateRadius(
   pressure: number | undefined,
   baseLineWidth: number,
   pressureSensitivity: number,
+  pressureCurve?: PressureCurve,
 ): number
 ```
 
@@ -140,13 +164,15 @@ function calculateRadius(
 | `pressure` | `number \| undefined` | ○ | 筆圧値（0.0〜1.0、undefinedはデフォルト0.5） |
 | `baseLineWidth` | `number` | ○ | 基準線幅 |
 | `pressureSensitivity` | `number` | ○ | 筆圧感度（0.0〜1.0） |
+| `pressureCurve` | `PressureCurve` | - | 筆圧カーブ（undefinedは変換なし） |
 
 **戻り値**: `number` - 描画半径（ピクセル）
 
 **計算ロジック**:
-- `sensitivity=0`: `baseLineWidth / 2`（均一）
-- `sensitivity=1`: `baseLineWidth * pressure`（筆圧比例）
-- 中間値: 均一と筆圧の線形補間
+1. `pressureCurve` がある場合、`applyPressureCurve` で筆圧を変換
+2. `sensitivity=0`: `baseLineWidth / 2`（均一）
+3. `sensitivity=1`: `baseLineWidth * pressure`（筆圧比例）
+4. 中間値: 均一と筆圧の線形補間
 
 ---
 
@@ -185,6 +211,7 @@ function drawVariableWidthPath(
   color: Color,
   baseLineWidth: number,
   pressureSensitivity: number,
+  pressureCurve?: PressureCurve,
 ): void
 ```
 
@@ -196,6 +223,7 @@ function drawVariableWidthPath(
 | `color` | `Color` | ○ | 描画色 |
 | `baseLineWidth` | `number` | ○ | 基準線幅 |
 | `pressureSensitivity` | `number` | ○ | 筆圧感度（0.0〜1.0） |
+| `pressureCurve` | `PressureCurve` | - | 筆圧カーブ（undefinedは変換なし） |
 
 **描画手順**:
 1. ポイント列をCatmull-Romスプラインで補間

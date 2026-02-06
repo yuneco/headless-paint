@@ -106,7 +106,16 @@ export function Minimap({
     ctx.strokeStyle = "#ccc";
     ctx.lineWidth = 1;
     ctx.strokeRect(0, 0, width, height);
-  }, [layer, viewTransform, mainCanvasWidth, mainCanvasHeight, width, height, scale, renderVersion]);
+  }, [
+    layer,
+    viewTransform,
+    mainCanvasWidth,
+    mainCanvasHeight,
+    width,
+    height,
+    scale,
+    renderVersion,
+  ]);
 
   return (
     <canvas

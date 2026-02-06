@@ -6,7 +6,10 @@ import { DEFAULT_HISTORY_CONFIG } from "./types";
 /**
  * 新しい履歴状態を作成
  */
-export function createHistoryState(width: number, height: number): HistoryState {
+export function createHistoryState(
+  width: number,
+  height: number,
+): HistoryState {
   return {
     commands: [],
     checkpoints: [],
@@ -29,14 +32,20 @@ export function pushCommand(
   config: HistoryConfig = DEFAULT_HISTORY_CONFIG,
 ): HistoryState {
   // 現在位置より後のコマンドを削除
-  const newCommands = [...state.commands.slice(0, state.currentIndex + 1), command];
+  const newCommands = [
+    ...state.commands.slice(0, state.currentIndex + 1),
+    command,
+  ];
   const newIndex = newCommands.length - 1;
 
   // 現在位置より後のチェックポイントを削除
-  let newCheckpoints = state.checkpoints.filter((cp) => cp.commandIndex <= state.currentIndex);
+  let newCheckpoints = state.checkpoints.filter(
+    (cp) => cp.commandIndex <= state.currentIndex,
+  );
 
   // チェックポイント作成の判定
-  const shouldCreateCheckpoint = (newIndex + 1) % config.checkpointInterval === 0;
+  const shouldCreateCheckpoint =
+    (newIndex + 1) % config.checkpointInterval === 0;
 
   if (shouldCreateCheckpoint) {
     const checkpoint = createCheckpoint(layer, newIndex);
@@ -120,7 +129,9 @@ export function redo(state: HistoryState): HistoryState {
 /**
  * 現在位置に対応する最適なチェックポイントを取得
  */
-export function findBestCheckpoint(state: HistoryState): Checkpoint | undefined {
+export function findBestCheckpoint(
+  state: HistoryState,
+): Checkpoint | undefined {
   // currentIndex以下で最も近いチェックポイントを探す
   let bestCheckpoint: Checkpoint | undefined;
   for (const cp of state.checkpoints) {

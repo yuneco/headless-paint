@@ -51,7 +51,9 @@ export function SymmetryOverlay({
       drawAxisLine(ctx, originScreen, config.angle, width, height);
     } else {
       const divisions =
-        config.mode === "kaleidoscope" ? config.divisions * 2 : config.divisions;
+        config.mode === "kaleidoscope"
+          ? config.divisions * 2
+          : config.divisions;
 
       for (let i = 0; i < divisions; i++) {
         const angle = (Math.PI * 2 * i) / divisions + config.angle;

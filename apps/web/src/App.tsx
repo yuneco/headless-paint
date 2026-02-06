@@ -233,6 +233,7 @@ export function App() {
         strokeStyle.color,
         strokeStyle.lineWidth,
         strokeStyle.pressureSensitivity,
+        strokeStyle.pressureCurve,
       );
       setHistoryState((prev) =>
         pushCommand(prev, command, committedLayer, HISTORY_CONFIG),

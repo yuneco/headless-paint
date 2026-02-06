@@ -26,9 +26,8 @@ export interface UseViewTransformResult {
 }
 
 export function useViewTransform(): UseViewTransformResult {
-  const [transform, setTransform] = useState<ViewTransform>(
-    createViewTransform,
-  );
+  const [transform, setTransform] =
+    useState<ViewTransform>(createViewTransform);
 
   const handlePan = useCallback((dx: number, dy: number) => {
     setTransform((prev) => pan(prev, dx, dy));

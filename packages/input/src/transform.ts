@@ -80,13 +80,9 @@ export function rotate(
   const screenCenter = [centerX, centerY] as const;
   const layerCenter = [0, 0];
   layerCenter[0] =
-    inverse[0] * screenCenter[0] +
-    inverse[3] * screenCenter[1] +
-    inverse[6];
+    inverse[0] * screenCenter[0] + inverse[3] * screenCenter[1] + inverse[6];
   layerCenter[1] =
-    inverse[1] * screenCenter[0] +
-    inverse[4] * screenCenter[1] +
-    inverse[7];
+    inverse[1] * screenCenter[0] + inverse[4] * screenCenter[1] + inverse[7];
 
   // Layer Space で中心基準の回転を適用
   // newTransform = transform * fromLayerOrigin * rotation * toLayerOrigin

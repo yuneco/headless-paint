@@ -1,5 +1,5 @@
 import { colorToStyle } from "./layer";
-import type { Color, Layer, Point, StrokePoint } from "./types";
+import type { Color, Layer, Point, PressureCurve, StrokePoint } from "./types";
 
 const DEFAULT_PRESSURE = 0.5;
 const MIN_INTERPOLATION_DISTANCE = 2;
@@ -59,17 +59,37 @@ export function drawPath(
 }
 
 /**
+ * 筆圧カーブを適用する
+ * パラメトリック cubic-bezier: 端点 (0,0)→(1,1) 固定、制御点の y 座標のみ調整
+ */
+export function applyPressureCurve(
+  pressure: number,
+  curve: PressureCurve,
+): number {
+  const t = pressure;
+  const mt = 1 - t;
+  return 3 * mt * mt * t * curve.y1 + 3 * mt * t * t * curve.y2 + t * t * t;
+}
+
+/**
  * 筆圧から描画半径を計算する
  */
 export function calculateRadius(
   pressure: number | undefined,
   baseLineWidth: number,
   pressureSensitivity: number,
+  pressureCurve?: PressureCurve,
 ): number {
-  const p = pressure ?? DEFAULT_PRESSURE;
+  let p = pressure ?? DEFAULT_PRESSURE;
+  if (pressureCurve) {
+    p = applyPressureCurve(p, pressureCurve);
+  }
   const uniformRadius = baseLineWidth / 2;
   const pressureRadius = baseLineWidth * p;
-  return uniformRadius * (1 - pressureSensitivity) + pressureRadius * pressureSensitivity;
+  return (
+    uniformRadius * (1 - pressureSensitivity) +
+    pressureRadius * pressureSensitivity
+  );
 }
 
 /**
@@ -96,7 +116,10 @@ export function interpolateStrokePoints(
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const segments = Math.max(1, Math.ceil(dist / MIN_INTERPOLATION_DISTANCE));
+      const segments = Math.max(
+        1,
+        Math.ceil(dist / MIN_INTERPOLATION_DISTANCE),
+      );
 
       for (let j = 1; j < segments; j++) {
         const t = j / segments;
@@ -138,6 +161,7 @@ export function drawVariableWidthPath(
   color: Color,
   baseLineWidth: number,
   pressureSensitivity: number,
+  pressureCurve?: PressureCurve,
 ): void {
   if (points.length === 0) return;
 
@@ -148,7 +172,12 @@ export function drawVariableWidthPath(
   const interpolated = interpolateStrokePoints(points);
 
   if (interpolated.length === 1) {
-    const r = calculateRadius(interpolated[0].pressure, baseLineWidth, pressureSensitivity);
+    const r = calculateRadius(
+      interpolated[0].pressure,
+      baseLineWidth,
+      pressureSensitivity,
+      pressureCurve,
+    );
     ctx.beginPath();
     ctx.arc(interpolated[0].x, interpolated[0].y, r, 0, Math.PI * 2);
     ctx.fill();
@@ -157,7 +186,12 @@ export function drawVariableWidthPath(
 
   for (let i = 0; i < interpolated.length; i++) {
     const p = interpolated[i];
-    const r = calculateRadius(p.pressure, baseLineWidth, pressureSensitivity);
+    const r = calculateRadius(
+      p.pressure,
+      baseLineWidth,
+      pressureSensitivity,
+      pressureCurve,
+    );
 
     // 円を描画
     ctx.beginPath();
@@ -167,7 +201,12 @@ export function drawVariableWidthPath(
     // 隣接点間を台形ポリゴンで接続
     if (i < interpolated.length - 1) {
       const next = interpolated[i + 1];
-      const rNext = calculateRadius(next.pressure, baseLineWidth, pressureSensitivity);
+      const rNext = calculateRadius(
+        next.pressure,
+        baseLineWidth,
+        pressureSensitivity,
+        pressureCurve,
+      );
 
       const dx = next.x - p.x;
       const dy = next.y - p.y;

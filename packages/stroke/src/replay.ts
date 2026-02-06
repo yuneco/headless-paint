@@ -5,10 +5,7 @@ import {
   drawVariableWidthPath,
   expandStrokePoints,
 } from "@headless-paint/engine";
-import {
-  compileFilterPipeline,
-  processAllPoints,
-} from "@headless-paint/input";
+import { compileFilterPipeline, processAllPoints } from "@headless-paint/input";
 import { restoreFromCheckpoint } from "./checkpoint";
 import { findBestCheckpoint, getCommandsToReplay } from "./history";
 import type { Command, HistoryState, StrokeCommand } from "./types";
@@ -38,7 +35,14 @@ function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
   const pressureSensitivity = command.pressureSensitivity ?? 0;
   for (const points of strokes) {
     if (points.length > 0) {
-      drawVariableWidthPath(layer, points, command.color, command.lineWidth, pressureSensitivity);
+      drawVariableWidthPath(
+        layer,
+        points,
+        command.color,
+        command.lineWidth,
+        pressureSensitivity,
+        command.pressureCurve,
+      );
     }
   }
 }
@@ -60,7 +64,10 @@ export function replayCommand(layer: Layer, command: Command): void {
 /**
  * コマンドのリストを順番にリプレイ
  */
-export function replayCommands(layer: Layer, commands: readonly Command[]): void {
+export function replayCommands(
+  layer: Layer,
+  commands: readonly Command[],
+): void {
   for (const command of commands) {
     replayCommand(layer, command);
   }

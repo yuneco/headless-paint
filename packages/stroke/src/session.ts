@@ -1,5 +1,13 @@
-import type { ExpandConfig, StrokePoint } from "@headless-paint/engine";
-import type { FilterOutput, FilterPipelineConfig, InputPoint } from "@headless-paint/input";
+import type {
+  ExpandConfig,
+  PressureCurve,
+  StrokePoint,
+} from "@headless-paint/engine";
+import type {
+  FilterOutput,
+  FilterPipelineConfig,
+  InputPoint,
+} from "@headless-paint/input";
 import type {
   RenderUpdate,
   StrokeCommand,
@@ -11,7 +19,9 @@ import type {
 /**
  * InputPoint から StrokePoint への変換（座標 + pressure を保持）
  */
-function toStrokePoints(inputPoints: readonly InputPoint[]): readonly StrokePoint[] {
+function toStrokePoints(
+  inputPoints: readonly InputPoint[],
+): readonly StrokePoint[] {
   return inputPoints.map((p) => ({ x: p.x, y: p.y, pressure: p.pressure }));
 }
 
@@ -58,7 +68,9 @@ export function startStrokeSession(
   const lastRenderedCommitIndex = filterOutput.committed.length - 1;
 
   const lastCommittedPoint =
-    committedPoints.length > 0 ? committedPoints[committedPoints.length - 1] : null;
+    committedPoints.length > 0
+      ? committedPoints[committedPoints.length - 1]
+      : null;
 
   const state: StrokeSessionState = {
     allCommitted: [...filterOutput.committed],
@@ -94,11 +106,15 @@ export function addPointToSession(
   // lastRenderedCommitIndex から開始し、1点のオーバーラップを含めることで
   // 前回描画のパス終端と今回のパス始端が同一座標で接続される
   const newlyCommittedStartIndex = Math.max(0, state.lastRenderedCommitIndex);
-  const newlyCommittedPoints = toStrokePoints(newAllCommitted.slice(newlyCommittedStartIndex));
+  const newlyCommittedPoints = toStrokePoints(
+    newAllCommitted.slice(newlyCommittedStartIndex),
+  );
 
   const pendingPoints = toStrokePoints(newCurrentPending);
   const lastCommittedPoint =
-    newAllCommitted.length > 0 ? toStrokePoint(newAllCommitted[newAllCommitted.length - 1]) : null;
+    newAllCommitted.length > 0
+      ? toStrokePoint(newAllCommitted[newAllCommitted.length - 1])
+      : null;
 
   const newState: StrokeSessionState = {
     allCommitted: newAllCommitted,
@@ -140,6 +156,7 @@ export function endStrokeSession(
     color: state.style.color,
     lineWidth: state.style.lineWidth,
     pressureSensitivity: state.style.pressureSensitivity,
+    pressureCurve: state.style.pressureCurve,
     timestamp: Date.now(),
   };
 }
@@ -154,6 +171,7 @@ export function createStrokeCommand(
   color: StrokeStyle["color"],
   lineWidth: number,
   pressureSensitivity?: number,
+  pressureCurve?: PressureCurve,
 ): StrokeCommand {
   return {
     type: "stroke",
@@ -163,6 +181,7 @@ export function createStrokeCommand(
     color,
     lineWidth,
     pressureSensitivity,
+    pressureCurve,
     timestamp: Date.now(),
   };
 }

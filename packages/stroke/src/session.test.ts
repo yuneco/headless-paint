@@ -32,7 +32,9 @@ describe("session", () => {
 
       const result = startStrokeSession(filterOutput, style, expandConfig);
 
-      expect(result.state.allCommitted).toEqual([{ x: 10, y: 20, timestamp: 1000 }]);
+      expect(result.state.allCommitted).toEqual([
+        { x: 10, y: 20, timestamp: 1000 },
+      ]);
       expect(result.state.currentPending).toEqual([]);
       // lastRenderedCommitIndex は描画済み committed の最終インデックス
       expect(result.state.lastRenderedCommitIndex).toBe(0);
@@ -144,7 +146,11 @@ describe("session", () => {
         { x: 30, y: 40, timestamp: 1002 },
       ];
 
-      const command = endStrokeSession(result.state, inputPoints, filterPipeline);
+      const command = endStrokeSession(
+        result.state,
+        inputPoints,
+        filterPipeline,
+      );
 
       expect(command).not.toBeNull();
       expect(command?.type).toBe("stroke");
@@ -162,7 +168,11 @@ describe("session", () => {
 
       const inputPoints = [{ x: 10, y: 20, timestamp: 1000 }];
 
-      const command = endStrokeSession(result.state, inputPoints, filterPipeline);
+      const command = endStrokeSession(
+        result.state,
+        inputPoints,
+        filterPipeline,
+      );
 
       expect(command).toBeNull();
     });

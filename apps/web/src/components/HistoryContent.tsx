@@ -19,7 +19,9 @@ interface HistoryEntry {
 }
 
 function getHistoryEntries(state: HistoryState): HistoryEntry[] {
-  const checkpointIndices = new Set(state.checkpoints.map((cp) => cp.commandIndex));
+  const checkpointIndices = new Set(
+    state.checkpoints.map((cp) => cp.commandIndex),
+  );
   return state.commands.map((command, index) => ({
     index,
     command,

@@ -25,6 +25,7 @@ interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;  // 0.0=均一, 1.0=最大感度
+  readonly pressureCurve?: PressureCurve; // 筆圧カーブ（undefined=線形）
 }
 ```
 
@@ -113,6 +114,7 @@ interface StrokeCommand {
   readonly color: Color;
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;
+  readonly pressureCurve?: PressureCurve;
   readonly timestamp: number;
 }
 ```
@@ -125,7 +127,8 @@ interface StrokeCommand {
 | `expand` | `ExpandConfig` | 展開設定 |
 | `color` | `Color` | 描画色 |
 | `lineWidth` | `number` | 線の太さ |
-| `pressureSensitivity` | `number` | 筆圧感度（optional、後方互換: undefined→0扱い） |
+| `pressureSensitivity` | `number` | 筆圧感度（optional、undefined→0扱い） |
+| `pressureCurve` | `PressureCurve` | 筆圧カーブ（optional、undefined→線形） |
 | `timestamp` | `number` | 作成時刻 |
 
 **特徴**:

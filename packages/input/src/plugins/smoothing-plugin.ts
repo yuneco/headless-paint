@@ -199,9 +199,7 @@ export const smoothingPlugin: FilterPlugin = {
     const committed: InputPoint[] = [];
 
     for (let i = startIndex; i < buffer.length; i++) {
-      committed.push(
-        smoothPointAtIndex(buffer, i, smoothingState.windowSize),
-      );
+      committed.push(smoothPointAtIndex(buffer, i, smoothingState.windowSize));
     }
 
     return {

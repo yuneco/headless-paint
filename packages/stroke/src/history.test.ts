@@ -9,7 +9,13 @@ import {
   redo,
   undo,
 } from "./history";
-import type { Checkpoint, Command, HistoryConfig, HistoryState, StrokeCommand } from "./types";
+import type {
+  Checkpoint,
+  Command,
+  HistoryConfig,
+  HistoryState,
+  StrokeCommand,
+} from "./types";
 
 // Create mock ImageData for Node.js environment
 function createMockImageData(width: number, height: number): ImageData {
@@ -221,8 +227,18 @@ describe("history", () => {
       const state: HistoryState = {
         commands: [],
         checkpoints: [
-          { id: "cp1", commandIndex: 4, imageData: createMockImageData(1, 1), createdAt: 1000 },
-          { id: "cp2", commandIndex: 9, imageData: createMockImageData(1, 1), createdAt: 2000 },
+          {
+            id: "cp1",
+            commandIndex: 4,
+            imageData: createMockImageData(1, 1),
+            createdAt: 1000,
+          },
+          {
+            id: "cp2",
+            commandIndex: 9,
+            imageData: createMockImageData(1, 1),
+            createdAt: 2000,
+          },
         ],
         currentIndex: 7,
         layerWidth: 800,

@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import type { UseExpandResult } from "../hooks/useExpand";
 import type { UsePenSettingsResult } from "../hooks/usePenSettings";
 import type { UseSmoothingResult } from "../hooks/useSmoothing";
+import { BezierCurveEditor } from "./BezierCurveEditor";
 
 interface DebugPanelProps {
   transform: ViewTransform;
@@ -182,13 +183,36 @@ export function DebugPanel({
 
   return (
     <div
-      ref={containerRef}
       style={{
         position: "fixed",
         top: 0,
         right: 0,
         zIndex: 100,
       }}
-    />
+    >
+      <div ref={containerRef} />
+      <div
+        style={{
+          backgroundColor: "#1a1a1a",
+          padding: "6px 8px 8px",
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            color: "#ebebeb",
+            marginBottom: 4,
+          }}
+        >
+          Pressure Curve
+        </div>
+        <BezierCurveEditor
+          value={penSettings.pressureCurve}
+          onChange={penSettings.setPressureCurve}
+        />
+      </div>
+    </div>
   );
 }

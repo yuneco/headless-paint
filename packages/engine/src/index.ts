@@ -10,10 +10,11 @@ export type {
   Layer,
   LayerMeta,
   Point,
+  PressureCurve,
   StrokePoint,
   StrokeStyle,
 } from "./types";
-export { DEFAULT_BACKGROUND_COLOR } from "./types";
+export { DEFAULT_BACKGROUND_COLOR, DEFAULT_PRESSURE_CURVE } from "./types";
 export {
   clearLayer,
   colorToStyle,
@@ -23,6 +24,7 @@ export {
   setPixel,
 } from "./layer";
 export {
+  applyPressureCurve,
   calculateRadius,
   drawCircle,
   drawLine,
@@ -30,7 +32,11 @@ export {
   drawVariableWidthPath,
   interpolateStrokePoints,
 } from "./draw";
-export { renderLayerWithTransform, renderLayers, type RenderOptions } from "./render";
+export {
+  renderLayerWithTransform,
+  renderLayers,
+  type RenderOptions,
+} from "./render";
 export {
   compileExpand,
   createDefaultExpandConfig,

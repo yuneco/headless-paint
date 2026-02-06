@@ -144,8 +144,16 @@ export function expandStrokePoints(
   for (const point of points) {
     vec2.set(inputVec, point.x, point.y);
     for (let i = 0; i < compiled.matrices.length; i++) {
-      vec2.transformMat3(outputVec, inputVec, compiled.matrices[i] as unknown as mat3);
-      strokes[i].push({ x: outputVec[0], y: outputVec[1], pressure: point.pressure });
+      vec2.transformMat3(
+        outputVec,
+        inputVec,
+        compiled.matrices[i] as unknown as mat3,
+      );
+      strokes[i].push({
+        x: outputVec[0],
+        y: outputVec[1],
+        pressure: point.pressure,
+      });
     }
   }
 

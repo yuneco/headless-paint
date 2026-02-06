@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { drawCircle, drawLine, drawPath } from "./draw";
+import {
+  applyPressureCurve,
+  calculateRadius,
+  drawCircle,
+  drawLine,
+  drawPath,
+} from "./draw";
 import { createLayer, getImageData, getPixel } from "./layer";
-import type { Color, Layer } from "./types";
+import type { Color, Layer, PressureCurve } from "./types";
+import { DEFAULT_PRESSURE_CURVE } from "./types";
 
 const RED: Color = { r: 255, g: 0, b: 0, a: 255 };
 
@@ -100,5 +107,82 @@ describe("drawPath", () => {
       RED,
     );
     expect(hasAnyPixels(layer)).toBe(true);
+  });
+});
+
+describe("applyPressureCurve", () => {
+  it("should be linear with default curve (y1=1/3, y2=2/3)", () => {
+    const curve = DEFAULT_PRESSURE_CURVE;
+    expect(applyPressureCurve(0, curve)).toBeCloseTo(0);
+    expect(applyPressureCurve(0.25, curve)).toBeCloseTo(0.25);
+    expect(applyPressureCurve(0.5, curve)).toBeCloseTo(0.5);
+    expect(applyPressureCurve(0.75, curve)).toBeCloseTo(0.75);
+    expect(applyPressureCurve(1, curve)).toBeCloseTo(1);
+  });
+
+  it("should produce soft curve with y1=1, y2=1", () => {
+    const soft: PressureCurve = { y1: 1, y2: 1 };
+    // 低い入力でも高い出力になる
+    const result = applyPressureCurve(0.3, soft);
+    expect(result).toBeGreaterThan(0.5);
+  });
+
+  it("should produce hard curve with y1=0, y2=1/3", () => {
+    const hard: PressureCurve = { y1: 0, y2: 1 / 3 };
+    // 低い入力は更に低い出力になる
+    const result = applyPressureCurve(0.3, hard);
+    expect(result).toBeLessThan(0.15);
+  });
+
+  it("should always return 0 for input 0", () => {
+    expect(applyPressureCurve(0, { y1: 0, y2: 0 })).toBe(0);
+    expect(applyPressureCurve(0, { y1: 1, y2: 1 })).toBe(0);
+    expect(applyPressureCurve(0, { y1: 0.5, y2: 0.8 })).toBe(0);
+  });
+
+  it("should always return 1 for input 1", () => {
+    expect(applyPressureCurve(1, { y1: 0, y2: 0 })).toBe(1);
+    expect(applyPressureCurve(1, { y1: 1, y2: 1 })).toBe(1);
+    expect(applyPressureCurve(1, { y1: 0.5, y2: 0.8 })).toBe(1);
+  });
+});
+
+describe("calculateRadius with pressureCurve", () => {
+  it("should apply pressure curve before calculating radius", () => {
+    const soft: PressureCurve = { y1: 1, y2: 1 };
+    const baseLineWidth = 10;
+    const sensitivity = 1;
+    const pressure = 0.3;
+
+    const radiusWithoutCurve = calculateRadius(
+      pressure,
+      baseLineWidth,
+      sensitivity,
+    );
+    const radiusWithCurve = calculateRadius(
+      pressure,
+      baseLineWidth,
+      sensitivity,
+      soft,
+    );
+
+    // soft curve makes low pressure produce larger radius
+    expect(radiusWithCurve).toBeGreaterThan(radiusWithoutCurve);
+  });
+
+  it("should not change radius when using default curve", () => {
+    const baseLineWidth = 10;
+    const sensitivity = 1;
+    const pressure = 0.5;
+
+    const radiusWithout = calculateRadius(pressure, baseLineWidth, sensitivity);
+    const radiusWith = calculateRadius(
+      pressure,
+      baseLineWidth,
+      sensitivity,
+      DEFAULT_PRESSURE_CURVE,
+    );
+
+    expect(radiusWith).toBeCloseTo(radiusWithout);
   });
 });

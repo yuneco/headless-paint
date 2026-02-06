@@ -185,6 +185,39 @@ const DEFAULT_BACKGROUND_COLOR: Color = { r: 255, g: 255, b: 255, a: 255 };
 
 ---
 
+## PressureCurve
+
+入力筆圧(0-1)→出力筆圧(0-1)のマッピングを制御する cubic-bezier カーブの制御点。
+
+```typescript
+interface PressureCurve {
+  readonly y1: number;  // 第1制御点のy座標 (0-1)
+  readonly y2: number;  // 第2制御点のy座標 (0-1)
+}
+```
+
+端点 `(0,0)→(1,1)` は固定。制御点の x 座標は `1/3`, `2/3` で固定され、y 座標のみ調整可能。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `y1` | `number` | 第1制御点のy座標（0-1） |
+| `y2` | `number` | 第2制御点のy座標（0-1） |
+
+**関連定数**:
+
+```typescript
+const DEFAULT_PRESSURE_CURVE: PressureCurve = { y1: 1/3, y2: 2/3 };
+```
+
+デフォルト値 `{ y1: 1/3, y2: 2/3 }` は数学的に線形（output = input）。
+
+**カーブの例**:
+- `{ y1: 1/3, y2: 2/3 }` — 線形（デフォルト）
+- `{ y1: 1, y2: 1 }` — 柔らかい（軽いタッチでも太くなる）
+- `{ y1: 0, y2: 1/3 }` — 硬い（強く押さないと太くならない）
+
+---
+
 ## StrokeStyle
 
 ストローク描画のスタイル設定。
@@ -194,6 +227,7 @@ interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;
+  readonly pressureCurve?: PressureCurve;
 }
 ```
 
@@ -202,8 +236,13 @@ interface StrokeStyle {
 | `color` | `Color` | - | 描画色 |
 | `lineWidth` | `number` | - | 線の基準太さ |
 | `pressureSensitivity` | `number` | `0` | 筆圧感度（0.0=均一太さ、1.0=最大感度） |
+| `pressureCurve` | `PressureCurve` | `undefined` | 筆圧カーブ（undefinedは線形） |
 
 **筆圧感度の動作**:
-- `0`: 全ポイントが `lineWidth` で均一描画（従来互換）
+- `0`: 全ポイントが `lineWidth` で均一描画
 - `1`: 筆圧に完全比例（`lineWidth * pressure` が直径）
 - `0〜1`: 均一太さと筆圧太さの線形補間
+
+**筆圧カーブの動作**:
+- `pressureCurve` が設定されている場合、筆圧感度の計算前に入力筆圧をカーブで変換する
+- `undefined` の場合は変換なし（線形のまま）

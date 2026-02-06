@@ -64,6 +64,20 @@ export const DEFAULT_BACKGROUND_COLOR: Color = {
 };
 
 // ============================================================
+// Pressure Curve
+// ============================================================
+
+export interface PressureCurve {
+  readonly y1: number;
+  readonly y2: number;
+}
+
+export const DEFAULT_PRESSURE_CURVE: PressureCurve = {
+  y1: 1 / 3,
+  y2: 2 / 3,
+};
+
+// ============================================================
 // StrokeStyle
 // ============================================================
 
@@ -71,4 +85,5 @@ export interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;
+  readonly pressureCurve?: PressureCurve;
 }
