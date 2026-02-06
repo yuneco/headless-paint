@@ -44,11 +44,10 @@ import { useExpand } from "./hooks/useExpand";
 import { useSmoothing } from "./hooks/useSmoothing";
 import type { ToolType } from "./hooks/usePointerHandler";
 import { useViewTransform } from "./hooks/useViewTransform";
+import { useWindowSize } from "./hooks/useWindowSize";
 
-const CANVAS_WIDTH = 800;
-const CANVAS_HEIGHT = 600;
-const LAYER_WIDTH = 1920;
-const LAYER_HEIGHT = 1080;
+const LAYER_WIDTH = 1024;
+const LAYER_HEIGHT = 1024;
 
 const PEN_COLOR = { r: 50, g: 50, b: 50, a: 255 };
 const PEN_WIDTH = 3;
@@ -61,8 +60,27 @@ const HISTORY_CONFIG: HistoryConfig = {
 
 export function App() {
   const [tool, setTool] = useState<ToolType>("pen");
-  const { transform, handlePan, handleZoom, handleRotate, reset } =
-    useViewTransform();
+  const { width: viewWidth, height: viewHeight } = useWindowSize();
+  const {
+    transform,
+    handlePan,
+    handleZoom,
+    handleRotate,
+    setInitialFit,
+  } = useViewTransform();
+
+  const fitToView = useCallback(() => {
+    setInitialFit(viewWidth, viewHeight, LAYER_WIDTH, LAYER_HEIGHT);
+  }, [viewWidth, viewHeight, setInitialFit]);
+
+  // 初回マウント時にレイヤーがビュー中央にフィットするよう初期化
+  const initialFitDone = useRef(false);
+  useEffect(() => {
+    if (!initialFitDone.current) {
+      fitToView();
+      initialFitDone.current = true;
+    }
+  }, [fitToView]);
 
   const committedLayer = useMemo(
     () => createLayer(LAYER_WIDTH, LAYER_HEIGHT),
@@ -290,64 +308,71 @@ export function App() {
   );
 
   return (
-    <div style={{ padding: 16 }}>
-      <h1 style={{ margin: "0 0 16px" }}>Headless Paint</h1>
+    <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
+      <PaintCanvas
+        layers={layers}
+        transform={transform}
+        tool={tool}
+        onPan={handlePan}
+        onZoom={handleZoom}
+        onRotate={handleRotate}
+        onStrokeStart={onStrokeStart}
+        onStrokeMove={onStrokeMove}
+        onStrokeEnd={onStrokeEnd}
+        width={viewWidth}
+        height={viewHeight}
+        layerWidth={LAYER_WIDTH}
+        layerHeight={LAYER_HEIGHT}
+        renderVersion={renderVersion}
+      />
 
-      <Toolbar
-        currentTool={tool}
-        onToolChange={setTool}
-        onReset={reset}
+      <SymmetryOverlay
+        config={expand.config}
+        transform={transform}
+        width={viewWidth}
+        height={viewHeight}
+      />
+
+      {/* ツールバーを上部中央にオーバーレイ配置 */}
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 10,
+        }}
+      >
+        <Toolbar
+          currentTool={tool}
+          onToolChange={setTool}
+          onReset={fitToView}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={canUndo(historyState)}
+          canRedo={canRedo(historyState)}
+        />
+      </div>
+
+      <SidebarPanel
+        layer={committedLayer}
+        viewTransform={transform}
+        mainCanvasWidth={viewWidth}
+        mainCanvasHeight={viewHeight}
+        renderVersion={renderVersion}
+        historyState={historyState}
         onUndo={handleUndo}
         onRedo={handleRedo}
         canUndo={canUndo(historyState)}
         canRedo={canRedo(historyState)}
       />
 
-      <div style={{ position: "relative", marginTop: 16 }}>
-        <PaintCanvas
-          layers={layers}
-          transform={transform}
-          tool={tool}
-          onPan={handlePan}
-          onZoom={handleZoom}
-          onRotate={handleRotate}
-          onStrokeStart={onStrokeStart}
-          onStrokeMove={onStrokeMove}
-          onStrokeEnd={onStrokeEnd}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          layerWidth={LAYER_WIDTH}
-          layerHeight={LAYER_HEIGHT}
-          renderVersion={renderVersion}
-        />
-
-        <SymmetryOverlay
-          config={expand.config}
-          transform={transform}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-        />
-
-        <SidebarPanel
-          layer={committedLayer}
-          viewTransform={transform}
-          mainCanvasWidth={CANVAS_WIDTH}
-          mainCanvasHeight={CANVAS_HEIGHT}
-          renderVersion={renderVersion}
-          historyState={historyState}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
-          canUndo={canUndo(historyState)}
-          canRedo={canRedo(historyState)}
-        />
-
-        <DebugPanel
-          transform={transform}
-          strokeCount={strokeCount}
-          expand={expand}
-          smoothing={smoothing}
-        />
-      </div>
+      <DebugPanel
+        transform={transform}
+        strokeCount={strokeCount}
+        expand={expand}
+        smoothing={smoothing}
+      />
     </div>
   );
 }

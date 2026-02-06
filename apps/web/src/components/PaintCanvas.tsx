@@ -123,7 +123,7 @@ export function PaintCanvas({
       style={{
         width,
         height,
-        border: "1px solid #ccc",
+        display: "block",
         cursor: tool === "pen" ? "crosshair" : "grab",
         touchAction: "none",
       }}
