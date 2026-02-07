@@ -1,4 +1,15 @@
 import type { Color } from "@headless-paint/engine";
+import {
+  ArrowLeftRight,
+  Eraser,
+  Hand,
+  Pen,
+  Redo2,
+  RotateCw,
+  Undo2,
+  ZoomIn,
+} from "lucide-react";
+import type { ComponentType } from "react";
 import type { ToolType } from "../hooks/usePointerHandler";
 
 function colorToHex(c: Color): string {
@@ -18,7 +29,6 @@ function hexToColor(hex: string): Color {
 interface ToolbarProps {
   currentTool: ToolType;
   onToolChange: (tool: ToolType) => void;
-  onReset: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -27,19 +37,22 @@ interface ToolbarProps {
   onColorChange?: (color: Color) => void;
 }
 
-const tools: { type: ToolType; label: string; icon: string }[] = [
-  { type: "pen", label: "Pen", icon: "✏️" },
-  { type: "eraser", label: "Eraser", icon: "🧹" },
-  { type: "scroll", label: "Scroll", icon: "✋" },
-  { type: "rotate", label: "Rotate", icon: "🔄" },
-  { type: "zoom", label: "Zoom", icon: "🔍" },
-  { type: "offset", label: "Offset", icon: "↔" },
+const tools: {
+  type: ToolType;
+  label: string;
+  icon: ComponentType<{ size?: number }>;
+}[] = [
+  { type: "pen", label: "Pen", icon: Pen },
+  { type: "eraser", label: "Eraser", icon: Eraser },
+  { type: "scroll", label: "Scroll", icon: Hand },
+  { type: "rotate", label: "Rotate", icon: RotateCw },
+  { type: "zoom", label: "Zoom", icon: ZoomIn },
+  { type: "offset", label: "Offset", icon: ArrowLeftRight },
 ];
 
 export function Toolbar({
   currentTool,
   onToolChange,
-  onReset,
   onUndo,
   onRedo,
   canUndo = false,
@@ -51,31 +64,33 @@ export function Toolbar({
     <div
       style={{
         display: "flex",
-        gap: 8,
-        padding: 8,
+        gap: 2,
+        padding: 2,
         backgroundColor: "#fff",
-        borderRadius: 8,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+        borderRadius: 4,
         alignItems: "center",
       }}
     >
-      {tools.map(({ type, label, icon }) => (
+      {tools.map(({ type, label, icon: Icon }) => (
         <button
           key={type}
           type="button"
           onClick={() => onToolChange(type)}
           style={{
-            padding: "8px 16px",
+            padding: 6,
             border: "none",
             borderRadius: 4,
             cursor: "pointer",
             backgroundColor: currentTool === type ? "#007bff" : "#e9ecef",
             color: currentTool === type ? "#fff" : "#333",
-            fontWeight: currentTool === type ? "bold" : "normal",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
           title={label}
+          aria-label={label}
         >
-          {icon} {label}
+          <Icon size={16} />
         </button>
       ))}
       {onColorChange && color && (
@@ -84,8 +99,8 @@ export function Toolbar({
           value={colorToHex(color)}
           onChange={(e) => onColorChange(hexToColor(e.target.value))}
           style={{
-            width: 36,
-            height: 36,
+            width: 28,
+            height: 28,
             padding: 2,
             border: "none",
             borderRadius: 4,
@@ -95,23 +110,34 @@ export function Toolbar({
           title="Pen Color"
         />
       )}
-      <div style={{ width: 1, backgroundColor: "#ddd", margin: "0 8px" }} />
+      <div
+        style={{
+          width: 1,
+          height: 20,
+          backgroundColor: "#ddd",
+          margin: "0 2px",
+        }}
+      />
       {onUndo && (
         <button
           type="button"
           onClick={onUndo}
           disabled={!canUndo}
           style={{
-            padding: "8px 16px",
+            padding: 6,
             border: "none",
             borderRadius: 4,
             cursor: canUndo ? "pointer" : "not-allowed",
             backgroundColor: canUndo ? "#6c757d" : "#e9ecef",
             color: canUndo ? "#fff" : "#999",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
           title="Undo (Cmd+Z)"
+          aria-label="Undo"
         >
-          ↩ Undo
+          <Undo2 size={16} />
         </button>
       )}
       {onRedo && (
@@ -120,34 +146,22 @@ export function Toolbar({
           onClick={onRedo}
           disabled={!canRedo}
           style={{
-            padding: "8px 16px",
+            padding: 6,
             border: "none",
             borderRadius: 4,
             cursor: canRedo ? "pointer" : "not-allowed",
             backgroundColor: canRedo ? "#6c757d" : "#e9ecef",
             color: canRedo ? "#fff" : "#999",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
           title="Redo (Cmd+Shift+Z)"
+          aria-label="Redo"
         >
-          ↪ Redo
+          <Redo2 size={16} />
         </button>
       )}
-      <div style={{ width: 1, backgroundColor: "#ddd", margin: "0 8px" }} />
-      <button
-        type="button"
-        onClick={onReset}
-        style={{
-          padding: "8px 16px",
-          border: "none",
-          borderRadius: 4,
-          cursor: "pointer",
-          backgroundColor: "#dc3545",
-          color: "#fff",
-        }}
-        title="Reset View"
-      >
-        Reset
-      </button>
     </div>
   );
 }

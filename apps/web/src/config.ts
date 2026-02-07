@@ -35,3 +35,14 @@ export const DEFAULT_SMOOTHING_ENABLED = true;
 
 /** スムージングの移動平均ウィンドウサイズ (奇数, 3-13) */
 export const DEFAULT_SMOOTHING_WINDOW_SIZE = 5;
+
+// ── UI Colors ───────────────────────────────────
+
+/** キャンバス背景色（レイヤー領域外） */
+export const UI_BACKGROUND_COLOR = "#f8f8f8";
+
+/** レイヤー境界線の色 */
+export const UI_LAYER_BORDER_COLOR = "#aaa";
+
+/** 対称ガイドラインの色 */
+export const UI_SYMMETRY_GUIDE_COLOR = "rgba(119, 164, 201, 0.6)";

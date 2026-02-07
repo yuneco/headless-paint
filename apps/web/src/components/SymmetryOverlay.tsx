@@ -2,6 +2,7 @@ import type { ExpandConfig } from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
 import { layerToScreen } from "@headless-paint/input";
 import { useEffect, useRef } from "react";
+import { UI_SYMMETRY_GUIDE_COLOR } from "../config";
 
 interface SymmetryOverlayProps {
   config: ExpandConfig;
@@ -10,7 +11,7 @@ interface SymmetryOverlayProps {
   height: number;
 }
 
-const GUIDE_COLOR = "rgba(100, 100, 255, 0.6)";
+const GUIDE_COLOR = UI_SYMMETRY_GUIDE_COLOR;
 const GUIDE_DASH = [8, 4];
 const ORIGIN_RADIUS = 8;
 
@@ -37,7 +38,7 @@ export function SymmetryOverlay({
 
     ctx.strokeStyle = GUIDE_COLOR;
     ctx.fillStyle = GUIDE_COLOR;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1;
 
     if (config.mode !== "axial") {
       ctx.beginPath();
@@ -45,18 +46,20 @@ export function SymmetryOverlay({
       ctx.fill();
     }
 
-    ctx.setLineDash(GUIDE_DASH);
-
     if (config.mode === "axial") {
+      ctx.setLineDash(GUIDE_DASH);
       drawAxisLine(ctx, originScreen, config.angle, width, height);
-    } else {
-      const divisions =
-        config.mode === "kaleidoscope"
-          ? config.divisions * 2
-          : config.divisions;
-
-      for (let i = 0; i < divisions; i++) {
-        const angle = (Math.PI * 2 * i) / divisions + config.angle;
+    } else if (config.mode === "radial") {
+      ctx.setLineDash([]);
+      for (let i = 0; i < config.divisions; i++) {
+        const angle = (Math.PI * 2 * i) / config.divisions + config.angle;
+        drawAxisLine(ctx, originScreen, angle, width, height);
+      }
+    } else if (config.mode === "kaleidoscope") {
+      const totalLines = config.divisions * 2;
+      for (let i = 0; i < totalLines; i++) {
+        const angle = (Math.PI * 2 * i) / totalLines + config.angle;
+        ctx.setLineDash(i % 2 === 0 ? [] : GUIDE_DASH);
         drawAxisLine(ctx, originScreen, angle, width, height);
       }
     }

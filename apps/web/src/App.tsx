@@ -399,7 +399,6 @@ export function App() {
         <Toolbar
           currentTool={tool}
           onToolChange={handleToolChange}
-          onReset={fitToView}
           onUndo={handleUndo}
           onRedo={handleRedo}
           canUndo={canUndo(historyState)}

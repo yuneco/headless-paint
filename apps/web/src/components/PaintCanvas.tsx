@@ -11,6 +11,7 @@ import {
 import type { InputPoint, ViewTransform } from "@headless-paint/input";
 import { layerToScreen } from "@headless-paint/input";
 import { useEffect, useRef } from "react";
+import { UI_BACKGROUND_COLOR, UI_LAYER_BORDER_COLOR } from "../config";
 import { type ToolType, usePointerHandler } from "../hooks/usePointerHandler";
 
 interface PaintCanvasProps {
@@ -71,7 +72,7 @@ export function PaintCanvas({
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    ctx.fillStyle = "#f0f0f0";
+    ctx.fillStyle = UI_BACKGROUND_COLOR;
     ctx.fillRect(0, 0, width, height);
 
     // パターンプレビュー（レイヤー領域外のみ、DPR未調整のtransformを使用）
@@ -109,7 +110,7 @@ export function PaintCanvas({
     ];
 
     ctx.save();
-    ctx.strokeStyle = "#444";
+    ctx.strokeStyle = UI_LAYER_BORDER_COLOR;
     ctx.lineWidth = 1;
     ctx.beginPath();
 
