@@ -53,7 +53,7 @@ export function SymmetryOverlay({
       ctx.setLineDash([]);
       for (let i = 0; i < config.divisions; i++) {
         const angle = (Math.PI * 2 * i) / config.divisions + config.angle;
-        drawAxisLine(ctx, originScreen, angle, width, height);
+        drawRayLine(ctx, originScreen, angle, width, height);
       }
     } else if (config.mode === "kaleidoscope") {
       const totalLines = config.divisions * 2;
@@ -100,6 +100,24 @@ function drawAxisLine(
 
   ctx.beginPath();
   ctx.moveTo(origin.x - dx, origin.y - dy);
+  ctx.lineTo(origin.x + dx, origin.y + dy);
+  ctx.stroke();
+}
+
+function drawRayLine(
+  ctx: CanvasRenderingContext2D,
+  origin: { x: number; y: number },
+  angle: number,
+  width: number,
+  height: number,
+) {
+  const length = Math.sqrt(width * width + height * height);
+
+  const dx = Math.sin(angle) * length;
+  const dy = -Math.cos(angle) * length;
+
+  ctx.beginPath();
+  ctx.moveTo(origin.x, origin.y);
   ctx.lineTo(origin.x + dx, origin.y + dy);
   ctx.stroke();
 }

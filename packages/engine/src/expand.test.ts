@@ -161,6 +161,24 @@ describe("expandPoint", () => {
     expect(result[3].x).toBeCloseTo(500);
     expect(result[3].y).toBeCloseTo(400);
   });
+
+  it("should keep first point unchanged for radial mode with non-zero angle", () => {
+    const config: ExpandConfig = {
+      mode: "radial",
+      origin: { x: 500, y: 500 },
+      angle: Math.PI / 2,
+      divisions: 2,
+    };
+    const compiled = compileExpand(config);
+    const result = expandPoint({ x: 600, y: 500 }, compiled);
+    expect(result.length).toBe(2);
+    // i=0: 入力位置そのまま（angleで回転されない）
+    expect(result[0].x).toBeCloseTo(600);
+    expect(result[0].y).toBeCloseTo(500);
+    // i=1: origin中心に180°回転
+    expect(result[1].x).toBeCloseTo(400);
+    expect(result[1].y).toBeCloseTo(500);
+  });
 });
 
 describe("expandStroke", () => {

@@ -35,7 +35,7 @@ export function compileExpand(config: ExpandConfig): CompiledExpand {
 
     case "radial":
       for (let i = 0; i < config.divisions; i++) {
-        const angle = (2 * Math.PI * i) / config.divisions + config.angle;
+        const angle = (2 * Math.PI * i) / config.divisions;
         matrices.push(createRotationMatrix(config.origin, angle));
       }
       break;
