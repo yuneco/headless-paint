@@ -1,5 +1,13 @@
-import type { BackgroundSettings, Layer } from "@headless-paint/engine";
-import { renderLayers } from "@headless-paint/engine";
+import type {
+  BackgroundSettings,
+  Layer,
+  PatternPreviewConfig,
+} from "@headless-paint/engine";
+import {
+  createPatternTile,
+  renderLayers,
+  renderPatternPreview,
+} from "@headless-paint/engine";
 import type { InputPoint, ViewTransform } from "@headless-paint/input";
 import { layerToScreen } from "@headless-paint/input";
 import { useEffect, useRef } from "react";
@@ -9,6 +17,7 @@ interface PaintCanvasProps {
   layers: readonly Layer[];
   transform: ViewTransform;
   background?: BackgroundSettings;
+  patternPreview?: PatternPreviewConfig;
   tool: ToolType;
   onPan: (dx: number, dy: number) => void;
   onZoom: (scale: number, centerX: number, centerY: number) => void;
@@ -27,6 +36,7 @@ export function PaintCanvas({
   layers,
   transform,
   background,
+  patternPreview,
   tool,
   onPan,
   onZoom,
@@ -57,6 +67,23 @@ export function PaintCanvas({
 
     ctx.fillStyle = "#f0f0f0";
     ctx.fillRect(0, 0, width, height);
+
+    // パターンプレビュー（レイヤー領域外のみ、DPR未調整のtransformを使用）
+    if (patternPreview) {
+      const tile = createPatternTile(layers, patternPreview);
+      if (tile) {
+        renderPatternPreview(
+          ctx,
+          tile,
+          patternPreview,
+          transform,
+          width,
+          height,
+          layerWidth,
+          layerHeight,
+        );
+      }
+    }
 
     const dprTransform = new Float32Array(transform) as ViewTransform;
     dprTransform[0] *= dpr;
@@ -97,6 +124,7 @@ export function PaintCanvas({
     layers,
     transform,
     background,
+    patternPreview,
     width,
     height,
     layerWidth,

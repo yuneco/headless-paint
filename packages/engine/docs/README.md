@@ -107,6 +107,15 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `renderPendingLayer(layer, points, style, expand)` | 作業レイヤーを再描画 |
 | `composeLayers(target, layers, transform?)` | レイヤーを合成 |
 
+### Pattern Preview
+
+詳細は [pattern-preview-api.md](./pattern-preview-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `createPatternTile(layers, config)` | レイヤー内容からパターンタイルを生成 |
+| `renderPatternPreview(ctx, tile, config, transform, ...)` | レイヤー領域外にパターンを半透明描画 |
+
 ## アーキテクチャ
 
 - **Canvas2D ベース**: OffscreenCanvas を使用し、Node.js や Worker でも動作可能

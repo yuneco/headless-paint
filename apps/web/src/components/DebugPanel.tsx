@@ -1,8 +1,9 @@
-import type { ExpandMode } from "@headless-paint/engine";
+import type { ExpandMode, PatternMode } from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
 import type { GUI } from "lil-gui";
 import { useEffect, useRef } from "react";
 import type { UseExpandResult } from "../hooks/useExpand";
+import type { UsePatternPreviewResult } from "../hooks/usePatternPreview";
 import type { UsePenSettingsResult } from "../hooks/usePenSettings";
 import type { UseSmoothingResult } from "../hooks/useSmoothing";
 import { BezierCurveEditor } from "./BezierCurveEditor";
@@ -13,9 +14,11 @@ interface DebugPanelProps {
   expand: UseExpandResult;
   smoothing: UseSmoothingResult;
   penSettings: UsePenSettingsResult;
+  patternPreview: UsePatternPreviewResult;
 }
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
+const PATTERN_MODES: PatternMode[] = ["none", "grid", "repeat-x", "repeat-y"];
 
 export function DebugPanel({
   transform,
@@ -23,6 +26,7 @@ export function DebugPanel({
   expand,
   smoothing,
   penSettings,
+  patternPreview,
 }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
@@ -51,6 +55,13 @@ export function DebugPanel({
     pressureSensitivity: 0,
   });
 
+  const patternDataRef = useRef({
+    mode: "none" as PatternMode,
+    opacity: 0.3,
+    offsetX: 0,
+    offsetY: 0,
+  });
+
   const expandRef = useRef(expand);
   expandRef.current = expand;
 
@@ -59,6 +70,9 @@ export function DebugPanel({
 
   const penSettingsRef = useRef(penSettings);
   penSettingsRef.current = penSettings;
+
+  const patternPreviewRef = useRef(patternPreview);
+  patternPreviewRef.current = patternPreview;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -157,6 +171,38 @@ export function DebugPanel({
         });
 
       penFolder.open();
+
+      const patternFolder = gui.addFolder("Pattern Preview");
+
+      patternFolder
+        .add(patternDataRef.current, "mode", PATTERN_MODES)
+        .name("Mode")
+        .onChange((value: PatternMode) => {
+          patternPreviewRef.current.setMode(value);
+        });
+
+      patternFolder
+        .add(patternDataRef.current, "opacity", 0, 1, 0.05)
+        .name("Opacity")
+        .onChange((value: number) => {
+          patternPreviewRef.current.setOpacity(value);
+        });
+
+      patternFolder
+        .add(patternDataRef.current, "offsetX", 0, 1, 0.05)
+        .name("Offset X")
+        .onChange((value: number) => {
+          patternPreviewRef.current.setOffsetX(value);
+        });
+
+      patternFolder
+        .add(patternDataRef.current, "offsetY", 0, 1, 0.05)
+        .name("Offset Y")
+        .onChange((value: number) => {
+          patternPreviewRef.current.setOffsetY(value);
+        });
+
+      patternFolder.open();
 
       guiRef.current = gui;
     });

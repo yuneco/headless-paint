@@ -51,3 +51,10 @@ export {
   renderPendingLayer,
   type ViewTransform,
 } from "./incremental-render";
+export {
+  createPatternTile,
+  DEFAULT_PATTERN_PREVIEW_CONFIG,
+  renderPatternPreview,
+  type PatternMode,
+  type PatternPreviewConfig,
+} from "./pattern-preview";

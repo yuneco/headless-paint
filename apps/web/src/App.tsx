@@ -44,6 +44,7 @@ import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import { useExpand } from "./hooks/useExpand";
+import { usePatternPreview } from "./hooks/usePatternPreview";
 import { usePenSettings } from "./hooks/usePenSettings";
 import type { ToolType } from "./hooks/usePointerHandler";
 import { useSmoothing } from "./hooks/useSmoothing";
@@ -105,6 +106,7 @@ export function App() {
 
   const penSettings = usePenSettings();
   const { strokeStyle } = penSettings;
+  const patternPreview = usePatternPreview();
 
   const sessionRef = useRef<{
     strokeSession: StrokeSessionState;
@@ -299,6 +301,7 @@ export function App() {
         layers={layers}
         transform={transform}
         background={background}
+        patternPreview={patternPreview.config}
         tool={tool}
         onPan={handlePan}
         onZoom={handleZoom}
@@ -360,6 +363,7 @@ export function App() {
         expand={expand}
         smoothing={smoothing}
         penSettings={penSettings}
+        patternPreview={patternPreview}
       />
     </div>
   );
