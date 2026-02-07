@@ -42,13 +42,14 @@ export function compileExpand(config: ExpandConfig): CompiledExpand {
 
     case "kaleidoscope":
       for (let i = 0; i < config.divisions; i++) {
-        const baseAngle = (2 * Math.PI * i) / config.divisions + config.angle;
-        matrices.push(createRotationMatrix(config.origin, baseAngle));
-        const reflectionAngle = baseAngle + Math.PI / config.divisions;
+        const rotAngle = (2 * Math.PI * i) / config.divisions;
+        matrices.push(createRotationMatrix(config.origin, rotAngle));
+        const reflectionAngle =
+          config.angle + rotAngle + Math.PI / config.divisions;
         matrices.push(
           createRotationReflectionMatrix(
             config.origin,
-            baseAngle,
+            rotAngle,
             reflectionAngle,
           ),
         );

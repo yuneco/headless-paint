@@ -179,6 +179,150 @@ describe("expandPoint", () => {
     expect(result[1].x).toBeCloseTo(400);
     expect(result[1].y).toBeCloseTo(500);
   });
+
+  it("should reflect across angled axis for axial mode with non-zero angle", () => {
+    // angle=π/4 → 45度の軸で反転
+    const config: ExpandConfig = {
+      mode: "axial",
+      origin: { x: 500, y: 500 },
+      angle: Math.PI / 4,
+      divisions: 1,
+    };
+    const compiled = compileExpand(config);
+    // origin右の点 (600,500)
+    const result = expandPoint({ x: 600, y: 500 }, compiled);
+    expect(result.length).toBe(2);
+    // 1番目: 入力位置そのまま
+    expect(result[0].x).toBeCloseTo(600);
+    expect(result[0].y).toBeCloseTo(500);
+    // 2番目: 45度軸で反転 → originから見て(100,0)が(0,100)になる
+    expect(result[1].x).toBeCloseTo(500);
+    expect(result[1].y).toBeCloseTo(600);
+  });
+
+  it("should return 2N points for kaleidoscope mode (angle=0)", () => {
+    const config: ExpandConfig = {
+      mode: "kaleidoscope",
+      origin: { x: 500, y: 500 },
+      angle: 0,
+      divisions: 4,
+    };
+    const compiled = compileExpand(config);
+    // origin右の点 (600,500)
+    const result = expandPoint({ x: 600, y: 500 }, compiled);
+    expect(result.length).toBe(8);
+    // 入力(600,500)は0°軸上にあるため、隣接ペアが一致する
+    // i=0 rotation(0°): 入力位置そのまま
+    expect(result[0].x).toBeCloseTo(600);
+    expect(result[0].y).toBeCloseTo(500);
+    // i=0 reflection(45°軸): (100,0)→反転→(0,100)
+    expect(result[1].x).toBeCloseTo(500);
+    expect(result[1].y).toBeCloseTo(600);
+    // i=1 rotation(90°): (100,0)→回転→(0,100)
+    expect(result[2].x).toBeCloseTo(500);
+    expect(result[2].y).toBeCloseTo(600);
+    // i=1 reflection(135°軸→rotation90°): 反転+回転で元に戻る
+    expect(result[3].x).toBeCloseTo(600);
+    expect(result[3].y).toBeCloseTo(500);
+    // i=2 rotation(180°): (100,0)→(-100,0)
+    expect(result[4].x).toBeCloseTo(400);
+    expect(result[4].y).toBeCloseTo(500);
+    // i=2 reflection(225°軸→rotation180°): (0,-100)
+    expect(result[5].x).toBeCloseTo(500);
+    expect(result[5].y).toBeCloseTo(400);
+    // i=3 rotation(270°): (100,0)→(0,-100)
+    expect(result[6].x).toBeCloseTo(500);
+    expect(result[6].y).toBeCloseTo(400);
+    // i=3 reflection(315°軸→rotation270°): 反転+回転で(-100,0)
+    expect(result[7].x).toBeCloseTo(400);
+    expect(result[7].y).toBeCloseTo(500);
+  });
+
+  it("should keep first point unchanged for kaleidoscope mode with non-zero angle", () => {
+    // angle=π/4(45°)でも入力位置は必ず出力に含まれる
+    const config: ExpandConfig = {
+      mode: "kaleidoscope",
+      origin: { x: 500, y: 500 },
+      angle: Math.PI / 4,
+      divisions: 4,
+    };
+    const compiled = compileExpand(config);
+    const result = expandPoint({ x: 600, y: 500 }, compiled);
+    expect(result.length).toBe(8);
+    // 入力位置(600,500)が出力のいずれかに含まれる（ペイントツールの大前提）
+    expect(result[0].x).toBeCloseTo(600);
+    expect(result[0].y).toBeCloseTo(500);
+  });
+
+  it("should keep first point unchanged for kaleidoscope mode with arbitrary angle", () => {
+    // 任意のangleでも入力位置は必ず保持される
+    const angles = [Math.PI / 6, Math.PI / 3, Math.PI / 2, Math.PI];
+    const divisions = [2, 3, 4, 6, 8];
+    const inputPoint = { x: 600, y: 500 };
+    const origin = { x: 500, y: 500 };
+
+    for (const angle of angles) {
+      for (const div of divisions) {
+        const config: ExpandConfig = {
+          mode: "kaleidoscope",
+          origin,
+          angle,
+          divisions: div,
+        };
+        const compiled = compileExpand(config);
+        const result = expandPoint(inputPoint, compiled);
+        expect(result[0].x).toBeCloseTo(inputPoint.x);
+        expect(result[0].y).toBeCloseTo(inputPoint.y);
+      }
+    }
+  });
+});
+
+describe("expandPoint — input position invariant", () => {
+  // ペイントツールの大前提: どの対称設定でも入力位置は出力に含まれる
+  const origin = { x: 500, y: 500 };
+  const inputPoint = { x: 600, y: 500 };
+  const angles = [0, Math.PI / 6, Math.PI / 4, Math.PI / 3, Math.PI / 2];
+
+  it("none: input always preserved", () => {
+    for (const angle of angles) {
+      const compiled = compileExpand({ mode: "none", origin, angle, divisions: 1 });
+      const result = expandPoint(inputPoint, compiled);
+      expect(result[0].x).toBeCloseTo(inputPoint.x);
+      expect(result[0].y).toBeCloseTo(inputPoint.y);
+    }
+  });
+
+  it("axial: input always preserved regardless of angle", () => {
+    for (const angle of angles) {
+      const compiled = compileExpand({ mode: "axial", origin, angle, divisions: 1 });
+      const result = expandPoint(inputPoint, compiled);
+      expect(result[0].x).toBeCloseTo(inputPoint.x);
+      expect(result[0].y).toBeCloseTo(inputPoint.y);
+    }
+  });
+
+  it("radial: input always preserved regardless of angle", () => {
+    for (const angle of angles) {
+      for (const divisions of [2, 3, 4, 6, 8]) {
+        const compiled = compileExpand({ mode: "radial", origin, angle, divisions });
+        const result = expandPoint(inputPoint, compiled);
+        expect(result[0].x).toBeCloseTo(inputPoint.x);
+        expect(result[0].y).toBeCloseTo(inputPoint.y);
+      }
+    }
+  });
+
+  it("kaleidoscope: input always preserved regardless of angle", () => {
+    for (const angle of angles) {
+      for (const divisions of [2, 3, 4, 6, 8]) {
+        const compiled = compileExpand({ mode: "kaleidoscope", origin, angle, divisions });
+        const result = expandPoint(inputPoint, compiled);
+        expect(result[0].x).toBeCloseTo(inputPoint.x);
+        expect(result[0].y).toBeCloseTo(inputPoint.y);
+      }
+    }
+  });
 });
 
 describe("expandStroke", () => {

@@ -134,7 +134,7 @@ interface ExpandConfig {
 |---|---|---|
 | `mode` | `ExpandMode` | 展開モード |
 | `origin` | `Point` | 展開の中心点（Layer Space） |
-| `angle` | `number` | 対称軸の角度（ラジアン、0=垂直軸）。axial/kaleidoscope で使用。radial では無視される |
+| `angle` | `number` | 反射軸の角度（ラジアン、0=垂直軸）。axial では反射軸の向き、kaleidoscope では各セクター内の反射軸の向きを制御（回転角には影響しない）。radial では無視される |
 | `divisions` | `number` | 分割数（radial/kaleidoscope で使用、2以上） |
 
 **使用例**:
