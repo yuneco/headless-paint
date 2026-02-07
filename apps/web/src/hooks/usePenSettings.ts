@@ -1,13 +1,11 @@
-import {
-  DEFAULT_PRESSURE_CURVE,
-  type PressureCurve,
-  type StrokeStyle,
-} from "@headless-paint/engine";
+import type { PressureCurve, StrokeStyle } from "@headless-paint/engine";
 import { useCallback, useState } from "react";
-
-const PEN_COLOR = { r: 50, g: 50, b: 50, a: 255 };
-const DEFAULT_LINE_WIDTH = 3;
-const DEFAULT_PRESSURE_SENSITIVITY = 0;
+import {
+  DEFAULT_LINE_WIDTH,
+  DEFAULT_PEN_COLOR,
+  DEFAULT_PRESSURE_CURVE,
+  DEFAULT_PRESSURE_SENSITIVITY,
+} from "../config";
 
 export interface UsePenSettingsResult {
   readonly lineWidth: number;
@@ -29,7 +27,7 @@ export function usePenSettings(): UsePenSettingsResult {
   );
 
   const strokeStyle: StrokeStyle = {
-    color: PEN_COLOR,
+    color: DEFAULT_PEN_COLOR,
     lineWidth,
     pressureSensitivity,
     pressureCurve,

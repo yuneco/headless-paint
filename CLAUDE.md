@@ -1,10 +1,9 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## プロジェクト概要
 
 Canvas2Dベースのペイントライブラリ。OffscreenCanvasを使用しヘッドレス環境(Node.js, Worker)で動作する。関数型設計で純粋関数+イミュータブルデータ構造を採用。
+本プロジェクトは現時点で初期開発中であり、既存の顧客データは存在しない。過去データの互換性は考慮せず破壊的な仕様変更を行って良い。
 
 ## コマンド
 
@@ -74,13 +73,12 @@ Expandは**入力時ではなく描画時**に適用される。SessionはExpand
 
 ## スキルと作業フロー
 
-### Doc-First開発 (planning-flow) 【必須】
+### Doc-First開発 
 
+計画の作成や、計画に従った実装を行う際は、planning-flow skillのフローに必ず従う。
 このプロジェクトではDoc-Firstで開発する。計画の中身（作業手順）を以下のPhaseで構成すること:
 
 1. API設計・ドキュメント作成 → 2. 利用イメージレビュー(承認まで実装に進まない) → 3. 実装 → 4. アーキテクトレビュー(通過して初めて完了報告)
-
-Phase 1（API設計）とPhase 2（利用イメージ）を飛ばさないこと。これがDoc-Firstの核心。
 
 ### セルフレビュー (review-library-usage)
 

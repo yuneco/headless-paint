@@ -40,26 +40,26 @@ export function DebugPanel({
   });
 
   const expandDataRef = useRef({
-    mode: "none" as ExpandMode,
-    divisions: 6,
-    angleDeg: 0,
+    mode: expand.config.mode,
+    divisions: expand.config.divisions,
+    angleDeg: (expand.config.angle * 180) / Math.PI,
   });
 
   const smoothingDataRef = useRef({
-    enabled: false,
-    windowSize: 5,
+    enabled: smoothing.enabled,
+    windowSize: smoothing.windowSize,
   });
 
   const penDataRef = useRef({
-    lineWidth: 3,
-    pressureSensitivity: 0,
+    lineWidth: penSettings.lineWidth,
+    pressureSensitivity: penSettings.pressureSensitivity,
   });
 
   const patternDataRef = useRef({
-    mode: "none" as PatternMode,
-    opacity: 0.3,
-    offsetX: 0,
-    offsetY: 0,
+    mode: patternPreview.config.mode,
+    opacity: patternPreview.config.opacity,
+    offsetX: patternPreview.config.offsetX,
+    offsetY: patternPreview.config.offsetY,
   });
 
   const expandRef = useRef(expand);
@@ -116,6 +116,7 @@ export function DebugPanel({
       expandFolder
         .add(expandDataRef.current, "mode", EXPAND_MODES)
         .name("Mode")
+        .listen()
         .onChange((value: ExpandMode) => {
           expandRef.current.setMode(value);
         });
@@ -123,6 +124,7 @@ export function DebugPanel({
       expandFolder
         .add(expandDataRef.current, "divisions", 2, 12, 1)
         .name("Divisions")
+        .listen()
         .onChange((value: number) => {
           expandRef.current.setDivisions(value);
         });
@@ -130,6 +132,7 @@ export function DebugPanel({
       expandFolder
         .add(expandDataRef.current, "angleDeg", 0, 360, 1)
         .name("Angle (deg)")
+        .listen()
         .onChange((value: number) => {
           expandRef.current.setAngle((value * Math.PI) / 180);
         });
@@ -141,6 +144,7 @@ export function DebugPanel({
       smoothingFolder
         .add(smoothingDataRef.current, "enabled")
         .name("Enable")
+        .listen()
         .onChange((value: boolean) => {
           smoothingRef.current.setEnabled(value);
         });
@@ -148,6 +152,7 @@ export function DebugPanel({
       smoothingFolder
         .add(smoothingDataRef.current, "windowSize", 3, 13, 2)
         .name("Window Size")
+        .listen()
         .onChange((value: number) => {
           smoothingRef.current.setWindowSize(value);
         });
@@ -159,6 +164,7 @@ export function DebugPanel({
       penFolder
         .add(penDataRef.current, "lineWidth", 1, 50, 1)
         .name("Line Width")
+        .listen()
         .onChange((value: number) => {
           penSettingsRef.current.setLineWidth(value);
         });
@@ -166,6 +172,7 @@ export function DebugPanel({
       penFolder
         .add(penDataRef.current, "pressureSensitivity", 0, 1, 0.05)
         .name("Pressure")
+        .listen()
         .onChange((value: number) => {
           penSettingsRef.current.setPressureSensitivity(value);
         });
@@ -177,6 +184,7 @@ export function DebugPanel({
       patternFolder
         .add(patternDataRef.current, "mode", PATTERN_MODES)
         .name("Mode")
+        .listen()
         .onChange((value: PatternMode) => {
           patternPreviewRef.current.setMode(value);
         });
@@ -184,6 +192,7 @@ export function DebugPanel({
       patternFolder
         .add(patternDataRef.current, "opacity", 0, 1, 0.05)
         .name("Opacity")
+        .listen()
         .onChange((value: number) => {
           patternPreviewRef.current.setOpacity(value);
         });
@@ -191,6 +200,7 @@ export function DebugPanel({
       patternFolder
         .add(patternDataRef.current, "offsetX", 0, 1, 0.05)
         .name("Offset X")
+        .listen()
         .onChange((value: number) => {
           patternPreviewRef.current.setOffsetX(value);
         });
@@ -198,6 +208,7 @@ export function DebugPanel({
       patternFolder
         .add(patternDataRef.current, "offsetY", 0, 1, 0.05)
         .name("Offset Y")
+        .listen()
         .onChange((value: number) => {
           patternPreviewRef.current.setOffsetY(value);
         });
@@ -226,6 +237,30 @@ export function DebugPanel({
     dataRef.current.translateY = Number(components.translateY.toFixed(1));
     dataRef.current.strokeCount = strokeCount;
   }, [transform, strokeCount]);
+
+  // Sync hook state → lil-gui data
+  useEffect(() => {
+    expandDataRef.current.mode = expand.config.mode;
+    expandDataRef.current.divisions = expand.config.divisions;
+    expandDataRef.current.angleDeg = (expand.config.angle * 180) / Math.PI;
+  }, [expand.config]);
+
+  useEffect(() => {
+    smoothingDataRef.current.enabled = smoothing.enabled;
+    smoothingDataRef.current.windowSize = smoothing.windowSize;
+  }, [smoothing.enabled, smoothing.windowSize]);
+
+  useEffect(() => {
+    penDataRef.current.lineWidth = penSettings.lineWidth;
+    penDataRef.current.pressureSensitivity = penSettings.pressureSensitivity;
+  }, [penSettings.lineWidth, penSettings.pressureSensitivity]);
+
+  useEffect(() => {
+    patternDataRef.current.mode = patternPreview.config.mode;
+    patternDataRef.current.opacity = patternPreview.config.opacity;
+    patternDataRef.current.offsetX = patternPreview.config.offsetX;
+    patternDataRef.current.offsetY = patternPreview.config.offsetY;
+  }, [patternPreview.config]);
 
   return (
     <div

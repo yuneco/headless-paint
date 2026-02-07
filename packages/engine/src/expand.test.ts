@@ -14,7 +14,7 @@ describe("createDefaultExpandConfig", () => {
     expect(config.mode).toBe("none");
     expect(config.origin).toEqual({ x: 500, y: 400 });
     expect(config.angle).toBe(0);
-    expect(config.divisions).toBe(1);
+    expect(config.divisions).toBe(6);
   });
 });
 

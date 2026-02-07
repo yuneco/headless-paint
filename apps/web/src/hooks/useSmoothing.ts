@@ -13,11 +13,16 @@ export interface UseSmoothingResult {
   setWindowSize: (windowSize: number) => void;
 }
 
-const DEFAULT_WINDOW_SIZE = 5;
+import {
+  DEFAULT_SMOOTHING_ENABLED,
+  DEFAULT_SMOOTHING_WINDOW_SIZE,
+} from "../config";
 
 export function useSmoothing(): UseSmoothingResult {
-  const [enabled, setEnabled] = useState(false);
-  const [windowSize, setWindowSizeState] = useState(DEFAULT_WINDOW_SIZE);
+  const [enabled, setEnabled] = useState(DEFAULT_SMOOTHING_ENABLED);
+  const [windowSize, setWindowSizeState] = useState(
+    DEFAULT_SMOOTHING_WINDOW_SIZE,
+  );
 
   const compiledFilterPipeline = useMemo(() => {
     const config: FilterPipelineConfig = enabled

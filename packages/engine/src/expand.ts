@@ -12,7 +12,7 @@ export function createDefaultExpandConfig(
     mode: "none",
     origin: { x: width / 2, y: height / 2 },
     angle: 0,
-    divisions: 1,
+    divisions: 6,
   };
 }
 
