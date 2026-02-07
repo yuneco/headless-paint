@@ -46,6 +46,7 @@ export interface StrokeCommand {
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;
   readonly pressureCurve?: PressureCurve;
+  readonly compositeOperation?: GlobalCompositeOperation;
   readonly timestamp: number;
 }
 

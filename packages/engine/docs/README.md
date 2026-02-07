@@ -43,7 +43,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Point` | 2D座標 `{ x, y }` |
 | `Color` | RGBA色 `{ r, g, b, a }` (各値 0-255) |
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
-| `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity }` |
+| `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
 | `Layer` | レイヤー本体（width, height, canvas, ctx, meta） |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
@@ -70,7 +70,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `drawLine(layer, from, to, color, lineWidth?)` | 直線を描画 |
 | `drawCircle(layer, center, radius, color)` | 塗りつぶし円を描画 |
 | `drawPath(layer, points, color, lineWidth?)` | パス（連続線）を描画 |
-| `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSensitivity, pressureCurve?)` | 可変太さパス描画（筆圧対応） |
+| `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSensitivity, pressureCurve?, compositeOperation?)` | 可変太さパス描画（筆圧対応） |
 | `calculateRadius(pressure, baseLineWidth, pressureSensitivity, pressureCurve?)` | 筆圧から描画半径を計算 |
 | `applyPressureCurve(pressure, curve)` | 筆圧カーブを適用 |
 | `interpolateStrokePoints(points)` | Catmull-Romスプライン補間 |

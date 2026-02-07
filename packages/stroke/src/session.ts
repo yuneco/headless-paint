@@ -157,6 +157,7 @@ export function endStrokeSession(
     lineWidth: state.style.lineWidth,
     pressureSensitivity: state.style.pressureSensitivity,
     pressureCurve: state.style.pressureCurve,
+    compositeOperation: state.style.compositeOperation,
     timestamp: Date.now(),
   };
 }
@@ -172,6 +173,7 @@ export function createStrokeCommand(
   lineWidth: number,
   pressureSensitivity?: number,
   pressureCurve?: PressureCurve,
+  compositeOperation?: GlobalCompositeOperation,
 ): StrokeCommand {
   return {
     type: "stroke",
@@ -182,6 +184,7 @@ export function createStrokeCommand(
     lineWidth,
     pressureSensitivity,
     pressureCurve,
+    compositeOperation,
     timestamp: Date.now(),
   };
 }

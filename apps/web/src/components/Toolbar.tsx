@@ -1,4 +1,19 @@
+import type { Color } from "@headless-paint/engine";
 import type { ToolType } from "../hooks/usePointerHandler";
+
+function colorToHex(c: Color): string {
+  const r = c.r.toString(16).padStart(2, "0");
+  const g = c.g.toString(16).padStart(2, "0");
+  const b = c.b.toString(16).padStart(2, "0");
+  return `#${r}${g}${b}`;
+}
+
+function hexToColor(hex: string): Color {
+  const r = Number.parseInt(hex.slice(1, 3), 16);
+  const g = Number.parseInt(hex.slice(3, 5), 16);
+  const b = Number.parseInt(hex.slice(5, 7), 16);
+  return { r, g, b, a: 255 };
+}
 
 interface ToolbarProps {
   currentTool: ToolType;
@@ -8,10 +23,13 @@ interface ToolbarProps {
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  color?: Color;
+  onColorChange?: (color: Color) => void;
 }
 
 const tools: { type: ToolType; label: string; icon: string }[] = [
   { type: "pen", label: "Pen", icon: "✏️" },
+  { type: "eraser", label: "Eraser", icon: "🧹" },
   { type: "scroll", label: "Scroll", icon: "✋" },
   { type: "rotate", label: "Rotate", icon: "🔄" },
   { type: "zoom", label: "Zoom", icon: "🔍" },
@@ -26,6 +44,8 @@ export function Toolbar({
   onRedo,
   canUndo = false,
   canRedo = false,
+  color,
+  onColorChange,
 }: ToolbarProps) {
   return (
     <div
@@ -36,6 +56,7 @@ export function Toolbar({
         backgroundColor: "#fff",
         borderRadius: 8,
         boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+        alignItems: "center",
       }}
     >
       {tools.map(({ type, label, icon }) => (
@@ -57,6 +78,23 @@ export function Toolbar({
           {icon} {label}
         </button>
       ))}
+      {onColorChange && color && (
+        <input
+          type="color"
+          value={colorToHex(color)}
+          onChange={(e) => onColorChange(hexToColor(e.target.value))}
+          style={{
+            width: 36,
+            height: 36,
+            padding: 2,
+            border: "none",
+            borderRadius: 4,
+            cursor: "pointer",
+            backgroundColor: "transparent",
+          }}
+          title="Pen Color"
+        />
+      )}
       <div style={{ width: 1, backgroundColor: "#ddd", margin: "0 8px" }} />
       {onUndo && (
         <button

@@ -74,8 +74,11 @@ function appendToCommittedLayer(
 
 **動作**:
 1. pointsを`expandStrokePoints`で展開（pressure保持）
-2. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画
+2. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画（`style.compositeOperation` を適用）
 3. 既存の描画は保持される（追加描画のみ）
+
+**消しゴムモードの動作**:
+`style.compositeOperation` が `"destination-out"` の場合、committedレイヤーの既存ピクセルが直接消去される。
 
 **使用例**:
 ```typescript
@@ -114,7 +117,10 @@ function renderPendingLayer(
 **動作**:
 1. レイヤーをクリア
 2. pointsを`expandStrokePoints`で展開（pressure保持）
-3. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画
+3. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画（`compositeOperation` は適用しない、常に `source-over`）
+
+**消しゴムモードの注意**:
+pendingレイヤーは毎回クリアされるため、`destination-out` で描画しても不可視になる。消しゴムのpendingプレビューは `LayerMeta.compositeOperation` によるレイヤー合成時に実現される（→ renderLayers / composeLayers を参照）。
 
 **使用例**:
 ```typescript
@@ -147,6 +153,13 @@ function composeLayers(
 | `target` | `CanvasRenderingContext2D` | ○ | 出力先のコンテキスト |
 | `layers` | `readonly Layer[]` | ○ | 合成するレイヤー（下から順） |
 | `transform` | `ViewTransform` | - | ビュー変換（省略時は単位行列） |
+
+**動作**:
+1. ターゲットキャンバスをクリア
+2. 各レイヤーについて、`meta.visible` が false のものはスキップ
+3. `meta.opacity` を `globalAlpha` に適用
+4. `meta.compositeOperation` が設定されていれば `globalCompositeOperation` に適用
+5. `drawImage` でレイヤーの内容を転写
 
 **使用例**:
 ```typescript

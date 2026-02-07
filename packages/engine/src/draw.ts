@@ -162,12 +162,18 @@ export function drawVariableWidthPath(
   baseLineWidth: number,
   pressureSensitivity: number,
   pressureCurve?: PressureCurve,
+  compositeOperation?: GlobalCompositeOperation,
 ): void {
   if (points.length === 0) return;
 
   const { ctx } = layer;
   const style = colorToStyle(color);
   ctx.fillStyle = style;
+
+  const prevCompositeOp = ctx.globalCompositeOperation;
+  if (compositeOperation) {
+    ctx.globalCompositeOperation = compositeOperation;
+  }
 
   const interpolated = interpolateStrokePoints(points);
 
@@ -181,6 +187,9 @@ export function drawVariableWidthPath(
     ctx.beginPath();
     ctx.arc(interpolated[0].x, interpolated[0].y, r, 0, Math.PI * 2);
     ctx.fill();
+    if (compositeOperation) {
+      ctx.globalCompositeOperation = prevCompositeOp;
+    }
     return;
   }
 
@@ -225,5 +234,9 @@ export function drawVariableWidthPath(
       ctx.closePath();
       ctx.fill();
     }
+  }
+
+  if (compositeOperation) {
+    ctx.globalCompositeOperation = prevCompositeOp;
   }
 }

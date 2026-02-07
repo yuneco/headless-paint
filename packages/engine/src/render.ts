@@ -81,8 +81,11 @@ export function renderLayers(
 
     ctx.imageSmoothingEnabled = smoothing;
 
-    // 不透明度を適用
+    // 不透明度・合成モードを適用
     ctx.globalAlpha = layer.meta.opacity;
+    if (layer.meta.compositeOperation) {
+      ctx.globalCompositeOperation = layer.meta.compositeOperation;
+    }
 
     // mat3 を setTransform に適用
     ctx.setTransform(

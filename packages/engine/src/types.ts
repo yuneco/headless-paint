@@ -18,6 +18,7 @@ export interface LayerMeta {
   name: string;
   visible: boolean;
   opacity: number;
+  compositeOperation?: GlobalCompositeOperation;
 }
 
 export interface Layer {
@@ -86,4 +87,5 @@ export interface StrokeStyle {
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;
   readonly pressureCurve?: PressureCurve;
+  readonly compositeOperation?: GlobalCompositeOperation;
 }

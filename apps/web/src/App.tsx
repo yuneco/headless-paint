@@ -112,6 +112,14 @@ export function App() {
   const { strokeStyle } = penSettings;
   const patternPreview = usePatternPreview();
 
+  const handleToolChange = useCallback(
+    (newTool: ToolType) => {
+      setTool(newTool);
+      penSettings.setEraser(newTool === "eraser");
+    },
+    [penSettings.setEraser],
+  );
+
   const shiftTempCanvas = useMemo(
     () => new OffscreenCanvas(LAYER_WIDTH, LAYER_HEIGHT),
     [],
@@ -153,6 +161,8 @@ export function App() {
         compiledExpand: compiled,
         compiledFilterPipeline,
       };
+
+      pendingLayer.meta.compositeOperation = strokeStyle.compositeOperation;
 
       appendToCommittedLayer(
         committedLayer,
@@ -247,6 +257,7 @@ export function App() {
         strokeStyle.lineWidth,
         strokeStyle.pressureSensitivity,
         strokeStyle.pressureCurve,
+        strokeStyle.compositeOperation,
       );
       setHistoryState((prev) =>
         pushCommand(prev, command, committedLayer, HISTORY_CONFIG),
@@ -254,6 +265,7 @@ export function App() {
     }
 
     clearLayer(pendingLayer);
+    pendingLayer.meta.compositeOperation = undefined;
     setRenderVersion((n) => n + 1);
 
     sessionRef.current = null;
@@ -319,7 +331,7 @@ export function App() {
 
   useKeyboardShortcuts({
     tool,
-    setTool,
+    setTool: handleToolChange,
     sessionRef,
     onUndo: handleUndo,
     onRedo: handleRedo,
@@ -386,12 +398,14 @@ export function App() {
       >
         <Toolbar
           currentTool={tool}
-          onToolChange={setTool}
+          onToolChange={handleToolChange}
           onReset={fitToView}
           onUndo={handleUndo}
           onRedo={handleRedo}
           canUndo={canUndo(historyState)}
           canRedo={canRedo(historyState)}
+          color={penSettings.color}
+          onColorChange={penSettings.setColor}
         />
       </div>
 

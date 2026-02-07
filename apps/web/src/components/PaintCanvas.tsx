@@ -205,7 +205,11 @@ export function PaintCanvas({
         height,
         display: "block",
         cursor:
-          tool === "pen" ? "crosshair" : tool === "offset" ? "move" : "grab",
+          tool === "pen" || tool === "eraser"
+            ? "crosshair"
+            : tool === "offset"
+              ? "move"
+              : "grab",
         touchAction: "none",
       }}
       onPointerDown={pointerHandlers.onPointerDown}

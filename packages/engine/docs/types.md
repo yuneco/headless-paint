@@ -59,8 +59,16 @@ interface LayerMeta {
   name: string;      // レイヤー名
   visible: boolean;  // 表示/非表示
   opacity: number;   // 不透明度 (0.0-1.0)
+  compositeOperation?: GlobalCompositeOperation;  // 合成モード
 }
 ```
+
+| フィールド | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `name` | `string` | `"Layer"` | レイヤー名 |
+| `visible` | `boolean` | `true` | 表示/非表示 |
+| `opacity` | `number` | `1` | 不透明度（0.0〜1.0） |
+| `compositeOperation` | `GlobalCompositeOperation` | `undefined` | レイヤー合成時の合成モード。`undefined` は `"source-over"`（通常合成）。消しゴムのpendingレイヤープレビューでは `"destination-out"` を設定する |
 
 **使用例**:
 ```typescript
@@ -69,6 +77,9 @@ const meta: LayerMeta = {
   visible: true,
   opacity: 0.8,
 };
+
+// 消しゴムプレビュー用に合成モードを設定
+pendingLayer.meta.compositeOperation = "destination-out";
 ```
 
 ## Layer
@@ -228,6 +239,7 @@ interface StrokeStyle {
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;
   readonly pressureCurve?: PressureCurve;
+  readonly compositeOperation?: GlobalCompositeOperation;
 }
 ```
 
@@ -237,6 +249,7 @@ interface StrokeStyle {
 | `lineWidth` | `number` | - | 線の基準太さ |
 | `pressureSensitivity` | `number` | `0` | 筆圧感度（0.0=均一太さ、1.0=最大感度） |
 | `pressureCurve` | `PressureCurve` | `undefined` | 筆圧カーブ（undefinedは線形） |
+| `compositeOperation` | `GlobalCompositeOperation` | `undefined` | Canvas合成モード。`undefined` は `"source-over"`。消しゴムでは `"destination-out"` を指定 |
 
 **筆圧感度の動作**:
 - `0`: 全ポイントが `lineWidth` で均一描画
@@ -246,3 +259,8 @@ interface StrokeStyle {
 **筆圧カーブの動作**:
 - `pressureCurve` が設定されている場合、筆圧感度の計算前に入力筆圧をカーブで変換する
 - `undefined` の場合は変換なし（線形のまま）
+
+**合成モードの動作**:
+- `"source-over"`（デフォルト）: 通常の加算描画
+- `"destination-out"`: 消しゴムモード（描画した箇所を透明にする）
+- その他の `GlobalCompositeOperation` 値も将来的にサポート可能

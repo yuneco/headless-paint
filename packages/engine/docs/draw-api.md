@@ -212,6 +212,7 @@ function drawVariableWidthPath(
   baseLineWidth: number,
   pressureSensitivity: number,
   pressureCurve?: PressureCurve,
+  compositeOperation?: GlobalCompositeOperation,
 ): void
 ```
 
@@ -224,13 +225,17 @@ function drawVariableWidthPath(
 | `baseLineWidth` | `number` | ○ | 基準線幅 |
 | `pressureSensitivity` | `number` | ○ | 筆圧感度（0.0〜1.0） |
 | `pressureCurve` | `PressureCurve` | - | 筆圧カーブ（undefinedは変換なし） |
+| `compositeOperation` | `GlobalCompositeOperation` | - | Canvas合成モード（undefinedは `"source-over"`） |
 
 **描画手順**:
-1. ポイント列をCatmull-Romスプラインで補間
-2. 各ポイントの筆圧から半径を計算（`calculateRadius`）
-3. 各ポイントに円を描画（fill）
-4. 隣接ポイント間を台形ポリゴンで接続（fill）
+1. `compositeOperation` が指定されている場合、`ctx.globalCompositeOperation` を設定
+2. ポイント列をCatmull-Romスプラインで補間
+3. 各ポイントの筆圧から半径を計算（`calculateRadius`）
+4. 各ポイントに円を描画（fill）
+5. 隣接ポイント間を台形ポリゴンで接続（fill）
+6. `compositeOperation` を元の値に復元
 
 **特記事項**:
 - `pressureSensitivity=0` でも正常動作（均一太さの円+台形描画）
 - committed/pending差分描画と互換性あり
+- 消しゴムモード: `compositeOperation="destination-out"` で既存ピクセルを消去

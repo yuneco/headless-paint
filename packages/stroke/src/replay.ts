@@ -43,6 +43,7 @@ function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
         command.lineWidth,
         pressureSensitivity,
         command.pressureCurve,
+        command.compositeOperation,
       );
     }
   }

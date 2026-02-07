@@ -9,7 +9,13 @@ import {
 } from "@headless-paint/input";
 import { useCallback, useRef } from "react";
 
-export type ToolType = "pen" | "scroll" | "rotate" | "zoom" | "offset";
+export type ToolType =
+  | "pen"
+  | "eraser"
+  | "scroll"
+  | "rotate"
+  | "zoom"
+  | "offset";
 
 export interface UsePointerHandlerOptions {
   transform: ViewTransform;
@@ -69,7 +75,7 @@ export function usePointerHandler(
         y: e.nativeEvent.offsetY,
       };
 
-      if (tool === "pen") {
+      if (tool === "pen" || tool === "eraser") {
         samplingStateRef.current = createSamplingState();
         const screenPoint = {
           x: e.nativeEvent.offsetX,
@@ -113,7 +119,8 @@ export function usePointerHandler(
       const dy = currentY - lastPosRef.current.y;
 
       switch (tool) {
-        case "pen": {
+        case "pen":
+        case "eraser": {
           const screenPoint = { x: currentX, y: currentY };
           const layerPoint = screenToLayer(screenPoint, transform);
           if (layerPoint) {
@@ -201,7 +208,7 @@ export function usePointerHandler(
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       if (isDrawingRef.current) {
-        if (tool === "pen") {
+        if (tool === "pen" || tool === "eraser") {
           onStrokeEnd();
         } else if (tool === "offset") {
           onWrapShiftEnd?.(totalShiftRef.current.x, totalShiftRef.current.y);

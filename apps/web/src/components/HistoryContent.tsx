@@ -4,7 +4,9 @@ import { useMemo } from "react";
 function getCommandLabel(command: Command): string {
   switch (command.type) {
     case "stroke":
-      return `Stroke (${command.inputPoints.length} pts)`;
+      return command.compositeOperation === "destination-out"
+        ? `Eraser (${command.inputPoints.length} pts)`
+        : `Stroke (${command.inputPoints.length} pts)`;
     case "clear":
       return "Clear";
     case "wrap-shift":

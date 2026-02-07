@@ -99,6 +99,7 @@ function renderLayers(
 2. 配列の先頭から順に（背面→前面）描画
 3. 各レイヤーの `meta.visible` が false のものはスキップ
 4. 各レイヤーの `meta.opacity` を `globalAlpha` に適用
+5. 各レイヤーの `meta.compositeOperation` が設定されていれば `globalCompositeOperation` に適用（消しゴムのpendingレイヤープレビューに使用）
 
 **使用例**:
 ```typescript

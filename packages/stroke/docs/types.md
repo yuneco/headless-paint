@@ -26,6 +26,7 @@ interface StrokeStyle {
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;  // 0.0=均一, 1.0=最大感度
   readonly pressureCurve?: PressureCurve; // 筆圧カーブ（undefined=線形）
+  readonly compositeOperation?: GlobalCompositeOperation; // 合成モード（undefined="source-over"）
 }
 ```
 
@@ -115,6 +116,7 @@ interface StrokeCommand {
   readonly lineWidth: number;
   readonly pressureSensitivity?: number;
   readonly pressureCurve?: PressureCurve;
+  readonly compositeOperation?: GlobalCompositeOperation;
   readonly timestamp: number;
 }
 ```
@@ -129,6 +131,7 @@ interface StrokeCommand {
 | `lineWidth` | `number` | 線の太さ |
 | `pressureSensitivity` | `number` | 筆圧感度（optional、undefined→0扱い） |
 | `pressureCurve` | `PressureCurve` | 筆圧カーブ（optional、undefined→線形） |
+| `compositeOperation` | `GlobalCompositeOperation` | 合成モード（optional、undefined→`"source-over"`）。消しゴムストロークでは `"destination-out"` |
 | `timestamp` | `number` | 作成時刻 |
 
 **特徴**:
@@ -156,7 +159,7 @@ interface ClearCommand {
 コマンドのUnion型。
 
 ```typescript
-type Command = StrokeCommand | ClearCommand;
+type Command = StrokeCommand | ClearCommand | WrapShiftCommand;
 ```
 
 ---

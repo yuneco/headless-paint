@@ -25,6 +25,7 @@ export function appendToCommittedLayer(
         style.lineWidth,
         style.pressureSensitivity ?? 0,
         style.pressureCurve,
+        style.compositeOperation,
       );
     }
   }
@@ -32,6 +33,8 @@ export function appendToCommittedLayer(
 
 /**
  * 作業レイヤーを再描画する（クリア→描画）
+ * compositeOperation は適用しない（常に source-over で描画）。
+ * 消しゴムプレビューは LayerMeta.compositeOperation による合成時に実現される。
  */
 export function renderPendingLayer(
   layer: Layer,
@@ -89,7 +92,13 @@ export function composeLayers(
     if (!layer.meta.visible) continue;
 
     target.globalAlpha = layer.meta.opacity;
+    if (layer.meta.compositeOperation) {
+      target.globalCompositeOperation = layer.meta.compositeOperation;
+    }
     target.drawImage(layer.canvas, 0, 0);
+    if (layer.meta.compositeOperation) {
+      target.globalCompositeOperation = "source-over";
+    }
   }
 
   target.restore();

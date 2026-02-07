@@ -95,6 +95,7 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
   // hold-switch内部状態
   const baseToolRef = useRef<ToolType | null>(null);
   const spaceHeldRef = useRef(false);
+  const altHeldRef = useRef(false);
 
   useEffect(() => {
     function activateHoldSwitch(newTool: ToolType): void {
@@ -187,7 +188,20 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
         return;
       }
 
-      // 7. 単キー hold-switch (s, o, z, r)
+      // 7. Alt単体 → pen/eraser反転 hold-switch
+      if (e.key === "Alt" && !spaceHeldRef.current) {
+        e.preventDefault();
+        altHeldRef.current = true;
+        const current = toolRef.current;
+        if (current === "pen") {
+          activateHoldSwitch("eraser");
+        } else if (current === "eraser") {
+          activateHoldSwitch("pen");
+        }
+        return;
+      }
+
+      // 8. 単キー hold-switch (s, o, z, r)
       const holdTool = HOLD_SWITCH_KEYS[e.key];
       if (holdTool) {
         e.preventDefault();
@@ -195,7 +209,7 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
         return;
       }
 
-      // 8. b → ペンに切替 (ホールド不要)
+      // 9. b → ペンに切替 (ホールド不要)
       if (e.key === "b") {
         e.preventDefault();
         setToolRef.current("pen");
@@ -223,6 +237,13 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
         return;
       }
 
+      // Alt解放 → pen/eraser hold-switch解除
+      if (e.key === "Alt" && altHeldRef.current) {
+        altHeldRef.current = false;
+        deactivateHoldSwitch();
+        return;
+      }
+
       // 単キー hold-switch 解放
       if (e.key in HOLD_SWITCH_KEYS && baseToolRef.current !== null) {
         deactivateHoldSwitch();
@@ -232,6 +253,7 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
 
     function handleWindowBlur(): void {
       spaceHeldRef.current = false;
+      altHeldRef.current = false;
       deactivateHoldSwitch();
     }
 
