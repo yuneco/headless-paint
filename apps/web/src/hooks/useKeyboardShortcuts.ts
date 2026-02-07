@@ -127,6 +127,9 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
         return;
       }
 
+      // Cmd/Ctrl + 他のキーはブラウザに委譲 (Cmd+R, Cmd+Sなど)
+      if (isMod) return;
+
       // 2. トグル/増減ショートカット
       switch (e.key) {
         case "k": {
