@@ -27,6 +27,7 @@ interface PaintCanvasProps {
   onStrokeEnd: () => void;
   onWrapShift?: (dx: number, dy: number) => void;
   onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
+  wrapOffset?: { readonly x: number; readonly y: number };
   width: number;
   height: number;
   layerWidth: number;
@@ -48,6 +49,7 @@ export function PaintCanvas({
   onStrokeEnd,
   onWrapShift,
   onWrapShiftEnd,
+  wrapOffset = { x: 0, y: 0 },
   width,
   height,
   layerWidth,
@@ -124,11 +126,43 @@ export function PaintCanvas({
     ctx.closePath();
     ctx.stroke();
     ctx.restore();
+
+    // ラップオフセットの元境界線（薄いグレー）
+    const ox = ((wrapOffset.x % layerWidth) + layerWidth) % layerWidth;
+    const oy = ((wrapOffset.y % layerHeight) + layerHeight) % layerHeight;
+
+    if (ox !== 0 || oy !== 0) {
+      ctx.save();
+      ctx.strokeStyle = "#aaa";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+
+      if (ox !== 0) {
+        const top = layerToScreen({ x: ox, y: 0 }, transform);
+        const bottom = layerToScreen({ x: ox, y: layerHeight }, transform);
+        ctx.beginPath();
+        ctx.moveTo(top.x, top.y);
+        ctx.lineTo(bottom.x, bottom.y);
+        ctx.stroke();
+      }
+
+      if (oy !== 0) {
+        const left = layerToScreen({ x: 0, y: oy }, transform);
+        const right = layerToScreen({ x: layerWidth, y: oy }, transform);
+        ctx.beginPath();
+        ctx.moveTo(left.x, left.y);
+        ctx.lineTo(right.x, right.y);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
   }, [
     layers,
     transform,
     background,
     patternPreview,
+    wrapOffset,
     width,
     height,
     layerWidth,

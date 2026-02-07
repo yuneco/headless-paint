@@ -369,5 +369,29 @@ describe("history", () => {
       const offset = computeCumulativeOffset(state);
       expect(offset).toEqual({ x: 0, y: 0 });
     });
+
+    it("should normalize negative offsets with modulo", () => {
+      const state: HistoryState = {
+        commands: [createWrapShift(-10, -20)],
+        checkpoints: [],
+        currentIndex: 0,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffset(state);
+      expect(offset).toEqual({ x: 790, y: 580 });
+    });
+
+    it("should normalize offsets exceeding layer size", () => {
+      const state: HistoryState = {
+        commands: [createWrapShift(850, 1300)],
+        checkpoints: [],
+        currentIndex: 0,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffset(state);
+      expect(offset).toEqual({ x: 50, y: 100 });
+    });
   });
 });

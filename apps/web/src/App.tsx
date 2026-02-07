@@ -116,6 +116,8 @@ export function App() {
     [],
   );
 
+  const dragShiftRef = useRef({ x: 0, y: 0 });
+
   const sessionRef = useRef<{
     strokeSession: StrokeSessionState;
     filterState: FilterPipelineState;
@@ -260,6 +262,10 @@ export function App() {
   const handleWrapShift = useCallback(
     (dx: number, dy: number) => {
       wrapShiftLayer(committedLayer, dx, dy, shiftTempCanvas);
+      dragShiftRef.current = {
+        x: dragShiftRef.current.x + dx,
+        y: dragShiftRef.current.y + dy,
+      };
       setRenderVersion((n) => n + 1);
     },
     [committedLayer, shiftTempCanvas],
@@ -267,6 +273,7 @@ export function App() {
 
   const handleWrapShiftEnd = useCallback(
     (totalDx: number, totalDy: number) => {
+      dragShiftRef.current = { x: 0, y: 0 };
       if (totalDx === 0 && totalDy === 0) return;
       const command = createWrapShiftCommand(totalDx, totalDy);
       setHistoryState((prev) =>
@@ -327,6 +334,11 @@ export function App() {
   }, [handleUndo, handleRedo]);
 
   const strokeCount = historyState.currentIndex + 1;
+  const cumulativeOffset = computeCumulativeOffset(historyState);
+  const currentOffset = {
+    x: cumulativeOffset.x + dragShiftRef.current.x,
+    y: cumulativeOffset.y + dragShiftRef.current.y,
+  };
 
   const layers: Layer[] = useMemo(
     () => [committedLayer, pendingLayer],
@@ -349,6 +361,7 @@ export function App() {
         onStrokeEnd={onStrokeEnd}
         onWrapShift={handleWrapShift}
         onWrapShiftEnd={handleWrapShiftEnd}
+        wrapOffset={currentOffset}
         width={viewWidth}
         height={viewHeight}
         layerWidth={LAYER_WIDTH}
@@ -404,7 +417,7 @@ export function App() {
         smoothing={smoothing}
         penSettings={penSettings}
         patternPreview={patternPreview}
-        layerOffset={computeCumulativeOffset(historyState)}
+        layerOffset={currentOffset}
         onResetOffset={handleResetOffset}
       />
     </div>

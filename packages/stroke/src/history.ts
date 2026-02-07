@@ -171,5 +171,7 @@ export function computeCumulativeOffset(state: HistoryState): {
       y += cmd.dy;
     }
   }
-  return { x, y };
+  const w = state.layerWidth;
+  const h = state.layerHeight;
+  return { x: ((x % w) + w) % w, y: ((y % h) + h) % h };
 }
