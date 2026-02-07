@@ -47,6 +47,7 @@ import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import { useExpand } from "./hooks/useExpand";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePatternPreview } from "./hooks/usePatternPreview";
 import { usePenSettings } from "./hooks/usePenSettings";
 import type { ToolType } from "./hooks/usePointerHandler";
@@ -316,22 +317,19 @@ export function App() {
     });
   }, [committedLayer]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isMod = e.metaKey || e.ctrlKey;
-      if (isMod && e.key === "z") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          handleRedo();
-        } else {
-          handleUndo();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleUndo, handleRedo]);
+  useKeyboardShortcuts({
+    tool,
+    setTool,
+    sessionRef,
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    expandMode: expand.config.mode,
+    setExpandMode: expand.setMode,
+    expandDivisions: expand.config.divisions,
+    setExpandDivisions: expand.setDivisions,
+    lineWidth: penSettings.lineWidth,
+    setLineWidth: penSettings.setLineWidth,
+  });
 
   const strokeCount = historyState.currentIndex + 1;
   const cumulativeOffset = computeCumulativeOffset(historyState);
