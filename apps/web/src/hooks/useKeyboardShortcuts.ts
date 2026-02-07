@@ -127,10 +127,22 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
         return;
       }
 
+      // 2. Space押下中に修飾キー → ツール再評価 (isMod委譲より先に処理)
+      if (
+        spaceHeldRef.current &&
+        (e.key === "Shift" ||
+          e.key === "Meta" ||
+          e.key === "Control" ||
+          e.key === "Alt")
+      ) {
+        setToolRef.current(resolveSpaceTool(e));
+        return;
+      }
+
       // Cmd/Ctrl + 他のキーはブラウザに委譲 (Cmd+R, Cmd+Sなど)
       if (isMod) return;
 
-      // 2. トグル/増減ショートカット
+      // 3. トグル/増減ショートカット
       switch (e.key) {
         case "k": {
           if (e.repeat) return;
@@ -165,29 +177,17 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
         }
       }
 
-      // 3. ストローク中はツール切替を抑止
+      // 4. ストローク中はツール切替を抑止
       if (sessionRef.current !== null) return;
 
-      // 4. リピート無視 (ツール切替系)
+      // 5. リピート無視 (ツール切替系)
       if (e.repeat) return;
 
-      // 5. Space → hold-switch
+      // 6. Space → hold-switch
       if (e.key === " ") {
         e.preventDefault();
         spaceHeldRef.current = true;
         activateHoldSwitch(resolveSpaceTool(e));
-        return;
-      }
-
-      // 6. Space押下中に修飾キー → ツール再評価
-      if (
-        spaceHeldRef.current &&
-        (e.key === "Shift" ||
-          e.key === "Meta" ||
-          e.key === "Control" ||
-          e.key === "Alt")
-      ) {
-        setToolRef.current(resolveSpaceTool(e));
         return;
       }
 
