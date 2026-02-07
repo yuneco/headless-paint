@@ -56,11 +56,11 @@ export function SymmetryOverlay({
         drawRayLine(ctx, originScreen, angle, width, height);
       }
     } else if (config.mode === "kaleidoscope") {
-      const totalLines = config.divisions * 2;
-      for (let i = 0; i < totalLines; i++) {
-        const angle = (Math.PI * 2 * i) / totalLines + config.angle;
+      const totalRays = config.divisions * 2;
+      for (let i = 0; i < totalRays; i++) {
+        const angle = (Math.PI * i) / config.divisions + config.angle;
         ctx.setLineDash(i % 2 === 0 ? [] : GUIDE_DASH);
-        drawAxisLine(ctx, originScreen, angle, width, height);
+        drawRayLine(ctx, originScreen, angle, width, height);
       }
     }
 
