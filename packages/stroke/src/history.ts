@@ -154,3 +154,22 @@ export function getCommandsToReplay(
   const startIndex = fromCheckpoint ? fromCheckpoint.commandIndex + 1 : 0;
   return state.commands.slice(startIndex, state.currentIndex + 1);
 }
+
+/**
+ * 履歴からcumulative offsetを算出（currentIndexまでのwrap-shiftを合算）
+ */
+export function computeCumulativeOffset(state: HistoryState): {
+  readonly x: number;
+  readonly y: number;
+} {
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i <= state.currentIndex; i++) {
+    const cmd = state.commands[i];
+    if (cmd.type === "wrap-shift") {
+      x += cmd.dx;
+      y += cmd.dy;
+    }
+  }
+  return { x, y };
+}

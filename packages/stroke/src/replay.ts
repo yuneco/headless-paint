@@ -4,6 +4,7 @@ import {
   compileExpand,
   drawVariableWidthPath,
   expandStrokePoints,
+  wrapShiftLayer,
 } from "@headless-paint/engine";
 import { compileFilterPipeline, processAllPoints } from "@headless-paint/input";
 import { restoreFromCheckpoint } from "./checkpoint";
@@ -57,6 +58,9 @@ export function replayCommand(layer: Layer, command: Command): void {
       break;
     case "clear":
       clearLayer(layer);
+      break;
+    case "wrap-shift":
+      wrapShiftLayer(layer, command.dx, command.dy);
       break;
   }
 }

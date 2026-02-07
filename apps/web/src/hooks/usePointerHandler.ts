@@ -9,7 +9,7 @@ import {
 } from "@headless-paint/input";
 import { useCallback, useRef } from "react";
 
-export type ToolType = "pen" | "scroll" | "rotate" | "zoom";
+export type ToolType = "pen" | "scroll" | "rotate" | "zoom" | "offset";
 
 export interface UsePointerHandlerOptions {
   transform: ViewTransform;
@@ -19,6 +19,8 @@ export interface UsePointerHandlerOptions {
   onStrokeStart: (point: InputPoint) => void;
   onStrokeMove: (point: InputPoint) => void;
   onStrokeEnd: () => void;
+  onWrapShift?: (dx: number, dy: number) => void;
+  onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
   canvasWidth: number;
   canvasHeight: number;
   samplingConfig?: SamplingConfig;
@@ -43,6 +45,8 @@ export function usePointerHandler(
     onStrokeStart,
     onStrokeMove,
     onStrokeEnd,
+    onWrapShift,
+    onWrapShiftEnd,
     canvasWidth,
     canvasHeight,
     samplingConfig = { minDistance: 2 },
@@ -51,6 +55,8 @@ export function usePointerHandler(
   const isDrawingRef = useRef(false);
   const lastPosRef = useRef<{ x: number; y: number } | null>(null);
   const samplingStateRef = useRef<SamplingState>(createSamplingState());
+  const totalShiftRef = useRef({ x: 0, y: 0 });
+  const fractionalShiftRef = useRef({ x: 0, y: 0 });
 
   const centerX = canvasWidth / 2;
   const centerY = canvasHeight / 2;
@@ -87,6 +93,9 @@ export function usePointerHandler(
             });
           }
         }
+      } else if (tool === "offset") {
+        totalShiftRef.current = { x: 0, y: 0 };
+        fractionalShiftRef.current = { x: 0, y: 0 };
       }
 
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -149,6 +158,28 @@ export function usePointerHandler(
           onZoom(scale, centerX, centerY);
           break;
         }
+        case "offset": {
+          const layerCurrent = screenToLayer(
+            { x: currentX, y: currentY },
+            transform,
+          );
+          const layerPrev = screenToLayer(lastPosRef.current, transform);
+          if (layerCurrent && layerPrev) {
+            const rawDx =
+              layerCurrent.x - layerPrev.x + fractionalShiftRef.current.x;
+            const rawDy =
+              layerCurrent.y - layerPrev.y + fractionalShiftRef.current.y;
+            const ldx = Math.round(rawDx);
+            const ldy = Math.round(rawDy);
+            fractionalShiftRef.current = { x: rawDx - ldx, y: rawDy - ldy };
+            if (ldx !== 0 || ldy !== 0) {
+              onWrapShift?.(ldx, ldy);
+              totalShiftRef.current.x += ldx;
+              totalShiftRef.current.y += ldy;
+            }
+          }
+          break;
+        }
       }
 
       lastPosRef.current = { x: currentX, y: currentY };
@@ -160,6 +191,7 @@ export function usePointerHandler(
       onZoom,
       onRotate,
       onStrokeMove,
+      onWrapShift,
       centerX,
       centerY,
       samplingConfig,
@@ -168,14 +200,18 @@ export function usePointerHandler(
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
-      if (isDrawingRef.current && tool === "pen") {
-        onStrokeEnd();
+      if (isDrawingRef.current) {
+        if (tool === "pen") {
+          onStrokeEnd();
+        } else if (tool === "offset") {
+          onWrapShiftEnd?.(totalShiftRef.current.x, totalShiftRef.current.y);
+        }
       }
       isDrawingRef.current = false;
       lastPosRef.current = null;
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     },
-    [tool, onStrokeEnd],
+    [tool, onStrokeEnd, onWrapShiftEnd],
   );
 
   const onWheel = useCallback(

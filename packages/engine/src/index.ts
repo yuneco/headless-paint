@@ -58,3 +58,4 @@ export {
   type PatternMode,
   type PatternPreviewConfig,
 } from "./pattern-preview";
+export { wrapShiftLayer } from "./wrap-shift";

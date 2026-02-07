@@ -15,6 +15,8 @@ interface DebugPanelProps {
   smoothing: UseSmoothingResult;
   penSettings: UsePenSettingsResult;
   patternPreview: UsePatternPreviewResult;
+  layerOffset?: { readonly x: number; readonly y: number };
+  onResetOffset?: () => void;
 }
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
@@ -27,6 +29,8 @@ export function DebugPanel({
   smoothing,
   penSettings,
   patternPreview,
+  layerOffset = { x: 0, y: 0 },
+  onResetOffset,
 }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
@@ -61,6 +65,14 @@ export function DebugPanel({
     offsetX: patternPreview.config.offsetX,
     offsetY: patternPreview.config.offsetY,
   });
+
+  const layerOffsetDataRef = useRef({
+    offsetX: layerOffset.x,
+    offsetY: layerOffset.y,
+  });
+
+  const onResetOffsetRef = useRef(onResetOffset);
+  onResetOffsetRef.current = onResetOffset;
 
   const expandRef = useRef(expand);
   expandRef.current = expand;
@@ -215,6 +227,26 @@ export function DebugPanel({
 
       patternFolder.open();
 
+      const layerOffsetFolder = gui.addFolder("Layer Offset");
+
+      layerOffsetFolder
+        .add(layerOffsetDataRef.current, "offsetX")
+        .name("Offset X")
+        .listen()
+        .disable();
+
+      layerOffsetFolder
+        .add(layerOffsetDataRef.current, "offsetY")
+        .name("Offset Y")
+        .listen()
+        .disable();
+
+      layerOffsetFolder
+        .add({ reset: () => onResetOffsetRef.current?.() }, "reset")
+        .name("Reset Offset");
+
+      layerOffsetFolder.open();
+
       guiRef.current = gui;
     });
 
@@ -261,6 +293,11 @@ export function DebugPanel({
     patternDataRef.current.offsetX = patternPreview.config.offsetX;
     patternDataRef.current.offsetY = patternPreview.config.offsetY;
   }, [patternPreview.config]);
+
+  useEffect(() => {
+    layerOffsetDataRef.current.offsetX = layerOffset.x;
+    layerOffsetDataRef.current.offsetY = layerOffset.y;
+  }, [layerOffset.x, layerOffset.y]);
 
   return (
     <div

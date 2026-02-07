@@ -15,6 +15,7 @@ const tools: { type: ToolType; label: string; icon: string }[] = [
   { type: "scroll", label: "Scroll", icon: "✋" },
   { type: "rotate", label: "Rotate", icon: "🔄" },
   { type: "zoom", label: "Zoom", icon: "🔍" },
+  { type: "offset", label: "Offset", icon: "↔" },
 ];
 
 export function Toolbar({

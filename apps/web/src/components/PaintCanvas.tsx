@@ -25,6 +25,8 @@ interface PaintCanvasProps {
   onStrokeStart: (point: InputPoint) => void;
   onStrokeMove: (point: InputPoint) => void;
   onStrokeEnd: () => void;
+  onWrapShift?: (dx: number, dy: number) => void;
+  onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
   width: number;
   height: number;
   layerWidth: number;
@@ -44,6 +46,8 @@ export function PaintCanvas({
   onStrokeStart,
   onStrokeMove,
   onStrokeEnd,
+  onWrapShift,
+  onWrapShiftEnd,
   width,
   height,
   layerWidth,
@@ -140,6 +144,8 @@ export function PaintCanvas({
     onStrokeStart,
     onStrokeMove,
     onStrokeEnd,
+    onWrapShift,
+    onWrapShiftEnd,
     canvasWidth: width,
     canvasHeight: height,
   });
@@ -164,7 +170,8 @@ export function PaintCanvas({
         width,
         height,
         display: "block",
-        cursor: tool === "pen" ? "crosshair" : "grab",
+        cursor:
+          tool === "pen" ? "crosshair" : tool === "offset" ? "move" : "grab",
         touchAction: "none",
       }}
       onPointerDown={pointerHandlers.onPointerDown}

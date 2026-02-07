@@ -10,6 +10,7 @@ export type {
   StrokeSessionResult,
   StrokeSessionState,
   StrokeStyle,
+  WrapShiftCommand,
 } from "./types";
 export { DEFAULT_HISTORY_CONFIG } from "./types";
 
@@ -18,6 +19,7 @@ export {
   addPointToSession,
   createClearCommand,
   createStrokeCommand,
+  createWrapShiftCommand,
   endStrokeSession,
   startStrokeSession,
 } from "./session";
@@ -26,6 +28,7 @@ export {
 export {
   canRedo,
   canUndo,
+  computeCumulativeOffset,
   createHistoryState,
   findBestCheckpoint,
   getCommandsToReplay,

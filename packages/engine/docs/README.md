@@ -116,6 +116,12 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `createPatternTile(layers, config)` | レイヤー内容からパターンタイルを生成 |
 | `renderPatternPreview(ctx, tile, config, transform, ...)` | レイヤー領域外にパターンを半透明描画 |
 
+### Wrap Shift
+
+| 関数 | 説明 |
+|---|---|
+| `wrapShiftLayer(layer, dx, dy, temp?)` | レイヤー全ピクセルをラップシフト（GPU加速drawImage使用）。整数シフトは完全可逆 |
+
 ## アーキテクチャ
 
 - **Canvas2D ベース**: OffscreenCanvas を使用し、Node.js や Worker でも動作可能

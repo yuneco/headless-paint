@@ -7,6 +7,8 @@ function getCommandLabel(command: Command): string {
       return `Stroke (${command.inputPoints.length} pts)`;
     case "clear":
       return "Clear";
+    case "wrap-shift":
+      return `Offset (${command.dx}, ${command.dy})`;
     default:
       return "Unknown";
   }

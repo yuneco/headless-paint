@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   canRedo,
   canUndo,
+  computeCumulativeOffset,
   createHistoryState,
   findBestCheckpoint,
   getCommandsToReplay,
@@ -15,6 +16,7 @@ import type {
   HistoryConfig,
   HistoryState,
   StrokeCommand,
+  WrapShiftCommand,
 } from "./types";
 
 // Create mock ImageData for Node.js environment
@@ -298,6 +300,74 @@ describe("history", () => {
       expect(toReplay).toHaveLength(2);
       expect(toReplay[0]).toEqual(commands[3]);
       expect(toReplay[1]).toEqual(commands[4]);
+    });
+  });
+
+  describe("computeCumulativeOffset", () => {
+    function createWrapShift(dx: number, dy: number): WrapShiftCommand {
+      return { type: "wrap-shift", dx, dy, timestamp: Date.now() };
+    }
+
+    it("should return (0, 0) for empty history", () => {
+      const state = createHistoryState(800, 600);
+      const offset = computeCumulativeOffset(state);
+      expect(offset).toEqual({ x: 0, y: 0 });
+    });
+
+    it("should return (0, 0) when no wrap-shift commands", () => {
+      const state: HistoryState = {
+        commands: [createTestCommand(1000), createTestCommand(1001)],
+        checkpoints: [],
+        currentIndex: 1,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffset(state);
+      expect(offset).toEqual({ x: 0, y: 0 });
+    });
+
+    it("should sum wrap-shift commands up to currentIndex", () => {
+      const state: HistoryState = {
+        commands: [
+          createWrapShift(10, 20),
+          createTestCommand(1000),
+          createWrapShift(5, -10),
+        ],
+        checkpoints: [],
+        currentIndex: 2,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffset(state);
+      expect(offset).toEqual({ x: 15, y: 10 });
+    });
+
+    it("should respect currentIndex (ignore undone commands)", () => {
+      const state: HistoryState = {
+        commands: [
+          createWrapShift(10, 20),
+          createWrapShift(5, -10),
+          createWrapShift(100, 100),
+        ],
+        checkpoints: [],
+        currentIndex: 1,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffset(state);
+      expect(offset).toEqual({ x: 15, y: 10 });
+    });
+
+    it("should return (0, 0) when currentIndex is -1", () => {
+      const state: HistoryState = {
+        commands: [createWrapShift(10, 20)],
+        checkpoints: [],
+        currentIndex: -1,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffset(state);
+      expect(offset).toEqual({ x: 0, y: 0 });
     });
   });
 });

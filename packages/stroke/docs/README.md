@@ -104,6 +104,9 @@ if (canUndo(historyState)) {
 | `StrokeSessionState` | セッション状態 |
 | `RenderUpdate` | 描画更新データ |
 | `StrokeCommand` | ストロークコマンド |
+| `ClearCommand` | クリアコマンド |
+| `WrapShiftCommand` | ラップシフトコマンド `{ type: "wrap-shift", dx, dy }` |
+| `Command` | `StrokeCommand \| ClearCommand \| WrapShiftCommand` |
 | `HistoryState` | 履歴状態 |
 | `HistoryConfig` | 履歴設定 |
 | `Checkpoint` | チェックポイント |
@@ -117,6 +120,7 @@ if (canUndo(historyState)) {
 | `startStrokeSession(filterOutput, style, expand)` | セッション開始 |
 | `addPointToSession(state, filterOutput)` | 点を追加 |
 | `endStrokeSession(state, inputPoints, filterConfig)` | セッション終了 |
+| `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成 |
 
 ### 履歴管理
 
@@ -130,6 +134,7 @@ if (canUndo(historyState)) {
 | `redo(state)` | 1つ先に進む |
 | `canUndo(state)` | Undo可能か |
 | `canRedo(state)` | Redo可能か |
+| `computeCumulativeOffset(state)` | 履歴中のwrap-shiftを合算して累積オフセットを返す |
 | `rebuildLayerState(layer, state)` | レイヤーを再構築 |
 
 ## アーキテクチャ

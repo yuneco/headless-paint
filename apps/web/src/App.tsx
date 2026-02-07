@@ -4,6 +4,7 @@ import {
   clearLayer,
   createLayer,
   renderPendingLayer,
+  wrapShiftLayer,
 } from "@headless-paint/engine";
 import type {
   BackgroundSettings,
@@ -24,8 +25,10 @@ import {
   addPointToSession,
   canRedo,
   canUndo,
+  computeCumulativeOffset,
   createHistoryState,
   createStrokeCommand,
+  createWrapShiftCommand,
   pushCommand,
   rebuildLayerState,
   redo,
@@ -107,6 +110,11 @@ export function App() {
   const penSettings = usePenSettings();
   const { strokeStyle } = penSettings;
   const patternPreview = usePatternPreview();
+
+  const shiftTempCanvas = useMemo(
+    () => new OffscreenCanvas(LAYER_WIDTH, LAYER_HEIGHT),
+    [],
+  );
 
   const sessionRef = useRef<{
     strokeSession: StrokeSessionState;
@@ -249,6 +257,36 @@ export function App() {
     setStrokePoints([]);
   }, [committedLayer, pendingLayer, strokeStyle]);
 
+  const handleWrapShift = useCallback(
+    (dx: number, dy: number) => {
+      wrapShiftLayer(committedLayer, dx, dy, shiftTempCanvas);
+      setRenderVersion((n) => n + 1);
+    },
+    [committedLayer, shiftTempCanvas],
+  );
+
+  const handleWrapShiftEnd = useCallback(
+    (totalDx: number, totalDy: number) => {
+      if (totalDx === 0 && totalDy === 0) return;
+      const command = createWrapShiftCommand(totalDx, totalDy);
+      setHistoryState((prev) =>
+        pushCommand(prev, command, committedLayer, HISTORY_CONFIG),
+      );
+    },
+    [committedLayer],
+  );
+
+  const handleResetOffset = useCallback(() => {
+    setHistoryState((prev) => {
+      const { x, y } = computeCumulativeOffset(prev);
+      if (x === 0 && y === 0) return prev;
+      wrapShiftLayer(committedLayer, -x, -y, shiftTempCanvas);
+      const command = createWrapShiftCommand(-x, -y);
+      setRenderVersion((n) => n + 1);
+      return pushCommand(prev, command, committedLayer, HISTORY_CONFIG);
+    });
+  }, [committedLayer, shiftTempCanvas]);
+
   const handleUndo = useCallback(() => {
     setHistoryState((prev) => {
       if (!canUndo(prev)) return prev;
@@ -309,6 +347,8 @@ export function App() {
         onStrokeStart={onStrokeStart}
         onStrokeMove={onStrokeMove}
         onStrokeEnd={onStrokeEnd}
+        onWrapShift={handleWrapShift}
+        onWrapShiftEnd={handleWrapShiftEnd}
         width={viewWidth}
         height={viewHeight}
         layerWidth={LAYER_WIDTH}
@@ -364,6 +404,8 @@ export function App() {
         smoothing={smoothing}
         penSettings={penSettings}
         patternPreview={patternPreview}
+        layerOffset={computeCumulativeOffset(historyState)}
+        onResetOffset={handleResetOffset}
       />
     </div>
   );

@@ -195,3 +195,18 @@ export function createClearCommand(): { type: "clear"; timestamp: number } {
     timestamp: Date.now(),
   };
 }
+
+/**
+ * ラップシフトコマンドを作成する（ヘルパー関数）
+ */
+export function createWrapShiftCommand(
+  dx: number,
+  dy: number,
+): { type: "wrap-shift"; dx: number; dy: number; timestamp: number } {
+  return {
+    type: "wrap-shift",
+    dx,
+    dy,
+    timestamp: Date.now(),
+  };
+}

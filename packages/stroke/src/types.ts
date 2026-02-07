@@ -54,7 +54,14 @@ export interface ClearCommand {
   readonly timestamp: number;
 }
 
-export type Command = StrokeCommand | ClearCommand;
+export interface WrapShiftCommand {
+  readonly type: "wrap-shift";
+  readonly dx: number;
+  readonly dy: number;
+  readonly timestamp: number;
+}
+
+export type Command = StrokeCommand | ClearCommand | WrapShiftCommand;
 
 // ============================================================
 // History State
