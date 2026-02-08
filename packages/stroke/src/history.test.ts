@@ -3,18 +3,25 @@ import {
   canRedo,
   canUndo,
   computeCumulativeOffset,
+  computeCumulativeOffsetForLayer,
   createHistoryState,
   findBestCheckpoint,
+  findBestCheckpointForLayer,
+  getAffectedLayerIds,
   getCommandsToReplay,
+  getCommandsToReplayForLayer,
   pushCommand,
   redo,
   undo,
 } from "./history";
 import type {
+  AddLayerCommand,
   Checkpoint,
   Command,
   HistoryConfig,
   HistoryState,
+  RemoveLayerCommand,
+  ReorderLayerCommand,
   StrokeCommand,
   WrapShiftCommand,
 } from "./types";
@@ -34,8 +41,9 @@ vi.mock("@headless-paint/engine", () => ({
   getImageData: vi.fn(() => createMockImageData(100, 100)),
 }));
 
-function createMockLayer() {
+function createMockLayer(id = "layer_1") {
   return {
+    id,
     width: 100,
     height: 100,
     canvas: {} as OffscreenCanvas,
@@ -46,15 +54,24 @@ function createMockLayer() {
   };
 }
 
-function createTestCommand(timestamp: number): StrokeCommand {
+function createTestCommand(
+  timestamp: number,
+  layerId = "layer_1",
+): StrokeCommand {
   return {
     type: "stroke",
+    layerId,
     inputPoints: [
       { x: 10, y: 20, timestamp },
       { x: 30, y: 40, timestamp: timestamp + 1 },
     ],
     filterPipeline: { filters: [] },
-    expand: { mode: "none", origin: { x: 50, y: 50 }, angle: 0, divisions: 1 },
+    expand: {
+      mode: "none",
+      origin: { x: 50, y: 50 },
+      angle: 0,
+      divisions: 1,
+    },
     color: { r: 0, g: 0, b: 0, a: 255 },
     lineWidth: 3,
     timestamp,
@@ -134,6 +151,139 @@ describe("history", () => {
 
       expect(state.commands).toHaveLength(2);
       expect(state.currentIndex).toBe(1);
+    });
+
+    it("should force checkpoint on remove-layer regardless of interval", () => {
+      let state = createHistoryState(800, 600);
+      const layer = createMockLayer();
+      const config: HistoryConfig = {
+        maxHistorySize: 100,
+        checkpointInterval: 100, // very high interval
+        maxCheckpoints: 10,
+      };
+
+      // Add a stroke command (no checkpoint since interval=100)
+      state = pushCommand(state, createTestCommand(1000), layer, config);
+      expect(state.checkpoints).toHaveLength(0);
+
+      // Add remove-layer command (should force checkpoint)
+      const removeCmd: RemoveLayerCommand = {
+        type: "remove-layer",
+        layerId: "layer_1",
+        removedIndex: 0,
+        meta: { name: "Layer 1", visible: true, opacity: 1 },
+        timestamp: 2000,
+      };
+      state = pushCommand(state, removeCmd, layer, config);
+
+      expect(state.checkpoints).toHaveLength(1);
+      expect(state.checkpoints[0].layerId).toBe("layer_1");
+      expect(state.checkpoints[0].commandIndex).toBe(1);
+    });
+
+    it("should not create checkpoint on add-layer (layer=null)", () => {
+      let state = createHistoryState(800, 600);
+      const config: HistoryConfig = {
+        maxHistorySize: 100,
+        checkpointInterval: 1, // every command
+        maxCheckpoints: 10,
+      };
+
+      const addCmd: AddLayerCommand = {
+        type: "add-layer",
+        layerId: "layer_2",
+        insertIndex: 1,
+        width: 800,
+        height: 600,
+        meta: { name: "Layer 2", visible: true, opacity: 1 },
+        timestamp: 1000,
+      };
+      state = pushCommand(state, addCmd, null, config);
+
+      expect(state.checkpoints).toHaveLength(0);
+    });
+
+    it("should not create checkpoint on reorder-layer (layer=null)", () => {
+      let state = createHistoryState(800, 600);
+      const config: HistoryConfig = {
+        maxHistorySize: 100,
+        checkpointInterval: 1,
+        maxCheckpoints: 10,
+      };
+
+      const reorderCmd: ReorderLayerCommand = {
+        type: "reorder-layer",
+        layerId: "layer_1",
+        fromIndex: 0,
+        toIndex: 1,
+        timestamp: 1000,
+      };
+      state = pushCommand(state, reorderCmd, null, config);
+
+      expect(state.checkpoints).toHaveLength(0);
+    });
+
+    it("should apply maxCheckpoints to forced checkpoints", () => {
+      let state = createHistoryState(800, 600);
+      const config: HistoryConfig = {
+        maxHistorySize: 100,
+        checkpointInterval: 100,
+        maxCheckpoints: 2,
+      };
+
+      // Force 3 checkpoints via remove-layer
+      for (let i = 0; i < 3; i++) {
+        const removeCmd: RemoveLayerCommand = {
+          type: "remove-layer",
+          layerId: `layer_${i}`,
+          removedIndex: 0,
+          meta: { name: `Layer ${i}`, visible: true, opacity: 1 },
+          timestamp: 1000 + i,
+        };
+        state = pushCommand(
+          state,
+          removeCmd,
+          createMockLayer(`layer_${i}`),
+          config,
+        );
+      }
+
+      // maxCheckpoints=2, so only the last 2 should remain
+      expect(state.checkpoints).toHaveLength(2);
+    });
+
+    it("should truncate checkpoints after undo + new remove-layer", () => {
+      let state = createHistoryState(800, 600);
+      const layer = createMockLayer();
+      const config: HistoryConfig = {
+        maxHistorySize: 100,
+        checkpointInterval: 100,
+        maxCheckpoints: 10,
+      };
+
+      // Add 3 commands
+      for (let i = 0; i < 3; i++) {
+        state = pushCommand(state, createTestCommand(1000 + i), layer, config);
+      }
+
+      // Force checkpoint at index 3
+      const removeCmd: RemoveLayerCommand = {
+        type: "remove-layer",
+        layerId: "layer_1",
+        removedIndex: 0,
+        meta: { name: "Layer 1", visible: true, opacity: 1 },
+        timestamp: 2000,
+      };
+      state = pushCommand(state, removeCmd, layer, config);
+      expect(state.checkpoints).toHaveLength(1);
+
+      // Undo back to index 2, then push new command
+      state = undo(state);
+      state = undo(state);
+      state = pushCommand(state, createTestCommand(3000), layer, config);
+
+      // The checkpoint at index 3 should be removed
+      expect(state.checkpoints).toHaveLength(0);
     });
   });
 
@@ -218,7 +368,7 @@ describe("history", () => {
     });
   });
 
-  describe("findBestCheckpoint", () => {
+  describe("findBestCheckpoint (deprecated)", () => {
     it("should return undefined when no checkpoints", () => {
       const state = createHistoryState(800, 600);
 
@@ -231,12 +381,14 @@ describe("history", () => {
         checkpoints: [
           {
             id: "cp1",
+            layerId: "layer_1",
             commandIndex: 4,
             imageData: createMockImageData(1, 1),
             createdAt: 1000,
           },
           {
             id: "cp2",
+            layerId: "layer_1",
             commandIndex: 9,
             imageData: createMockImageData(1, 1),
             createdAt: 2000,
@@ -253,7 +405,85 @@ describe("history", () => {
     });
   });
 
-  describe("getCommandsToReplay", () => {
+  describe("findBestCheckpointForLayer", () => {
+    it("should return only checkpoints for the target layerId", () => {
+      const state: HistoryState = {
+        commands: [],
+        checkpoints: [
+          {
+            id: "cp1",
+            layerId: "layer_1",
+            commandIndex: 4,
+            imageData: createMockImageData(1, 1),
+            createdAt: 1000,
+          },
+          {
+            id: "cp2",
+            layerId: "layer_2",
+            commandIndex: 5,
+            imageData: createMockImageData(1, 1),
+            createdAt: 2000,
+          },
+        ],
+        currentIndex: 7,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const cp = findBestCheckpointForLayer(state, "layer_1");
+      expect(cp?.id).toBe("cp1");
+    });
+
+    it("should return the closest checkpoint before currentIndex", () => {
+      const state: HistoryState = {
+        commands: [],
+        checkpoints: [
+          {
+            id: "cp1",
+            layerId: "layer_1",
+            commandIndex: 2,
+            imageData: createMockImageData(1, 1),
+            createdAt: 1000,
+          },
+          {
+            id: "cp2",
+            layerId: "layer_1",
+            commandIndex: 6,
+            imageData: createMockImageData(1, 1),
+            createdAt: 2000,
+          },
+        ],
+        currentIndex: 7,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const cp = findBestCheckpointForLayer(state, "layer_1");
+      expect(cp?.id).toBe("cp2");
+    });
+
+    it("should return undefined when no checkpoints for the target layer", () => {
+      const state: HistoryState = {
+        commands: [],
+        checkpoints: [
+          {
+            id: "cp1",
+            layerId: "layer_2",
+            commandIndex: 4,
+            imageData: createMockImageData(1, 1),
+            createdAt: 1000,
+          },
+        ],
+        currentIndex: 7,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      expect(findBestCheckpointForLayer(state, "layer_1")).toBeUndefined();
+    });
+  });
+
+  describe("getCommandsToReplay (deprecated)", () => {
     it("should return all commands when no checkpoint", () => {
       const commands: Command[] = [
         createTestCommand(1000),
@@ -281,8 +511,9 @@ describe("history", () => {
         createTestCommand(1003),
         createTestCommand(1004),
       ];
-      const checkpoint = {
+      const checkpoint: Checkpoint = {
         id: "cp1",
+        layerId: "layer_1",
         commandIndex: 2,
         imageData: createMockImageData(1, 1),
         createdAt: 1000,
@@ -303,9 +534,144 @@ describe("history", () => {
     });
   });
 
-  describe("computeCumulativeOffset", () => {
-    function createWrapShift(dx: number, dy: number): WrapShiftCommand {
-      return { type: "wrap-shift", dx, dy, timestamp: Date.now() };
+  describe("getCommandsToReplayForLayer", () => {
+    it("should filter by layerId and return only draw commands", () => {
+      const commands: Command[] = [
+        createTestCommand(1000, "layer_1"),
+        createTestCommand(1001, "layer_2"),
+        createTestCommand(1002, "layer_1"),
+        {
+          type: "add-layer",
+          layerId: "layer_2",
+          insertIndex: 1,
+          width: 100,
+          height: 100,
+          meta: { name: "L2", visible: true, opacity: 1 },
+          timestamp: 1003,
+        } as AddLayerCommand,
+      ];
+      const state: HistoryState = {
+        commands,
+        checkpoints: [],
+        currentIndex: 3,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const toReplay = getCommandsToReplayForLayer(state, "layer_1");
+      expect(toReplay).toHaveLength(2);
+      expect(toReplay[0].type).toBe("stroke");
+      expect(toReplay[1].type).toBe("stroke");
+    });
+
+    it("should respect checkpoint range", () => {
+      const commands: Command[] = [
+        createTestCommand(1000, "layer_1"),
+        createTestCommand(1001, "layer_1"),
+        createTestCommand(1002, "layer_1"),
+      ];
+      const checkpoint: Checkpoint = {
+        id: "cp1",
+        layerId: "layer_1",
+        commandIndex: 0,
+        imageData: createMockImageData(1, 1),
+        createdAt: 1000,
+      };
+      const state: HistoryState = {
+        commands,
+        checkpoints: [checkpoint],
+        currentIndex: 2,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const toReplay = getCommandsToReplayForLayer(
+        state,
+        "layer_1",
+        checkpoint,
+      );
+      expect(toReplay).toHaveLength(2);
+    });
+  });
+
+  describe("getAffectedLayerIds", () => {
+    it("should return layerIds from draw commands in range", () => {
+      const commands: Command[] = [
+        createTestCommand(1000, "layer_1"),
+        createTestCommand(1001, "layer_2"),
+        createTestCommand(1002, "layer_1"),
+      ];
+      const state: HistoryState = {
+        commands,
+        checkpoints: [],
+        currentIndex: 2,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const ids = getAffectedLayerIds(state, 0, 2);
+      expect(ids.has("layer_1")).toBe(true);
+      expect(ids.has("layer_2")).toBe(true);
+      expect(ids.size).toBe(2);
+    });
+
+    it("should return single layerId for single-layer range", () => {
+      const commands: Command[] = [
+        createTestCommand(1000, "layer_1"),
+        createTestCommand(1001, "layer_1"),
+      ];
+      const state: HistoryState = {
+        commands,
+        checkpoints: [],
+        currentIndex: 1,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const ids = getAffectedLayerIds(state, 0, 1);
+      expect(ids.size).toBe(1);
+      expect(ids.has("layer_1")).toBe(true);
+    });
+
+    it("should return empty set for structural-only range", () => {
+      const commands: Command[] = [
+        {
+          type: "add-layer",
+          layerId: "layer_2",
+          insertIndex: 1,
+          width: 100,
+          height: 100,
+          meta: { name: "L2", visible: true, opacity: 1 },
+          timestamp: 1000,
+        } as AddLayerCommand,
+        {
+          type: "reorder-layer",
+          layerId: "layer_2",
+          fromIndex: 0,
+          toIndex: 1,
+          timestamp: 1001,
+        } as ReorderLayerCommand,
+      ];
+      const state: HistoryState = {
+        commands,
+        checkpoints: [],
+        currentIndex: 1,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const ids = getAffectedLayerIds(state, 0, 1);
+      expect(ids.size).toBe(0);
+    });
+  });
+
+  describe("computeCumulativeOffset (deprecated)", () => {
+    function createWrapShift(
+      dx: number,
+      dy: number,
+      layerId = "layer_1",
+    ): WrapShiftCommand {
+      return { type: "wrap-shift", layerId, dx, dy, timestamp: Date.now() };
     }
 
     it("should return (0, 0) for empty history", () => {
@@ -392,6 +758,44 @@ describe("history", () => {
       };
       const offset = computeCumulativeOffset(state);
       expect(offset).toEqual({ x: 50, y: 100 });
+    });
+  });
+
+  describe("computeCumulativeOffsetForLayer", () => {
+    function createWrapShift(
+      dx: number,
+      dy: number,
+      layerId = "layer_1",
+    ): WrapShiftCommand {
+      return { type: "wrap-shift", layerId, dx, dy, timestamp: Date.now() };
+    }
+
+    it("should only sum wrap-shift for the target layer", () => {
+      const state: HistoryState = {
+        commands: [
+          createWrapShift(10, 20, "layer_1"),
+          createWrapShift(100, 200, "layer_2"),
+          createWrapShift(5, -10, "layer_1"),
+        ],
+        checkpoints: [],
+        currentIndex: 2,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffsetForLayer(state, "layer_1");
+      expect(offset).toEqual({ x: 15, y: 10 });
+    });
+
+    it("should ignore other layers wrap-shifts", () => {
+      const state: HistoryState = {
+        commands: [createWrapShift(10, 20, "layer_2")],
+        checkpoints: [],
+        currentIndex: 0,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+      const offset = computeCumulativeOffsetForLayer(state, "layer_1");
+      expect(offset).toEqual({ x: 0, y: 0 });
     });
   });
 });

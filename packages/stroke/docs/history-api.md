@@ -255,7 +255,58 @@ const command = createStrokeCommand(
 クリアコマンドを作成する（ヘルパー関数）。
 
 ```typescript
-function createClearCommand(): ClearCommand
+function createClearCommand(layerId: string): ClearCommand
+```
+
+---
+
+## createAddLayerCommand
+
+レイヤー追加コマンドを作成する。
+
+```typescript
+function createAddLayerCommand(
+  layerId: string,
+  insertIndex: number,
+  width: number,
+  height: number,
+  meta: LayerMeta,
+): AddLayerCommand
+```
+
+---
+
+## createRemoveLayerCommand
+
+レイヤー削除コマンドを作成する。削除時のメタデータをスナップショットとして保存し、Undo時の復元に使用する。
+
+```typescript
+function createRemoveLayerCommand(
+  layerId: string,
+  removedIndex: number,
+  meta: LayerMeta,
+): RemoveLayerCommand
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `layerId` | `string` | ○ | 削除するレイヤーのID |
+| `removedIndex` | `number` | ○ | 削除前のスタック位置 |
+| `meta` | `LayerMeta` | ○ | 削除時のメタデータ（name, visible, opacity等） |
+
+---
+
+## createReorderLayerCommand
+
+レイヤー並べ替えコマンドを作成する。
+
+```typescript
+function createReorderLayerCommand(
+  layerId: string,
+  fromIndex: number,
+  toIndex: number,
+): ReorderLayerCommand
 ```
 
 ---

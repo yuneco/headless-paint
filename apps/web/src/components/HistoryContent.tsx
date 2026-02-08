@@ -1,16 +1,34 @@
 import type { Command, HistoryState } from "@headless-paint/stroke";
+import { isDrawCommand } from "@headless-paint/stroke";
+import { ChevronLeft } from "lucide-react";
 import { useMemo } from "react";
 
-function getCommandLabel(command: Command): string {
+function getCommandLabel(
+  command: Command,
+  layerIdToName: (layerId: string) => string,
+): string {
+  if (isDrawCommand(command)) {
+    const name = layerIdToName(command.layerId);
+    switch (command.type) {
+      case "stroke":
+        return command.compositeOperation === "destination-out"
+          ? `${name} Eraser`
+          : `${name} Stroke`;
+      case "clear":
+        return `${name} Clear`;
+      case "wrap-shift":
+        return `${name} Offset`;
+    }
+  }
+
+  // 構造コマンド
   switch (command.type) {
-    case "stroke":
-      return command.compositeOperation === "destination-out"
-        ? `Eraser (${command.inputPoints.length} pts)`
-        : `Stroke (${command.inputPoints.length} pts)`;
-    case "clear":
-      return "Clear";
-    case "wrap-shift":
-      return `Offset (${command.dx}, ${command.dy})`;
+    case "add-layer":
+      return "+ Layer";
+    case "remove-layer":
+      return "- Layer";
+    case "reorder-layer":
+      return "\u21D5 Layer";
     default:
       return "Unknown";
   }
@@ -39,6 +57,7 @@ interface HistoryContentProps {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  layerIdToName: (layerId: string) => string;
 }
 
 export function HistoryContent({
@@ -47,6 +66,7 @@ export function HistoryContent({
   onRedo,
   canUndo,
   canRedo,
+  layerIdToName,
 }: HistoryContentProps) {
   const entries = useMemo(
     () => getHistoryEntries(historyState),
@@ -134,7 +154,8 @@ export function HistoryContent({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {entry.index + 1}. {getCommandLabel(entry.command)}
+                    {entry.index + 1}.{" "}
+                    {getCommandLabel(entry.command, layerIdToName)}
                   </div>
                 </div>
 
@@ -148,7 +169,9 @@ export function HistoryContent({
                       CP
                     </span>
                   )}
-                  {isCurrent && <span style={{ color: "#007bff" }}>◀</span>}
+                  {isCurrent && (
+                    <ChevronLeft size={14} style={{ color: "#007bff" }} />
+                  )}
                 </div>
               </div>
             );

@@ -22,6 +22,7 @@ export interface LayerMeta {
 }
 
 export interface Layer {
+  readonly id: string;
   readonly width: number;
   readonly height: number;
   readonly canvas: OffscreenCanvas;

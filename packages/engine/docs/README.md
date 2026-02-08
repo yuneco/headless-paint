@@ -44,7 +44,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Color` | RGBA色 `{ r, g, b, a }` (各値 0-255) |
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
-| `Layer` | レイヤー本体（width, height, canvas, ctx, meta） |
+| `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
 
@@ -54,7 +54,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `createLayer(width, height, meta?)` | 新規レイヤー作成 |
+| `createLayer(width, height, meta?)` | 新規レイヤー作成（一意の `id` を自動付与） |
 | `clearLayer(layer)` | レイヤーをクリア |
 | `getPixel(layer, x, y)` | ピクセル色を取得 |
 | `setPixel(layer, x, y, color)` | ピクセル色を設定 |
@@ -115,6 +115,17 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 |---|---|
 | `createPatternTile(layers, config)` | レイヤー内容からパターンタイルを生成 |
 | `renderPatternPreview(ctx, tile, config, transform, ...)` | レイヤー領域外にパターンを半透明描画 |
+
+### Layer Collection
+
+| 関数 | 説明 |
+|---|---|
+| `addLayer(layers, width, height, meta?)` | レイヤーを追加し `[newLayers, newLayer]` を返す |
+| `removeLayer(layers, layerId)` | 指定IDのレイヤーを削除 |
+| `findLayerById(layers, layerId)` | IDでレイヤーを検索 |
+| `getLayerIndex(layers, layerId)` | IDからインデックスを取得（-1 = 未検出） |
+| `moveLayer(layers, fromIndex, toIndex)` | レイヤーの順序を変更 |
+| `updateLayerMeta(layers, layerId, meta)` | レイヤーのメタデータを更新 |
 
 ### Wrap Shift
 

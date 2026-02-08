@@ -8,8 +8,12 @@ import {
 } from "@headless-paint/engine";
 import { compileFilterPipeline, processAllPoints } from "@headless-paint/input";
 import { restoreFromCheckpoint } from "./checkpoint";
-import { findBestCheckpoint, getCommandsToReplay } from "./history";
+import {
+  findBestCheckpointForLayer,
+  getCommandsToReplayForLayer,
+} from "./history";
 import type { Command, HistoryState, StrokeCommand } from "./types";
+import { isDrawCommand } from "./types";
 
 /**
  * ストロークコマンドをリプレイする
@@ -51,8 +55,12 @@ function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
 
 /**
  * 単一のコマンドをレイヤーに適用
+ * 構造コマンドはピクセルを変更しないため無視する
  */
 export function replayCommand(layer: Layer, command: Command): void {
+  if (!isDrawCommand(command)) {
+    return;
+  }
   switch (command.type) {
     case "stroke":
       replayStrokeCommand(layer, command);
@@ -79,11 +87,14 @@ export function replayCommands(
 }
 
 /**
- * 履歴状態に基づいてレイヤーを再構築
- * - 最適なチェックポイントから復元し、その後のコマンドをリプレイ
+ * 特定レイヤーを履歴状態に基づいて再構築する
+ * - layer.id でフィルタし、そのレイヤーの描画コマンドのみリプレイ
  */
-export function rebuildLayerState(layer: Layer, state: HistoryState): void {
-  const checkpoint = findBestCheckpoint(state);
+export function rebuildLayerFromHistory(
+  layer: Layer,
+  state: HistoryState,
+): void {
+  const checkpoint = findBestCheckpointForLayer(state, layer.id);
 
   if (checkpoint) {
     restoreFromCheckpoint(layer, checkpoint);
@@ -91,6 +102,17 @@ export function rebuildLayerState(layer: Layer, state: HistoryState): void {
     clearLayer(layer);
   }
 
-  const commandsToReplay = getCommandsToReplay(state, checkpoint);
+  const commandsToReplay = getCommandsToReplayForLayer(
+    state,
+    layer.id,
+    checkpoint,
+  );
   replayCommands(layer, commandsToReplay);
+}
+
+/**
+ * @deprecated Use rebuildLayerFromHistory instead
+ */
+export function rebuildLayerState(layer: Layer, state: HistoryState): void {
+  rebuildLayerFromHistory(layer, state);
 }

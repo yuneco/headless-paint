@@ -59,3 +59,11 @@ export {
   type PatternPreviewConfig,
 } from "./pattern-preview";
 export { wrapShiftLayer } from "./wrap-shift";
+export {
+  addLayer,
+  findLayerById,
+  getLayerIndex,
+  moveLayer,
+  removeLayer,
+  updateLayerMeta,
+} from "./layer-collection";

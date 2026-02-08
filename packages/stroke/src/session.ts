@@ -1,5 +1,6 @@
 import type {
   ExpandConfig,
+  LayerMeta,
   PressureCurve,
   StrokePoint,
 } from "@headless-paint/engine";
@@ -9,7 +10,10 @@ import type {
   InputPoint,
 } from "@headless-paint/input";
 import type {
+  AddLayerCommand,
+  RemoveLayerCommand,
   RenderUpdate,
+  ReorderLayerCommand,
   StrokeCommand,
   StrokeSessionResult,
   StrokeSessionState,
@@ -139,6 +143,7 @@ export function addPointToSession(
  */
 export function endStrokeSession(
   state: StrokeSessionState,
+  layerId: string,
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
 ): StrokeCommand | null {
@@ -150,6 +155,7 @@ export function endStrokeSession(
 
   return {
     type: "stroke",
+    layerId,
     inputPoints: [...inputPoints],
     filterPipeline,
     expand: state.expand,
@@ -166,6 +172,7 @@ export function endStrokeSession(
  * ストロークコマンドを作成する（ヘルパー関数）
  */
 export function createStrokeCommand(
+  layerId: string,
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
   expand: ExpandConfig,
@@ -177,6 +184,7 @@ export function createStrokeCommand(
 ): StrokeCommand {
   return {
     type: "stroke",
+    layerId,
     inputPoints: [...inputPoints],
     filterPipeline,
     expand,
@@ -192,9 +200,14 @@ export function createStrokeCommand(
 /**
  * クリアコマンドを作成する（ヘルパー関数）
  */
-export function createClearCommand(): { type: "clear"; timestamp: number } {
+export function createClearCommand(layerId: string): {
+  type: "clear";
+  layerId: string;
+  timestamp: number;
+} {
   return {
     type: "clear",
+    layerId,
     timestamp: Date.now(),
   };
 }
@@ -203,13 +216,76 @@ export function createClearCommand(): { type: "clear"; timestamp: number } {
  * ラップシフトコマンドを作成する（ヘルパー関数）
  */
 export function createWrapShiftCommand(
+  layerId: string,
   dx: number,
   dy: number,
-): { type: "wrap-shift"; dx: number; dy: number; timestamp: number } {
+): {
+  type: "wrap-shift";
+  layerId: string;
+  dx: number;
+  dy: number;
+  timestamp: number;
+} {
   return {
     type: "wrap-shift",
+    layerId,
     dx,
     dy,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * レイヤー追加コマンドを作成する
+ */
+export function createAddLayerCommand(
+  layerId: string,
+  insertIndex: number,
+  width: number,
+  height: number,
+  meta: LayerMeta,
+): AddLayerCommand {
+  return {
+    type: "add-layer",
+    layerId,
+    insertIndex,
+    width,
+    height,
+    meta,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * レイヤー削除コマンドを作成する
+ */
+export function createRemoveLayerCommand(
+  layerId: string,
+  removedIndex: number,
+  meta: LayerMeta,
+): RemoveLayerCommand {
+  return {
+    type: "remove-layer",
+    layerId,
+    removedIndex,
+    meta,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * レイヤー並べ替えコマンドを作成する
+ */
+export function createReorderLayerCommand(
+  layerId: string,
+  fromIndex: number,
+  toIndex: number,
+): ReorderLayerCommand {
+  return {
+    type: "reorder-layer",
+    layerId,
+    fromIndex,
+    toIndex,
     timestamp: Date.now(),
   };
 }

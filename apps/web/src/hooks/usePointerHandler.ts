@@ -22,9 +22,9 @@ export interface UsePointerHandlerOptions {
   onPan: (dx: number, dy: number) => void;
   onZoom: (scale: number, centerX: number, centerY: number) => void;
   onRotate: (angleRad: number, centerX: number, centerY: number) => void;
-  onStrokeStart: (point: InputPoint) => void;
-  onStrokeMove: (point: InputPoint) => void;
-  onStrokeEnd: () => void;
+  onStrokeStart?: (point: InputPoint) => void;
+  onStrokeMove?: (point: InputPoint) => void;
+  onStrokeEnd?: () => void;
   onWrapShift?: (dx: number, dy: number) => void;
   onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
   canvasWidth: number;
@@ -91,7 +91,7 @@ export function usePointerHandler(
           );
           samplingStateRef.current = newState;
           if (accepted) {
-            onStrokeStart({
+            onStrokeStart?.({
               x: layerPoint.x,
               y: layerPoint.y,
               pressure: e.nativeEvent.pressure,
@@ -132,7 +132,7 @@ export function usePointerHandler(
             );
             samplingStateRef.current = newState;
             if (accepted) {
-              onStrokeMove({
+              onStrokeMove?.({
                 x: layerPoint.x,
                 y: layerPoint.y,
                 pressure: e.nativeEvent.pressure,
@@ -209,7 +209,7 @@ export function usePointerHandler(
     (e: React.PointerEvent) => {
       if (isDrawingRef.current) {
         if (tool === "pen" || tool === "eraser") {
-          onStrokeEnd();
+          onStrokeEnd?.();
         } else if (tool === "offset") {
           onWrapShiftEnd?.(totalShiftRef.current.x, totalShiftRef.current.y);
         }

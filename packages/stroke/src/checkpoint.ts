@@ -22,6 +22,7 @@ export function createCheckpoint(
 
   return {
     id: generateCheckpointId(),
+    layerId: layer.id,
     commandIndex,
     imageData,
     createdAt: Date.now(),

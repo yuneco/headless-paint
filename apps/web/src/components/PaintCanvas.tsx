@@ -23,9 +23,9 @@ interface PaintCanvasProps {
   onPan: (dx: number, dy: number) => void;
   onZoom: (scale: number, centerX: number, centerY: number) => void;
   onRotate: (angleRad: number, centerX: number, centerY: number) => void;
-  onStrokeStart: (point: InputPoint) => void;
-  onStrokeMove: (point: InputPoint) => void;
-  onStrokeEnd: () => void;
+  onStrokeStart?: (point: InputPoint) => void;
+  onStrokeMove?: (point: InputPoint) => void;
+  onStrokeEnd?: () => void;
   onWrapShift?: (dx: number, dy: number) => void;
   onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
   wrapOffset?: { readonly x: number; readonly y: number };

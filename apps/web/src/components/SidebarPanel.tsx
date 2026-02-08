@@ -1,12 +1,14 @@
-import type { Layer } from "@headless-paint/engine";
+import type { BackgroundSettings, Layer } from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
 import type { HistoryState } from "@headless-paint/stroke";
+import type { LayerEntry } from "../hooks/useLayers";
 import { AccordionPanel } from "./AccordionPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";
+import { LayerPanel } from "./LayerPanel";
 import { Minimap } from "./Minimap";
 
 interface SidebarPanelProps {
-  layer: Layer;
+  layers: readonly Layer[];
   viewTransform: ViewTransform;
   mainCanvasWidth: number;
   mainCanvasHeight: number;
@@ -16,10 +18,23 @@ interface SidebarPanelProps {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  // Layer panel props
+  entries: readonly LayerEntry[];
+  activeLayerId: string | null;
+  background: BackgroundSettings;
+  onSelectLayer: (id: string) => void;
+  onAddLayer: () => void;
+  onRemoveLayer: (id: string) => void;
+  onToggleVisibility: (id: string) => void;
+  onToggleBackground: () => void;
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
+  // History panel props
+  layerIdToName: (layerId: string) => string;
 }
 
 export function SidebarPanel({
-  layer,
+  layers,
   viewTransform,
   mainCanvasWidth,
   mainCanvasHeight,
@@ -29,6 +44,17 @@ export function SidebarPanel({
   onRedo,
   canUndo,
   canRedo,
+  entries,
+  activeLayerId,
+  background,
+  onSelectLayer,
+  onAddLayer,
+  onRemoveLayer,
+  onToggleVisibility,
+  onToggleBackground,
+  onMoveUp,
+  onMoveDown,
+  layerIdToName,
 }: SidebarPanelProps) {
   const entryCount = getHistoryEntryCount(historyState);
 
@@ -43,12 +69,32 @@ export function SidebarPanel({
     >
       <AccordionPanel title="Minimap" defaultExpanded isFirst isLast={false}>
         <Minimap
-          layer={layer}
+          layers={layers}
           viewTransform={viewTransform}
           mainCanvasWidth={mainCanvasWidth}
           mainCanvasHeight={mainCanvasHeight}
           maxWidth={264}
           renderVersion={renderVersion}
+        />
+      </AccordionPanel>
+      <AccordionPanel
+        title="Layers"
+        badge={entries.length}
+        defaultExpanded
+        isFirst={false}
+        isLast={false}
+      >
+        <LayerPanel
+          entries={entries}
+          activeLayerId={activeLayerId}
+          background={background}
+          onSelectLayer={onSelectLayer}
+          onAddLayer={onAddLayer}
+          onRemoveLayer={onRemoveLayer}
+          onToggleVisibility={onToggleVisibility}
+          onToggleBackground={onToggleBackground}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
         />
       </AccordionPanel>
       <AccordionPanel
@@ -64,6 +110,7 @@ export function SidebarPanel({
           onRedo={onRedo}
           canUndo={canUndo}
           canRedo={canRedo}
+          layerIdToName={layerIdToName}
         />
       </AccordionPanel>
     </div>

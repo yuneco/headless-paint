@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { type CSSProperties, type ReactNode, useState } from "react";
 
 interface AccordionPanelProps {
@@ -59,7 +60,7 @@ export function AccordionPanel({
           {title}
           {badge !== undefined && ` (${badge})`}
         </span>
-        <span>{isExpanded ? "▼" : "▶"}</span>
+        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
       {isExpanded && <div style={{ padding: 8 }}>{children}</div>}
     </div>
