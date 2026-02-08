@@ -262,11 +262,13 @@ export function createAddLayerCommand(
 export function createRemoveLayerCommand(
   layerId: string,
   removedIndex: number,
+  meta: LayerMeta,
 ): RemoveLayerCommand {
   return {
     type: "remove-layer",
     layerId,
     removedIndex,
+    meta,
     timestamp: Date.now(),
   };
 }

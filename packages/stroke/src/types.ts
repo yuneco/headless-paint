@@ -86,6 +86,7 @@ export interface RemoveLayerCommand {
   readonly type: "remove-layer";
   readonly layerId: string;
   readonly removedIndex: number;
+  readonly meta: LayerMeta;
   readonly timestamp: number;
 }
 

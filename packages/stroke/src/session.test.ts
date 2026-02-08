@@ -250,12 +250,14 @@ describe("session", () => {
   });
 
   describe("createRemoveLayerCommand", () => {
-    it("should create remove-layer command with layerId and removedIndex", () => {
-      const command = createRemoveLayerCommand("layer_1", 0);
+    it("should create remove-layer command with layerId, removedIndex, and meta", () => {
+      const meta = { name: "My Layer", visible: true, opacity: 0.8 };
+      const command = createRemoveLayerCommand("layer_1", 0, meta);
 
       expect(command.type).toBe("remove-layer");
       expect(command.layerId).toBe("layer_1");
       expect(command.removedIndex).toBe(0);
+      expect(command.meta).toEqual(meta);
       expect(typeof command.timestamp).toBe("number");
     });
   });

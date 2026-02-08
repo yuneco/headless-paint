@@ -13,8 +13,13 @@ interface UseLayersReturn {
   activeEntry: LayerEntry | undefined;
   addLayer: () => { entry: LayerEntry; insertIndex: number };
   removeLayer: (layerId: string) => void;
-  reinsertLayer: (layerId: string, index: number) => LayerEntry;
+  reinsertLayer: (
+    layerId: string,
+    index: number,
+    meta?: LayerMeta,
+  ) => LayerEntry;
   setActiveLayerId: (id: string | null) => void;
+  renameLayer: (layerId: string, name: string) => void;
   toggleVisibility: (layerId: string) => void;
   setLayerVisible: (layerId: string, visible: boolean) => void;
   moveLayerUp: (
@@ -103,8 +108,8 @@ export function useLayers(width: number, height: number): UseLayersReturn {
   }, []);
 
   const reinsertLayer = useCallback(
-    (layerId: string, index: number) => {
-      const layer = createLayer(width, height);
+    (layerId: string, index: number, meta?: LayerMeta) => {
+      const layer = createLayer(width, height, meta);
       // ID を既知のものに書き換える（Undo復元用）
       (layer as { id: string }).id = layerId;
       const entry: LayerEntry = { id: layerId, committedLayer: layer };
@@ -125,6 +130,13 @@ export function useLayers(width: number, height: number): UseLayersReturn {
     },
     [width, height],
   );
+
+  const renameLayer = useCallback((layerId: string, name: string) => {
+    const entry = entriesRef.current.find((e) => e.id === layerId);
+    if (!entry) return;
+    entry.committedLayer.meta.name = name;
+    setEntries([...entriesRef.current]);
+  }, []);
 
   const toggleVisibility = useCallback((layerId: string) => {
     // direct mutation + direct set: StrictMode で updater が2回呼ばれても冪等
@@ -181,6 +193,7 @@ export function useLayers(width: number, height: number): UseLayersReturn {
     removeLayer,
     reinsertLayer,
     setActiveLayerId,
+    renameLayer,
     toggleVisibility,
     setLayerVisible,
     moveLayerUp,

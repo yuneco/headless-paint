@@ -154,12 +154,110 @@ interface ClearCommand {
 
 ---
 
-## Command
+## WrapShiftCommand
 
-コマンドのUnion型。
+ラップシフトコマンド。レイヤー全体をタイル状にシフトする。
 
 ```typescript
-type Command = StrokeCommand | ClearCommand | WrapShiftCommand;
+interface WrapShiftCommand {
+  readonly type: "wrap-shift";
+  readonly layerId: string;
+  readonly dx: number;
+  readonly dy: number;
+  readonly timestamp: number;
+}
+```
+
+---
+
+## DrawCommand
+
+描画コマンドのUnion型。レイヤーのピクセルに影響する操作。
+
+```typescript
+type DrawCommand = StrokeCommand | ClearCommand | WrapShiftCommand;
+```
+
+---
+
+## Structural Commands（構造コマンド）
+
+レイヤーの構造（追加・削除・並び替え）を操作するコマンド。描画コマンドと同じ履歴に記録される。
+
+### AddLayerCommand
+
+```typescript
+interface AddLayerCommand {
+  readonly type: "add-layer";
+  readonly layerId: string;
+  readonly insertIndex: number;
+  readonly width: number;
+  readonly height: number;
+  readonly meta: LayerMeta;
+  readonly timestamp: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `layerId` | `string` | 新しいレイヤーのID |
+| `insertIndex` | `number` | レイヤースタックへの挿入位置 |
+| `width` / `height` | `number` | レイヤーサイズ |
+| `meta` | `LayerMeta` | 作成時のメタデータ（name, visible, opacity等） |
+
+### RemoveLayerCommand
+
+```typescript
+interface RemoveLayerCommand {
+  readonly type: "remove-layer";
+  readonly layerId: string;
+  readonly removedIndex: number;
+  readonly meta: LayerMeta;
+  readonly timestamp: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `layerId` | `string` | 削除するレイヤーのID |
+| `removedIndex` | `number` | 削除前のスタック位置（Undo復元用） |
+| `meta` | `LayerMeta` | 削除時のメタデータスナップショット（Undo復元用） |
+
+**設計意図**: 削除時の `meta`（name, visible, opacity, compositeOperation）をスナップショットすることで、Undo時にメタデータを含めて完全復元できる。メタデータ変更（リネーム、表示切替等）はコマンド化されないため、削除コマンドでの保存が復元の唯一の手段となる。
+
+### ReorderLayerCommand
+
+```typescript
+interface ReorderLayerCommand {
+  readonly type: "reorder-layer";
+  readonly layerId: string;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+  readonly timestamp: number;
+}
+```
+
+### StructuralCommand
+
+```typescript
+type StructuralCommand = AddLayerCommand | RemoveLayerCommand | ReorderLayerCommand;
+```
+
+---
+
+## Command
+
+コマンドのUnion型。描画コマンドと構造コマンドの両方を含む。
+
+```typescript
+type Command = DrawCommand | StructuralCommand;
+```
+
+### 型ガード
+
+```typescript
+function isDrawCommand(cmd: Command): cmd is DrawCommand;
+function isStructuralCommand(cmd: Command): cmd is StructuralCommand;
 ```
 
 ---

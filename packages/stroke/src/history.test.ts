@@ -171,6 +171,7 @@ describe("history", () => {
         type: "remove-layer",
         layerId: "layer_1",
         removedIndex: 0,
+        meta: { name: "Layer 1", visible: true, opacity: 1 },
         timestamp: 2000,
       };
       state = pushCommand(state, removeCmd, layer, config);
@@ -236,6 +237,7 @@ describe("history", () => {
           type: "remove-layer",
           layerId: `layer_${i}`,
           removedIndex: 0,
+          meta: { name: `Layer ${i}`, visible: true, opacity: 1 },
           timestamp: 1000 + i,
         };
         state = pushCommand(
@@ -269,6 +271,7 @@ describe("history", () => {
         type: "remove-layer",
         layerId: "layer_1",
         removedIndex: 0,
+        meta: { name: "Layer 1", visible: true, opacity: 1 },
         timestamp: 2000,
       };
       state = pushCommand(state, removeCmd, layer, config);

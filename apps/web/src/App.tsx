@@ -382,7 +382,11 @@ export function App() {
       const entry = findEntry(layerId);
       if (!entry) return;
       const removedIndex = getLayerIndex(layerId);
-      const command = createRemoveLayerCommand(layerId, removedIndex);
+      const command = createRemoveLayerCommand(
+        layerId,
+        removedIndex,
+        entry.committedLayer.meta,
+      );
       setHistoryState((prev) =>
         pushCommand(prev, command, entry.committedLayer, HISTORY_CONFIG),
       );
@@ -443,6 +447,7 @@ export function App() {
             const entry = reinsertLayer(
               undoneCommand.layerId,
               undoneCommand.removedIndex,
+              undoneCommand.meta,
             );
             const cp = newState.checkpoints.find(
               (c) =>
@@ -516,7 +521,11 @@ export function App() {
       if (isStructuralCommand(redoneCommand)) {
         switch (redoneCommand.type) {
           case "add-layer":
-            reinsertLayer(redoneCommand.layerId, redoneCommand.insertIndex);
+            reinsertLayer(
+              redoneCommand.layerId,
+              redoneCommand.insertIndex,
+              redoneCommand.meta,
+            );
             break;
           case "remove-layer":
             removeLayerById(redoneCommand.layerId);
