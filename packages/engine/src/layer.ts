@@ -6,6 +6,12 @@ const DEFAULT_META: LayerMeta = {
   opacity: 1,
 };
 
+let layerIdCounter = 0;
+
+function generateLayerId(): string {
+  return `layer_${Date.now()}_${++layerIdCounter}`;
+}
+
 export function createLayer(
   width: number,
   height: number,
@@ -18,6 +24,7 @@ export function createLayer(
   }
 
   return {
+    id: generateLayerId(),
     width,
     height,
     canvas,

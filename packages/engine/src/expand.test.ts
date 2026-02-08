@@ -286,7 +286,12 @@ describe("expandPoint — input position invariant", () => {
 
   it("none: input always preserved", () => {
     for (const angle of angles) {
-      const compiled = compileExpand({ mode: "none", origin, angle, divisions: 1 });
+      const compiled = compileExpand({
+        mode: "none",
+        origin,
+        angle,
+        divisions: 1,
+      });
       const result = expandPoint(inputPoint, compiled);
       expect(result[0].x).toBeCloseTo(inputPoint.x);
       expect(result[0].y).toBeCloseTo(inputPoint.y);
@@ -295,7 +300,12 @@ describe("expandPoint — input position invariant", () => {
 
   it("axial: input always preserved regardless of angle", () => {
     for (const angle of angles) {
-      const compiled = compileExpand({ mode: "axial", origin, angle, divisions: 1 });
+      const compiled = compileExpand({
+        mode: "axial",
+        origin,
+        angle,
+        divisions: 1,
+      });
       const result = expandPoint(inputPoint, compiled);
       expect(result[0].x).toBeCloseTo(inputPoint.x);
       expect(result[0].y).toBeCloseTo(inputPoint.y);
@@ -305,7 +315,12 @@ describe("expandPoint — input position invariant", () => {
   it("radial: input always preserved regardless of angle", () => {
     for (const angle of angles) {
       for (const divisions of [2, 3, 4, 6, 8]) {
-        const compiled = compileExpand({ mode: "radial", origin, angle, divisions });
+        const compiled = compileExpand({
+          mode: "radial",
+          origin,
+          angle,
+          divisions,
+        });
         const result = expandPoint(inputPoint, compiled);
         expect(result[0].x).toBeCloseTo(inputPoint.x);
         expect(result[0].y).toBeCloseTo(inputPoint.y);
@@ -316,7 +331,12 @@ describe("expandPoint — input position invariant", () => {
   it("kaleidoscope: input always preserved regardless of angle", () => {
     for (const angle of angles) {
       for (const divisions of [2, 3, 4, 6, 8]) {
-        const compiled = compileExpand({ mode: "kaleidoscope", origin, angle, divisions });
+        const compiled = compileExpand({
+          mode: "kaleidoscope",
+          origin,
+          angle,
+          divisions,
+        });
         const result = expandPoint(inputPoint, compiled);
         expect(result[0].x).toBeCloseTo(inputPoint.x);
         expect(result[0].y).toBeCloseTo(inputPoint.y);

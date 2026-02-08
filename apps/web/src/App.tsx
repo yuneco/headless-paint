@@ -25,13 +25,19 @@ import {
   addPointToSession,
   canRedo,
   canUndo,
-  computeCumulativeOffset,
+  computeCumulativeOffsetForLayer,
+  createAddLayerCommand,
   createHistoryState,
+  createRemoveLayerCommand,
+  createReorderLayerCommand,
   createStrokeCommand,
   createWrapShiftCommand,
+  getAffectedLayerIds,
+  isStructuralCommand,
   pushCommand,
-  rebuildLayerState,
+  rebuildLayerFromHistory,
   redo,
+  restoreFromCheckpoint,
   startStrokeSession,
   undo,
 } from "@headless-paint/stroke";
@@ -48,6 +54,7 @@ import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import { useExpand } from "./hooks/useExpand";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useLayers } from "./hooks/useLayers";
 import { usePatternPreview } from "./hooks/usePatternPreview";
 import { usePenSettings } from "./hooks/usePenSettings";
 import type { ToolType } from "./hooks/usePointerHandler";
@@ -83,19 +90,35 @@ export function App() {
     }
   }, [fitToView]);
 
-  const committedLayer = useMemo(
-    () => createLayer(LAYER_WIDTH, LAYER_HEIGHT),
-    [],
-  );
+  // レイヤー管理
+  const layerManager = useLayers(LAYER_WIDTH, LAYER_HEIGHT);
+  const {
+    entries,
+    activeLayerId,
+    activeEntry,
+    addLayer,
+    removeLayer: removeLayerById,
+    reinsertLayer,
+    setActiveLayerId,
+    toggleVisibility,
+    setLayerVisible,
+    moveLayerUp,
+    moveLayerDown,
+    findEntry,
+    getLayerIndex,
+    renderVersion,
+    bumpRenderVersion,
+  } = layerManager;
+
+  // 共有 pending layer
   const pendingLayer = useMemo(
     () => createLayer(LAYER_WIDTH, LAYER_HEIGHT),
     [],
   );
 
   const [strokePoints, setStrokePoints] = useState<InputPoint[]>([]);
-  const [renderVersion, setRenderVersion] = useState(0);
 
-  const [background] = useState<BackgroundSettings>({
+  const [background, setBackground] = useState<BackgroundSettings>({
     color: DEFAULT_BACKGROUND_COLOR,
     visible: true,
   });
@@ -133,13 +156,19 @@ export function App() {
     inputPoints: InputPoint[];
     compiledExpand: CompiledExpand;
     compiledFilterPipeline: CompiledFilterPipeline;
+    layerId: string;
   } | null>(null);
 
   const expandRef = useRef(expand);
   expandRef.current = expand;
 
+  // 描画可否判定
+  const canDraw = activeEntry?.committedLayer.meta.visible ?? false;
+
   const onStrokeStart = useCallback(
     (inputPoint: InputPoint) => {
+      if (!activeEntry || !activeEntry.committedLayer.meta.visible) return;
+
       const compiled = expandRef.current.compiled;
       const filterState = createFilterPipelineState(compiledFilterPipeline);
       const filterResult = processPoint(
@@ -160,12 +189,13 @@ export function App() {
         inputPoints: [inputPoint],
         compiledExpand: compiled,
         compiledFilterPipeline,
+        layerId: activeEntry.id,
       };
 
       pendingLayer.meta.compositeOperation = strokeStyle.compositeOperation;
 
       appendToCommittedLayer(
-        committedLayer,
+        activeEntry.committedLayer,
         strokeResult.renderUpdate.newlyCommitted,
         strokeStyle,
         compiled,
@@ -178,14 +208,23 @@ export function App() {
       );
 
       setStrokePoints([inputPoint]);
-      setRenderVersion((n) => n + 1);
+      bumpRenderVersion();
     },
-    [committedLayer, pendingLayer, compiledFilterPipeline, strokeStyle],
+    [
+      activeEntry,
+      pendingLayer,
+      compiledFilterPipeline,
+      strokeStyle,
+      bumpRenderVersion,
+    ],
   );
 
   const onStrokeMove = useCallback(
     (inputPoint: InputPoint) => {
       if (!sessionRef.current) return;
+
+      const currentEntry = findEntry(sessionRef.current.layerId);
+      if (!currentEntry) return;
 
       const filterResult = processPoint(
         sessionRef.current.filterState,
@@ -206,7 +245,7 @@ export function App() {
       };
 
       appendToCommittedLayer(
-        committedLayer,
+        currentEntry.committedLayer,
         strokeResult.renderUpdate.newlyCommitted,
         strokeStyle,
         sessionRef.current.compiledExpand,
@@ -219,9 +258,9 @@ export function App() {
       );
 
       setStrokePoints((prev) => [...prev, inputPoint]);
-      setRenderVersion((n) => n + 1);
+      bumpRenderVersion();
     },
-    [committedLayer, pendingLayer, strokeStyle],
+    [pendingLayer, strokeStyle, findEntry, bumpRenderVersion],
   );
 
   const onStrokeEnd = useCallback(() => {
@@ -230,17 +269,26 @@ export function App() {
       return;
     }
 
-    const { inputPoints, strokeSession, filterState, compiledFilterPipeline } =
-      sessionRef.current;
+    const {
+      inputPoints,
+      strokeSession,
+      filterState,
+      compiledFilterPipeline,
+      layerId,
+    } = sessionRef.current;
+
+    const currentEntry = findEntry(layerId);
+    if (!currentEntry) {
+      sessionRef.current = null;
+      setStrokePoints([]);
+      return;
+    }
 
     const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
-
-    // finalize で確定した残りの点を session に反映し、描画更新を取得
     const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
 
-    // finalize で新たに確定した点を committed layer に描画
     appendToCommittedLayer(
-      committedLayer,
+      currentEntry.committedLayer,
       finalStrokeResult.renderUpdate.newlyCommitted,
       strokeStyle,
       sessionRef.current.compiledExpand,
@@ -250,6 +298,7 @@ export function App() {
 
     if (totalPoints >= 2) {
       const command = createStrokeCommand(
+        layerId,
         inputPoints,
         compiledFilterPipeline.config,
         strokeSession.expand,
@@ -260,74 +309,256 @@ export function App() {
         strokeStyle.compositeOperation,
       );
       setHistoryState((prev) =>
-        pushCommand(prev, command, committedLayer, HISTORY_CONFIG),
+        pushCommand(prev, command, currentEntry.committedLayer, HISTORY_CONFIG),
       );
     }
 
     clearLayer(pendingLayer);
     pendingLayer.meta.compositeOperation = undefined;
-    setRenderVersion((n) => n + 1);
+    bumpRenderVersion();
 
     sessionRef.current = null;
     setStrokePoints([]);
-  }, [committedLayer, pendingLayer, strokeStyle]);
+  }, [pendingLayer, strokeStyle, findEntry, bumpRenderVersion]);
 
   const handleWrapShift = useCallback(
     (dx: number, dy: number) => {
-      wrapShiftLayer(committedLayer, dx, dy, shiftTempCanvas);
+      if (!activeEntry) return;
+      wrapShiftLayer(activeEntry.committedLayer, dx, dy, shiftTempCanvas);
       dragShiftRef.current = {
         x: dragShiftRef.current.x + dx,
         y: dragShiftRef.current.y + dy,
       };
-      setRenderVersion((n) => n + 1);
+      bumpRenderVersion();
     },
-    [committedLayer, shiftTempCanvas],
+    [activeEntry, shiftTempCanvas, bumpRenderVersion],
   );
 
   const handleWrapShiftEnd = useCallback(
     (totalDx: number, totalDy: number) => {
       dragShiftRef.current = { x: 0, y: 0 };
       if (totalDx === 0 && totalDy === 0) return;
-      const command = createWrapShiftCommand(totalDx, totalDy);
+      if (!activeEntry) return;
+      const command = createWrapShiftCommand(activeEntry.id, totalDx, totalDy);
       setHistoryState((prev) =>
-        pushCommand(prev, command, committedLayer, HISTORY_CONFIG),
+        pushCommand(prev, command, activeEntry.committedLayer, HISTORY_CONFIG),
       );
     },
-    [committedLayer],
+    [activeEntry],
   );
 
   const handleResetOffset = useCallback(() => {
+    if (!activeEntry) return;
     setHistoryState((prev) => {
-      const { x, y } = computeCumulativeOffset(prev);
+      const { x, y } = computeCumulativeOffsetForLayer(prev, activeEntry.id);
       if (x === 0 && y === 0) return prev;
-      wrapShiftLayer(committedLayer, -x, -y, shiftTempCanvas);
-      const command = createWrapShiftCommand(-x, -y);
-      setRenderVersion((n) => n + 1);
-      return pushCommand(prev, command, committedLayer, HISTORY_CONFIG);
+      wrapShiftLayer(activeEntry.committedLayer, -x, -y, shiftTempCanvas);
+      const command = createWrapShiftCommand(activeEntry.id, -x, -y);
+      bumpRenderVersion();
+      return pushCommand(
+        prev,
+        command,
+        activeEntry.committedLayer,
+        HISTORY_CONFIG,
+      );
     });
-  }, [committedLayer, shiftTempCanvas]);
+  }, [activeEntry, shiftTempCanvas, bumpRenderVersion]);
+
+  // レイヤー構造操作ハンドラ
+  const handleAddLayer = useCallback(() => {
+    const { entry, insertIndex } = addLayer();
+    const command = createAddLayerCommand(
+      entry.id,
+      insertIndex,
+      LAYER_WIDTH,
+      LAYER_HEIGHT,
+      entry.committedLayer.meta,
+    );
+    setHistoryState((prev) => pushCommand(prev, command, null, HISTORY_CONFIG));
+  }, [addLayer]);
+
+  const handleRemoveLayer = useCallback(
+    (layerId: string) => {
+      const entry = findEntry(layerId);
+      if (!entry) return;
+      const removedIndex = getLayerIndex(layerId);
+      const command = createRemoveLayerCommand(layerId, removedIndex);
+      setHistoryState((prev) =>
+        pushCommand(prev, command, entry.committedLayer, HISTORY_CONFIG),
+      );
+      removeLayerById(layerId);
+    },
+    [findEntry, getLayerIndex, removeLayerById],
+  );
+
+  const handleMoveLayerUp = useCallback(
+    (layerId: string) => {
+      const result = moveLayerUp(layerId);
+      if (!result) return;
+      const command = createReorderLayerCommand(
+        layerId,
+        result.fromIndex,
+        result.toIndex,
+      );
+      setHistoryState((prev) =>
+        pushCommand(prev, command, null, HISTORY_CONFIG),
+      );
+    },
+    [moveLayerUp],
+  );
+
+  const handleMoveLayerDown = useCallback(
+    (layerId: string) => {
+      const result = moveLayerDown(layerId);
+      if (!result) return;
+      const command = createReorderLayerCommand(
+        layerId,
+        result.fromIndex,
+        result.toIndex,
+      );
+      setHistoryState((prev) =>
+        pushCommand(prev, command, null, HISTORY_CONFIG),
+      );
+    },
+    [moveLayerDown],
+  );
+
+  const handleToggleBackground = useCallback(() => {
+    setBackground((prev) => ({ ...prev, visible: !prev.visible }));
+    bumpRenderVersion();
+  }, [bumpRenderVersion]);
 
   const handleUndo = useCallback(() => {
     setHistoryState((prev) => {
       if (!canUndo(prev)) return prev;
+      const undoneCommand = prev.commands[prev.currentIndex];
       const newState = undo(prev);
-      clearLayer(committedLayer);
-      rebuildLayerState(committedLayer, newState);
-      setRenderVersion((n) => n + 1);
+
+      if (isStructuralCommand(undoneCommand)) {
+        switch (undoneCommand.type) {
+          case "add-layer":
+            removeLayerById(undoneCommand.layerId);
+            break;
+          case "remove-layer": {
+            const entry = reinsertLayer(
+              undoneCommand.layerId,
+              undoneCommand.removedIndex,
+            );
+            const cp = newState.checkpoints.find(
+              (c) =>
+                c.layerId === undoneCommand.layerId &&
+                c.commandIndex === prev.currentIndex,
+            );
+            if (cp) {
+              restoreFromCheckpoint(entry.committedLayer, cp);
+            } else {
+              rebuildLayerFromHistory(entry.committedLayer, newState);
+            }
+            break;
+          }
+          case "reorder-layer": {
+            // 逆方向に移動
+            const currentEntries = layerManager.entries;
+            const currentIndex = currentEntries.findIndex(
+              (e) => e.id === undoneCommand.layerId,
+            );
+            if (currentIndex !== -1) {
+              if (undoneCommand.toIndex > undoneCommand.fromIndex) {
+                moveLayerDown(undoneCommand.layerId);
+              } else {
+                moveLayerUp(undoneCommand.layerId);
+              }
+              // moveLayerUp/Down は historyState に pushCommand するので、
+              // ここでは内部操作のみ行うべき。ただしこれは undo 内なので
+              // setHistoryState の更新関数内で呼ばれている。
+              // moveLayerUp/Down は setEntries を直接操作するので問題ない。
+            }
+            break;
+          }
+        }
+      } else {
+        // 描画コマンド: 影響レイヤーのみリビルド
+        const affectedIds = getAffectedLayerIds(
+          prev,
+          newState.currentIndex,
+          prev.currentIndex,
+        );
+        for (const id of affectedIds) {
+          const e = findEntry(id);
+          if (!e) continue;
+          rebuildLayerFromHistory(e.committedLayer, newState);
+          if (!e.committedLayer.meta.visible) {
+            setLayerVisible(e.id, true);
+          }
+        }
+      }
+
+      bumpRenderVersion();
       return newState;
     });
-  }, [committedLayer]);
+  }, [
+    findEntry,
+    removeLayerById,
+    reinsertLayer,
+    moveLayerUp,
+    moveLayerDown,
+    setLayerVisible,
+    bumpRenderVersion,
+    layerManager.entries,
+  ]);
 
   const handleRedo = useCallback(() => {
     setHistoryState((prev) => {
       if (!canRedo(prev)) return prev;
       const newState = redo(prev);
-      clearLayer(committedLayer);
-      rebuildLayerState(committedLayer, newState);
-      setRenderVersion((n) => n + 1);
+      const redoneCommand = newState.commands[newState.currentIndex];
+
+      if (isStructuralCommand(redoneCommand)) {
+        switch (redoneCommand.type) {
+          case "add-layer":
+            reinsertLayer(redoneCommand.layerId, redoneCommand.insertIndex);
+            break;
+          case "remove-layer":
+            removeLayerById(redoneCommand.layerId);
+            break;
+          case "reorder-layer": {
+            if (redoneCommand.toIndex > redoneCommand.fromIndex) {
+              moveLayerUp(redoneCommand.layerId);
+            } else {
+              moveLayerDown(redoneCommand.layerId);
+            }
+            break;
+          }
+        }
+      } else {
+        // 描画コマンド: 影響レイヤーのみリビルド
+        const affectedIds = getAffectedLayerIds(
+          newState,
+          prev.currentIndex,
+          newState.currentIndex,
+        );
+        for (const id of affectedIds) {
+          const e = findEntry(id);
+          if (!e) continue;
+          rebuildLayerFromHistory(e.committedLayer, newState);
+          if (!e.committedLayer.meta.visible) {
+            setLayerVisible(e.id, true);
+          }
+        }
+      }
+
+      bumpRenderVersion();
       return newState;
     });
-  }, [committedLayer]);
+  }, [
+    findEntry,
+    removeLayerById,
+    reinsertLayer,
+    moveLayerUp,
+    moveLayerDown,
+    setLayerVisible,
+    bumpRenderVersion,
+  ]);
 
   useKeyboardShortcuts({
     tool,
@@ -344,15 +575,36 @@ export function App() {
   });
 
   const strokeCount = historyState.currentIndex + 1;
-  const cumulativeOffset = computeCumulativeOffset(historyState);
+  const cumulativeOffset = activeLayerId
+    ? computeCumulativeOffsetForLayer(historyState, activeLayerId)
+    : { x: 0, y: 0 };
   const currentOffset = {
     x: cumulativeOffset.x + dragShiftRef.current.x,
     y: cumulativeOffset.y + dragShiftRef.current.y,
   };
 
-  const layers: Layer[] = useMemo(
-    () => [committedLayer, pendingLayer],
-    [committedLayer, pendingLayer],
+  // レイヤー配列構築: 全committed + pending をアクティブレイヤーの直後に挿入
+  // biome-ignore lint/correctness/useExhaustiveDependencies: renderVersionはlayers内部のcanvas更新を検知する再描画トリガー
+  const layers: Layer[] = useMemo(() => {
+    const result: Layer[] = [];
+    for (const entry of entries) {
+      result.push(entry.committedLayer);
+      if (entry.id === activeLayerId) {
+        result.push(pendingLayer);
+      }
+    }
+    return result;
+  }, [entries, activeLayerId, pendingLayer, renderVersion]);
+
+  // レイヤーID→表示名の解決関数
+  const layerIdToName = useCallback(
+    (layerId: string) => {
+      const entry = entries.find((e) => e.id === layerId);
+      if (!entry) return "?";
+      const idx = entries.indexOf(entry);
+      return `L${idx + 1}`;
+    },
+    [entries],
   );
 
   return (
@@ -366,9 +618,9 @@ export function App() {
         onPan={handlePan}
         onZoom={handleZoom}
         onRotate={handleRotate}
-        onStrokeStart={onStrokeStart}
-        onStrokeMove={onStrokeMove}
-        onStrokeEnd={onStrokeEnd}
+        onStrokeStart={canDraw ? onStrokeStart : undefined}
+        onStrokeMove={canDraw ? onStrokeMove : undefined}
+        onStrokeEnd={canDraw ? onStrokeEnd : undefined}
         onWrapShift={handleWrapShift}
         onWrapShiftEnd={handleWrapShiftEnd}
         wrapOffset={currentOffset}
@@ -409,7 +661,7 @@ export function App() {
       </div>
 
       <SidebarPanel
-        layer={committedLayer}
+        layers={layers}
         viewTransform={transform}
         mainCanvasWidth={viewWidth}
         mainCanvasHeight={viewHeight}
@@ -419,6 +671,17 @@ export function App() {
         onRedo={handleRedo}
         canUndo={canUndo(historyState)}
         canRedo={canRedo(historyState)}
+        entries={entries}
+        activeLayerId={activeLayerId}
+        background={background}
+        onSelectLayer={setActiveLayerId}
+        onAddLayer={handleAddLayer}
+        onRemoveLayer={handleRemoveLayer}
+        onToggleVisibility={toggleVisibility}
+        onToggleBackground={handleToggleBackground}
+        onMoveUp={handleMoveLayerUp}
+        onMoveDown={handleMoveLayerDown}
+        layerIdToName={layerIdToName}
       />
 
       <DebugPanel

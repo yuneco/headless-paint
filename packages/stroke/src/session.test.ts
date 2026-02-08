@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   addPointToSession,
+  createAddLayerCommand,
   createClearCommand,
+  createRemoveLayerCommand,
+  createReorderLayerCommand,
   createStrokeCommand,
+  createWrapShiftCommand,
   endStrokeSession,
   startStrokeSession,
 } from "./session";
@@ -131,7 +135,7 @@ describe("session", () => {
   });
 
   describe("endStrokeSession", () => {
-    it("should return StrokeCommand for valid stroke (2+ points)", () => {
+    it("should return StrokeCommand with layerId for valid stroke (2+ points)", () => {
       const filterOutput = {
         committed: [
           { x: 10, y: 20, timestamp: 1000 },
@@ -148,12 +152,14 @@ describe("session", () => {
 
       const command = endStrokeSession(
         result.state,
+        "layer_1",
         inputPoints,
         filterPipeline,
       );
 
       expect(command).not.toBeNull();
       expect(command?.type).toBe("stroke");
+      expect(command?.layerId).toBe("layer_1");
       expect(command?.inputPoints).toEqual(inputPoints);
       expect(command?.color).toEqual(style.color);
       expect(command?.lineWidth).toBe(style.lineWidth);
@@ -170,6 +176,7 @@ describe("session", () => {
 
       const command = endStrokeSession(
         result.state,
+        "layer_1",
         inputPoints,
         filterPipeline,
       );
@@ -179,13 +186,14 @@ describe("session", () => {
   });
 
   describe("createStrokeCommand", () => {
-    it("should create stroke command with provided parameters", () => {
+    it("should create stroke command with layerId as first argument", () => {
       const inputPoints = [
         { x: 10, y: 20, timestamp: 1000 },
         { x: 30, y: 40, timestamp: 1002 },
       ];
 
       const command = createStrokeCommand(
+        "layer_1",
         inputPoints,
         filterPipeline,
         expandConfig,
@@ -194,6 +202,7 @@ describe("session", () => {
       );
 
       expect(command.type).toBe("stroke");
+      expect(command.layerId).toBe("layer_1");
       expect(command.inputPoints).toEqual(inputPoints);
       expect(command.filterPipeline).toEqual(filterPipeline);
       expect(command.expand).toEqual(expandConfig);
@@ -204,10 +213,61 @@ describe("session", () => {
   });
 
   describe("createClearCommand", () => {
-    it("should create clear command", () => {
-      const command = createClearCommand();
+    it("should create clear command with layerId", () => {
+      const command = createClearCommand("layer_1");
 
       expect(command.type).toBe("clear");
+      expect(command.layerId).toBe("layer_1");
+      expect(typeof command.timestamp).toBe("number");
+    });
+  });
+
+  describe("createWrapShiftCommand", () => {
+    it("should create wrap-shift command with layerId", () => {
+      const command = createWrapShiftCommand("layer_1", 10, 20);
+
+      expect(command.type).toBe("wrap-shift");
+      expect(command.layerId).toBe("layer_1");
+      expect(command.dx).toBe(10);
+      expect(command.dy).toBe(20);
+      expect(typeof command.timestamp).toBe("number");
+    });
+  });
+
+  describe("createAddLayerCommand", () => {
+    it("should create add-layer command with all fields", () => {
+      const meta = { name: "Layer 2", visible: true, opacity: 1 };
+      const command = createAddLayerCommand("layer_2", 1, 800, 600, meta);
+
+      expect(command.type).toBe("add-layer");
+      expect(command.layerId).toBe("layer_2");
+      expect(command.insertIndex).toBe(1);
+      expect(command.width).toBe(800);
+      expect(command.height).toBe(600);
+      expect(command.meta).toEqual(meta);
+      expect(typeof command.timestamp).toBe("number");
+    });
+  });
+
+  describe("createRemoveLayerCommand", () => {
+    it("should create remove-layer command with layerId and removedIndex", () => {
+      const command = createRemoveLayerCommand("layer_1", 0);
+
+      expect(command.type).toBe("remove-layer");
+      expect(command.layerId).toBe("layer_1");
+      expect(command.removedIndex).toBe(0);
+      expect(typeof command.timestamp).toBe("number");
+    });
+  });
+
+  describe("createReorderLayerCommand", () => {
+    it("should create reorder-layer command with layerId, fromIndex, toIndex", () => {
+      const command = createReorderLayerCommand("layer_1", 0, 2);
+
+      expect(command.type).toBe("reorder-layer");
+      expect(command.layerId).toBe("layer_1");
+      expect(command.fromIndex).toBe(0);
+      expect(command.toIndex).toBe(2);
       expect(typeof command.timestamp).toBe("number");
     });
   });

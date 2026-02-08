@@ -1,5 +1,5 @@
 import type { Layer } from "@headless-paint/engine";
-import { renderLayerWithTransform } from "@headless-paint/engine";
+import { renderLayers } from "@headless-paint/engine";
 import {
   type ViewTransform,
   createViewTransform,
@@ -9,7 +9,7 @@ import {
 import { useEffect, useRef } from "react";
 
 interface MinimapProps {
-  layer: Layer;
+  layers: readonly Layer[];
   viewTransform: ViewTransform;
   mainCanvasWidth: number;
   mainCanvasHeight: number;
@@ -18,7 +18,7 @@ interface MinimapProps {
 }
 
 export function Minimap({
-  layer,
+  layers,
   viewTransform,
   mainCanvasWidth,
   mainCanvasHeight,
@@ -27,11 +27,14 @@ export function Minimap({
 }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // レイヤーのアスペクト比に合わせてミニマップサイズを計算
-  const aspectRatio = layer.width / layer.height;
+  // 最初のレイヤーのサイズを基準にする（全レイヤー同サイズ前提）
+  const layerWidth = layers[0]?.width ?? 1024;
+  const layerHeight = layers[0]?.height ?? 1024;
+
+  const aspectRatio = layerWidth / layerHeight;
   const width = maxWidth;
   const height = maxWidth / aspectRatio;
-  const scale = maxWidth / layer.width;
+  const scale = maxWidth / layerWidth;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: renderVersionはlayer内部のImageData更新を検知する再描画トリガー
   useEffect(() => {
@@ -44,30 +47,18 @@ export function Minimap({
     const dpr = window.devicePixelRatio;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
 
     // 背景
     ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // レイヤー全体を表示するための変換
-    const minimapTransform = zoom(createViewTransform(), scale, 0, 0);
-
-    // DPRを考慮した変換行列を作成
-    // renderLayerWithTransform内でsetTransformを使用するため、
-    // ctx.scale(dpr, dpr)がリセットされる。事前にDPRを適用する必要がある
-    const dprTransform = new Float32Array(minimapTransform) as ViewTransform;
-    dprTransform[0] *= dpr;
-    dprTransform[1] *= dpr;
-    dprTransform[3] *= dpr;
-    dprTransform[4] *= dpr;
-    dprTransform[6] *= dpr;
-    dprTransform[7] *= dpr;
-
-    renderLayerWithTransform(layer, ctx, dprTransform);
+    // 全可視レイヤーを合成表示
+    const minimapTransform = zoom(createViewTransform(), scale * dpr, 0, 0);
+    renderLayers(layers, ctx, minimapTransform);
 
     // メインビューの表示範囲を赤枠で表示
-    // メインキャンバスの4隅をLayer Spaceに変換
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const corners = [
       { x: 0, y: 0 },
       { x: mainCanvasWidth, y: 0 },
@@ -75,7 +66,6 @@ export function Minimap({
       { x: 0, y: mainCanvasHeight },
     ];
 
-    ctx.save();
     ctx.strokeStyle = "red";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -86,7 +76,6 @@ export function Minimap({
       if (!layerPoint) return;
 
       hasValidPoints = true;
-      // Layer Space → Minimap Space
       const mx = layerPoint.x * scale;
       const my = layerPoint.y * scale;
 
@@ -104,11 +93,14 @@ export function Minimap({
     ctx.restore();
 
     // 枠線
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.strokeStyle = "#ccc";
     ctx.lineWidth = 1;
     ctx.strokeRect(0, 0, width, height);
+    ctx.restore();
   }, [
-    layer,
+    layers,
     viewTransform,
     mainCanvasWidth,
     mainCanvasHeight,

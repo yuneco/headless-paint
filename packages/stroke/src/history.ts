@@ -1,7 +1,13 @@
 import type { Layer } from "@headless-paint/engine";
 import { createCheckpoint } from "./checkpoint";
-import type { Checkpoint, Command, HistoryConfig, HistoryState } from "./types";
-import { DEFAULT_HISTORY_CONFIG } from "./types";
+import type {
+  Checkpoint,
+  Command,
+  DrawCommand,
+  HistoryConfig,
+  HistoryState,
+} from "./types";
+import { DEFAULT_HISTORY_CONFIG, isDrawCommand } from "./types";
 
 /**
  * 新しい履歴状態を作成
@@ -22,13 +28,15 @@ export function createHistoryState(
 /**
  * コマンドを履歴に追加
  * - 現在位置より後のコマンドは削除される（Undo後の新操作）
- * - checkpointInterval ごとにチェックポイントを作成
+ * - 描画コマンド: checkpointInterval ごとにチェックポイントを作成
+ * - remove-layer: チェックポイントを強制作成
+ * - add-layer / reorder-layer: チェックポイント不要（layer=null）
  * - 最大履歴数を超えた場合は古いエントリを削除
  */
 export function pushCommand(
   state: HistoryState,
   command: Command,
-  layer: Layer,
+  layer: Layer | null,
   config: HistoryConfig = DEFAULT_HISTORY_CONFIG,
 ): HistoryState {
   // 現在位置より後のコマンドを削除
@@ -44,12 +52,20 @@ export function pushCommand(
   );
 
   // チェックポイント作成の判定
-  const shouldCreateCheckpoint =
-    (newIndex + 1) % config.checkpointInterval === 0;
-
-  if (shouldCreateCheckpoint) {
-    const checkpoint = createCheckpoint(layer, newIndex);
-    newCheckpoints = [...newCheckpoints, checkpoint];
+  if (layer !== null) {
+    if (command.type === "remove-layer") {
+      // remove-layer: 強制作成
+      const checkpoint = createCheckpoint(layer, newIndex);
+      newCheckpoints = [...newCheckpoints, checkpoint];
+    } else if (isDrawCommand(command)) {
+      // 描画コマンド: interval に従う
+      const shouldCreateCheckpoint =
+        (newIndex + 1) % config.checkpointInterval === 0;
+      if (shouldCreateCheckpoint) {
+        const checkpoint = createCheckpoint(layer, newIndex);
+        newCheckpoints = [...newCheckpoints, checkpoint];
+      }
+    }
 
     // 最大チェックポイント数を超えた場合は古いものを削除
     if (newCheckpoints.length > config.maxCheckpoints) {
@@ -127,12 +143,94 @@ export function redo(state: HistoryState): HistoryState {
 }
 
 /**
- * 現在位置に対応する最適なチェックポイントを取得
+ * 特定レイヤーの最適なチェックポイントを取得
+ */
+export function findBestCheckpointForLayer(
+  state: HistoryState,
+  layerId: string,
+): Checkpoint | undefined {
+  let bestCheckpoint: Checkpoint | undefined;
+  for (const cp of state.checkpoints) {
+    if (cp.layerId === layerId && cp.commandIndex <= state.currentIndex) {
+      if (!bestCheckpoint || cp.commandIndex > bestCheckpoint.commandIndex) {
+        bestCheckpoint = cp;
+      }
+    }
+  }
+  return bestCheckpoint;
+}
+
+/**
+ * 特定レイヤーのリプレイ対象コマンドを取得（描画コマンドのみ）
+ */
+export function getCommandsToReplayForLayer(
+  state: HistoryState,
+  layerId: string,
+  fromCheckpoint?: Checkpoint,
+): readonly DrawCommand[] {
+  const startIndex = fromCheckpoint ? fromCheckpoint.commandIndex + 1 : 0;
+  const commands: DrawCommand[] = [];
+  for (let i = startIndex; i <= state.currentIndex; i++) {
+    const cmd = state.commands[i];
+    if (isDrawCommand(cmd) && cmd.layerId === layerId) {
+      commands.push(cmd);
+    }
+  }
+  return commands;
+}
+
+/**
+ * 2つのindex間で影響するレイヤーIDセットを取得
+ */
+export function getAffectedLayerIds(
+  state: HistoryState,
+  fromIndex: number,
+  toIndex: number,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  const lo = Math.min(fromIndex, toIndex);
+  const hi = Math.max(fromIndex, toIndex);
+  for (let i = lo; i <= hi; i++) {
+    if (i < 0 || i >= state.commands.length) continue;
+    const cmd = state.commands[i];
+    if (isDrawCommand(cmd)) {
+      ids.add(cmd.layerId);
+    }
+  }
+  return ids;
+}
+
+/**
+ * 特定レイヤーのwrap-shift累積offsetを算出
+ */
+export function computeCumulativeOffsetForLayer(
+  state: HistoryState,
+  layerId: string,
+): { readonly x: number; readonly y: number } {
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i <= state.currentIndex; i++) {
+    const cmd = state.commands[i];
+    if (cmd.type === "wrap-shift" && cmd.layerId === layerId) {
+      x += cmd.dx;
+      y += cmd.dy;
+    }
+  }
+  const w = state.layerWidth;
+  const h = state.layerHeight;
+  return { x: ((x % w) + w) % w, y: ((y % h) + h) % h };
+}
+
+// ============================================================
+// 後方互換ヘルパー（削除予定の旧API — 内部テストで利用中のため残存）
+// ============================================================
+
+/**
+ * @deprecated Use findBestCheckpointForLayer instead
  */
 export function findBestCheckpoint(
   state: HistoryState,
 ): Checkpoint | undefined {
-  // currentIndex以下で最も近いチェックポイントを探す
   let bestCheckpoint: Checkpoint | undefined;
   for (const cp of state.checkpoints) {
     if (cp.commandIndex <= state.currentIndex) {
@@ -145,7 +243,7 @@ export function findBestCheckpoint(
 }
 
 /**
- * チェックポイント後にリプレイが必要なコマンドを取得
+ * @deprecated Use getCommandsToReplayForLayer instead
  */
 export function getCommandsToReplay(
   state: HistoryState,
@@ -156,7 +254,7 @@ export function getCommandsToReplay(
 }
 
 /**
- * 履歴からcumulative offsetを算出（currentIndexまでのwrap-shiftを合算）
+ * @deprecated Use computeCumulativeOffsetForLayer instead
  */
 export function computeCumulativeOffset(state: HistoryState): {
   readonly x: number;

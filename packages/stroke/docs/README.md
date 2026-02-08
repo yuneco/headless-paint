@@ -16,8 +16,8 @@ pnpm add @headless-paint/stroke
 
 1. **セッション管理**: 1本のストロークの進捗を管理
 2. **差分計算**: 前回からの変更点（newlyCommitted）を計算
-3. **履歴管理**: Undo/Redo機能の提供
-4. **StrokeCommand生成**: 履歴保存用のコマンド生成
+3. **履歴管理**: マルチレイヤー対応のUndo/Redo機能の提供
+4. **コマンド生成**: 描画コマンドおよび構造コマンド（レイヤー追加/削除/並び替え）の生成
 
 ### やってはいけないこと
 
@@ -37,59 +37,38 @@ stroke
 
 ```typescript
 import {
-  // セッション管理
   startStrokeSession,
   addPointToSession,
-  endStrokeSession,
-  // 履歴管理
+  createStrokeCommand,
   createHistoryState,
   pushCommand,
   undo,
-  redo,
   canUndo,
-  canRedo,
-  rebuildLayerState,
+  rebuildLayerFromHistory,
+  createAddLayerCommand,
+  isStructuralCommand,
 } from "@headless-paint/stroke";
-import { createLayer, clearLayer } from "@headless-paint/engine";
-import { compileFilterPipeline, processPoint } from "@headless-paint/input";
+import { createLayer } from "@headless-paint/engine";
 
-// 初期化
+// 初期化（全コマンドに layerId が付く）
 const layer = createLayer(1920, 1080);
 let historyState = createHistoryState(1920, 1080);
 
-// ストロークセッション開始
-function onPointerDown(filterOutput, strokeStyle, expandConfig) {
-  const result = startStrokeSession(filterOutput, strokeStyle, expandConfig);
-  sessionRef.current = result.state;
-  renderUpdate(result.renderUpdate); // 描画更新
-}
+// ストロークセッション → コマンド生成
+const command = createStrokeCommand(
+  layer.id, inputPoints, filterConfig, expandConfig,
+  color, lineWidth, sensitivity, pressureCurve, compositeOp
+);
+historyState = pushCommand(historyState, command, layer, config);
 
-// ストローク中
-function onPointerMove(filterOutput) {
-  const result = addPointToSession(sessionRef.current, filterOutput);
-  sessionRef.current = result.state;
-  renderUpdate(result.renderUpdate);
-}
+// レイヤー追加（構造コマンド）
+const addCmd = createAddLayerCommand(layer.id, 0, 1920, 1080, layer.meta);
+historyState = pushCommand(historyState, addCmd, null, config);
 
-// ストローク終了
-function onPointerUp(inputPoints, filterPipelineConfig) {
-  const command = endStrokeSession(
-    sessionRef.current,
-    inputPoints,
-    filterPipelineConfig
-  );
-  sessionRef.current = null;
-
-  if (command) {
-    historyState = pushCommand(historyState, command, layer, config);
-  }
-}
-
-// Undo
+// Undo → レイヤー単位でリビルド
 if (canUndo(historyState)) {
   historyState = undo(historyState);
-  clearLayer(layer);
-  rebuildLayerState(layer, historyState);
+  rebuildLayerFromHistory(layer, historyState); // layer.id でフィルタ
 }
 ```
 
@@ -103,13 +82,18 @@ if (canUndo(historyState)) {
 |---|---|
 | `StrokeSessionState` | セッション状態 |
 | `RenderUpdate` | 描画更新データ |
-| `StrokeCommand` | ストロークコマンド |
-| `ClearCommand` | クリアコマンド |
-| `WrapShiftCommand` | ラップシフトコマンド `{ type: "wrap-shift", dx, dy }` |
-| `Command` | `StrokeCommand \| ClearCommand \| WrapShiftCommand` |
+| `StrokeCommand` | ストロークコマンド（`layerId` 付き） |
+| `ClearCommand` | クリアコマンド（`layerId` 付き） |
+| `WrapShiftCommand` | ラップシフトコマンド（`layerId` 付き） |
+| `DrawCommand` | `StrokeCommand \| ClearCommand \| WrapShiftCommand` |
+| `AddLayerCommand` | レイヤー追加コマンド |
+| `RemoveLayerCommand` | レイヤー削除コマンド |
+| `ReorderLayerCommand` | レイヤー並び替えコマンド |
+| `StructuralCommand` | `AddLayerCommand \| RemoveLayerCommand \| ReorderLayerCommand` |
+| `Command` | `DrawCommand \| StructuralCommand` |
 | `HistoryState` | 履歴状態 |
 | `HistoryConfig` | 履歴設定 |
-| `Checkpoint` | チェックポイント |
+| `Checkpoint` | チェックポイント（`layerId` 付き） |
 
 ### セッション管理
 
@@ -119,8 +103,13 @@ if (canUndo(historyState)) {
 |---|---|
 | `startStrokeSession(filterOutput, style, expand)` | セッション開始 |
 | `addPointToSession(state, filterOutput)` | 点を追加 |
-| `endStrokeSession(state, inputPoints, filterConfig)` | セッション終了 |
-| `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成 |
+| `endStrokeSession(state, layerId, inputPoints, filterConfig)` | セッション終了（`layerId` 必須） |
+| `createStrokeCommand(layerId, inputPoints, ...)` | ストロークコマンドを直接作成 |
+| `createClearCommand(layerId)` | クリアコマンドを作成 |
+| `createWrapShiftCommand(layerId, dx, dy)` | ラップシフトコマンドを作成 |
+| `createAddLayerCommand(layerId, insertIndex, width, height, meta)` | レイヤー追加コマンドを作成 |
+| `createRemoveLayerCommand(layerId, removedIndex)` | レイヤー削除コマンドを作成 |
+| `createReorderLayerCommand(layerId, fromIndex, toIndex)` | レイヤー並び替えコマンドを作成 |
 
 ### 履歴管理
 
@@ -129,13 +118,18 @@ if (canUndo(historyState)) {
 | 関数 | 説明 |
 |---|---|
 | `createHistoryState(width, height)` | 履歴状態を作成 |
-| `pushCommand(state, command, layer, config)` | コマンドを追加 |
+| `pushCommand(state, command, layer, config)` | コマンドを追加（`layer` は構造コマンド時 `null` 可） |
 | `undo(state)` | 1つ前に戻る |
 | `redo(state)` | 1つ先に進む |
 | `canUndo(state)` | Undo可能か |
 | `canRedo(state)` | Redo可能か |
-| `computeCumulativeOffset(state)` | 履歴中のwrap-shiftを合算して累積オフセットを返す |
-| `rebuildLayerState(layer, state)` | レイヤーを再構築 |
+| `rebuildLayerFromHistory(layer, state)` | `layer.id` に基づきレイヤーを再構築 |
+| `computeCumulativeOffsetForLayer(state, layerId)` | 指定レイヤーの累積オフセットを返す |
+| `findBestCheckpointForLayer(state, layerId)` | 指定レイヤーの最適なチェックポイントを検索 |
+| `getCommandsToReplayForLayer(state, layerId)` | 指定レイヤーのリプレイ対象コマンドを取得 |
+| `getAffectedLayerIds(state, fromIndex, toIndex)` | 指定範囲で影響を受けるレイヤーIDの集合を取得 |
+| `isDrawCommand(command)` | 描画コマンドの型ガード |
+| `isStructuralCommand(command)` | 構造コマンドの型ガード |
 
 ## アーキテクチャ
 
