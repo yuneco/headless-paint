@@ -15,10 +15,9 @@ const createTestStyle = (): StrokeStyle => ({
 
 const createNoneExpand = (): ReturnType<typeof compileExpand> => {
   const config: ExpandConfig = {
-    mode: "none",
-    origin: { x: 50, y: 50 },
-    angle: 0,
-    divisions: 1,
+    levels: [
+      { mode: "none", offset: { x: 50, y: 50 }, angle: 0, divisions: 1 },
+    ],
   };
   return compileExpand(config);
 };

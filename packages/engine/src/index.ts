@@ -6,6 +6,7 @@ export type {
   Color,
   CompiledExpand,
   ExpandConfig,
+  ExpandLevel,
   ExpandMode,
   Layer,
   LayerMeta,
@@ -39,6 +40,7 @@ export {
 } from "./render";
 export {
   compileExpand,
+  compileLocalTransforms,
   createDefaultExpandConfig,
   expandPoint,
   expandStroke,

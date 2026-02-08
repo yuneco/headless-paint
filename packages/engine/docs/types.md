@@ -117,15 +117,15 @@ type ExpandMode = "none" | "axial" | "radial" | "kaleidoscope";
 
 ---
 
-## ExpandConfig
+## ExpandLevel
 
-対称展開の設定。
+1レベル分の対称展開設定。
 
 ```typescript
-interface ExpandConfig {
+interface ExpandLevel {
   readonly mode: ExpandMode;
-  readonly origin: Point;
-  readonly angle: number;
+  readonly offset: Point;     // root: 絶対座標, child: 親からの相対座標
+  readonly angle: number;     // root: 座標系回転角度, child: autoAngle に加算される自前角度
   readonly divisions: number;
 }
 ```
@@ -133,17 +133,58 @@ interface ExpandConfig {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `mode` | `ExpandMode` | 展開モード |
-| `origin` | `Point` | 展開の中心点（Layer Space） |
-| `angle` | `number` | 反射軸の角度（ラジアン、0=垂直軸）。axial では反射軸の向き、kaleidoscope では各セクター内の反射軸の向きを制御（回転角には影響しない）。radial では無視される |
+| `offset` | `Point` | root: 絶対座標（展開の中心点）、child: 親からの相対座標 |
+| `angle` | `number` | root: 座標系の回転角度（ラジアン）、child: auto-angle に加算される自前角度 |
 | `divisions` | `number` | 分割数（radial/kaleidoscope で使用、2以上） |
 
 **使用例**:
 ```typescript
-const config: ExpandConfig = {
+const rootLevel: ExpandLevel = {
   mode: "radial",
-  origin: { x: 500, y: 500 },
+  offset: { x: 500, y: 500 },
   angle: 0,
   divisions: 6,
+};
+
+const childLevel: ExpandLevel = {
+  mode: "kaleidoscope",
+  offset: { x: 0, y: -80 },
+  angle: 0,
+  divisions: 4,
+};
+```
+
+---
+
+## ExpandConfig
+
+多段対称展開の設定。levels 配列の各要素が1段の展開を定義する。
+
+```typescript
+interface ExpandConfig {
+  readonly levels: readonly ExpandLevel[];
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `levels` | `readonly ExpandLevel[]` | 展開レベルの配列。1要素で従来の単一レベル展開と同等 |
+
+**使用例**:
+```typescript
+// 単一レベル
+const config: ExpandConfig = {
+  levels: [
+    { mode: "radial", offset: { x: 500, y: 500 }, angle: 0, divisions: 6 },
+  ],
+};
+
+// 多段展開
+const multiConfig: ExpandConfig = {
+  levels: [
+    { mode: "radial", offset: { x: 400, y: 300 }, angle: 0, divisions: 3 },
+    { mode: "kaleidoscope", offset: { x: 0, y: -80 }, angle: 0, divisions: 4 },
+  ],
 };
 ```
 

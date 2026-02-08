@@ -45,6 +45,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
+| `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
 
@@ -91,6 +92,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `compileExpand(config)` | 展開設定をコンパイル |
+| `compileLocalTransforms(mode, divisions)` | 1レベル分のローカル回転/反射行列を生成 |
 | `expandPoint(point, compiled)` | 単一点を展開 |
 | `expandStroke(points, compiled)` | ストローク全体を展開（Point版） |
 | `expandStrokePoints(points, compiled)` | ストローク全体を展開（StrokePoint版、pressure保持） |

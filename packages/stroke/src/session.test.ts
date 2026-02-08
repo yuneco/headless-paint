@@ -19,10 +19,14 @@ describe("session", () => {
   };
 
   const expandConfig = {
-    mode: "none" as const,
-    origin: { x: 100, y: 100 },
-    angle: 0,
-    divisions: 1,
+    levels: [
+      {
+        mode: "none" as const,
+        offset: { x: 100, y: 100 },
+        angle: 0,
+        divisions: 1,
+      },
+    ],
   };
 
   const filterPipeline = { filters: [] };

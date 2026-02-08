@@ -1,4 +1,4 @@
-import type { ExpandMode, PatternMode } from "@headless-paint/engine";
+import type { ExpandMode, PatternMode, Point } from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
 import type { GUI } from "lil-gui";
 import { useEffect, useRef } from "react";
@@ -44,9 +44,18 @@ export function DebugPanel({
   });
 
   const expandDataRef = useRef({
-    mode: expand.config.mode,
-    divisions: expand.config.divisions,
-    angleDeg: (expand.config.angle * 180) / Math.PI,
+    mode: expand.config.levels[0].mode,
+    divisions: expand.config.levels[0].divisions,
+    angleDeg: (expand.config.levels[0].angle * 180) / Math.PI,
+  });
+
+  const subExpandDataRef = useRef({
+    enabled: expand.subEnabled,
+    mode: expand.config.levels[1]?.mode ?? "radial",
+    divisions: expand.config.levels[1]?.divisions ?? 4,
+    angleDeg: ((expand.config.levels[1]?.angle ?? 0) * 180) / Math.PI,
+    offsetX: expand.config.levels[1]?.offset.x ?? 0,
+    offsetY: expand.config.levels[1]?.offset.y ?? -80,
   });
 
   const smoothingDataRef = useRef({
@@ -148,6 +157,66 @@ export function DebugPanel({
         .onChange((value: number) => {
           expandRef.current.setAngle((value * Math.PI) / 180);
         });
+
+      const subExpandFolder = expandFolder.addFolder("Sub Symmetry");
+
+      subExpandFolder
+        .add(subExpandDataRef.current, "enabled")
+        .name("Enabled")
+        .listen()
+        .onChange((value: boolean) => {
+          expandRef.current.setSubEnabled(value);
+        });
+
+      subExpandFolder
+        .add(subExpandDataRef.current, "mode", EXPAND_MODES)
+        .name("Mode")
+        .listen()
+        .onChange((value: ExpandMode) => {
+          expandRef.current.setSubMode(value);
+        });
+
+      subExpandFolder
+        .add(subExpandDataRef.current, "divisions", 2, 12, 1)
+        .name("Divisions")
+        .listen()
+        .onChange((value: number) => {
+          expandRef.current.setSubDivisions(value);
+        });
+
+      subExpandFolder
+        .add(subExpandDataRef.current, "angleDeg", 0, 360, 1)
+        .name("Angle (deg)")
+        .listen()
+        .onChange((value: number) => {
+          expandRef.current.setSubAngle((value * Math.PI) / 180);
+        });
+
+      subExpandFolder
+        .add(subExpandDataRef.current, "offsetX", -200, 200, 1)
+        .name("Offset X")
+        .listen()
+        .onChange((value: number) => {
+          const current = expandRef.current.config.levels[1]?.offset ?? {
+            x: 0,
+            y: -80,
+          };
+          expandRef.current.setSubOffset({ x: value, y: current.y } as Point);
+        });
+
+      subExpandFolder
+        .add(subExpandDataRef.current, "offsetY", -200, 200, 1)
+        .name("Offset Y")
+        .listen()
+        .onChange((value: number) => {
+          const current = expandRef.current.config.levels[1]?.offset ?? {
+            x: 0,
+            y: -80,
+          };
+          expandRef.current.setSubOffset({ x: current.x, y: value } as Point);
+        });
+
+      subExpandFolder.open();
 
       expandFolder.open();
 
@@ -272,10 +341,23 @@ export function DebugPanel({
 
   // Sync hook state → lil-gui data
   useEffect(() => {
-    expandDataRef.current.mode = expand.config.mode;
-    expandDataRef.current.divisions = expand.config.divisions;
-    expandDataRef.current.angleDeg = (expand.config.angle * 180) / Math.PI;
+    expandDataRef.current.mode = expand.config.levels[0].mode;
+    expandDataRef.current.divisions = expand.config.levels[0].divisions;
+    expandDataRef.current.angleDeg =
+      (expand.config.levels[0].angle * 180) / Math.PI;
   }, [expand.config]);
+
+  useEffect(() => {
+    subExpandDataRef.current.enabled = expand.subEnabled;
+    const sub = expand.config.levels[1];
+    if (sub) {
+      subExpandDataRef.current.mode = sub.mode;
+      subExpandDataRef.current.divisions = sub.divisions;
+      subExpandDataRef.current.angleDeg = (sub.angle * 180) / Math.PI;
+      subExpandDataRef.current.offsetX = sub.offset.x;
+      subExpandDataRef.current.offsetY = sub.offset.y;
+    }
+  }, [expand.config, expand.subEnabled]);
 
   useEffect(() => {
     smoothingDataRef.current.enabled = smoothing.enabled;

@@ -575,9 +575,9 @@ export function App() {
     sessionRef,
     onUndo: handleUndo,
     onRedo: handleRedo,
-    expandMode: expand.config.mode,
+    expandMode: expand.config.levels[0].mode,
     setExpandMode: expand.setMode,
-    expandDivisions: expand.config.divisions,
+    expandDivisions: expand.config.levels[0].divisions,
     setExpandDivisions: expand.setDivisions,
     lineWidth: penSettings.lineWidth,
     setLineWidth: penSettings.setLineWidth,
@@ -645,6 +645,7 @@ export function App() {
         transform={transform}
         width={viewWidth}
         height={viewHeight}
+        onSubOffsetChange={expand.setSubOffset}
       />
 
       {/* ツールバーを上部中央にオーバーレイ配置 */}
