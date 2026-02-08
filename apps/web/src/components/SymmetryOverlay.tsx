@@ -83,19 +83,23 @@ export function SymmetryOverlay({
       ctx.fill();
     }
 
+    // ガイド角度にビュー回転を加算（レイヤー空間→スクリーン空間）
+    const viewRotation = Math.atan2(transform[1], transform[0]);
+    const screenAngle = root.angle + viewRotation;
+
     if (root.mode === "axial") {
       ctx.setLineDash(GUIDE_DASH);
-      drawAxisLine(ctx, originScreen, root.angle, width, height);
+      drawAxisLine(ctx, originScreen, screenAngle, width, height);
     } else if (root.mode === "radial") {
       ctx.setLineDash([]);
       for (let i = 0; i < root.divisions; i++) {
-        const angle = (Math.PI * 2 * i) / root.divisions + root.angle;
+        const angle = (Math.PI * 2 * i) / root.divisions + screenAngle;
         drawRayLine(ctx, originScreen, angle, width, height);
       }
     } else if (root.mode === "kaleidoscope") {
       const totalRays = root.divisions * 2;
       for (let i = 0; i < totalRays; i++) {
-        const angle = (Math.PI * i) / root.divisions + root.angle;
+        const angle = (Math.PI * i) / root.divisions + screenAngle;
         ctx.setLineDash(i % 2 === 0 ? [] : GUIDE_DASH);
         drawRayLine(ctx, originScreen, angle, width, height);
       }
@@ -108,7 +112,10 @@ export function SymmetryOverlay({
       const child = config.levels[1];
 
       const childEffectiveAngle =
-        root.angle + Math.atan2(child.offset.y, child.offset.x) + child.angle;
+        root.angle +
+        Math.atan2(child.offset.y, child.offset.x) +
+        child.angle +
+        viewRotation;
 
       ctx.strokeStyle = style.subColor;
       ctx.fillStyle = style.subColor;
