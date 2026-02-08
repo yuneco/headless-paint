@@ -46,6 +46,26 @@ function shouldAcceptPoint(
 
 ---
 
+## createSamplingState
+
+間引き状態の初期値を作成する。
+
+```typescript
+function createSamplingState(): SamplingState
+```
+
+**戻り値**: `SamplingState` - `{ lastPoint: null, lastTimestamp: null }`
+
+**使用例**:
+```typescript
+import { createSamplingState } from "@headless-paint/input";
+
+// ストローク開始時に初期状態を作成
+let samplingState = createSamplingState();
+```
+
+---
+
 ## 使用例
 
 ### 基本的な使用パターン

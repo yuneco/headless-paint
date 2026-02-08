@@ -102,6 +102,7 @@ if (canUndo(historyState)) {
 | 型 | 説明 |
 |---|---|
 | `StrokeSessionState` | セッション状態 |
+| `StrokeSessionResult` | セッション操作の結果（state + renderUpdate） |
 | `RenderUpdate` | 描画更新データ |
 | `StrokeCommand` | ストロークコマンド |
 | `ClearCommand` | クリアコマンド |

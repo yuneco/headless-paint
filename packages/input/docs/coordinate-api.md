@@ -133,7 +133,7 @@ function onPointerMove(e: PointerEvent) {
   const screenDelta = { x: e.movementX, y: e.movementY };
 
   // 回転成分のみを逆適用（スケールは無視）
-  const angle = getRotationAngle(transform);
+  const { rotation: angle } = decomposeTransform(transform);
   const cos = Math.cos(-angle);
   const sin = Math.sin(-angle);
   const layerDx = screenDelta.x * cos - screenDelta.y * sin;

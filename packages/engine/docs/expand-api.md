@@ -169,7 +169,7 @@ function createDefaultExpandConfig(width: number, height: number): ExpandConfig
 **使用例**:
 ```typescript
 const config = createDefaultExpandConfig(1920, 1080);
-// { mode: "none", origin: { x: 960, y: 540 }, angle: 0, divisions: 1 }
+// { mode: "none", origin: { x: 960, y: 540 }, angle: 0, divisions: 6 }
 ```
 
 ---

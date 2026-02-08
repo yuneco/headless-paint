@@ -9,7 +9,7 @@
 import type { InputPoint, FilterPipelineConfig, FilterOutput } from "@headless-paint/input";
 
 // @headless-paint/engine から
-import type { ExpandConfig, Color, StrokePoint } from "@headless-paint/engine";
+import type { ExpandConfig, Color, StrokePoint, PressureCurve, StrokeStyle } from "@headless-paint/engine";
 // re-export
 export type { StrokeStyle } from "@headless-paint/engine";
 ```
@@ -151,6 +151,28 @@ interface ClearCommand {
   readonly timestamp: number;
 }
 ```
+
+---
+
+## WrapShiftCommand
+
+ラップシフトコマンド。
+
+```typescript
+interface WrapShiftCommand {
+  readonly type: "wrap-shift";
+  readonly dx: number;
+  readonly dy: number;
+  readonly timestamp: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"wrap-shift"` | コマンド種別 |
+| `dx` | `number` | X方向のシフト量 |
+| `dy` | `number` | Y方向のシフト量 |
+| `timestamp` | `number` | 作成時刻 |
 
 ---
 

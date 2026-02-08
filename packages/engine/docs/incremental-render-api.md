@@ -38,9 +38,10 @@
 
 ## RenderUpdate
 
-描画更新のデータ構造。strokeパッケージから渡される。
+描画更新のデータ構造。`@headless-paint/stroke` パッケージで定義・エクスポートされている（engine パッケージには含まれない）。
 
 ```typescript
+// @headless-paint/stroke で定義
 interface RenderUpdate {
   readonly newlyCommitted: readonly StrokePoint[];  // 今回新たに確定した点（pressure含む）
   readonly currentPending: readonly StrokePoint[];  // 現在のpending全体（pressure含む）
@@ -147,12 +148,22 @@ function composeLayers(
 ): void
 ```
 
+`ViewTransform` は `incremental-render.ts` で定義される独自型で、render-api.md の `mat3` ベースのビュー変換とは異なる:
+
+```typescript
+interface ViewTransform {
+  readonly scale: number;
+  readonly offsetX: number;
+  readonly offsetY: number;
+}
+```
+
 **引数**:
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `target` | `CanvasRenderingContext2D` | ○ | 出力先のコンテキスト |
 | `layers` | `readonly Layer[]` | ○ | 合成するレイヤー（下から順） |
-| `transform` | `ViewTransform` | - | ビュー変換（省略時は単位行列） |
+| `transform` | `ViewTransform` | - | ビュー変換（省略時は変換なし）。`{ scale, offsetX, offsetY }` 形式 |
 
 **動作**:
 1. ターゲットキャンバスをクリア

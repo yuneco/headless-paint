@@ -2,13 +2,15 @@
 
 ビュー変換を適用してレイヤーを Canvas に描画する関数群です。
 
-## ViewTransform
+## transform（mat3）
 
-`@headless-paint/input` パッケージで定義されるビュー変換行列。
-パン・ズーム・回転情報を含む 3x3 行列（gl-matrix の mat3 形式）。
+`@headless-paint/input` パッケージで `ViewTransform` として定義されるビュー変換行列。
+パン・ズーム・回転情報を含む 3x3 行列（gl-matrix の `mat3` 形式）。
 
 ```typescript
-import type { ViewTransform } from "@headless-paint/input";
+import type { mat3 } from "gl-matrix";
+// or
+import type { ViewTransform } from "@headless-paint/input";  // ViewTransform = mat3
 ```
 
 ---
@@ -20,8 +22,8 @@ import type { ViewTransform } from "@headless-paint/input";
 ```typescript
 function renderLayerWithTransform(
   layer: Layer,
-  ctx: CanvasRenderingContext2D,
-  transform: ViewTransform,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  transform: mat3,
 ): void
 ```
 
@@ -29,8 +31,8 @@ function renderLayerWithTransform(
 | 名前 | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `layer` | `Layer` | ○ | 描画するレイヤー |
-| `ctx` | `CanvasRenderingContext2D` | ○ | 描画先のコンテキスト |
-| `transform` | `ViewTransform` | ○ | 適用するビュー変換 |
+| `ctx` | `CanvasRenderingContext2D \| OffscreenCanvasRenderingContext2D` | ○ | 描画先のコンテキスト |
+| `transform` | `mat3` | ○ | 適用するビュー変換（gl-matrix の mat3 形式） |
 
 **処理内容**:
 1. `ctx.save()` で状態保存
@@ -81,7 +83,7 @@ interface RenderOptions {
 function renderLayers(
   layers: readonly Layer[],
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  transform: ViewTransform,
+  transform: mat3,
   options?: RenderOptions,
 ): void
 ```
@@ -91,7 +93,7 @@ function renderLayers(
 |---|---|---|---|
 | `layers` | `readonly Layer[]` | ○ | 描画するレイヤーの配列（背面から前面順） |
 | `ctx` | `CanvasRenderingContext2D \| OffscreenCanvasRenderingContext2D` | ○ | 描画先のコンテキスト |
-| `transform` | `ViewTransform` | ○ | 適用するビュー変換 |
+| `transform` | `mat3` | ○ | 適用するビュー変換（gl-matrix の mat3 形式） |
 | `options` | `RenderOptions` | - | 背景設定などのオプション |
 
 **処理内容**:

@@ -6,8 +6,8 @@
 
 ```typescript
 interface Point {
-  x: number;
-  y: number;
+  readonly x: number;
+  readonly y: number;
 }
 ```
 
@@ -24,7 +24,7 @@ const layerPoint: Point = { x: 50, y: 75 };
 ビュー変換を表す 3x3 行列。gl-matrix の `mat3` 形式。
 
 ```typescript
-type ViewTransform = Float32Array;  // 長さ 9 の配列
+type ViewTransform = mat3;  // gl-matrix の mat3 型
 ```
 
 **行列構造**:
@@ -53,8 +53,8 @@ transform = zoom(transform, 2.0, 320, 240);
 
 ```typescript
 interface SamplingConfig {
-  minDistance?: number;      // 最小距離（ピクセル）。デフォルト: 2
-  minTimeInterval?: number;  // 最小時間間隔（ミリ秒）。デフォルト: 0
+  readonly minDistance?: number;      // 最小距離（ピクセル）。デフォルト: 2
+  readonly minTimeInterval?: number;  // 最小時間間隔（ミリ秒）。デフォルト: 0
 }
 ```
 
@@ -85,8 +85,8 @@ const config: SamplingConfig = { minDistance: 2, minTimeInterval: 8 };
 
 ```typescript
 interface SamplingState {
-  lastPoint: Point | null;     // 最後に採用した座標
-  lastTimestamp: number | null; // 最後に採用した時刻
+  readonly lastPoint: Point | null;     // 最後に採用した座標
+  readonly lastTimestamp: number | null; // 最後に採用した時刻
 }
 ```
 
@@ -155,10 +155,10 @@ console.log(`Translation: (${components.translateX}, ${components.translateY})`)
 
 ```typescript
 interface InputPoint {
-  x: number;
-  y: number;
-  pressure?: number;   // 筆圧（0.0-1.0、オプション）
-  timestamp: number;   // タイムスタンプ（ミリ秒）
+  readonly x: number;
+  readonly y: number;
+  readonly pressure?: number;   // 筆圧（0.0-1.0、オプション）
+  readonly timestamp: number;   // タイムスタンプ（ミリ秒）
 }
 ```
 

@@ -62,7 +62,7 @@ function pushCommand(
   state: HistoryState,
   command: Command,
   layer: Layer,
-  config: HistoryConfig
+  config?: HistoryConfig
 ): HistoryState
 ```
 
@@ -72,7 +72,7 @@ function pushCommand(
 | `state` | `HistoryState` | ○ | 現在の履歴状態 |
 | `command` | `Command` | ○ | 追加するコマンド |
 | `layer` | `Layer` | ○ | 現在のレイヤー（チェックポイント作成用） |
-| `config` | `HistoryConfig` | ○ | 履歴設定 |
+| `config` | `HistoryConfig` | - | 履歴設定（省略時は `DEFAULT_HISTORY_CONFIG`） |
 
 **戻り値**: `HistoryState` - 更新された履歴状態
 
@@ -229,8 +229,11 @@ function createStrokeCommand(
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
   expand: ExpandConfig,
-  color: Color,
-  lineWidth: number
+  color: StrokeStyle["color"],
+  lineWidth: number,
+  pressureSensitivity?: number,
+  pressureCurve?: PressureCurve,
+  compositeOperation?: GlobalCompositeOperation,
 ): StrokeCommand
 ```
 

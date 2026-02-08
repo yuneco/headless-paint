@@ -23,6 +23,7 @@ import {
   layerToScreen,
   // 間引き
   shouldAcceptPoint,
+  createSamplingState,
   // フィルタパイプライン
   compileFilterPipeline,
   createFilterPipelineState,
@@ -111,6 +112,7 @@ pipelineState = result.state;
 | 関数 | 説明 |
 |---|---|
 | `shouldAcceptPoint(point, timestamp, state, config)` | 間引き判定 |
+| `createSamplingState()` | 間引き状態の初期値を作成 |
 
 ### フィルタパイプライン
 
