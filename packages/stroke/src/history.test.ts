@@ -67,10 +67,9 @@ function createTestCommand(
     ],
     filterPipeline: { filters: [] },
     expand: {
-      mode: "none",
-      origin: { x: 50, y: 50 },
-      angle: 0,
-      divisions: 1,
+      levels: [
+        { mode: "none", offset: { x: 50, y: 50 }, angle: 0, divisions: 1 },
+      ],
     },
     color: { r: 0, g: 0, b: 0, a: 255 },
     lineWidth: 3,

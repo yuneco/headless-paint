@@ -36,11 +36,15 @@ export interface Layer {
 
 export type ExpandMode = "none" | "axial" | "radial" | "kaleidoscope";
 
-export interface ExpandConfig {
+export interface ExpandLevel {
   readonly mode: ExpandMode;
-  readonly origin: Point;
-  readonly angle: number;
+  readonly offset: Point; // root: 絶対座標, child: 親からの相対座標
+  readonly angle: number; // root: 座標系回転角度, child: autoAngle に加算される自前角度
   readonly divisions: number;
+}
+
+export interface ExpandConfig {
+  readonly levels: readonly ExpandLevel[];
 }
 
 export interface CompiledExpand {
