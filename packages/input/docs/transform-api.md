@@ -216,3 +216,88 @@ console.log(`Translate: (${components.translateX}, ${components.translateY})`);
 **注意**:
 - `zoom()` は常に均等スケールを適用するため、通常は `scaleX === scaleY`
 - シアー（せん断）変換を含む行列では正確な分解ができない場合がある
+
+---
+
+## fitToView
+
+レイヤー全体がビューポートに収まるビュー変換を作成する。初期表示・リセット時に使用する。
+
+```typescript
+function fitToView(
+  viewWidth: number,
+  viewHeight: number,
+  layerWidth: number,
+  layerHeight: number,
+): ViewTransform
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `viewWidth` | `number` | ○ | ビューポートの幅（Screen Space） |
+| `viewHeight` | `number` | ○ | ビューポートの高さ（Screen Space） |
+| `layerWidth` | `number` | ○ | レイヤーの幅（Layer Space） |
+| `layerHeight` | `number` | ○ | レイヤーの高さ（Layer Space） |
+
+**戻り値**: `ViewTransform` - レイヤーをビュー中央にフィットさせるビュー変換
+
+**注意**:
+- アスペクト比を保ったまま、ビューポートに収まる最大スケールを適用する
+- レイヤーとビューポートのアスペクト比が異なる場合、短い辺の方向に中央寄せされる
+
+**使用例**:
+```typescript
+import { fitToView } from "@headless-paint/input";
+
+// 1024x768 のレイヤーを 800x600 のビューポートにフィット
+const transform = fitToView(800, 600, 1024, 768);
+
+// React での初期表示
+const setInitialFit = useCallback(
+  (viewW: number, viewH: number, layerW: number, layerH: number) => {
+    setTransform(fitToView(viewW, viewH, layerW, layerH));
+  },
+  [],
+);
+```
+
+---
+
+## applyDpr
+
+ビュー変換に Device Pixel Ratio スケーリングを適用する。Canvas API の描画時に、論理ピクセルと物理ピクセルの対応を取るために使用する。
+
+```typescript
+function applyDpr(
+  transform: ViewTransform,
+  dpr: number,
+): ViewTransform
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `transform` | `ViewTransform` | ○ | 適用元のビュー変換 |
+| `dpr` | `number` | ○ | Device Pixel Ratio（通常は `window.devicePixelRatio`） |
+
+**戻り値**: `ViewTransform` - DPR スケーリングが適用された新しいビュー変換（元の変換は変更されない）
+
+**注意**:
+- Canvas の物理ピクセルサイズを `width * dpr`, `height * dpr` に設定した上で、この関数で変換した行列を `renderLayers` 等に渡す
+- 元のビュー変換は座標変換（`screenToLayer` 等）にそのまま使い、DPR 適用済みの変換は描画にのみ使用する
+
+**使用例**:
+```typescript
+import { applyDpr } from "@headless-paint/input";
+import { renderLayers } from "@headless-paint/engine";
+
+// Canvas の物理サイズを DPR に合わせる
+const dpr = window.devicePixelRatio;
+canvas.width = width * dpr;
+canvas.height = height * dpr;
+ctx.scale(dpr, dpr);
+
+// DPR 適用済みの変換で描画
+renderLayers(layers, ctx, applyDpr(transform, dpr), { background });
+```

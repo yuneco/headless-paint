@@ -23,12 +23,14 @@ export type {
 
 // Transform functions
 export {
+  applyDpr,
   createViewTransform,
-  pan,
-  zoom,
-  rotate,
-  invertViewTransform,
   decomposeTransform,
+  fitToView,
+  invertViewTransform,
+  pan,
+  rotate,
+  zoom,
 } from "./transform";
 
 // Coordinate functions

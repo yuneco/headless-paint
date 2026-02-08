@@ -9,7 +9,7 @@ import {
   renderPatternPreview,
 } from "@headless-paint/engine";
 import type { InputPoint, ViewTransform } from "@headless-paint/input";
-import { layerToScreen } from "@headless-paint/input";
+import { applyDpr, layerToScreen } from "@headless-paint/input";
 import { useEffect, useRef } from "react";
 import { UI_BACKGROUND_COLOR, UI_LAYER_BORDER_COLOR } from "../config";
 import { type ToolType, usePointerHandler } from "../hooks/usePointerHandler";
@@ -92,15 +92,7 @@ export function PaintCanvas({
       }
     }
 
-    const dprTransform = new Float32Array(transform) as ViewTransform;
-    dprTransform[0] *= dpr;
-    dprTransform[1] *= dpr;
-    dprTransform[3] *= dpr;
-    dprTransform[4] *= dpr;
-    dprTransform[6] *= dpr;
-    dprTransform[7] *= dpr;
-
-    renderLayers(layers, ctx, dprTransform, { background });
+    renderLayers(layers, ctx, applyDpr(transform, dpr), { background });
 
     const layerCorners = [
       { x: 0, y: 0 },

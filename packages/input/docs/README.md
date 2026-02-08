@@ -17,6 +17,8 @@ import {
   pan,
   zoom,
   rotate,
+  fitToView,
+  applyDpr,
   decomposeTransform,
   // 座標変換
   screenToLayer,
@@ -93,6 +95,8 @@ pipelineState = result.state;
 | `pan(transform, dx, dy)` | 平行移動 |
 | `zoom(transform, scale, cx, cy)` | 中心点基準でズーム |
 | `rotate(transform, angle, cx, cy)` | 中心点基準で回転 |
+| `fitToView(viewW, viewH, layerW, layerH)` | ビューポートにフィットする変換を作成 |
+| `applyDpr(transform, dpr)` | Device Pixel Ratio スケーリングを適用 |
 | `invertViewTransform(transform)` | 逆変換を計算 |
 | `decomposeTransform(transform)` | 行列から変換成分を抽出 |
 
@@ -142,13 +146,19 @@ pipelineState = result.state;
 
 ## Retina対応
 
-アプリ層で `ctx.scale(dpr, dpr)` を適用することで、`offsetX/Y` をそのまま Screen Space として使用できます。
+アプリ層で `ctx.scale(dpr, dpr)` を適用することで、`offsetX/Y` をそのまま Screen Space として使用できます。描画時のビュー変換には `applyDpr` で DPR スケーリングを適用してください。
 
 ```typescript
+import { applyDpr } from "@headless-paint/input";
+import { renderLayers } from "@headless-paint/engine";
+
 const dpr = window.devicePixelRatio;
 canvas.width = logicalWidth * dpr;
 canvas.height = logicalHeight * dpr;
 canvas.style.width = `${logicalWidth}px`;
 canvas.style.height = `${logicalHeight}px`;
 ctx.scale(dpr, dpr);
+
+// 描画時: DPR 適用済みの変換を使用
+renderLayers(layers, ctx, applyDpr(transform, dpr), { background });
 ```

@@ -118,6 +118,51 @@ export function invertViewTransform(
 }
 
 /**
+ * レイヤー全体がビューポートに収まるビュー変換を作成する。
+ * 初期表示・リセット時に使用する。
+ *
+ * @param viewWidth ビューポートの幅（Screen Space）
+ * @param viewHeight ビューポートの高さ（Screen Space）
+ * @param layerWidth レイヤーの幅（Layer Space）
+ * @param layerHeight レイヤーの高さ（Layer Space）
+ * @returns レイヤーをビュー中央にフィットさせるビュー変換
+ */
+export function fitToView(
+  viewWidth: number,
+  viewHeight: number,
+  layerWidth: number,
+  layerHeight: number,
+): ViewTransform {
+  const scale = Math.min(viewWidth / layerWidth, viewHeight / layerHeight);
+  const offsetX = (viewWidth - layerWidth * scale) / 2;
+  const offsetY = (viewHeight - layerHeight * scale) / 2;
+
+  let t = createViewTransform();
+  t = zoom(t, scale, 0, 0);
+  t = pan(t, offsetX, offsetY);
+  return t;
+}
+
+/**
+ * ビュー変換に Device Pixel Ratio スケーリングを適用する。
+ * Canvas API の描画時に、論理ピクセルと物理ピクセルの対応を取るために使用する。
+ *
+ * @param transform 適用元のビュー変換
+ * @param dpr Device Pixel Ratio（通常は `window.devicePixelRatio`）
+ * @returns DPR スケーリングが適用された新しいビュー変換
+ */
+export function applyDpr(transform: ViewTransform, dpr: number): ViewTransform {
+  const result = mat3.clone(transform);
+  result[0] *= dpr;
+  result[1] *= dpr;
+  result[3] *= dpr;
+  result[4] *= dpr;
+  result[6] *= dpr;
+  result[7] *= dpr;
+  return result;
+}
+
+/**
  * ビュー変換行列を個別の変換成分に分解
  *
  * 行列構造（column-major, gl-matrix形式）:

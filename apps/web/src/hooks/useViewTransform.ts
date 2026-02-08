@@ -1,6 +1,7 @@
 import {
   type ViewTransform,
   createViewTransform,
+  fitToView,
   pan,
   rotate,
   zoom,
@@ -49,17 +50,7 @@ export function useViewTransform(): UseViewTransformResult {
 
   const setInitialFit = useCallback(
     (viewW: number, viewH: number, layerW: number, layerH: number) => {
-      // レイヤー全体がビューに収まる最大スケールを求める
-      const scale = Math.min(viewW / layerW, viewH / layerH);
-      // スケール後のレイヤーをビュー中央に配置するためのオフセット
-      const offsetX = (viewW - layerW * scale) / 2;
-      const offsetY = (viewH - layerH * scale) / 2;
-
-      // identity → zoom(原点基準) → pan でフィット用 transform を構築
-      let t = createViewTransform();
-      t = zoom(t, scale, 0, 0);
-      t = pan(t, offsetX, offsetY);
-      setTransform(t);
+      setTransform(fitToView(viewW, viewH, layerW, layerH));
     },
     [],
   );
