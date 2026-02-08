@@ -7,6 +7,7 @@ export type {
   DrawCommand,
   HistoryConfig,
   HistoryState,
+  LayerDrawCommand,
   RemoveLayerCommand,
   RenderUpdate,
   ReorderLayerCommand,
@@ -20,6 +21,7 @@ export type {
 export {
   DEFAULT_HISTORY_CONFIG,
   isDrawCommand,
+  isLayerDrawCommand,
   isStructuralCommand,
 } from "./types";
 
@@ -41,7 +43,6 @@ export {
   canRedo,
   canUndo,
   computeCumulativeOffset,
-  computeCumulativeOffsetForLayer,
   createHistoryState,
   findBestCheckpoint,
   findBestCheckpointForLayer,

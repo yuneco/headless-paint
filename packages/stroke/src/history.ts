@@ -7,7 +7,11 @@ import type {
   HistoryConfig,
   HistoryState,
 } from "./types";
-import { DEFAULT_HISTORY_CONFIG, isDrawCommand } from "./types";
+import {
+  DEFAULT_HISTORY_CONFIG,
+  isDrawCommand,
+  isLayerDrawCommand,
+} from "./types";
 
 /**
  * 新しい履歴状態を作成
@@ -172,7 +176,9 @@ export function getCommandsToReplayForLayer(
   const commands: DrawCommand[] = [];
   for (let i = startIndex; i <= state.currentIndex; i++) {
     const cmd = state.commands[i];
-    if (isDrawCommand(cmd) && cmd.layerId === layerId) {
+    if (cmd.type === "wrap-shift") {
+      commands.push(cmd);
+    } else if (isLayerDrawCommand(cmd) && cmd.layerId === layerId) {
       commands.push(cmd);
     }
   }
@@ -193,7 +199,7 @@ export function getAffectedLayerIds(
   for (let i = lo; i <= hi; i++) {
     if (i < 0 || i >= state.commands.length) continue;
     const cmd = state.commands[i];
-    if (isDrawCommand(cmd)) {
+    if (isLayerDrawCommand(cmd)) {
       ids.add(cmd.layerId);
     }
   }
@@ -201,17 +207,17 @@ export function getAffectedLayerIds(
 }
 
 /**
- * 特定レイヤーのwrap-shift累積offsetを算出
+ * wrap-shift の累積オフセットを算出（グローバル、全レイヤー共通）
  */
-export function computeCumulativeOffsetForLayer(
-  state: HistoryState,
-  layerId: string,
-): { readonly x: number; readonly y: number } {
+export function computeCumulativeOffset(state: HistoryState): {
+  readonly x: number;
+  readonly y: number;
+} {
   let x = 0;
   let y = 0;
   for (let i = 0; i <= state.currentIndex; i++) {
     const cmd = state.commands[i];
-    if (cmd.type === "wrap-shift" && cmd.layerId === layerId) {
+    if (cmd.type === "wrap-shift") {
       x += cmd.dx;
       y += cmd.dy;
     }
@@ -251,25 +257,4 @@ export function getCommandsToReplay(
 ): readonly Command[] {
   const startIndex = fromCheckpoint ? fromCheckpoint.commandIndex + 1 : 0;
   return state.commands.slice(startIndex, state.currentIndex + 1);
-}
-
-/**
- * @deprecated Use computeCumulativeOffsetForLayer instead
- */
-export function computeCumulativeOffset(state: HistoryState): {
-  readonly x: number;
-  readonly y: number;
-} {
-  let x = 0;
-  let y = 0;
-  for (let i = 0; i <= state.currentIndex; i++) {
-    const cmd = state.commands[i];
-    if (cmd.type === "wrap-shift") {
-      x += cmd.dx;
-      y += cmd.dy;
-    }
-  }
-  const w = state.layerWidth;
-  const h = state.layerHeight;
-  return { x: ((x % w) + w) % w, y: ((y % h) + h) % h };
 }

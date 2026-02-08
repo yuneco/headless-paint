@@ -9,6 +9,7 @@ export interface LayerEntry {
 
 interface UseLayersReturn {
   entries: readonly LayerEntry[];
+  entriesRef: React.RefObject<LayerEntry[]>;
   activeLayerId: string | null;
   activeEntry: LayerEntry | undefined;
   addLayer: () => { entry: LayerEntry; insertIndex: number };
@@ -187,6 +188,7 @@ export function useLayers(width: number, height: number): UseLayersReturn {
 
   return {
     entries,
+    entriesRef,
     activeLayerId,
     activeEntry,
     addLayer,

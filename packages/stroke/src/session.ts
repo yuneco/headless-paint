@@ -216,19 +216,16 @@ export function createClearCommand(layerId: string): {
  * ラップシフトコマンドを作成する（ヘルパー関数）
  */
 export function createWrapShiftCommand(
-  layerId: string,
   dx: number,
   dy: number,
 ): {
   type: "wrap-shift";
-  layerId: string;
   dx: number;
   dy: number;
   timestamp: number;
 } {
   return {
     type: "wrap-shift",
-    layerId,
     dx,
     dy,
     timestamp: Date.now(),

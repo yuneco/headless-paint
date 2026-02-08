@@ -3,7 +3,6 @@ import {
   canRedo,
   canUndo,
   computeCumulativeOffset,
-  computeCumulativeOffsetForLayer,
   createHistoryState,
   findBestCheckpoint,
   findBestCheckpointForLayer,
@@ -563,6 +562,38 @@ describe("history", () => {
       expect(toReplay[1].type).toBe("stroke");
     });
 
+    it("should include wrap-shift commands for all layers (global)", () => {
+      const wrapShift: WrapShiftCommand = {
+        type: "wrap-shift",
+        dx: 10,
+        dy: 20,
+        timestamp: 1005,
+      };
+      const commands: Command[] = [
+        createTestCommand(1000, "layer_1"),
+        wrapShift,
+        createTestCommand(1002, "layer_2"),
+      ];
+      const state: HistoryState = {
+        commands,
+        checkpoints: [],
+        currentIndex: 2,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      // wrap-shift はどのレイヤーのリプレイにも含まれる
+      const forLayer1 = getCommandsToReplayForLayer(state, "layer_1");
+      expect(forLayer1).toHaveLength(2); // stroke + wrap-shift
+      expect(forLayer1[0].type).toBe("stroke");
+      expect(forLayer1[1].type).toBe("wrap-shift");
+
+      const forLayer2 = getCommandsToReplayForLayer(state, "layer_2");
+      expect(forLayer2).toHaveLength(2); // wrap-shift + stroke
+      expect(forLayer2[0].type).toBe("wrap-shift");
+      expect(forLayer2[1].type).toBe("stroke");
+    });
+
     it("should respect checkpoint range", () => {
       const commands: Command[] = [
         createTestCommand(1000, "layer_1"),
@@ -632,6 +663,29 @@ describe("history", () => {
       expect(ids.has("layer_1")).toBe(true);
     });
 
+    it("should not include wrap-shift in affected layer ids", () => {
+      const commands: Command[] = [
+        createTestCommand(1000, "layer_1"),
+        {
+          type: "wrap-shift",
+          dx: 10,
+          dy: 20,
+          timestamp: 1001,
+        } as WrapShiftCommand,
+      ];
+      const state: HistoryState = {
+        commands,
+        checkpoints: [],
+        currentIndex: 1,
+        layerWidth: 800,
+        layerHeight: 600,
+      };
+
+      const ids = getAffectedLayerIds(state, 0, 1);
+      expect(ids.size).toBe(1);
+      expect(ids.has("layer_1")).toBe(true);
+    });
+
     it("should return empty set for structural-only range", () => {
       const commands: Command[] = [
         {
@@ -664,13 +718,9 @@ describe("history", () => {
     });
   });
 
-  describe("computeCumulativeOffset (deprecated)", () => {
-    function createWrapShift(
-      dx: number,
-      dy: number,
-      layerId = "layer_1",
-    ): WrapShiftCommand {
-      return { type: "wrap-shift", layerId, dx, dy, timestamp: Date.now() };
+  describe("computeCumulativeOffset", () => {
+    function createWrapShift(dx: number, dy: number): WrapShiftCommand {
+      return { type: "wrap-shift", dx, dy, timestamp: Date.now() };
     }
 
     it("should return (0, 0) for empty history", () => {
@@ -757,44 +807,6 @@ describe("history", () => {
       };
       const offset = computeCumulativeOffset(state);
       expect(offset).toEqual({ x: 50, y: 100 });
-    });
-  });
-
-  describe("computeCumulativeOffsetForLayer", () => {
-    function createWrapShift(
-      dx: number,
-      dy: number,
-      layerId = "layer_1",
-    ): WrapShiftCommand {
-      return { type: "wrap-shift", layerId, dx, dy, timestamp: Date.now() };
-    }
-
-    it("should only sum wrap-shift for the target layer", () => {
-      const state: HistoryState = {
-        commands: [
-          createWrapShift(10, 20, "layer_1"),
-          createWrapShift(100, 200, "layer_2"),
-          createWrapShift(5, -10, "layer_1"),
-        ],
-        checkpoints: [],
-        currentIndex: 2,
-        layerWidth: 800,
-        layerHeight: 600,
-      };
-      const offset = computeCumulativeOffsetForLayer(state, "layer_1");
-      expect(offset).toEqual({ x: 15, y: 10 });
-    });
-
-    it("should ignore other layers wrap-shifts", () => {
-      const state: HistoryState = {
-        commands: [createWrapShift(10, 20, "layer_2")],
-        checkpoints: [],
-        currentIndex: 0,
-        layerWidth: 800,
-        layerHeight: 600,
-      };
-      const offset = computeCumulativeOffsetForLayer(state, "layer_1");
-      expect(offset).toEqual({ x: 0, y: 0 });
     });
   });
 });

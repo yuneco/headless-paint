@@ -60,13 +60,14 @@ export interface ClearCommand {
 
 export interface WrapShiftCommand {
   readonly type: "wrap-shift";
-  readonly layerId: string;
   readonly dx: number;
   readonly dy: number;
   readonly timestamp: number;
 }
 
-export type DrawCommand = StrokeCommand | ClearCommand | WrapShiftCommand;
+export type LayerDrawCommand = StrokeCommand | ClearCommand;
+
+export type DrawCommand = LayerDrawCommand | WrapShiftCommand;
 
 // ============================================================
 // Structural Commands (構造コマンド)
@@ -113,6 +114,10 @@ export function isDrawCommand(cmd: Command): cmd is DrawCommand {
   return (
     cmd.type === "stroke" || cmd.type === "clear" || cmd.type === "wrap-shift"
   );
+}
+
+export function isLayerDrawCommand(cmd: Command): cmd is LayerDrawCommand {
+  return cmd.type === "stroke" || cmd.type === "clear";
 }
 
 export function isStructuralCommand(cmd: Command): cmd is StructuralCommand {

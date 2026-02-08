@@ -296,7 +296,7 @@ export function DebugPanel({
 
       patternFolder.open();
 
-      const layerOffsetFolder = gui.addFolder("Layer Offset");
+      const layerOffsetFolder = gui.addFolder("Offset");
 
       layerOffsetFolder
         .add(layerOffsetDataRef.current, "offsetX")

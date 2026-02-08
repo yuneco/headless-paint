@@ -85,7 +85,8 @@ if (canUndo(historyState)) {
 | `RenderUpdate` | 描画更新データ |
 | `StrokeCommand` | ストロークコマンド（`layerId` 付き） |
 | `ClearCommand` | クリアコマンド（`layerId` 付き） |
-| `WrapShiftCommand` | ラップシフトコマンド（`layerId` 付き） |
+| `WrapShiftCommand` | ラップシフトコマンド（グローバル） |
+| `LayerDrawCommand` | レイヤー固有の描画コマンド（`layerId` 付き） |
 | `DrawCommand` | `StrokeCommand \| ClearCommand \| WrapShiftCommand` |
 | `AddLayerCommand` | レイヤー追加コマンド |
 | `RemoveLayerCommand` | レイヤー削除コマンド |
@@ -107,7 +108,7 @@ if (canUndo(historyState)) {
 | `endStrokeSession(state, layerId, inputPoints, filterConfig)` | セッション終了（`layerId` 必須） |
 | `createStrokeCommand(layerId, inputPoints, ...)` | ストロークコマンドを直接作成 |
 | `createClearCommand(layerId)` | クリアコマンドを作成 |
-| `createWrapShiftCommand(layerId, dx, dy)` | ラップシフトコマンドを作成 |
+| `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成（グローバル） |
 | `createAddLayerCommand(layerId, insertIndex, width, height, meta)` | レイヤー追加コマンドを作成 |
 | `createRemoveLayerCommand(layerId, removedIndex)` | レイヤー削除コマンドを作成 |
 | `createReorderLayerCommand(layerId, fromIndex, toIndex)` | レイヤー並び替えコマンドを作成 |
@@ -125,11 +126,12 @@ if (canUndo(historyState)) {
 | `canUndo(state)` | Undo可能か |
 | `canRedo(state)` | Redo可能か |
 | `rebuildLayerFromHistory(layer, state)` | `layer.id` に基づきレイヤーを再構築 |
-| `computeCumulativeOffsetForLayer(state, layerId)` | 指定レイヤーの累積オフセットを返す |
+| `computeCumulativeOffset(state)` | グローバルな累積オフセットを返す |
 | `findBestCheckpointForLayer(state, layerId)` | 指定レイヤーの最適なチェックポイントを検索 |
 | `getCommandsToReplayForLayer(state, layerId)` | 指定レイヤーのリプレイ対象コマンドを取得 |
 | `getAffectedLayerIds(state, fromIndex, toIndex)` | 指定範囲で影響を受けるレイヤーIDの集合を取得 |
 | `isDrawCommand(command)` | 描画コマンドの型ガード |
+| `isLayerDrawCommand(command)` | レイヤー固有の描画コマンドの型ガード |
 | `isStructuralCommand(command)` | 構造コマンドの型ガード |
 
 ## アーキテクチャ

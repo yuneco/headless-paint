@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isDrawCommand, isStructuralCommand } from "./types";
+import {
+  isDrawCommand,
+  isLayerDrawCommand,
+  isStructuralCommand,
+} from "./types";
 import type { Command } from "./types";
 
 describe("isDrawCommand", () => {
@@ -31,6 +35,38 @@ describe("isDrawCommand", () => {
   it("should return false for reorder-layer", () => {
     const cmd = { type: "reorder-layer" } as Command;
     expect(isDrawCommand(cmd)).toBe(false);
+  });
+});
+
+describe("isLayerDrawCommand", () => {
+  it("should return true for stroke", () => {
+    const cmd = { type: "stroke" } as Command;
+    expect(isLayerDrawCommand(cmd)).toBe(true);
+  });
+
+  it("should return true for clear", () => {
+    const cmd = { type: "clear" } as Command;
+    expect(isLayerDrawCommand(cmd)).toBe(true);
+  });
+
+  it("should return false for wrap-shift", () => {
+    const cmd = { type: "wrap-shift" } as Command;
+    expect(isLayerDrawCommand(cmd)).toBe(false);
+  });
+
+  it("should return false for add-layer", () => {
+    const cmd = { type: "add-layer" } as Command;
+    expect(isLayerDrawCommand(cmd)).toBe(false);
+  });
+
+  it("should return false for remove-layer", () => {
+    const cmd = { type: "remove-layer" } as Command;
+    expect(isLayerDrawCommand(cmd)).toBe(false);
+  });
+
+  it("should return false for reorder-layer", () => {
+    const cmd = { type: "reorder-layer" } as Command;
+    expect(isLayerDrawCommand(cmd)).toBe(false);
   });
 });
 

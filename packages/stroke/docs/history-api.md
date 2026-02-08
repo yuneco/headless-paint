@@ -61,7 +61,7 @@ const historyState = createHistoryState(1920, 1080);
 function pushCommand(
   state: HistoryState,
   command: Command,
-  layer: Layer,
+  layer: Layer | null,
   config?: HistoryConfig
 ): HistoryState
 ```
@@ -71,7 +71,7 @@ function pushCommand(
 |------|-----|------|------|
 | `state` | `HistoryState` | ○ | 現在の履歴状態 |
 | `command` | `Command` | ○ | 追加するコマンド |
-| `layer` | `Layer` | ○ | 現在のレイヤー（チェックポイント作成用） |
+| `layer` | `Layer \| null` | ○ | 現在のレイヤー（チェックポイント作成用）。wrap-shift や構造コマンドでは `null` を渡す |
 | `config` | `HistoryConfig` | - | 履歴設定（省略時は `DEFAULT_HISTORY_CONFIG`） |
 
 **戻り値**: `HistoryState` - 更新された履歴状態
@@ -226,6 +226,7 @@ function replayCommand(layer: Layer, command: Command): void
 
 ```typescript
 function createStrokeCommand(
+  layerId: string,
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
   expand: ExpandConfig,
@@ -308,6 +309,23 @@ function createReorderLayerCommand(
   toIndex: number,
 ): ReorderLayerCommand
 ```
+
+---
+
+## computeCumulativeOffset
+
+wrap-shift の累積オフセットを算出する（グローバル、全レイヤー共通）。
+
+```typescript
+function computeCumulativeOffset(state: HistoryState): { readonly x: number; readonly y: number }
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `state` | `HistoryState` | ○ | 現在の履歴状態 |
+
+**戻り値**: `{ x, y }` - 正規化された累積オフセット（`[0, width)`, `[0, height)` の範囲）
 
 ---
 

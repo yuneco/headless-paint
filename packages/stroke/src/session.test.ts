@@ -227,11 +227,10 @@ describe("session", () => {
   });
 
   describe("createWrapShiftCommand", () => {
-    it("should create wrap-shift command with layerId", () => {
-      const command = createWrapShiftCommand("layer_1", 10, 20);
+    it("should create wrap-shift command", () => {
+      const command = createWrapShiftCommand(10, 20);
 
       expect(command.type).toBe("wrap-shift");
-      expect(command.layerId).toBe("layer_1");
       expect(command.dx).toBe(10);
       expect(command.dy).toBe(20);
       expect(typeof command.timestamp).toBe("number");

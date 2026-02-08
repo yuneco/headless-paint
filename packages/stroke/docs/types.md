@@ -109,6 +109,7 @@ interface RenderUpdate {
 ```typescript
 interface StrokeCommand {
   readonly type: "stroke";
+  readonly layerId: string;
   readonly inputPoints: readonly InputPoint[];
   readonly filterPipeline: FilterPipelineConfig;
   readonly expand: ExpandConfig;
@@ -124,6 +125,7 @@ interface StrokeCommand {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `type` | `"stroke"` | コマンド種別 |
+| `layerId` | `string` | 対象レイヤーのID |
 | `inputPoints` | `readonly InputPoint[]` | 変換前の入力点列 |
 | `filterPipeline` | `FilterPipelineConfig` | フィルタパイプライン設定 |
 | `expand` | `ExpandConfig` | 展開設定 |
@@ -148,6 +150,7 @@ interface StrokeCommand {
 ```typescript
 interface ClearCommand {
   readonly type: "clear";
+  readonly layerId: string;
   readonly timestamp: number;
 }
 ```
@@ -161,7 +164,6 @@ interface ClearCommand {
 ```typescript
 interface WrapShiftCommand {
   readonly type: "wrap-shift";
-  readonly layerId: string;
   readonly dx: number;
   readonly dy: number;
   readonly timestamp: number;
@@ -170,9 +172,19 @@ interface WrapShiftCommand {
 
 ---
 
+## LayerDrawCommand
+
+レイヤーに紐づく描画コマンド。`layerId` を持つ。
+
+```typescript
+type LayerDrawCommand = StrokeCommand | ClearCommand;
+```
+
+---
+
 ## DrawCommand
 
-描画コマンドのUnion型。レイヤーのピクセルに影響する操作。
+描画コマンドのUnion型。レイヤーのピクセルに影響する操作。`LayerDrawCommand` はレイヤー固有、`WrapShiftCommand` はグローバル（全レイヤーに適用）。
 
 ```typescript
 type DrawCommand = StrokeCommand | ClearCommand | WrapShiftCommand;
@@ -257,6 +269,7 @@ type Command = DrawCommand | StructuralCommand;
 
 ```typescript
 function isDrawCommand(cmd: Command): cmd is DrawCommand;
+function isLayerDrawCommand(cmd: Command): cmd is LayerDrawCommand;
 function isStructuralCommand(cmd: Command): cmd is StructuralCommand;
 ```
 
@@ -269,6 +282,7 @@ function isStructuralCommand(cmd: Command): cmd is StructuralCommand;
 ```typescript
 interface Checkpoint {
   readonly id: string;
+  readonly layerId: string;
   readonly commandIndex: number;
   readonly imageData: ImageData;
   readonly createdAt: number;
@@ -278,6 +292,7 @@ interface Checkpoint {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `id` | `string` | 一意な識別子 |
+| `layerId` | `string` | 対象レイヤーのID |
 | `commandIndex` | `number` | 対応するコマンドのインデックス |
 | `imageData` | `ImageData` | レイヤーのスナップショット |
 | `createdAt` | `number` | 作成時刻（タイムスタンプ） |

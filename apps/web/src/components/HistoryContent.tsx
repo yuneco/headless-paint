@@ -7,6 +7,11 @@ function getCommandLabel(
   command: Command,
   layerIdToName: (layerId: string) => string,
 ): string {
+  // wrap-shift はグローバル（レイヤープレフィックスなし）
+  if (command.type === "wrap-shift") {
+    return "Offset";
+  }
+
   if (isDrawCommand(command)) {
     const name = layerIdToName(command.layerId);
     switch (command.type) {
@@ -16,8 +21,6 @@ function getCommandLabel(
           : `${name} Stroke`;
       case "clear":
         return `${name} Clear`;
-      case "wrap-shift":
-        return `${name} Offset`;
     }
   }
 

@@ -25,7 +25,7 @@ import {
   addPointToSession,
   canRedo,
   canUndo,
-  computeCumulativeOffsetForLayer,
+  computeCumulativeOffset,
   createAddLayerCommand,
   createHistoryState,
   createRemoveLayerCommand,
@@ -94,6 +94,7 @@ export function App() {
   const layerManager = useLayers(LAYER_WIDTH, LAYER_HEIGHT);
   const {
     entries,
+    entriesRef,
     activeLayerId,
     activeEntry,
     addLayer,
@@ -323,46 +324,37 @@ export function App() {
 
   const handleWrapShift = useCallback(
     (dx: number, dy: number) => {
-      if (!activeEntry) return;
-      wrapShiftLayer(activeEntry.committedLayer, dx, dy, shiftTempCanvas);
+      for (const entry of entriesRef.current) {
+        wrapShiftLayer(entry.committedLayer, dx, dy, shiftTempCanvas);
+      }
       dragShiftRef.current = {
         x: dragShiftRef.current.x + dx,
         y: dragShiftRef.current.y + dy,
       };
       bumpRenderVersion();
     },
-    [activeEntry, shiftTempCanvas, bumpRenderVersion],
+    [entriesRef, shiftTempCanvas, bumpRenderVersion],
   );
 
-  const handleWrapShiftEnd = useCallback(
-    (totalDx: number, totalDy: number) => {
-      dragShiftRef.current = { x: 0, y: 0 };
-      if (totalDx === 0 && totalDy === 0) return;
-      if (!activeEntry) return;
-      const command = createWrapShiftCommand(activeEntry.id, totalDx, totalDy);
-      setHistoryState((prev) =>
-        pushCommand(prev, command, activeEntry.committedLayer, HISTORY_CONFIG),
-      );
-    },
-    [activeEntry],
-  );
+  const handleWrapShiftEnd = useCallback((totalDx: number, totalDy: number) => {
+    dragShiftRef.current = { x: 0, y: 0 };
+    if (totalDx === 0 && totalDy === 0) return;
+    const command = createWrapShiftCommand(totalDx, totalDy);
+    setHistoryState((prev) => pushCommand(prev, command, null, HISTORY_CONFIG));
+  }, []);
 
   const handleResetOffset = useCallback(() => {
-    if (!activeEntry) return;
     setHistoryState((prev) => {
-      const { x, y } = computeCumulativeOffsetForLayer(prev, activeEntry.id);
+      const { x, y } = computeCumulativeOffset(prev);
       if (x === 0 && y === 0) return prev;
-      wrapShiftLayer(activeEntry.committedLayer, -x, -y, shiftTempCanvas);
-      const command = createWrapShiftCommand(activeEntry.id, -x, -y);
+      for (const entry of entriesRef.current) {
+        wrapShiftLayer(entry.committedLayer, -x, -y, shiftTempCanvas);
+      }
+      const command = createWrapShiftCommand(-x, -y);
       bumpRenderVersion();
-      return pushCommand(
-        prev,
-        command,
-        activeEntry.committedLayer,
-        HISTORY_CONFIG,
-      );
+      return pushCommand(prev, command, null, HISTORY_CONFIG);
     });
-  }, [activeEntry, shiftTempCanvas, bumpRenderVersion]);
+  }, [entriesRef, shiftTempCanvas, bumpRenderVersion]);
 
   // レイヤー構造操作ハンドラ
   const handleAddLayer = useCallback(() => {
@@ -438,7 +430,17 @@ export function App() {
       const undoneCommand = prev.commands[prev.currentIndex];
       const newState = undo(prev);
 
-      if (isStructuralCommand(undoneCommand)) {
+      if (undoneCommand.type === "wrap-shift") {
+        // グローバル: 全レイヤーに逆シフト（リビルド不要の高速パス）
+        for (const entry of entriesRef.current) {
+          wrapShiftLayer(
+            entry.committedLayer,
+            -undoneCommand.dx,
+            -undoneCommand.dy,
+            shiftTempCanvas,
+          );
+        }
+      } else if (isStructuralCommand(undoneCommand)) {
         switch (undoneCommand.type) {
           case "add-layer":
             removeLayerById(undoneCommand.layerId);
@@ -473,16 +475,12 @@ export function App() {
               } else {
                 moveLayerUp(undoneCommand.layerId);
               }
-              // moveLayerUp/Down は historyState に pushCommand するので、
-              // ここでは内部操作のみ行うべき。ただしこれは undo 内なので
-              // setHistoryState の更新関数内で呼ばれている。
-              // moveLayerUp/Down は setEntries を直接操作するので問題ない。
             }
             break;
           }
         }
       } else {
-        // 描画コマンド: 影響レイヤーのみリビルド
+        // レイヤー描画コマンド: 影響レイヤーのみリビルド
         const affectedIds = getAffectedLayerIds(
           prev,
           newState.currentIndex,
@@ -502,6 +500,8 @@ export function App() {
       return newState;
     });
   }, [
+    entriesRef,
+    shiftTempCanvas,
     findEntry,
     removeLayerById,
     reinsertLayer,
@@ -518,7 +518,17 @@ export function App() {
       const newState = redo(prev);
       const redoneCommand = newState.commands[newState.currentIndex];
 
-      if (isStructuralCommand(redoneCommand)) {
+      if (redoneCommand.type === "wrap-shift") {
+        // グローバル: 全レイヤーに順シフト（リビルド不要の高速パス）
+        for (const entry of entriesRef.current) {
+          wrapShiftLayer(
+            entry.committedLayer,
+            redoneCommand.dx,
+            redoneCommand.dy,
+            shiftTempCanvas,
+          );
+        }
+      } else if (isStructuralCommand(redoneCommand)) {
         switch (redoneCommand.type) {
           case "add-layer":
             reinsertLayer(
@@ -540,7 +550,7 @@ export function App() {
           }
         }
       } else {
-        // 描画コマンド: 影響レイヤーのみリビルド
+        // レイヤー描画コマンド: 影響レイヤーのみリビルド
         const affectedIds = getAffectedLayerIds(
           newState,
           prev.currentIndex,
@@ -560,6 +570,8 @@ export function App() {
       return newState;
     });
   }, [
+    entriesRef,
+    shiftTempCanvas,
     findEntry,
     removeLayerById,
     reinsertLayer,
@@ -584,9 +596,7 @@ export function App() {
   });
 
   const strokeCount = historyState.currentIndex + 1;
-  const cumulativeOffset = activeLayerId
-    ? computeCumulativeOffsetForLayer(historyState, activeLayerId)
-    : { x: 0, y: 0 };
+  const cumulativeOffset = computeCumulativeOffset(historyState);
   const currentOffset = {
     x: cumulativeOffset.x + dragShiftRef.current.x,
     y: cumulativeOffset.y + dragShiftRef.current.y,
