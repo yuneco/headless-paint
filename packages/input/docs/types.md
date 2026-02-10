@@ -328,3 +328,171 @@ interface FilterProcessResult {
 | `state` | `FilterPipelineState` | 次の呼び出しに渡す状態 |
 | `output` | `FilterOutput` | committed/pendingに分離された出力 |
 
+---
+
+## GesturePointerEvent
+
+ジェスチャー入力イベント。DOM の PointerEvent から必要な情報を抽出した DOM 非依存の型。
+
+```typescript
+interface GesturePointerEvent {
+  readonly pointerId: number;
+  readonly pointerType: "touch" | "pen" | "mouse";
+  readonly x: number;       // Screen Space
+  readonly y: number;       // Screen Space
+  readonly pressure: number;
+  readonly timestamp: number;
+  readonly eventType: "down" | "move" | "up" | "cancel";
+}
+```
+
+**フィールド説明**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `pointerId` | `number` | ポインター識別子 |
+| `pointerType` | `"touch" \| "pen" \| "mouse"` | ポインターデバイスの種類 |
+| `x` | `number` | Screen Space の X 座標 |
+| `y` | `number` | Screen Space の Y 座標 |
+| `pressure` | `number` | 筆圧（0.0–1.0） |
+| `timestamp` | `number` | タイムスタンプ（ミリ秒） |
+| `eventType` | `"down" \| "move" \| "up" \| "cancel"` | イベント種別 |
+
+**使用例**:
+```typescript
+// DOM PointerEvent から変換
+const gestureEvent: GesturePointerEvent = {
+  pointerId: e.pointerId,
+  pointerType: e.pointerType as "touch",
+  x: e.offsetX,
+  y: e.offsetY,
+  pressure: e.pressure,
+  timestamp: e.timeStamp,
+  eventType: "down",
+};
+```
+
+---
+
+## GestureConfig
+
+ジェスチャー認識の設定。
+
+```typescript
+interface GestureConfig {
+  readonly graceWindowMs: number;
+  readonly confirmDistancePx: number;
+  readonly undoMaxMovePx: number;
+  readonly undoMaxDurationMs: number;
+}
+```
+
+| フィールド | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `graceWindowMs` | `number` | `150` | 二本指切替の猶予期間（ms）。タッチダウンからこの時間内に2指目が来るとジェスチャーに切替 |
+| `confirmDistancePx` | `number` | `10` | ストローク確定の移動閾値（px）。これ以上動くと committed フラッシュ |
+| `undoMaxMovePx` | `number` | `20` | Undo 判定の最大移動量（px）。ジェスチャー中にこれ以上動くと Undo にならない |
+| `undoMaxDurationMs` | `number` | `300` | Undo 判定の最大時間（ms）。ジェスチャーがこれ以上長いと Undo にならない |
+
+**使用例**:
+```typescript
+import { DEFAULT_GESTURE_CONFIG } from "@headless-paint/input";
+
+// デフォルト設定を使用
+const config = DEFAULT_GESTURE_CONFIG;
+
+// カスタム設定
+const customConfig: GestureConfig = {
+  graceWindowMs: 200,    // 猶予期間を長めに
+  confirmDistancePx: 5,  // 確定閾値を小さく
+  undoMaxMovePx: 30,
+  undoMaxDurationMs: 400,
+};
+```
+
+---
+
+## GestureState
+
+ジェスチャー状態マシンの状態（Discriminated Union）。
+
+```typescript
+type GestureState =
+  | { readonly phase: "idle" }
+  | {
+      readonly phase: "single_down";
+      readonly primaryPointerId: number;
+      readonly downTimestamp: number;
+      readonly downPos: Point;
+      readonly lastPos: Point;
+    }
+  | {
+      readonly phase: "drawing";
+      readonly primaryPointerId: number;
+      readonly downTimestamp: number;
+    }
+  | {
+      readonly phase: "gesture";
+      readonly primaryPointerId: number;
+      readonly secondaryPointerId: number;
+      readonly layerP1: Point;
+      readonly layerP2: Point;
+      readonly lastScreenP1: Point;
+      readonly lastScreenP2: Point;
+      readonly downTimestamp: number;
+      readonly gestureMoved: boolean;
+    }
+  | {
+      readonly phase: "gesture_ending";
+      readonly remainingPointerId: number;
+      readonly layerP1: Point;
+      readonly layerP2: Point;
+      readonly lastScreenP1: Point;
+      readonly lastScreenP2: Point;
+      readonly downTimestamp: number;
+      readonly gestureMoved: boolean;
+    };
+```
+
+**各フェーズの説明**:
+
+| フェーズ | 説明 |
+|---|---|
+| `idle` | 入力なし。初期状態 |
+| `single_down` | 1指タッチ中。描画開始済みだが未確定（pending-only） |
+| `drawing` | 描画確定済み。通常の committed/pending フロー |
+| `gesture` | 2指ジェスチャー中（ピンチズーム/回転/パン） |
+| `gesture_ending` | 1指が離れ、残り1指の up 待ち |
+
+---
+
+## GestureEvent
+
+ジェスチャー状態マシンが発行する出力イベント。
+
+```typescript
+type GestureEvent =
+  | { readonly type: "draw-start"; readonly point: GesturePointerEvent }
+  | { readonly type: "draw-move"; readonly point: GesturePointerEvent }
+  | { readonly type: "draw-confirm" }
+  | { readonly type: "draw-end" }
+  | { readonly type: "draw-cancel" }
+  | { readonly type: "pinch-start"; readonly transform: ViewTransform }
+  | { readonly type: "pinch-move"; readonly transform: ViewTransform }
+  | { readonly type: "pinch-end" }
+  | { readonly type: "undo" };
+```
+
+**各イベントの説明**:
+
+| イベント | 発行タイミング | 説明 |
+|---|---|---|
+| `draw-start` | タッチダウン時 | 描画開始。pending-only レンダリングを開始 |
+| `draw-move` | タッチ移動時 | 描画継続。ポイント追加 |
+| `draw-confirm` | 移動閾値超過時 | ストローク確定。pending→committed フラッシュ |
+| `draw-end` | タッチアップ時 | 描画終了 |
+| `draw-cancel` | 2指切替時 | ストロークキャンセル。pendingLayer クリアのみ |
+| `pinch-start` | 2指目ダウン時 | ピンチジェスチャー開始。初期 ViewTransform を含む |
+| `pinch-move` | 2指移動時 | ピンチ継続。新しい ViewTransform を含む |
+| `pinch-end` | ジェスチャー終了時 | ピンチ終了 |
+| `undo` | 二本指短タップ時 | Undo 操作 |

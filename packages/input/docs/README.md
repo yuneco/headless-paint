@@ -31,6 +31,11 @@ import {
   createFilterPipelineState,
   processPoint,
   finalizePipeline,
+  // ジェスチャー
+  createGestureState,
+  processGestureEvent,
+  DEFAULT_GESTURE_CONFIG,
+  computeSimilarityTransform,
 } from "@headless-paint/input";
 
 // ビュー変換を作成
@@ -63,6 +68,18 @@ const result = processPoint(pipelineState, { x: 100, y: 100, pressure: 0.5, time
 pipelineState = result.state;
 // result.output.committed - 確定した点
 // result.output.pending - 未確定の点
+
+// ジェスチャー状態マシン
+let gestureState = createGestureState();
+const gestureConfig = DEFAULT_GESTURE_CONFIG;
+
+const [newState, events] = processGestureEvent(
+  gestureState, pointerEvent, gestureConfig, transform
+);
+gestureState = newState;
+for (const event of events) {
+  // event.type: "draw-start" | "draw-move" | "draw-confirm" | ...
+}
 ```
 
 ## API リファレンス
@@ -84,6 +101,10 @@ pipelineState = result.state;
 | `CompiledFilterPipeline` | コンパイル済みフィルタパイプライン |
 | `FilterPipelineState` | フィルタパイプライン状態 |
 | `FilterOutput` | フィルタ出力（committed/pending） |
+| `GesturePointerEvent` | ジェスチャー入力イベント（DOM非依存） |
+| `GestureConfig` | ジェスチャー認識設定 |
+| `GestureState` | ジェスチャー状態（Discriminated Union） |
+| `GestureEvent` | ジェスチャー出力イベント |
 
 ### ビュー変換関数
 
@@ -99,6 +120,7 @@ pipelineState = result.state;
 | `applyDpr(transform, dpr)` | Device Pixel Ratio スケーリングを適用 |
 | `invertViewTransform(transform)` | 逆変換を計算 |
 | `decomposeTransform(transform)` | 行列から変換成分を抽出 |
+| `computeSimilarityTransform(lP1, lP2, sP1, sP2)` | 2点対応から相似変換を計算 |
 
 ### 座標変換関数
 
@@ -129,6 +151,16 @@ pipelineState = result.state;
 | `processPoint(state, point, compiled)` | 点を処理 |
 | `finalizePipeline(state, compiled)` | パイプラインを終了 |
 | `processAllPoints(points, compiled)` | 全点を一括処理（リプレイ用） |
+
+### ジェスチャー関数
+
+詳細は [gesture-api.md](./gesture-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `createGestureState()` | ジェスチャー状態の初期値を作成 |
+| `processGestureEvent(state, event, config, transform)` | ポインターイベントを処理 |
+| `DEFAULT_GESTURE_CONFIG` | デフォルトのジェスチャー設定 |
 
 ## 座標系
 

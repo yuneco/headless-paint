@@ -26,6 +26,7 @@ interface PaintCanvasProps {
   onStrokeStart?: (point: InputPoint) => void;
   onStrokeMove?: (point: InputPoint) => void;
   onStrokeEnd?: () => void;
+  onTouchPointerEvent?: (e: React.PointerEvent) => void;
   onWrapShift?: (dx: number, dy: number) => void;
   onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
   wrapOffset?: { readonly x: number; readonly y: number };
@@ -48,6 +49,7 @@ export function PaintCanvas({
   onStrokeStart,
   onStrokeMove,
   onStrokeEnd,
+  onTouchPointerEvent,
   onWrapShift,
   onWrapShiftEnd,
   wrapOffset = { x: 0, y: 0 },
@@ -205,10 +207,34 @@ export function PaintCanvas({
               : "grab",
         touchAction: "none",
       }}
-      onPointerDown={pointerHandlers.onPointerDown}
-      onPointerMove={pointerHandlers.onPointerMove}
-      onPointerUp={pointerHandlers.onPointerUp}
-      onPointerLeave={pointerHandlers.onPointerUp}
+      onPointerDown={(e) => {
+        if (e.pointerType === "touch" && onTouchPointerEvent) {
+          onTouchPointerEvent(e);
+        } else {
+          pointerHandlers.onPointerDown(e);
+        }
+      }}
+      onPointerMove={(e) => {
+        if (e.pointerType === "touch" && onTouchPointerEvent) {
+          onTouchPointerEvent(e);
+        } else {
+          pointerHandlers.onPointerMove(e);
+        }
+      }}
+      onPointerUp={(e) => {
+        if (e.pointerType === "touch" && onTouchPointerEvent) {
+          onTouchPointerEvent(e);
+        } else {
+          pointerHandlers.onPointerUp(e);
+        }
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "touch" && onTouchPointerEvent) {
+          onTouchPointerEvent(e);
+        } else {
+          pointerHandlers.onPointerUp(e);
+        }
+      }}
     />
   );
 }

@@ -164,3 +164,90 @@ export interface FilterProcessResult {
   readonly state: FilterPipelineState;
   readonly output: FilterOutput;
 }
+
+// ============================================================
+// Gesture（マルチタッチジェスチャー）
+// ============================================================
+
+/**
+ * ジェスチャー入力イベント（DOM非依存）
+ */
+export interface GesturePointerEvent {
+  readonly pointerId: number;
+  readonly pointerType: "touch" | "pen" | "mouse";
+  readonly x: number; // Screen Space
+  readonly y: number; // Screen Space
+  readonly pressure: number;
+  readonly timestamp: number;
+  readonly eventType: "down" | "move" | "up" | "cancel";
+}
+
+/**
+ * ジェスチャー認識の設定
+ */
+export interface GestureConfig {
+  /** 二本指切替の猶予期間（ミリ秒）。デフォルト: 150 */
+  readonly graceWindowMs: number;
+  /** ストローク確定の移動閾値（ピクセル）。デフォルト: 10 */
+  readonly confirmDistancePx: number;
+  /** Undo判定の最大移動量（ピクセル）。デフォルト: 20 */
+  readonly undoMaxMovePx: number;
+  /** Undo判定の最大時間（ミリ秒）。デフォルト: 300 */
+  readonly undoMaxDurationMs: number;
+}
+
+/**
+ * ジェスチャー状態マシンの状態（Discriminated Union）
+ *
+ * idle → single_down → drawing → idle
+ *                    → gesture → gesture_ending → idle
+ */
+export type GestureState =
+  | { readonly phase: "idle" }
+  | {
+      readonly phase: "single_down";
+      readonly primaryPointerId: number;
+      readonly downTimestamp: number;
+      readonly downPos: Point;
+      readonly lastPos: Point;
+    }
+  | {
+      readonly phase: "drawing";
+      readonly primaryPointerId: number;
+      readonly downTimestamp: number;
+    }
+  | {
+      readonly phase: "gesture";
+      readonly primaryPointerId: number;
+      readonly secondaryPointerId: number;
+      readonly layerP1: Point;
+      readonly layerP2: Point;
+      readonly lastScreenP1: Point;
+      readonly lastScreenP2: Point;
+      readonly downTimestamp: number;
+      readonly gestureMoved: boolean;
+    }
+  | {
+      readonly phase: "gesture_ending";
+      readonly remainingPointerId: number;
+      readonly layerP1: Point;
+      readonly layerP2: Point;
+      readonly lastScreenP1: Point;
+      readonly lastScreenP2: Point;
+      readonly downTimestamp: number;
+      readonly gestureMoved: boolean;
+    };
+
+/**
+ * ジェスチャー状態マシンが発行する出力イベント
+ */
+export type GestureEvent =
+  | { readonly type: "draw-start"; readonly point: GesturePointerEvent }
+  | { readonly type: "draw-move"; readonly point: GesturePointerEvent }
+  | { readonly type: "draw-confirm" }
+  | { readonly type: "draw-end" }
+  | { readonly type: "draw-cancel" }
+  | { readonly type: "pinch-start"; readonly transform: ViewTransform }
+  | { readonly type: "pinch-move"; readonly transform: ViewTransform }
+  | { readonly type: "pinch-end" }
+  | { readonly type: "undo" };

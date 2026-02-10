@@ -1,5 +1,5 @@
 import { mat3 } from "gl-matrix";
-import type { TransformComponents, ViewTransform } from "./types";
+import type { Point, TransformComponents, ViewTransform } from "./types";
 
 /**
  * 単位行列のビュー変換を作成
@@ -187,4 +187,45 @@ export function decomposeTransform(
     translateX: transform[6],
     translateY: transform[7],
   };
+}
+
+/**
+ * 2組の点対応から相似変換を計算する。
+ * ピンチジェスチャーで使用し、指の下のレイヤー座標が完全に保存される（ドリフトゼロ）。
+ *
+ * @param layerP1 1本目の指のレイヤー座標（ジェスチャー開始時に記録）
+ * @param layerP2 2本目の指のレイヤー座標（ジェスチャー開始時に記録）
+ * @param screenP1 1本目の指の現在のスクリーン座標
+ * @param screenP2 2本目の指の現在のスクリーン座標
+ * @returns 相似変換行列。2つのレイヤー座標が一致する場合 null
+ */
+export function computeSimilarityTransform(
+  layerP1: Point,
+  layerP2: Point,
+  screenP1: Point,
+  screenP2: Point,
+): ViewTransform | null {
+  const dLx = layerP2.x - layerP1.x;
+  const dLy = layerP2.y - layerP1.y;
+  const denom = dLx * dLx + dLy * dLy;
+
+  if (denom < 1e-10) return null;
+
+  const dSx = screenP2.x - screenP1.x;
+  const dSy = screenP2.y - screenP1.y;
+
+  const a = (dSx * dLx + dSy * dLy) / denom;
+  const b = (dSy * dLx - dSx * dLy) / denom;
+  const tx = screenP1.x - a * layerP1.x + b * layerP1.y;
+  const ty = screenP1.y - b * layerP1.x - a * layerP1.y;
+
+  // mat3 column-major: [a, b, 0, -b, a, 0, tx, ty, 1]
+  const result = mat3.create();
+  result[0] = a;
+  result[1] = b;
+  result[3] = -b;
+  result[4] = a;
+  result[6] = tx;
+  result[7] = ty;
+  return result;
 }

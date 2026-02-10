@@ -19,11 +19,17 @@ export type {
   FilterPlugin,
   FilterState,
   FilterStepResult,
+  // Gesture types
+  GesturePointerEvent,
+  GestureConfig,
+  GestureState,
+  GestureEvent,
 } from "./types";
 
 // Transform functions
 export {
   applyDpr,
+  computeSimilarityTransform,
   createViewTransform,
   decomposeTransform,
   fitToView,
@@ -50,3 +56,10 @@ export {
 
 // Plugin functions (for extension)
 export { getFilterPlugin, registerFilterPlugin } from "./plugins";
+
+// Gesture functions
+export {
+  DEFAULT_GESTURE_CONFIG,
+  createGestureState,
+  processGestureEvent,
+} from "./gesture";

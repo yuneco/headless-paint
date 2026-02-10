@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { screenToLayer } from "./coordinate";
 import {
   applyDpr,
+  computeSimilarityTransform,
   createViewTransform,
   decomposeTransform,
   fitToView,
@@ -117,5 +118,110 @@ describe("applyDpr", () => {
     for (let i = 0; i < 9; i++) {
       expect(result[i]).toBeCloseTo(t[i]);
     }
+  });
+});
+
+describe("computeSimilarityTransform", () => {
+  it("should return identity for matching points", () => {
+    // Layer (0,0)→Screen (0,0), Layer (100,0)→Screen (100,0) → 恒等変換
+    const result = computeSimilarityTransform(
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+    );
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result[0]).toBeCloseTo(1); // a
+      expect(result[1]).toBeCloseTo(0); // b
+      expect(result[3]).toBeCloseTo(0); // -b
+      expect(result[4]).toBeCloseTo(1); // a
+      expect(result[6]).toBeCloseTo(0); // tx
+      expect(result[7]).toBeCloseTo(0); // ty
+    }
+  });
+
+  it("should compute pure translation", () => {
+    // Layer (0,0)→Screen (50,30), Layer (100,0)→Screen (150,30)
+    const result = computeSimilarityTransform(
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 50, y: 30 },
+      { x: 150, y: 30 },
+    );
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result[0]).toBeCloseTo(1);
+      expect(result[1]).toBeCloseTo(0);
+      expect(result[6]).toBeCloseTo(50);
+      expect(result[7]).toBeCloseTo(30);
+    }
+  });
+
+  it("should compute pure zoom (2x)", () => {
+    // Layer (0,0)→Screen (0,0), Layer (100,0)→Screen (200,0)
+    const result = computeSimilarityTransform(
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    );
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result[0]).toBeCloseTo(2); // scale
+      expect(result[1]).toBeCloseTo(0);
+      expect(result[6]).toBeCloseTo(0);
+      expect(result[7]).toBeCloseTo(0);
+    }
+  });
+
+  it("should compute 90 degree rotation", () => {
+    // Layer (0,0)→Screen (0,0), Layer (100,0)→Screen (0,100)
+    const result = computeSimilarityTransform(
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 0, y: 0 },
+      { x: 0, y: 100 },
+    );
+    expect(result).not.toBeNull();
+    if (result) {
+      expect(result[0]).toBeCloseTo(0); // a = cos(90°)
+      expect(result[1]).toBeCloseTo(1); // b = sin(90°)
+      expect(result[3]).toBeCloseTo(-1); // -b
+      expect(result[4]).toBeCloseTo(0); // a
+    }
+  });
+
+  it("should preserve point mapping (composite transform)", () => {
+    const lP1 = { x: 50, y: 100 };
+    const lP2 = { x: 200, y: 150 };
+    const sP1 = { x: 300, y: 400 };
+    const sP2 = { x: 100, y: 500 };
+
+    const result = computeSimilarityTransform(lP1, lP2, sP1, sP2);
+    expect(result).not.toBeNull();
+    if (result) {
+      // L1 → S1 が保存される
+      const mappedS1x = result[0] * lP1.x + result[3] * lP1.y + result[6];
+      const mappedS1y = result[1] * lP1.x + result[4] * lP1.y + result[7];
+      expect(mappedS1x).toBeCloseTo(sP1.x);
+      expect(mappedS1y).toBeCloseTo(sP1.y);
+
+      // L2 → S2 が保存される
+      const mappedS2x = result[0] * lP2.x + result[3] * lP2.y + result[6];
+      const mappedS2y = result[1] * lP2.x + result[4] * lP2.y + result[7];
+      expect(mappedS2x).toBeCloseTo(sP2.x);
+      expect(mappedS2y).toBeCloseTo(sP2.y);
+    }
+  });
+
+  it("should return null for degenerate case (identical layer points)", () => {
+    const result = computeSimilarityTransform(
+      { x: 100, y: 100 },
+      { x: 100, y: 100 },
+      { x: 0, y: 0 },
+      { x: 200, y: 200 },
+    );
+    expect(result).toBeNull();
   });
 });

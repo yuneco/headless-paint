@@ -17,6 +17,8 @@ interface DebugPanelProps {
   patternPreview: UsePatternPreviewResult;
   layerOffset?: { readonly x: number; readonly y: number };
   onResetOffset?: () => void;
+  showTouchDebug?: boolean;
+  onToggleTouchDebug?: () => void;
 }
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
@@ -31,6 +33,8 @@ export function DebugPanel({
   patternPreview,
   layerOffset = { x: 0, y: 0 },
   onResetOffset,
+  showTouchDebug = false,
+  onToggleTouchDebug,
 }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
@@ -80,8 +84,15 @@ export function DebugPanel({
     offsetY: layerOffset.y,
   });
 
+  const touchDebugDataRef = useRef({
+    showTouchDebug: showTouchDebug,
+  });
+
   const onResetOffsetRef = useRef(onResetOffset);
   onResetOffsetRef.current = onResetOffset;
+
+  const onToggleTouchDebugRef = useRef(onToggleTouchDebug);
+  onToggleTouchDebugRef.current = onToggleTouchDebug;
 
   const expandRef = useRef(expand);
   expandRef.current = expand;
@@ -316,6 +327,16 @@ export function DebugPanel({
 
       layerOffsetFolder.open();
 
+      const touchFolder = gui.addFolder("Touch Debug");
+      touchFolder
+        .add(touchDebugDataRef.current, "showTouchDebug")
+        .name("Show Overlay")
+        .listen()
+        .onChange((_value: boolean) => {
+          onToggleTouchDebugRef.current?.();
+        });
+      touchFolder.open();
+
       guiRef.current = gui;
     });
 
@@ -380,6 +401,10 @@ export function DebugPanel({
     layerOffsetDataRef.current.offsetX = layerOffset.x;
     layerOffsetDataRef.current.offsetY = layerOffset.y;
   }, [layerOffset.x, layerOffset.y]);
+
+  useEffect(() => {
+    touchDebugDataRef.current.showTouchDebug = showTouchDebug;
+  }, [showTouchDebug]);
 
   return (
     <div

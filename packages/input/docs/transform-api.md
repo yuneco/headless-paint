@@ -301,3 +301,61 @@ ctx.scale(dpr, dpr);
 // DPR 適用済みの変換で描画
 renderLayers(layers, ctx, applyDpr(transform, dpr), { background });
 ```
+
+---
+
+## computeSimilarityTransform
+
+2組の点対応（レイヤー座標とスクリーン座標）から相似変換を計算する。ピンチジェスチャーで使用し、指の下のレイヤー座標が完全に保存される（ドリフトゼロ）。
+
+```typescript
+function computeSimilarityTransform(
+  layerP1: Point,
+  layerP2: Point,
+  screenP1: Point,
+  screenP2: Point,
+): ViewTransform | null
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `layerP1` | `Point` | ○ | 1本目の指のレイヤー座標（ジェスチャー開始時に記録） |
+| `layerP2` | `Point` | ○ | 2本目の指のレイヤー座標（ジェスチャー開始時に記録） |
+| `screenP1` | `Point` | ○ | 1本目の指の現在のスクリーン座標 |
+| `screenP2` | `Point` | ○ | 2本目の指の現在のスクリーン座標 |
+
+**戻り値**: `ViewTransform | null` - 相似変換行列。2つのレイヤー座標が一致する場合（退化ケース）は `null`
+
+**アルゴリズム**:
+```
+dL = L2 - L1, dS = S2 - S1, denom = |dL|²
+a = (dSx·dLx + dSy·dLy) / denom
+b = (dSy·dLx - dSx·dLy) / denom
+tx = S1x - a·L1x + b·L1y
+ty = S1y - b·L1x - a·L1y
+→ mat3 column-major: [a, b, 0, -b, a, 0, tx, ty, 1]
+```
+
+**注意**:
+- incremental な pan/zoom/rotate ではなく、2点対応から ViewTransform を丸ごと計算する
+- ドリフトが蓄積しないため、長時間のジェスチャーでも精度が保たれる
+- 2つのレイヤー座標が完全に一致する場合は除算エラーを避けるため `null` を返す
+
+**使用例**:
+```typescript
+import { computeSimilarityTransform, screenToLayer } from "@headless-paint/input";
+
+// ジェスチャー開始時: スクリーン座標からレイヤーアンカーを記録
+const layerP1 = screenToLayer(screenP1, currentTransform);
+const layerP2 = screenToLayer(screenP2, currentTransform);
+
+// 各フレーム: 現在のスクリーン座標とアンカーから ViewTransform を計算
+const newTransform = computeSimilarityTransform(
+  layerP1, layerP2,
+  currentScreenP1, currentScreenP2,
+);
+if (newTransform) {
+  setTransform(newTransform);
+}
+```

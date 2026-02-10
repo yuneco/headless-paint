@@ -13,6 +13,7 @@ export interface UseViewTransformResult {
   handlePan: (dx: number, dy: number) => void;
   handleZoom: (scale: number, centerX: number, centerY: number) => void;
   handleRotate: (angleRad: number, centerX: number, centerY: number) => void;
+  handleSetTransform: (newTransform: ViewTransform) => void;
   reset: () => void;
   /**
    * レイヤー全体がビューに収まるようにスケール・オフセットを設定する。
@@ -55,6 +56,10 @@ export function useViewTransform(): UseViewTransformResult {
     [],
   );
 
+  const handleSetTransform = useCallback((newTransform: ViewTransform) => {
+    setTransform(newTransform);
+  }, []);
+
   const reset = useCallback(() => {
     setTransform(createViewTransform());
   }, []);
@@ -64,6 +69,7 @@ export function useViewTransform(): UseViewTransformResult {
     handlePan,
     handleZoom,
     handleRotate,
+    handleSetTransform,
     reset,
     setInitialFit,
   };
