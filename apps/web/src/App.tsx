@@ -52,6 +52,7 @@ import { PaintCanvas } from "./components/PaintCanvas";
 import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
+import { TouchDebugOverlay } from "./components/TouchDebugOverlay";
 import { useExpand } from "./hooks/useExpand";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useLayers } from "./hooks/useLayers";
@@ -59,6 +60,7 @@ import { usePatternPreview } from "./hooks/usePatternPreview";
 import { usePenSettings } from "./hooks/usePenSettings";
 import type { ToolType } from "./hooks/usePointerHandler";
 import { useSmoothing } from "./hooks/useSmoothing";
+import { useTouchGesture } from "./hooks/useTouchGesture";
 import { useViewTransform } from "./hooks/useViewTransform";
 import { useWindowSize } from "./hooks/useWindowSize";
 
@@ -74,8 +76,14 @@ const HISTORY_CONFIG: HistoryConfig = {
 export function App() {
   const [tool, setTool] = useState<ToolType>("pen");
   const { width: viewWidth, height: viewHeight } = useWindowSize();
-  const { transform, handlePan, handleZoom, handleRotate, setInitialFit } =
-    useViewTransform();
+  const {
+    transform,
+    handlePan,
+    handleZoom,
+    handleRotate,
+    handleSetTransform,
+    setInitialFit,
+  } = useViewTransform();
 
   const fitToView = useCallback(() => {
     setInitialFit(viewWidth, viewHeight, LAYER_WIDTH, LAYER_HEIGHT);
@@ -163,12 +171,16 @@ export function App() {
   const expandRef = useRef(expand);
   expandRef.current = expand;
 
+  const [showTouchDebug, setShowTouchDebug] = useState(false);
+  const pendingOnlyRef = useRef(false);
+
   // 描画可否判定
   const canDraw = activeEntry?.committedLayer.meta.visible ?? false;
 
   const onStrokeStart = useCallback(
-    (inputPoint: InputPoint) => {
+    (inputPoint: InputPoint, pendingOnly = false) => {
       if (!activeEntry || !activeEntry.committedLayer.meta.visible) return;
+      pendingOnlyRef.current = pendingOnly;
 
       const compiled = expandRef.current.compiled;
       const filterState = createFilterPipelineState(compiledFilterPipeline);
@@ -195,18 +207,22 @@ export function App() {
 
       pendingLayer.meta.compositeOperation = strokeStyle.compositeOperation;
 
-      appendToCommittedLayer(
-        activeEntry.committedLayer,
-        strokeResult.renderUpdate.newlyCommitted,
-        strokeStyle,
-        compiled,
-      );
-      renderPendingLayer(
-        pendingLayer,
-        strokeResult.renderUpdate.currentPending,
-        strokeStyle,
-        compiled,
-      );
+      if (!pendingOnly) {
+        appendToCommittedLayer(
+          activeEntry.committedLayer,
+          strokeResult.renderUpdate.newlyCommitted,
+          strokeStyle,
+          compiled,
+        );
+      }
+
+      const pendingPoints = pendingOnly
+        ? [
+            ...strokeResult.renderUpdate.newlyCommitted,
+            ...strokeResult.renderUpdate.currentPending,
+          ]
+        : strokeResult.renderUpdate.currentPending;
+      renderPendingLayer(pendingLayer, pendingPoints, strokeStyle, compiled);
 
       setStrokePoints([inputPoint]);
       bumpRenderVersion();
@@ -245,15 +261,24 @@ export function App() {
         inputPoints: [...sessionRef.current.inputPoints, inputPoint],
       };
 
-      appendToCommittedLayer(
-        currentEntry.committedLayer,
-        strokeResult.renderUpdate.newlyCommitted,
-        strokeStyle,
-        sessionRef.current.compiledExpand,
-      );
+      if (!pendingOnlyRef.current) {
+        appendToCommittedLayer(
+          currentEntry.committedLayer,
+          strokeResult.renderUpdate.newlyCommitted,
+          strokeStyle,
+          sessionRef.current.compiledExpand,
+        );
+      }
+
+      const pendingPoints = pendingOnlyRef.current
+        ? [
+            ...strokeResult.state.allCommitted,
+            ...strokeResult.renderUpdate.currentPending,
+          ]
+        : strokeResult.renderUpdate.currentPending;
       renderPendingLayer(
         pendingLayer,
-        strokeResult.renderUpdate.currentPending,
+        pendingPoints,
         strokeStyle,
         sessionRef.current.compiledExpand,
       );
@@ -267,6 +292,17 @@ export function App() {
   const onStrokeEnd = useCallback(() => {
     if (!sessionRef.current) {
       setStrokePoints([]);
+      return;
+    }
+
+    // Still in pending-only mode → stroke was never confirmed → discard
+    if (pendingOnlyRef.current) {
+      clearLayer(pendingLayer);
+      pendingLayer.meta.compositeOperation = undefined;
+      sessionRef.current = null;
+      pendingOnlyRef.current = false;
+      setStrokePoints([]);
+      bumpRenderVersion();
       return;
     }
 
@@ -321,6 +357,33 @@ export function App() {
     sessionRef.current = null;
     setStrokePoints([]);
   }, [pendingLayer, strokeStyle, findEntry, bumpRenderVersion]);
+
+  const onDrawConfirm = useCallback(() => {
+    if (!sessionRef.current || !pendingOnlyRef.current) return;
+    pendingOnlyRef.current = false;
+
+    const currentEntry = findEntry(sessionRef.current.layerId);
+    if (!currentEntry) return;
+
+    // 蓄積された全 committed ポイントを committed layer にフラッシュ
+    appendToCommittedLayer(
+      currentEntry.committedLayer,
+      sessionRef.current.strokeSession.allCommitted,
+      strokeStyle,
+      sessionRef.current.compiledExpand,
+    );
+
+    bumpRenderVersion();
+  }, [findEntry, strokeStyle, bumpRenderVersion]);
+
+  const onDrawCancel = useCallback(() => {
+    clearLayer(pendingLayer);
+    pendingLayer.meta.compositeOperation = undefined;
+    sessionRef.current = null;
+    pendingOnlyRef.current = false;
+    setStrokePoints([]);
+    bumpRenderVersion();
+  }, [pendingLayer, bumpRenderVersion]);
 
   const handleWrapShift = useCallback(
     (dx: number, dy: number) => {
@@ -581,6 +644,18 @@ export function App() {
     bumpRenderVersion,
   ]);
 
+  const touchGesture = useTouchGesture({
+    transform,
+    onStrokeStart: canDraw ? onStrokeStart : undefined,
+    onStrokeMove: canDraw ? onStrokeMove : undefined,
+    onStrokeEnd: canDraw ? onStrokeEnd : undefined,
+    onDrawConfirm,
+    onDrawCancel,
+    onSetTransform: handleSetTransform,
+    onUndo: handleUndo,
+    debugEnabled: showTouchDebug,
+  });
+
   useKeyboardShortcuts({
     tool,
     setTool: handleToolChange,
@@ -640,6 +715,7 @@ export function App() {
         onStrokeStart={canDraw ? onStrokeStart : undefined}
         onStrokeMove={canDraw ? onStrokeMove : undefined}
         onStrokeEnd={canDraw ? onStrokeEnd : undefined}
+        onTouchPointerEvent={touchGesture.handlePointerEvent}
         onWrapShift={handleWrapShift}
         onWrapShiftEnd={handleWrapShiftEnd}
         wrapOffset={currentOffset}
@@ -656,6 +732,14 @@ export function App() {
         width={viewWidth}
         height={viewHeight}
         onSubOffsetChange={expand.setSubOffset}
+      />
+
+      <TouchDebugOverlay
+        enabled={showTouchDebug}
+        touchPoints={touchGesture.touchPoints}
+        gesturePhase={touchGesture.gesturePhase}
+        width={viewWidth}
+        height={viewHeight}
       />
 
       {/* ツールバーを上部中央にオーバーレイ配置 */}
@@ -713,6 +797,8 @@ export function App() {
         patternPreview={patternPreview}
         layerOffset={currentOffset}
         onResetOffset={handleResetOffset}
+        showTouchDebug={showTouchDebug}
+        onToggleTouchDebug={() => setShowTouchDebug((prev) => !prev)}
       />
     </div>
   );
