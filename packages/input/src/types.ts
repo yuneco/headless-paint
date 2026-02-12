@@ -103,7 +103,7 @@ export interface FilterPlugin {
 /**
  * フィルタの種類
  */
-export type FilterType = "smoothing";
+export type FilterType = "smoothing" | "straight-line";
 
 /**
  * スムージングフィルタの設定
@@ -114,11 +114,17 @@ export interface SmoothingConfig {
 }
 
 /**
+ * 直線フィルタの設定
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: 設定項目は現時点でないが、FilterConfig union の一貫性のため型を用意
+export interface StraightLineConfig {}
+
+/**
  * フィルタ設定（Discriminated Union）
  */
-export type FilterConfig = { type: "smoothing"; config: SmoothingConfig };
-// 将来の拡張:
-// | { type: "pressure-curve"; config: PressureCurveConfig }
+export type FilterConfig =
+  | { readonly type: "smoothing"; readonly config: SmoothingConfig }
+  | { readonly type: "straight-line"; readonly config: StraightLineConfig };
 
 // ============================================================
 // Filter Pipeline（フィルタパイプライン）

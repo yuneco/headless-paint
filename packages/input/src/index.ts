@@ -9,6 +9,7 @@ export type {
   InputPoint,
   FilterType,
   SmoothingConfig,
+  StraightLineConfig,
   FilterConfig,
   FilterPipelineConfig,
   CompiledFilterPipeline,

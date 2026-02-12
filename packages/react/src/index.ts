@@ -15,6 +15,7 @@ export { useWindowSize } from "./useWindowSize";
 
 export type {
   StrokeCompleteData,
+  StrokeStartOptions,
   UseStrokeSessionConfig,
   UseStrokeSessionResult,
 } from "./useStrokeSession";
@@ -54,6 +55,7 @@ export type {
   FilterPipelineConfig,
   InputPoint,
   SamplingConfig,
+  StraightLineConfig,
   ViewTransform,
 } from "@headless-paint/input";
 

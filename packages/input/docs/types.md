@@ -179,12 +179,13 @@ const point: InputPoint = {
 フィルタの種類。
 
 ```typescript
-type FilterType = "smoothing";
+type FilterType = "smoothing" | "straight-line";
 ```
 
 | 値 | 説明 |
 |---|---|
 | `"smoothing"` | スムージング（移動平均）フィルタ |
+| `"straight-line"` | 直線フィルタ（始点→終点の2点に圧縮） |
 
 ---
 
@@ -209,22 +210,37 @@ const config: SmoothingConfig = { windowSize: 5 };
 
 ---
 
+## StraightLineConfig
+
+直線フィルタの設定。現在は設定項目なし（将来の拡張用に型を予約）。
+
+```typescript
+// biome-ignore lint/suspicious/noEmptyInterface: 将来の拡張ポイント
+interface StraightLineConfig {}
+```
+
+---
+
 ## FilterConfig
 
 フィルタ設定（Discriminated Union）。
 
 ```typescript
 type FilterConfig =
-  | { type: "smoothing"; config: SmoothingConfig }
-  // 将来の拡張用
-  // | { type: "pressure-curve"; config: PressureCurveConfig }
+  | { readonly type: "smoothing"; readonly config: SmoothingConfig }
+  | { readonly type: "straight-line"; readonly config: StraightLineConfig };
 ```
 
 **使用例**:
 ```typescript
-const filter: FilterConfig = {
+const smoothing: FilterConfig = {
   type: "smoothing",
   config: { windowSize: 5 },
+};
+
+const straightLine: FilterConfig = {
+  type: "straight-line",
+  config: {},
 };
 ```
 

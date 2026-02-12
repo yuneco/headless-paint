@@ -1,6 +1,11 @@
 import type { ExpandMode } from "@headless-paint/engine";
 import type { ToolType } from "@headless-paint/react";
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef } from "react";
+
+export interface KeyboardShortcutsResult {
+  /** Shift キーが現在押されているか（直線モード判定用） */
+  readonly shiftHeld: RefObject<boolean>;
+}
 
 export interface KeyboardShortcutsDeps {
   readonly tool: ToolType;
@@ -57,7 +62,9 @@ function resolveSpaceTool(e: KeyboardEvent): ToolType {
   return "scroll";
 }
 
-export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
+export function useKeyboardShortcuts(
+  deps: KeyboardShortcutsDeps,
+): KeyboardShortcutsResult {
   // ref-sync: 全依存値をrefで追跡し、イベントハンドラを安定させる
   const toolRef = useRef(deps.tool);
   toolRef.current = deps.tool;
@@ -96,6 +103,7 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
   const baseToolRef = useRef<ToolType | null>(null);
   const spaceHeldRef = useRef(false);
   const altHeldRef = useRef(false);
+  const shiftHeldRef = useRef(false);
 
   useEffect(() => {
     function activateHoldSwitch(newTool: ToolType): void {
@@ -113,6 +121,7 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
     }
 
     function handleKeyDown(e: KeyboardEvent): void {
+      if (e.key === "Shift") shiftHeldRef.current = true;
       if (isInputFocused()) return;
 
       // 1. Cmd/Ctrl+Z → undo/redo (最優先)
@@ -221,6 +230,8 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
     }
 
     function handleKeyUp(e: KeyboardEvent): void {
+      if (e.key === "Shift") shiftHeldRef.current = false;
+
       // Space解放
       if (e.key === " ") {
         spaceHeldRef.current = false;
@@ -257,6 +268,7 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
     function handleWindowBlur(): void {
       spaceHeldRef.current = false;
       altHeldRef.current = false;
+      shiftHeldRef.current = false;
       deactivateHoldSwitch();
     }
 
@@ -270,4 +282,6 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
       window.removeEventListener("blur", handleWindowBlur);
     };
   }, []);
+
+  return { shiftHeld: shiftHeldRef };
 }

@@ -246,7 +246,7 @@ interface PointerHandlers {
 
 タッチデバイスのマルチタッチイベントを認識し、ジェスチャーに応じたコールバックを発火する。
 
-- 1本指: 描画（`onStrokeStart` を常に `pendingOnly=true` で呼ぶ pending-until-confirmed パターン）
+- 1本指: 描画（`onStrokeStart` を常に `{ pendingOnly: true }` で呼ぶ pending-until-confirmed パターン）
 - 2本指: ピンチ（zoom + pan + rotate）
 - 2本指タップ: Undo
 - 描画中に2本目追加: 描画をキャンセルしてジェスチャーに遷移
@@ -261,8 +261,8 @@ function useTouchGesture(options: UseTouchGestureOptions): UseTouchGestureResult
 interface UseTouchGestureOptions {
   /** 現在のビュー変換 */
   readonly transform: ViewTransform;
-  /** 描画開始。pendingOnly=true でタッチの pending-until-confirmed モードになる */
-  readonly onStrokeStart?: (point: InputPoint, pendingOnly?: boolean) => void;
+  /** 描画開始 */
+  readonly onStrokeStart?: (point: InputPoint, options?: StrokeStartOptions) => void;
   readonly onStrokeMove?: (point: InputPoint) => void;
   readonly onStrokeEnd?: () => void;
   /** pending ストロークの確定（1本指のまま描画完了時に呼ばれる） */
@@ -342,6 +342,19 @@ interface UseStrokeSessionConfig {
 }
 ```
 
+### StrokeStartOptions
+
+`onStrokeStart` の第2引数。ストローク開始時のモードを指定する。
+
+```typescript
+interface StrokeStartOptions {
+  /** true にすると committed layer への描画を保留する（タッチの pending-until-confirmed 用） */
+  readonly pendingOnly?: boolean;
+  /** true にすると直線モード（始点→終点の2点に集約、筆圧は中央値）になる */
+  readonly straightLine?: boolean;
+}
+```
+
 ### StrokeCompleteData
 
 `onStrokeComplete` に渡されるデータ。ストロークの再現に必要な全情報を含む。
@@ -367,11 +380,11 @@ interface StrokeCompleteData {
 interface UseStrokeSessionResult {
   /**
    * ストロークを開始する。
-   * pendingOnly=true にすると committed layer への描画を保留し、
+   * options.pendingOnly=true にすると committed layer への描画を保留し、
    * onDrawConfirm() が呼ばれるまで pendingLayer のみに描画する。
-   * （タッチ操作の pending-until-confirmed パターン用）
+   * options.straightLine=true にすると直線モード（始点→終点の2点に集約）になる。
    */
-  readonly onStrokeStart: (point: InputPoint, pendingOnly?: boolean) => void;
+  readonly onStrokeStart: (point: InputPoint, options?: StrokeStartOptions) => void;
   /** ポイントを追加する。FilterPipeline を通過後、差分レンダリングが実行される */
   readonly onStrokeMove: (point: InputPoint) => void;
   /** ストロークを終了する。FilterPipeline をフラッシュし、onStrokeComplete を呼ぶ */
@@ -493,7 +506,7 @@ interface PaintEngineResult {
   // ── ストローク ──
 
   /** ストロークを開始する */
-  readonly onStrokeStart: (point: InputPoint, pendingOnly?: boolean) => void;
+  readonly onStrokeStart: (point: InputPoint, options?: StrokeStartOptions) => void;
   /** ポイントを追加する */
   readonly onStrokeMove: (point: InputPoint) => void;
   /** ストロークを終了する。履歴にコマンドが自動記録される */
@@ -664,4 +677,5 @@ interface UseLayersResult {
 | `FilterPipelineConfig` | input | FilterPipeline の設定 |
 | `SamplingConfig` | input | ポイントサンプリングの設定 |
 | `HistoryState` | stroke | 履歴の内部状態 |
+| `StraightLineConfig` | input | 直線フィルタの設定 |
 | `HistoryConfig` | stroke | 履歴の容量設定 |

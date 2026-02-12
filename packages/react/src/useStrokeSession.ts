@@ -10,6 +10,7 @@ import type {
   StrokeStyle,
 } from "@headless-paint/engine";
 import {
+  compileFilterPipeline,
   createFilterPipelineState,
   finalizePipeline,
   processPoint,
@@ -22,7 +23,7 @@ import type {
 } from "@headless-paint/input";
 import { addPointToSession, startStrokeSession } from "@headless-paint/stroke";
 import type { StrokeSessionState } from "@headless-paint/stroke";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 export interface StrokeCompleteData {
   readonly inputPoints: readonly InputPoint[];
@@ -30,6 +31,11 @@ export interface StrokeCompleteData {
   readonly expandConfig: ExpandConfig;
   readonly strokeStyle: StrokeStyle;
   readonly totalPoints: number;
+}
+
+export interface StrokeStartOptions {
+  readonly pendingOnly?: boolean;
+  readonly straightLine?: boolean;
 }
 
 export interface UseStrokeSessionConfig {
@@ -43,7 +49,10 @@ export interface UseStrokeSessionConfig {
 }
 
 export interface UseStrokeSessionResult {
-  readonly onStrokeStart: (point: InputPoint, pendingOnly?: boolean) => void;
+  readonly onStrokeStart: (
+    point: InputPoint,
+    options?: StrokeStartOptions,
+  ) => void;
   readonly onStrokeMove: (point: InputPoint) => void;
   readonly onStrokeEnd: () => void;
   readonly onDrawConfirm: () => void;
@@ -102,19 +111,30 @@ export function useStrokeSession(
     [],
   );
 
+  const straightLinePipeline = useMemo(
+    () =>
+      compileFilterPipeline({
+        filters: [{ type: "straight-line", config: {} }],
+      }),
+    [],
+  );
+
   const onStrokeStart = useCallback(
-    (inputPoint: InputPoint, pendingOnly = false) => {
+    (inputPoint: InputPoint, options?: StrokeStartOptions) => {
       const currentLayer = layerRef.current;
       if (!currentLayer || !currentLayer.meta.visible) return;
-      pendingOnlyRef.current = pendingOnly;
+      pendingOnlyRef.current = options?.pendingOnly ?? false;
 
       const compiled = compiledExpandRef.current;
       const style = strokeStyleRef.current;
-      const filterState = createFilterPipelineState(compiledFilterPipeline);
+      const activePipeline = options?.straightLine
+        ? straightLinePipeline
+        : compiledFilterPipeline;
+      const filterState = createFilterPipelineState(activePipeline);
       const filterResult = processPoint(
         filterState,
         inputPoint,
-        compiledFilterPipeline,
+        activePipeline,
       );
 
       const strokeResult = startStrokeSession(
@@ -128,10 +148,11 @@ export function useStrokeSession(
         filterState: filterResult.state,
         inputPoints: [inputPoint],
         compiledExpand: compiled,
-        compiledFilterPipeline,
+        compiledFilterPipeline: activePipeline,
         layerId: currentLayer.id,
       };
 
+      const pendingOnly = pendingOnlyRef.current;
       pendingLayer.meta.compositeOperation = style.compositeOperation;
 
       if (!pendingOnly) {
@@ -155,7 +176,12 @@ export function useStrokeSession(
       setIsDrawing(true);
       bumpRenderVersion();
     },
-    [compiledFilterPipeline, pendingLayer, bumpRenderVersion],
+    [
+      compiledFilterPipeline,
+      straightLinePipeline,
+      pendingLayer,
+      bumpRenderVersion,
+    ],
   );
 
   const onStrokeMove = useCallback(

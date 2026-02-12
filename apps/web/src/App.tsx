@@ -1,5 +1,6 @@
 import { DEFAULT_BACKGROUND_COLOR } from "@headless-paint/engine";
 import type { BackgroundSettings } from "@headless-paint/engine";
+import type { InputPoint } from "@headless-paint/input";
 import {
   type ToolType,
   useExpand,
@@ -11,13 +12,13 @@ import {
   useWindowSize,
 } from "@headless-paint/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_PEN_CONFIG, DEFAULT_SMOOTHING_CONFIG } from "./config";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
 import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import { TouchDebugOverlay } from "./components/TouchDebugOverlay";
+import { DEFAULT_PEN_CONFIG, DEFAULT_SMOOTHING_CONFIG } from "./config";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePatternPreview } from "./hooks/usePatternPreview";
 
@@ -98,7 +99,7 @@ export function App() {
   });
 
   // キーボードショートカット
-  useKeyboardShortcuts({
+  const { shiftHeld } = useKeyboardShortcuts({
     tool,
     setTool: handleToolChange,
     isDrawing: engine.strokePoints.length > 0,
@@ -111,6 +112,14 @@ export function App() {
     lineWidth: penSettings.lineWidth,
     setLineWidth: penSettings.setLineWidth,
   });
+
+  // Shift+ドラッグで直線モード
+  const handleStrokeStart = useCallback(
+    (point: InputPoint) => {
+      engine.onStrokeStart(point, { straightLine: shiftHeld.current });
+    },
+    [engine.onStrokeStart, shiftHeld],
+  );
 
   const strokeCount = engine.historyState.currentIndex + 1;
 
@@ -135,7 +144,7 @@ export function App() {
         onPan={handlePan}
         onZoom={handleZoom}
         onRotate={handleRotate}
-        onStrokeStart={engine.canDraw ? engine.onStrokeStart : undefined}
+        onStrokeStart={engine.canDraw ? handleStrokeStart : undefined}
         onStrokeMove={engine.canDraw ? engine.onStrokeMove : undefined}
         onStrokeEnd={engine.canDraw ? engine.onStrokeEnd : undefined}
         onTouchPointerEvent={touchGesture.handlePointerEvent}

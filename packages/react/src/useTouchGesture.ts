@@ -15,10 +15,14 @@ import {
   shouldAcceptPoint,
 } from "@headless-paint/input";
 import { useCallback, useRef, useState } from "react";
+import type { StrokeStartOptions } from "./useStrokeSession";
 
 export interface UseTouchGestureOptions {
   readonly transform: ViewTransform;
-  readonly onStrokeStart?: (point: InputPoint, pendingOnly?: boolean) => void;
+  readonly onStrokeStart?: (
+    point: InputPoint,
+    options?: StrokeStartOptions,
+  ) => void;
   readonly onStrokeMove?: (point: InputPoint) => void;
   readonly onStrokeEnd?: () => void;
   readonly onDrawConfirm?: () => void;
@@ -79,7 +83,7 @@ export function useTouchGesture(
                 pressure: evt.point.pressure,
                 timestamp: evt.point.timestamp,
               },
-              true,
+              { pendingOnly: true },
             );
           }
         }

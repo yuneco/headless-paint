@@ -28,7 +28,10 @@ import type { HistoryConfig, HistoryState } from "@headless-paint/stroke";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { LayerEntry } from "./useLayers";
 import { useLayers } from "./useLayers";
-import type { StrokeCompleteData } from "./useStrokeSession";
+import type {
+  StrokeCompleteData,
+  StrokeStartOptions,
+} from "./useStrokeSession";
 import { useStrokeSession } from "./useStrokeSession";
 
 export interface PaintEngineConfig {
@@ -57,7 +60,10 @@ export interface PaintEngineResult {
   readonly moveLayerDown: (layerId: string) => void;
 
   // ── ストローク ──
-  readonly onStrokeStart: (point: InputPoint, pendingOnly?: boolean) => void;
+  readonly onStrokeStart: (
+    point: InputPoint,
+    options?: StrokeStartOptions,
+  ) => void;
   readonly onStrokeMove: (point: InputPoint) => void;
   readonly onStrokeEnd: () => void;
   readonly onDrawConfirm: () => void;

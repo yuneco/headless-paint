@@ -261,6 +261,24 @@ function onPointerUp() {
 
 ---
 
+## 型定義
+
+### FilterType / FilterConfig
+
+```typescript
+type FilterType = "smoothing" | "straight-line";
+
+type FilterConfig =
+  | { type: "smoothing"; config: SmoothingConfig }
+  | { type: "straight-line"; config: StraightLineConfig };
+
+interface FilterPipelineConfig {
+  readonly filters: readonly FilterConfig[];
+}
+```
+
+---
+
 ## プラグインシステム
 
 新しいフィルタの追加は `plugins/` ディレクトリにファイルを追加し、レジストリに登録するだけ。
@@ -305,6 +323,41 @@ export function registerFilterPlugin(plugin: FilterPlugin): void {
   plugins.set(plugin.type, plugin);
 }
 ```
+
+### 組み込みプラグイン
+
+#### smoothing
+
+入力点に移動平均を適用してストロークを滑らかにする。window 内の点を重み付き平均で計算し、window を超えた点から順に committed として確定する。
+
+```typescript
+// FilterType: "smoothing"
+interface SmoothingConfig {
+  /** 移動平均のウィンドウサイズ（3以上の奇数推奨） */
+  readonly windowSize: number;
+}
+```
+
+#### straight-line
+
+入力点を直線（始点→終点の2点）に集約する。描画中は committed を空に保ち、pending に始点→現在点のプレビューを出力する。finalize 時に2点を committed として確定する。
+
+筆圧はストローク中に蓄積した全入力の中央値を適用する。外れ値に強く、安定した太さの直線が得られる。
+
+```typescript
+// FilterType: "straight-line"
+interface StraightLineConfig {}
+```
+
+| フェーズ | committed | pending | 説明 |
+|----------|-----------|---------|------|
+| 1点目 | `[]` | `[p1']` | 点を pending に保持 |
+| N点目 | `[]` | `[start', pN']` | 始点→現在点のプレビュー |
+| finalize | `[start', end']` | `[]` | 2点を確定（中央値筆圧） |
+
+`p'` = 筆圧を中央値に置換した点。
+
+**Replay（Undo/Redo）**: `processAllPoints` に全 raw inputPoints を通すと finalize まで実行され、2点だけ返る。既存の replay 関数は変更不要。
 
 ### プラグイン実装例（smoothing）
 

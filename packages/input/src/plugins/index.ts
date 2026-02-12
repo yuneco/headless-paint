@@ -1,11 +1,13 @@
 import type { FilterPlugin } from "../types";
 import { smoothingPlugin } from "./smoothing-plugin";
+import { straightLinePlugin } from "./straight-line-plugin";
 
 /**
  * フィルタプラグインレジストリ
  */
 const filterPluginRegistry = new Map<string, FilterPlugin>([
   [smoothingPlugin.type, smoothingPlugin],
+  [straightLinePlugin.type, straightLinePlugin],
 ]);
 
 /**
