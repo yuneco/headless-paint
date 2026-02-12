@@ -71,10 +71,10 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `drawLine(layer, from, to, color, lineWidth?)` | 直線を描画 |
 | `drawCircle(layer, center, radius, color)` | 塗りつぶし円を描画 |
 | `drawPath(layer, points, color, lineWidth?)` | パス（連続線）を描画 |
-| `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSensitivity, pressureCurve?, compositeOperation?)` | 可変太さパス描画（筆圧対応） |
+| `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSensitivity, pressureCurve?, compositeOperation?, overlapCount?)` | 可変太さパス描画（筆圧対応） |
 | `calculateRadius(pressure, baseLineWidth, pressureSensitivity, pressureCurve?)` | 筆圧から描画半径を計算 |
 | `applyPressureCurve(pressure, curve)` | 筆圧カーブを適用 |
-| `interpolateStrokePoints(points)` | Catmull-Romスプライン補間 |
+| `interpolateStrokePoints(points, overlapCount?)` | Catmull-Romスプライン補間 |
 
 ### レンダリング関数
 
@@ -105,7 +105,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `appendToCommittedLayer(layer, points, style, expand)` | 確定レイヤーに追加描画 |
+| `appendToCommittedLayer(layer, points, style, expand, overlapCount?)` | 確定レイヤーに追加描画 |
 | `renderPendingLayer(layer, points, style, expand)` | 作業レイヤーを再描画 |
 | `composeLayers(target, layers, transform?)` | レイヤーを合成 |
 

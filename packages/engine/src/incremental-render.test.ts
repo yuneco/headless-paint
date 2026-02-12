@@ -70,6 +70,40 @@ describe("appendToCommittedLayer", () => {
     expect(getPixel(layer, 50, 30).a).toBe(255);
     expect(getPixel(layer, 50, 70).a).toBe(255);
   });
+
+  it("should draw with overlapCount > 0 (bridge segment)", () => {
+    const layer = createLayer(100, 100);
+    const style = createTestStyle();
+    const compiled = createNoneExpand();
+    // 3 overlap points + 1 new point
+    const points = [
+      { x: 10, y: 50 },
+      { x: 30, y: 50 },
+      { x: 50, y: 50 },
+      { x: 70, y: 50 },
+    ];
+
+    appendToCommittedLayer(layer, points, style, compiled, 3);
+
+    // Bridge area (around x=50-70) should have pixels
+    expect(getPixel(layer, 60, 50).a).toBeGreaterThan(0);
+  });
+
+  it("overlapCount=0 should behave identically to no overlapCount", () => {
+    const layer1 = createLayer(100, 100);
+    const layer2 = createLayer(100, 100);
+    const style = createTestStyle();
+    const compiled = createNoneExpand();
+    const points = [
+      { x: 10, y: 50 },
+      { x: 90, y: 50 },
+    ];
+
+    appendToCommittedLayer(layer1, points, style, compiled);
+    appendToCommittedLayer(layer2, points, style, compiled, 0);
+
+    expect(getPixel(layer1, 50, 50)).toEqual(getPixel(layer2, 50, 50));
+  });
 });
 
 describe("renderPendingLayer", () => {

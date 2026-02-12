@@ -65,6 +65,16 @@ describe("session", () => {
         { x: 15, y: 25 },
       ]);
     });
+
+    it("should return committedOverlapCount = 0", () => {
+      const filterOutput = {
+        committed: [{ x: 10, y: 20, timestamp: 1000 }],
+        pending: [],
+      };
+
+      const result = startStrokeSession(filterOutput, style, expandConfig);
+      expect(result.renderUpdate.committedOverlapCount).toBe(0);
+    });
   });
 
   describe("addPointToSession", () => {
@@ -130,11 +140,60 @@ describe("session", () => {
       };
       const result3 = addPointToSession(result2.state, filterOutput3);
 
-      // Starts from max(0, lastRenderedCommitIndex=1) = index 1
+      // With COMMITTED_OVERLAP_COUNT=3, starts from max(0, 1-(3-1))=0
+      // committedOverlapCount = min(3, 1+1) = 2
+      expect(result3.renderUpdate.committedOverlapCount).toBe(2);
       expect(result3.renderUpdate.newlyCommitted).toEqual([
-        { x: 30, y: 40 },
-        { x: 50, y: 60 },
+        { x: 10, y: 20 }, // overlap
+        { x: 30, y: 40 }, // overlap
+        { x: 50, y: 60 }, // new
       ]);
+    });
+
+    it("should return committedOverlapCount=1 on first addPointToSession", () => {
+      const filterOutput1 = {
+        committed: [{ x: 10, y: 20, timestamp: 1000 }],
+        pending: [],
+      };
+      const result1 = startStrokeSession(filterOutput1, style, expandConfig);
+
+      const filterOutput2 = {
+        committed: [
+          { x: 10, y: 20, timestamp: 1000 },
+          { x: 30, y: 40, timestamp: 1002 },
+        ],
+        pending: [],
+      };
+      const result2 = addPointToSession(result1.state, filterOutput2);
+
+      // lastRenderedCommitIndex was 0, so min(3, 0+1) = 1
+      expect(result2.renderUpdate.committedOverlapCount).toBe(1);
+    });
+
+    it("should cap committedOverlapCount at 3 after enough points", () => {
+      let state = startStrokeSession(
+        {
+          committed: [{ x: 0, y: 0, timestamp: 1000 }],
+          pending: [],
+        },
+        style,
+        expandConfig,
+      ).state;
+
+      // Add points incrementally until we have 5 committed
+      for (let i = 1; i <= 4; i++) {
+        const committed = Array.from({ length: i + 1 }, (_, j) => ({
+          x: j * 10,
+          y: 0,
+          timestamp: 1000 + j,
+        }));
+        const result = addPointToSession(state, { committed, pending: [] });
+        state = result.state;
+
+        if (i >= 3) {
+          expect(result.renderUpdate.committedOverlapCount).toBe(3);
+        }
+      }
     });
   });
 

@@ -20,6 +20,8 @@ import type {
   StrokeStyle,
 } from "./types";
 
+const COMMITTED_OVERLAP_COUNT = 3;
+
 /**
  * InputPoint から StrokePoint への変換（座標 + pressure を保持）
  */
@@ -89,6 +91,7 @@ export function startStrokeSession(
     currentPending: buildPendingWithOverlap(pendingPoints, lastCommittedPoint),
     style,
     expand,
+    committedOverlapCount: 0,
   };
 
   return { state, renderUpdate };
@@ -107,11 +110,22 @@ export function addPointToSession(
   const newCurrentPending = [...filterOutput.pending];
 
   // newlyCommitted: 今回 appendToCommittedLayer に渡す点列
-  // lastRenderedCommitIndex から開始し、1点のオーバーラップを含めることで
-  // 前回描画のパス終端と今回のパス始端が同一座標で接続される
-  const newlyCommittedStartIndex = Math.max(0, state.lastRenderedCommitIndex);
+  // lastRenderedCommitIndex から最大 COMMITTED_OVERLAP_COUNT 点のオーバーラップを含めることで
+  // Catmull-Rom スプラインのブリッジ部分で十分な制御点が確保される
+  const newlyCommittedStartIndex = Math.max(
+    0,
+    state.lastRenderedCommitIndex - (COMMITTED_OVERLAP_COUNT - 1),
+  );
+  const committedOverlapCount = Math.min(
+    COMMITTED_OVERLAP_COUNT,
+    state.lastRenderedCommitIndex + 1,
+  );
   const newlyCommittedPoints = toStrokePoints(
     newAllCommitted.slice(newlyCommittedStartIndex),
+  );
+  const actualOverlap = Math.min(
+    committedOverlapCount,
+    newlyCommittedPoints.length,
   );
 
   const pendingPoints = toStrokePoints(newCurrentPending);
@@ -133,6 +147,7 @@ export function addPointToSession(
     currentPending: buildPendingWithOverlap(pendingPoints, lastCommittedPoint),
     style: state.style,
     expand: state.expand,
+    committedOverlapCount: actualOverlap,
   };
 
   return { state: newState, renderUpdate };

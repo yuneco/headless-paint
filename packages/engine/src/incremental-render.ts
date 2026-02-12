@@ -12,6 +12,7 @@ export function appendToCommittedLayer(
   points: readonly StrokePoint[],
   style: StrokeStyle,
   compiledExpand: CompiledExpand,
+  overlapCount = 0,
 ): void {
   if (points.length === 0) return;
 
@@ -26,6 +27,7 @@ export function appendToCommittedLayer(
         style.pressureSensitivity ?? 0,
         style.pressureCurve,
         style.compositeOperation,
+        overlapCount,
       );
     }
   }

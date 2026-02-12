@@ -27,6 +27,7 @@ export interface RenderUpdate {
   readonly currentPending: readonly StrokePoint[];
   readonly style: StrokeStyle;
   readonly expand: ExpandConfig;
+  readonly committedOverlapCount: number;
 }
 
 export interface StrokeSessionResult {

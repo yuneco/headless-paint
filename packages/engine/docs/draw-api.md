@@ -183,13 +183,15 @@ Catmull-Romスプラインでポイント列を補間する。描画の滑らか
 ```typescript
 function interpolateStrokePoints(
   points: readonly StrokePoint[],
+  overlapCount?: number,
 ): StrokePoint[]
 ```
 
 **引数**:
-| 名前 | 型 | 必須 | 説明 |
-|---|---|---|---|
-| `points` | `readonly StrokePoint[]` | ○ | 入力ポイント列 |
+| 名前 | 型 | 必須 | デフォルト | 説明 |
+|---|---|---|---|---|
+| `points` | `readonly StrokePoint[]` | ○ | - | 入力ポイント列 |
+| `overlapCount` | `number` | - | `0` | 先頭 N 点が描画済みオーバーラップであることを示す。曲率計算には参加するが、オーバーラップ内部のセグメントは出力から除外される。ブリッジセグメント（最後のオーバーラップ点→最初の新規点）は出力に含まれる |
 
 **戻り値**: `StrokePoint[]` - 補間されたポイント列（x, y はCatmull-Rom、pressureは線形補間）
 
@@ -197,6 +199,8 @@ function interpolateStrokePoints(
 - 2点未満の場合はそのままコピーを返す
 - ポイント間の距離に応じて補間点数を自動決定
 - 描画関数の内部で使用される（FilterPipelineではなく描画時に適用）
+- `overlapCount > 0` の場合、内部で `skipSegments = max(0, overlapCount - 1)` を計算し、先頭セグメントを出力から除外する
+- `overlapCount = 0` の場合、従来と完全に同一の動作
 
 ---
 
@@ -213,6 +217,7 @@ function drawVariableWidthPath(
   pressureSensitivity: number,
   pressureCurve?: PressureCurve,
   compositeOperation?: GlobalCompositeOperation,
+  overlapCount?: number,
 ): void
 ```
 
@@ -226,6 +231,7 @@ function drawVariableWidthPath(
 | `pressureSensitivity` | `number` | ○ | 筆圧感度（0.0〜1.0） |
 | `pressureCurve` | `PressureCurve` | - | 筆圧カーブ（undefinedは変換なし） |
 | `compositeOperation` | `GlobalCompositeOperation` | - | Canvas合成モード（undefinedは `"source-over"`） |
+| `overlapCount` | `number` | - | `interpolateStrokePoints` にパススルーされる。先頭のオーバーラップ点数を指定し、曲率計算精度を向上させる |
 
 **描画手順**:
 1. `compositeOperation` が指定されている場合、`ctx.globalCompositeOperation` を設定

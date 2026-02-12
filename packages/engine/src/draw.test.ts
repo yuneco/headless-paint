@@ -5,9 +5,10 @@ import {
   drawCircle,
   drawLine,
   drawPath,
+  interpolateStrokePoints,
 } from "./draw";
 import { createLayer, getImageData, getPixel } from "./layer";
-import type { Color, Layer, PressureCurve } from "./types";
+import type { Color, Layer, PressureCurve, StrokePoint } from "./types";
 import { DEFAULT_PRESSURE_CURVE } from "./types";
 
 const RED: Color = { r: 255, g: 0, b: 0, a: 255 };
@@ -144,6 +145,51 @@ describe("applyPressureCurve", () => {
     expect(applyPressureCurve(1, { y1: 0, y2: 0 })).toBe(1);
     expect(applyPressureCurve(1, { y1: 1, y2: 1 })).toBe(1);
     expect(applyPressureCurve(1, { y1: 0.5, y2: 0.8 })).toBe(1);
+  });
+});
+
+describe("interpolateStrokePoints with overlapCount", () => {
+  const mkPoint = (x: number, y: number): StrokePoint => ({
+    x,
+    y,
+    pressure: 0.5,
+  });
+
+  it("overlapCount=0 should produce same output as no overlapCount", () => {
+    const points = [mkPoint(0, 0), mkPoint(10, 0), mkPoint(20, 0)];
+    const withoutOverlap = interpolateStrokePoints(points);
+    const withOverlap = interpolateStrokePoints(points, 0);
+    expect(withOverlap).toEqual(withoutOverlap);
+  });
+
+  it("overlapCount=3 with 4 points should skip first 2 segments and output from bridge", () => {
+    const points = [
+      mkPoint(0, 0),
+      mkPoint(10, 0),
+      mkPoint(20, 0),
+      mkPoint(30, 0),
+    ];
+    const result = interpolateStrokePoints(points, 3);
+    // skipSegments = max(0, 3 - 1) = 2
+    // Points at index 0, 1 are skipped; index 2 (last overlap) is output
+    // Bridge segment (index 2 → 3) and point at index 3 are output
+    expect(result[0].x).toBe(20); // last overlap point
+    expect(result[result.length - 1].x).toBe(30); // new point
+  });
+
+  it("overlapCount >= points.length should output only last point", () => {
+    const points = [mkPoint(0, 0), mkPoint(10, 0), mkPoint(20, 0)];
+    const result = interpolateStrokePoints(points, 3);
+    // skipSegments = max(0, 3 - 1) = 2
+    // Only index 2 point is output, no segments after it
+    expect(result.length).toBe(1);
+    expect(result[0].x).toBe(20);
+  });
+
+  it("1-point input should be unchanged regardless of overlapCount", () => {
+    const points = [mkPoint(5, 5)];
+    const result = interpolateStrokePoints(points, 1);
+    expect(result).toEqual([{ x: 5, y: 5, pressure: 0.5 }]);
   });
 });
 

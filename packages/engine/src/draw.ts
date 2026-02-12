@@ -97,11 +97,13 @@ export function calculateRadius(
  */
 export function interpolateStrokePoints(
   points: readonly StrokePoint[],
+  overlapCount = 0,
 ): StrokePoint[] {
   if (points.length < 2) {
     return points.map((p) => ({ ...p }));
   }
 
+  const skipSegments = Math.max(0, overlapCount - 1);
   const result: StrokePoint[] = [];
 
   for (let i = 0; i < points.length; i++) {
@@ -110,9 +112,11 @@ export function interpolateStrokePoints(
     const p2 = points[Math.min(points.length - 1, i + 1)];
     const p3 = points[Math.min(points.length - 1, i + 2)];
 
-    result.push({ x: p1.x, y: p1.y, pressure: p1.pressure });
+    if (i >= skipSegments) {
+      result.push({ x: p1.x, y: p1.y, pressure: p1.pressure });
+    }
 
-    if (i < points.length - 1) {
+    if (i < points.length - 1 && i >= skipSegments) {
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -163,6 +167,7 @@ export function drawVariableWidthPath(
   pressureSensitivity: number,
   pressureCurve?: PressureCurve,
   compositeOperation?: GlobalCompositeOperation,
+  overlapCount?: number,
 ): void {
   if (points.length === 0) return;
 
@@ -175,7 +180,7 @@ export function drawVariableWidthPath(
     ctx.globalCompositeOperation = compositeOperation;
   }
 
-  const interpolated = interpolateStrokePoints(points);
+  const interpolated = interpolateStrokePoints(points, overlapCount);
 
   if (interpolated.length === 1) {
     const r = calculateRadius(

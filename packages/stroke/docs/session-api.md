@@ -92,8 +92,9 @@ function addPointToSession(
 **動作**:
 1. filterOutput.committed を allCommitted に追加
 2. filterOutput.pending を currentPending に設定
-3. lastRenderedCommitIndex から新しく追加された点を newlyCommitted として計算
-4. InputPointからStrokePoint（pressure保持）に変換してRenderUpdateを生成
+3. lastRenderedCommitIndex からオーバーラップ点（最大3点）を含めて newlyCommitted を計算
+4. `committedOverlapCount = min(3, lastRenderedCommitIndex + 1)` で利用可能なオーバーラップ点数をクランプ
+5. InputPointからStrokePoint（pressure保持）に変換してRenderUpdateを生成
 
 **使用例**:
 ```typescript
@@ -205,8 +206,11 @@ const inputPoints: InputPoint[] = [];
 
 // 描画更新処理
 function onRenderUpdate(update: RenderUpdate) {
-  if (update.newlyCommitted.length > 0) {
-    appendToCommittedLayer(committedLayer, update.newlyCommitted, update.style, compiledExpand);
+  if (update.newlyCommitted.length > update.committedOverlapCount) {
+    appendToCommittedLayer(
+      committedLayer, update.newlyCommitted, update.style, compiledExpand,
+      update.committedOverlapCount,
+    );
   }
   renderPendingLayer(pendingLayer, update.currentPending, update.style, compiledExpand);
   composeLayers(displayCtx, [committedLayer, pendingLayer], viewTransform);

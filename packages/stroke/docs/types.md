@@ -84,19 +84,30 @@ interface RenderUpdate {
   readonly currentPending: readonly StrokePoint[];
   readonly style: StrokeStyle;
   readonly expand: ExpandConfig;
+  readonly committedOverlapCount: number;
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `newlyCommitted` | `readonly StrokePoint[]` | 今回新たに確定した点（差分、pressure含む） |
+| `newlyCommitted` | `readonly StrokePoint[]` | 今回新たに確定した点（差分、pressure含む）。先頭に `committedOverlapCount` 個のオーバーラップ点を含む |
 | `currentPending` | `readonly StrokePoint[]` | 現在のpending全体（pressure含む） |
 | `style` | `StrokeStyle` | 描画スタイル |
 | `expand` | `ExpandConfig` | 展開設定 |
+| `committedOverlapCount` | `number` | `newlyCommitted` 先頭に含まれる描画済みオーバーラップ点の数。Catmull-Rom の曲率計算に使用され、描画はスキップされる |
 
 **newlyCommittedとcurrentPendingの違い**:
-- `newlyCommitted`: 前回の `addPointToSession` 以降に新しく確定した点のみ
+- `newlyCommitted`: 前回の `addPointToSession` 以降に新しく確定した点のみ。先頭に最大3点のオーバーラップ（描画済み点）を含み、Catmull-Romスプラインのブリッジ部分の曲率計算精度を向上させる
 - `currentPending`: 現在のpending全体（毎回全て再描画するため）
+
+**committedOverlapCount の値**:
+| 経路 | 値 | 理由 |
+|---|---|---|
+| `startStrokeSession` | 0 | 初回描画、オーバーラップなし |
+| `addPointToSession` | `min(3, 前回までの committed 点数)` | 利用可能な点数でクランプ |
+| `onDrawConfirm`（全フラッシュ） | 呼び出し側で 0 を指定（デフォルト） | allCommitted を一括描画 |
+
+**ゼロ新規点ガード**: `newlyCommitted.length === committedOverlapCount` の場合、新規点がないため `appendToCommittedLayer` の呼び出しをスキップすること。
 
 **StrokePoint型への変更理由**: 筆圧情報（pressure）をengineの描画関数まで伝達するため。InputPointからpressureを保持したままStrokePointに変換される。
 

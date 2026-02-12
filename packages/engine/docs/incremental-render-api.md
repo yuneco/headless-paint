@@ -47,6 +47,7 @@ interface RenderUpdate {
   readonly currentPending: readonly StrokePoint[];  // 現在のpending全体（pressure含む）
   readonly style: StrokeStyle;
   readonly expand: ExpandConfig;
+  readonly committedOverlapCount: number;            // 先頭のオーバーラップ点数
 }
 ```
 
@@ -61,7 +62,8 @@ function appendToCommittedLayer(
   layer: Layer,
   points: readonly StrokePoint[],
   style: StrokeStyle,
-  compiledExpand: CompiledExpand
+  compiledExpand: CompiledExpand,
+  overlapCount = 0,
 ): void
 ```
 
@@ -69,9 +71,10 @@ function appendToCommittedLayer(
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 確定レイヤー |
-| `points` | `readonly StrokePoint[]` | ○ | 新しく確定した点（pressure含む） |
+| `points` | `readonly StrokePoint[]` | ○ | 新しく確定した点（pressure含む）。先頭に `overlapCount` 個のオーバーラップ点を含む |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（pressureSensitivity含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
+| `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
 
 **動作**:
 1. pointsを`expandStrokePoints`で展開（pressure保持）
@@ -83,13 +86,16 @@ function appendToCommittedLayer(
 
 **使用例**:
 ```typescript
-// 新しく確定した点を描画
-appendToCommittedLayer(
-  committedLayer,
-  renderUpdate.newlyCommitted,
-  renderUpdate.style,
-  compiledExpand
-);
+// 新しく確定した点を描画（オーバーラップ付き）
+if (renderUpdate.newlyCommitted.length > renderUpdate.committedOverlapCount) {
+  appendToCommittedLayer(
+    committedLayer,
+    renderUpdate.newlyCommitted,
+    renderUpdate.style,
+    compiledExpand,
+    renderUpdate.committedOverlapCount,
+  );
+}
 ```
 
 ---
@@ -200,13 +206,14 @@ const compiledExpand = compileExpand(expandConfig);
 
 // ストローク中の描画更新
 function onRenderUpdate(update: RenderUpdate) {
-  // 1. 新しく確定した点を確定レイヤーに追加
-  if (update.newlyCommitted.length > 0) {
+  // 1. 新しく確定した点を確定レイヤーに追加（ゼロ新規点ガード付き）
+  if (update.newlyCommitted.length > update.committedOverlapCount) {
     appendToCommittedLayer(
       committedLayer,
       update.newlyCommitted,
       update.style,
-      compiledExpand
+      compiledExpand,
+      update.committedOverlapCount,
     );
   }
 

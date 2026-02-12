@@ -262,12 +262,17 @@ export function App() {
       };
 
       if (!pendingOnlyRef.current) {
-        appendToCommittedLayer(
-          currentEntry.committedLayer,
-          strokeResult.renderUpdate.newlyCommitted,
-          strokeStyle,
-          sessionRef.current.compiledExpand,
-        );
+        const { newlyCommitted, committedOverlapCount } =
+          strokeResult.renderUpdate;
+        if (newlyCommitted.length > committedOverlapCount) {
+          appendToCommittedLayer(
+            currentEntry.committedLayer,
+            newlyCommitted,
+            strokeStyle,
+            sessionRef.current.compiledExpand,
+            committedOverlapCount,
+          );
+        }
       }
 
       const pendingPoints = pendingOnlyRef.current
@@ -324,12 +329,17 @@ export function App() {
     const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
     const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
 
-    appendToCommittedLayer(
-      currentEntry.committedLayer,
-      finalStrokeResult.renderUpdate.newlyCommitted,
-      strokeStyle,
-      sessionRef.current.compiledExpand,
-    );
+    const { newlyCommitted, committedOverlapCount } =
+      finalStrokeResult.renderUpdate;
+    if (newlyCommitted.length > committedOverlapCount) {
+      appendToCommittedLayer(
+        currentEntry.committedLayer,
+        newlyCommitted,
+        strokeStyle,
+        sessionRef.current.compiledExpand,
+        committedOverlapCount,
+      );
+    }
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
 

@@ -143,7 +143,7 @@ input (FilterOutput)
     ↓
 stroke: セッション管理
     - 前回からの差分計算
-    → RenderUpdate { newlyCommitted, currentPending, style, expand }
+    → RenderUpdate { newlyCommitted, currentPending, style, expand, committedOverlapCount }
     ↓
 engine: 描画
     - expand適用（確定/pending両方）
@@ -171,6 +171,16 @@ StrokeSessionState で追跡:
   - lastRenderedCommitIndex: 前回描画した確定点のインデックス
 
 RenderUpdate として出力:
-  - newlyCommitted: 今回新たに確定した点（差分）
+  - newlyCommitted: 今回新たに確定した点（差分）+ 先頭に最大3点のオーバーラップ
   - currentPending: 現在のpending全体
+  - committedOverlapCount: newlyCommitted 先頭のオーバーラップ点数
+```
+
+### committed オーバーラップ戦略
+
+インクリメンタル描画で `newlyCommitted` を描画する際、前回描画済みの末尾点をオーバーラップとして含める。これにより Catmull-Rom スプラインのブリッジ部分（描画済み→新規の接続点）で十分な制御点が確保され、曲率計算が改善される。
+
+```
+[...描画済み..., Pa, Pb, Pc] [Pa, Pb, Pc, P_new1, P_new2, ...]  ← 3点オーバーラップ
+                              ^^^^^^^^^^^ context (曲率計算のみ、描画スキップ)
 ```
