@@ -109,14 +109,14 @@ function undo(state: HistoryState): HistoryState
 
 **戻り値**: `HistoryState` - currentIndex が1減った状態
 
-**注意**: この関数は currentIndex を更新するだけ。レイヤーの再構築は `rebuildLayerState` で行う。
+**注意**: この関数は currentIndex を更新するだけ。レイヤーの再構築は `rebuildLayerFromHistory` で行う。
 
 **使用例**:
 ```typescript
 if (canUndo(historyState)) {
   historyState = undo(historyState);
   clearLayer(layer);
-  rebuildLayerState(layer, historyState);
+  rebuildLayerFromHistory(layer, historyState);
 }
 ```
 
@@ -142,7 +142,7 @@ function redo(state: HistoryState): HistoryState
 if (canRedo(historyState)) {
   historyState = redo(historyState);
   clearLayer(layer);
-  rebuildLayerState(layer, historyState);
+  rebuildLayerFromHistory(layer, historyState);
 }
 ```
 
@@ -172,12 +172,12 @@ function canRedo(state: HistoryState): boolean
 
 ---
 
-## rebuildLayerState
+## rebuildLayerFromHistory
 
-履歴状態からレイヤーを再構築する。
+履歴状態から指定レイヤーを再構築する。レイヤー ID に基づいてチェックポイントとコマンドをフィルタリングし、該当レイヤーの描画のみをリプレイする。
 
 ```typescript
-function rebuildLayerState(layer: Layer, state: HistoryState): void
+function rebuildLayerFromHistory(layer: Layer, state: HistoryState): void
 ```
 
 **引数**:
@@ -187,14 +187,75 @@ function rebuildLayerState(layer: Layer, state: HistoryState): void
 | `state` | `HistoryState` | ○ | 履歴状態 |
 
 **動作**:
-1. currentIndex 以下の最新チェックポイントを探す
-2. チェックポイントがあれば imageData をレイヤーに復元
-3. チェックポイント以降のコマンドをリプレイ
+1. `layer.id` に対応する最適なチェックポイントを探す
+2. チェックポイントがあれば imageData をレイヤーに復元、なければクリア
+3. チェックポイント以降の該当レイヤーのコマンドをリプレイ
 
 **使用例**:
 ```typescript
-clearLayer(layer);
-rebuildLayerState(layer, historyState);
+rebuildLayerFromHistory(layer, historyState);
+```
+
+---
+
+## replayCommands
+
+コマンド列をレイヤーに順次適用する。
+
+```typescript
+function replayCommands(layer: Layer, commands: readonly Command[]): void
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `layer` | `Layer` | ○ | 描画先レイヤー |
+| `commands` | `readonly Command[]` | ○ | 適用するコマンドの配列 |
+
+---
+
+## createCheckpoint
+
+レイヤーの現在の ImageData をスナップショットとして保存する。
+
+```typescript
+function createCheckpoint(layer: Layer, commandIndex: number): Checkpoint
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `layer` | `Layer` | ○ | スナップショット元のレイヤー |
+| `commandIndex` | `number` | ○ | このチェックポイントが対応するコマンドインデックス |
+
+**戻り値**: `Checkpoint` — レイヤー ID、ImageData、コマンドインデックスを含む
+
+---
+
+## restoreFromCheckpoint
+
+チェックポイントの ImageData をレイヤーに復元する。
+
+```typescript
+function restoreFromCheckpoint(layer: Layer, checkpoint: Checkpoint): void
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `layer` | `Layer` | ○ | 復元先のレイヤー |
+| `checkpoint` | `Checkpoint` | ○ | 復元するチェックポイント |
+
+---
+
+## rebuildLayerState
+
+> **@deprecated** — `rebuildLayerFromHistory` を使用してください。
+
+履歴状態からレイヤーを再構築する。内部で `rebuildLayerFromHistory` を呼び出す。
+
+```typescript
+function rebuildLayerState(layer: Layer, state: HistoryState): void
 ```
 
 ---
@@ -339,7 +400,7 @@ import {
   redo,
   canUndo,
   canRedo,
-  rebuildLayerState,
+  rebuildLayerFromHistory,
 } from "@headless-paint/stroke";
 import { createLayer, clearLayer } from "@headless-paint/engine";
 
@@ -364,7 +425,7 @@ function handleUndo() {
 
   historyState = undo(historyState);
   clearLayer(layer);
-  rebuildLayerState(layer, historyState);
+  rebuildLayerFromHistory(layer, historyState);
   redraw(); // 画面を再描画
 }
 
@@ -374,7 +435,7 @@ function handleRedo() {
 
   historyState = redo(historyState);
   clearLayer(layer);
-  rebuildLayerState(layer, historyState);
+  rebuildLayerFromHistory(layer, historyState);
   redraw();
 }
 

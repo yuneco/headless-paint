@@ -128,17 +128,13 @@ renderLayers(layers, ctx, transform);
 
 高DPIディスプレイ（Retina等）でシャープな描画を行うには、DPRを考慮した処理が必要です。
 
-### 現状の制約
+`renderLayerWithTransform` は内部で `ctx.setTransform()` を使用するため、呼び出し前に設定した `ctx.scale(dpr, dpr)` がリセットされます。そのため、DPR スケーリングをビュー変換行列に含める必要があります。
 
-`renderLayerWithTransform`は内部で`ctx.setTransform()`を使用するため、呼び出し前に設定した`ctx.scale(dpr, dpr)`がリセットされます。
-
-**そのため、呼び出し側でDPRを変換行列に含める必要があります。**
-
-> **注意**: これは理想的な設計ではありません。DPR対応は一般的なニーズであり、本来はライブラリ側で隠蔽すべきです。将来のバージョンでAPIを改善予定です。
-
-### 現状の対応方法
+`@headless-paint/input` の `applyDpr` ユーティリティを使うと簡潔に対応できます。
 
 ```typescript
+import { applyDpr } from "@headless-paint/input";
+
 // 1. キャンバスのDPR対応
 const dpr = window.devicePixelRatio;
 canvas.width = width * dpr;
@@ -149,31 +145,13 @@ ctx.scale(dpr, dpr);
 ctx.fillStyle = "#f0f0f0";
 ctx.fillRect(0, 0, width, height);
 
-// 3. DPRを含めた変換行列を作成
-const dprTransform = new Float32Array(transform);
-dprTransform[0] *= dpr;  // a
-dprTransform[1] *= dpr;  // b
-dprTransform[3] *= dpr;  // c
-dprTransform[4] *= dpr;  // d
-dprTransform[6] *= dpr;  // tx
-dprTransform[7] *= dpr;  // ty
-
-// 4. レイヤー描画
+// 3. DPRを含めた変換行列を作成してレイヤー描画
+const dprTransform = applyDpr(transform, dpr);
 renderLayerWithTransform(layer, ctx, dprTransform);
 
-// 5. その他の描画（DPRスケーリングは restore 後に戻る）
+// 4. その他の描画（DPRスケーリングは restore 後に戻る）
 ctx.strokeStyle = "#444";
 ctx.strokeRect(0, 0, 100, 100);  // DPRスケーリング適用
-```
-
-### 将来の改善案
-
-```typescript
-// 案: DPR適用ユーティリティの追加（@headless-paint/input）
-import { applyDPR } from "@headless-paint/input";
-
-const dprTransform = applyDPR(transform, window.devicePixelRatio);
-renderLayerWithTransform(layer, ctx, dprTransform);
 ```
 
 ---

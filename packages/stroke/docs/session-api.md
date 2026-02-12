@@ -123,6 +123,7 @@ function onPointerMove(e: PointerEvent) {
 ```typescript
 function endStrokeSession(
   state: StrokeSessionState,
+  layerId: string,
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig
 ): StrokeCommand | null
@@ -132,6 +133,7 @@ function endStrokeSession(
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `state` | `StrokeSessionState` | ○ | 現在のセッション状態 |
+| `layerId` | `string` | ○ | 描画先レイヤーの ID（コマンドに記録される） |
 | `inputPoints` | `readonly InputPoint[]` | ○ | フィルタ前の入力点列（履歴保存用） |
 | `filterPipeline` | `FilterPipelineConfig` | ○ | 使用したフィルタパイプライン設定 |
 
@@ -159,7 +161,8 @@ function onPointerUp() {
   // コマンド生成
   const command = endStrokeSession(
     finalResult.state,
-    allInputPoints,  // フィルタ前の全入力点
+    layerId,           // 描画先レイヤーのID
+    allInputPoints,    // フィルタ前の全入力点
     filterPipelineConfig
   );
 
@@ -259,7 +262,7 @@ function onPointerUp() {
   onRenderUpdate(finalResult.renderUpdate);
 
   // コマンド生成
-  const command = endStrokeSession(finalResult.state, inputPoints, filterConfig);
+  const command = endStrokeSession(finalResult.state, layer.id, inputPoints, filterConfig);
 
   // クリーンアップ
   sessionState = null;

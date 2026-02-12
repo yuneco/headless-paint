@@ -125,6 +125,8 @@ interface UseSmoothingResult {
 function useExpand(layerWidth: number, layerHeight: number): UseExpandResult;
 ```
 
+`layerWidth` / `layerHeight` は `createDefaultExpandConfig()` に渡され、デフォルト展開設定の中心座標（`offset`）の計算に使用される。
+
 #### UseExpandResult
 
 ```typescript
@@ -235,7 +237,7 @@ interface PointerHandlers {
   readonly onPointerDown: (e: React.PointerEvent) => void;
   readonly onPointerMove: (e: React.PointerEvent) => void;
   readonly onPointerUp: (e: React.PointerEvent) => void;
-  /** Canvas 要素の wheel イベントに接続する（ズーム操作） */
+  /** Canvas 要素の wheel イベントに接続する（ズーム操作）。標準 DOM WheelEvent（React.WheelEvent ではない） */
   readonly onWheel: (e: WheelEvent) => void;
 }
 ```
@@ -244,7 +246,7 @@ interface PointerHandlers {
 
 タッチデバイスのマルチタッチイベントを認識し、ジェスチャーに応じたコールバックを発火する。
 
-- 1本指: 描画（pending-until-confirmed パターン）
+- 1本指: 描画（`onStrokeStart` を常に `pendingOnly=true` で呼ぶ pending-until-confirmed パターン）
 - 2本指: ピンチ（zoom + pan + rotate）
 - 2本指タップ: Undo
 - 描画中に2本目追加: 描画をキャンセルしてジェスチャーに遷移
@@ -380,7 +382,7 @@ interface UseStrokeSessionResult {
   readonly onDrawCancel: () => void;
   /** layer が有効（非 null かつ visible）で描画可能な状態か */
   readonly canDraw: boolean;
-  /** 描画操作のたびにインクリメントされる。Canvas の再描画トリガーとして使う */
+  /** 描画操作のたびにインクリメントされる単純カウンタ。Canvas の再描画トリガーとして使う */
   readonly renderVersion: number;
   /** 現在のストロークで蓄積された入力ポイント列（デバッグ表示用） */
   readonly strokePoints: readonly InputPoint[];

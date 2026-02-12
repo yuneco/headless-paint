@@ -122,7 +122,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `addLayer(layers, width, height, meta?)` | レイヤーを追加し `[newLayers, newLayer]` を返す |
+| `addLayer(layers, width, height, meta?, insertIndex?)` | レイヤーを追加し `[newLayers, newLayer]` を返す。`insertIndex` 省略時は末尾に追加 |
 | `removeLayer(layers, layerId)` | 指定IDのレイヤーを削除 |
 | `findLayerById(layers, layerId)` | IDでレイヤーを検索 |
 | `getLayerIndex(layers, layerId)` | IDからインデックスを取得（-1 = 未検出） |

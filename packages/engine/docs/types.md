@@ -88,6 +88,7 @@ pendingLayer.meta.compositeOperation = "destination-out";
 
 ```typescript
 interface Layer {
+  readonly id: string;                              // 一意な識別子（createLayer で自動付与）
   readonly width: number;                           // 幅（ピクセル）
   readonly height: number;                          // 高さ（ピクセル）
   readonly canvas: OffscreenCanvas;                 // キャンバス
