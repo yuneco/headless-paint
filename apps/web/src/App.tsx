@@ -343,7 +343,7 @@ export function App() {
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
 
-    if (totalPoints >= 2) {
+    if (totalPoints >= 1) {
       const command = createStrokeCommand(
         layerId,
         inputPoints,

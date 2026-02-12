@@ -136,8 +136,8 @@ function endStrokeSession(
 | `filterPipeline` | `FilterPipelineConfig` | ○ | 使用したフィルタパイプライン設定 |
 
 **戻り値**: `StrokeCommand | null`
-- 有効なストローク（2点以上）の場合: `StrokeCommand`（`style.compositeOperation` も含む）
-- 無効なストローク（1点以下）の場合: `null`
+- 有効なストローク（1点以上）の場合: `StrokeCommand`（`style.compositeOperation` も含む）
+- 無効なストローク（0点）の場合: `null`
 
 **使用例**:
 ```typescript

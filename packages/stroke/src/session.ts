@@ -162,9 +162,9 @@ export function endStrokeSession(
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
 ): StrokeCommand | null {
-  // 有効なストローク（2点以上）の場合のみコマンドを生成
+  // 有効なストローク（1点以上）の場合のみコマンドを生成
   const totalPoints = state.allCommitted.length + state.currentPending.length;
-  if (totalPoints < 2) {
+  if (totalPoints < 1) {
     return null;
   }
 

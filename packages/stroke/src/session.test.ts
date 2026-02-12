@@ -228,7 +228,7 @@ describe("session", () => {
       expect(command?.lineWidth).toBe(style.lineWidth);
     });
 
-    it("should return null for invalid stroke (< 2 points)", () => {
+    it("should return StrokeCommand for single-point stroke (1 point)", () => {
       const filterOutput = {
         committed: [{ x: 10, y: 20, timestamp: 1000 }],
         pending: [],
@@ -241,6 +241,25 @@ describe("session", () => {
         result.state,
         "layer_1",
         inputPoints,
+        filterPipeline,
+      );
+
+      expect(command).not.toBeNull();
+      expect(command?.type).toBe("stroke");
+      expect(command?.layerId).toBe("layer_1");
+    });
+
+    it("should return null for empty stroke (0 points)", () => {
+      const filterOutput = {
+        committed: [],
+        pending: [],
+      };
+      const result = startStrokeSession(filterOutput, style, expandConfig);
+
+      const command = endStrokeSession(
+        result.state,
+        "layer_1",
+        [],
         filterPipeline,
       );
 
