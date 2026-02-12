@@ -1,4 +1,5 @@
 import type { Color } from "@headless-paint/engine";
+import type { ToolType } from "@headless-paint/react";
 import {
   ArrowLeftRight,
   Eraser,
@@ -10,7 +11,6 @@ import {
   ZoomIn,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import type { ToolType } from "../hooks/usePointerHandler";
 
 function colorToHex(c: Color): string {
   const r = c.r.toString(16).padStart(2, "0");

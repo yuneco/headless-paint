@@ -32,6 +32,9 @@ importers:
       '@headless-paint/input':
         specifier: workspace:*
         version: link:../../packages/input
+      '@headless-paint/react':
+        specifier: workspace:*
+        version: link:../../packages/react
       '@headless-paint/stroke':
         specifier: workspace:*
         version: link:../../packages/stroke
@@ -83,6 +86,30 @@ importers:
         specifier: ^3.4.3
         version: 3.4.4
     devDependencies:
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.1
+      vite-plugin-dts:
+        specifier: ^4.4.0
+        version: 4.5.4(typescript@5.9.3)(vite@6.4.1)
+
+  packages/react:
+    devDependencies:
+      '@headless-paint/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@headless-paint/input':
+        specifier: workspace:*
+        version: link:../input
+      '@headless-paint/stroke':
+        specifier: workspace:*
+        version: link:../stroke
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.9
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
       vite:
         specifier: ^6.0.0
         version: 6.4.1
@@ -2141,7 +2168,6 @@ packages:
   /react@19.2.3:
     resolution: {integrity: sha512-Ku/hhYbVjOQnXDZFv2+RibmLFGwFdeeKHFcOTlrt7xplBnya5OGn/hIRDsqDiSUcfORsDC7MPxwork8jBwsIWA==}
     engines: {node: '>=0.10.0'}
-    dev: false
 
   /require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}

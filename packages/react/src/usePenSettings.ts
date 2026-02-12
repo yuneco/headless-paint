@@ -1,11 +1,13 @@
 import type { Color, PressureCurve, StrokeStyle } from "@headless-paint/engine";
+import { DEFAULT_PRESSURE_CURVE } from "@headless-paint/engine";
 import { useCallback, useState } from "react";
-import {
-  DEFAULT_LINE_WIDTH,
-  DEFAULT_PEN_COLOR,
-  DEFAULT_PRESSURE_CURVE,
-  DEFAULT_PRESSURE_SENSITIVITY,
-} from "../config";
+
+export interface PenSettingsConfig {
+  readonly initialColor?: Color;
+  readonly initialLineWidth?: number;
+  readonly initialPressureSensitivity?: number;
+  readonly initialPressureCurve?: PressureCurve;
+}
 
 export interface UsePenSettingsResult {
   readonly color: Color;
@@ -21,14 +23,24 @@ export interface UsePenSettingsResult {
   readonly setEraser: (eraser: boolean) => void;
 }
 
-export function usePenSettings(): UsePenSettingsResult {
-  const [color, setColor] = useState<Color>(DEFAULT_PEN_COLOR);
-  const [lineWidth, setLineWidth] = useState(DEFAULT_LINE_WIDTH);
+const DEFAULT_COLOR: Color = { r: 0, g: 0, b: 0, a: 255 };
+const DEFAULT_LINE_WIDTH = 8;
+const DEFAULT_PRESSURE_SENSITIVITY = 1.0;
+
+export function usePenSettings(
+  config?: PenSettingsConfig,
+): UsePenSettingsResult {
+  const [color, setColor] = useState<Color>(
+    () => config?.initialColor ?? DEFAULT_COLOR,
+  );
+  const [lineWidth, setLineWidth] = useState(
+    () => config?.initialLineWidth ?? DEFAULT_LINE_WIDTH,
+  );
   const [pressureSensitivity, setPressureSensitivity] = useState(
-    DEFAULT_PRESSURE_SENSITIVITY,
+    () => config?.initialPressureSensitivity ?? DEFAULT_PRESSURE_SENSITIVITY,
   );
   const [pressureCurve, setPressureCurve] = useState<PressureCurve>(
-    DEFAULT_PRESSURE_CURVE,
+    () => config?.initialPressureCurve ?? DEFAULT_PRESSURE_CURVE,
   );
   const [eraser, setEraser] = useState(false);
 

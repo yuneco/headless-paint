@@ -1,12 +1,11 @@
 import type { ExpandMode } from "@headless-paint/engine";
-import type { MutableRefObject } from "react";
+import type { ToolType } from "@headless-paint/react";
 import { useEffect, useRef } from "react";
-import type { ToolType } from "./usePointerHandler";
 
 export interface KeyboardShortcutsDeps {
   readonly tool: ToolType;
   readonly setTool: (tool: ToolType) => void;
-  readonly sessionRef: MutableRefObject<unknown | null>;
+  readonly isDrawing: boolean;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly expandMode: ExpandMode;
@@ -66,7 +65,8 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
   const setToolRef = useRef(deps.setTool);
   setToolRef.current = deps.setTool;
 
-  const sessionRef = deps.sessionRef;
+  const isDrawingRef = useRef(deps.isDrawing);
+  isDrawingRef.current = deps.isDrawing;
 
   const onUndoRef = useRef(deps.onUndo);
   onUndoRef.current = deps.onUndo;
@@ -178,7 +178,7 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
       }
 
       // 4. ストローク中はツール切替を抑止
-      if (sessionRef.current !== null) return;
+      if (isDrawingRef.current) return;
 
       // 5. リピート無視 (ツール切替系)
       if (e.repeat) return;
@@ -269,5 +269,5 @@ export function useKeyboardShortcuts(deps: KeyboardShortcutsDeps): void {
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [sessionRef]);
+  }, []);
 }

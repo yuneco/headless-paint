@@ -9,17 +9,21 @@ import {
 import { useCallback, useState } from "react";
 
 export interface UseViewTransformResult {
-  transform: ViewTransform;
-  handlePan: (dx: number, dy: number) => void;
-  handleZoom: (scale: number, centerX: number, centerY: number) => void;
-  handleRotate: (angleRad: number, centerX: number, centerY: number) => void;
-  handleSetTransform: (newTransform: ViewTransform) => void;
-  reset: () => void;
-  /**
-   * レイヤー全体がビューに収まるようにスケール・オフセットを設定する。
-   * 初回マウント時やリセット時に呼ぶ。
-   */
-  setInitialFit: (
+  readonly transform: ViewTransform;
+  readonly handlePan: (dx: number, dy: number) => void;
+  readonly handleZoom: (
+    scale: number,
+    centerX: number,
+    centerY: number,
+  ) => void;
+  readonly handleRotate: (
+    angleRad: number,
+    centerX: number,
+    centerY: number,
+  ) => void;
+  readonly handleSetTransform: (newTransform: ViewTransform) => void;
+  readonly reset: () => void;
+  readonly setInitialFit: (
     viewW: number,
     viewH: number,
     layerW: number,

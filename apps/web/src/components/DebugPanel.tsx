@@ -1,11 +1,13 @@
 import type { ExpandMode, PatternMode, Point } from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
+import type {
+  UseExpandResult,
+  UsePenSettingsResult,
+  UseSmoothingResult,
+} from "@headless-paint/react";
 import type { GUI } from "lil-gui";
 import { useEffect, useRef } from "react";
-import type { UseExpandResult } from "../hooks/useExpand";
 import type { UsePatternPreviewResult } from "../hooks/usePatternPreview";
-import type { UsePenSettingsResult } from "../hooks/usePenSettings";
-import type { UseSmoothingResult } from "../hooks/useSmoothing";
 import { BezierCurveEditor } from "./BezierCurveEditor";
 
 interface DebugPanelProps {

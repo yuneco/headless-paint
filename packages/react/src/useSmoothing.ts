@@ -5,30 +5,35 @@ import type {
 import { compileFilterPipeline } from "@headless-paint/input";
 import { useCallback, useMemo, useState } from "react";
 
-export interface UseSmoothingResult {
-  enabled: boolean;
-  windowSize: number;
-  compiledFilterPipeline: CompiledFilterPipeline;
-  setEnabled: (enabled: boolean) => void;
-  setWindowSize: (windowSize: number) => void;
+export interface SmoothingConfig {
+  readonly initialEnabled?: boolean;
+  readonly initialWindowSize?: number;
 }
 
-import {
-  DEFAULT_SMOOTHING_ENABLED,
-  DEFAULT_SMOOTHING_WINDOW_SIZE,
-} from "../config";
+export interface UseSmoothingResult {
+  readonly enabled: boolean;
+  readonly windowSize: number;
+  readonly compiledFilterPipeline: CompiledFilterPipeline;
+  readonly setEnabled: (enabled: boolean) => void;
+  readonly setWindowSize: (windowSize: number) => void;
+}
 
-export function useSmoothing(): UseSmoothingResult {
-  const [enabled, setEnabled] = useState(DEFAULT_SMOOTHING_ENABLED);
+const DEFAULT_SMOOTHING_ENABLED = true;
+const DEFAULT_SMOOTHING_WINDOW_SIZE = 5;
+
+export function useSmoothing(config?: SmoothingConfig): UseSmoothingResult {
+  const [enabled, setEnabled] = useState(
+    () => config?.initialEnabled ?? DEFAULT_SMOOTHING_ENABLED,
+  );
   const [windowSize, setWindowSizeState] = useState(
-    DEFAULT_SMOOTHING_WINDOW_SIZE,
+    () => config?.initialWindowSize ?? DEFAULT_SMOOTHING_WINDOW_SIZE,
   );
 
   const compiledFilterPipeline = useMemo(() => {
-    const config: FilterPipelineConfig = enabled
+    const pipelineConfig: FilterPipelineConfig = enabled
       ? { filters: [{ type: "smoothing", config: { windowSize } }] }
       : { filters: [] };
-    return compileFilterPipeline(config);
+    return compileFilterPipeline(pipelineConfig);
   }, [enabled, windowSize]);
 
   // windowSize は奇数に正規化（移動平均の中央が一意に決まる必要があるため）

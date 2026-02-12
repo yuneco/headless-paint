@@ -7,42 +7,41 @@ export interface LayerEntry {
   readonly committedLayer: Layer;
 }
 
-interface UseLayersReturn {
-  entries: readonly LayerEntry[];
-  entriesRef: React.RefObject<LayerEntry[]>;
-  activeLayerId: string | null;
-  activeEntry: LayerEntry | undefined;
-  addLayer: () => { entry: LayerEntry; insertIndex: number };
-  removeLayer: (layerId: string) => void;
-  reinsertLayer: (
+export interface UseLayersResult {
+  readonly entries: readonly LayerEntry[];
+  readonly entriesRef: React.RefObject<LayerEntry[]>;
+  readonly activeLayerId: string | null;
+  readonly activeEntry: LayerEntry | undefined;
+  readonly addLayer: () => { entry: LayerEntry; insertIndex: number };
+  readonly removeLayer: (layerId: string) => void;
+  readonly reinsertLayer: (
     layerId: string,
     index: number,
     meta?: LayerMeta,
   ) => LayerEntry;
-  setActiveLayerId: (id: string | null) => void;
-  renameLayer: (layerId: string, name: string) => void;
-  toggleVisibility: (layerId: string) => void;
-  setLayerVisible: (layerId: string, visible: boolean) => void;
-  moveLayerUp: (
+  readonly setActiveLayerId: (id: string | null) => void;
+  readonly renameLayer: (layerId: string, name: string) => void;
+  readonly toggleVisibility: (layerId: string) => void;
+  readonly setLayerVisible: (layerId: string, visible: boolean) => void;
+  readonly moveLayerUp: (
     layerId: string,
   ) => { fromIndex: number; toIndex: number } | null;
-  moveLayerDown: (
+  readonly moveLayerDown: (
     layerId: string,
   ) => { fromIndex: number; toIndex: number } | null;
-  findEntry: (layerId: string) => LayerEntry | undefined;
-  getLayerIndex: (layerId: string) => number;
-  renderVersion: number;
-  bumpRenderVersion: () => void;
+  readonly findEntry: (layerId: string) => LayerEntry | undefined;
+  readonly getLayerIndex: (layerId: string) => number;
+  readonly renderVersion: number;
+  readonly bumpRenderVersion: () => void;
 }
 
-export function useLayers(width: number, height: number): UseLayersReturn {
+export function useLayers(width: number, height: number): UseLayersResult {
   const [renderVersion, setRenderVersion] = useState(0);
   const bumpRenderVersion = useCallback(
     () => setRenderVersion((n) => n + 1),
     [],
   );
 
-  // 初期レイヤー1枚で開始
   const [entries, setEntries] = useState<LayerEntry[]>(() => {
     const layer = createLayer(width, height, { name: "Layer 1" });
     return [{ id: layer.id, committedLayer: layer }];
@@ -52,14 +51,12 @@ export function useLayers(width: number, height: number): UseLayersReturn {
     () => entries[0]?.id ?? null,
   );
 
-  // entriesRef で最新entriesをコールバックから参照
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
   const activeLayerIdRef = useRef(activeLayerId);
   activeLayerIdRef.current = activeLayerId;
 
-  // レイヤー名のカウンター
   const layerCounterRef = useRef(1);
 
   const findEntry = useCallback(
@@ -96,7 +93,6 @@ export function useLayers(width: number, height: number): UseLayersReturn {
     const newEntries = currentEntries.filter((e) => e.id !== layerId);
     setEntries(newEntries);
 
-    // アクティブレイヤーが削除された場合、隣接レイヤーを自動選択
     if (activeLayerIdRef.current === layerId) {
       if (newEntries.length === 0) {
         setActiveLayerId(null);
@@ -111,7 +107,6 @@ export function useLayers(width: number, height: number): UseLayersReturn {
   const reinsertLayer = useCallback(
     (layerId: string, index: number, meta?: LayerMeta) => {
       const layer = createLayer(width, height, meta);
-      // ID を既知のものに書き換える（Undo復元用）
       (layer as { id: string }).id = layerId;
       const entry: LayerEntry = { id: layerId, committedLayer: layer };
 

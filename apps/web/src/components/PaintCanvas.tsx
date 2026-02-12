@@ -10,9 +10,9 @@ import {
 } from "@headless-paint/engine";
 import type { InputPoint, ViewTransform } from "@headless-paint/input";
 import { applyDpr, layerToScreen } from "@headless-paint/input";
+import { type ToolType, usePointerHandler } from "@headless-paint/react";
 import { useEffect, useRef } from "react";
 import { UI_BACKGROUND_COLOR, UI_LAYER_BORDER_COLOR } from "../config";
-import { type ToolType, usePointerHandler } from "../hooks/usePointerHandler";
 
 interface PaintCanvasProps {
   layers: readonly Layer[];

@@ -18,25 +18,29 @@ export type ToolType =
   | "offset";
 
 export interface UsePointerHandlerOptions {
-  transform: ViewTransform;
-  onPan: (dx: number, dy: number) => void;
-  onZoom: (scale: number, centerX: number, centerY: number) => void;
-  onRotate: (angleRad: number, centerX: number, centerY: number) => void;
-  onStrokeStart?: (point: InputPoint) => void;
-  onStrokeMove?: (point: InputPoint) => void;
-  onStrokeEnd?: () => void;
-  onWrapShift?: (dx: number, dy: number) => void;
-  onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
-  canvasWidth: number;
-  canvasHeight: number;
-  samplingConfig?: SamplingConfig;
+  readonly transform: ViewTransform;
+  readonly onPan: (dx: number, dy: number) => void;
+  readonly onZoom: (scale: number, centerX: number, centerY: number) => void;
+  readonly onRotate: (
+    angleRad: number,
+    centerX: number,
+    centerY: number,
+  ) => void;
+  readonly onStrokeStart?: (point: InputPoint) => void;
+  readonly onStrokeMove?: (point: InputPoint) => void;
+  readonly onStrokeEnd?: () => void;
+  readonly onWrapShift?: (dx: number, dy: number) => void;
+  readonly onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
+  readonly canvasWidth: number;
+  readonly canvasHeight: number;
+  readonly samplingConfig?: SamplingConfig;
 }
 
 export interface PointerHandlers {
-  onPointerDown: (e: React.PointerEvent) => void;
-  onPointerMove: (e: React.PointerEvent) => void;
-  onPointerUp: (e: React.PointerEvent) => void;
-  onWheel: (e: WheelEvent) => void;
+  readonly onPointerDown: (e: React.PointerEvent) => void;
+  readonly onPointerMove: (e: React.PointerEvent) => void;
+  readonly onPointerUp: (e: React.PointerEvent) => void;
+  readonly onWheel: (e: WheelEvent) => void;
 }
 
 export function usePointerHandler(
@@ -146,7 +150,6 @@ export function usePointerHandler(
           onPan(dx, dy);
           break;
         case "rotate": {
-          // 中心点からの角度変化で回転
           const prevAngle = Math.atan2(
             lastPosRef.current.y - centerY,
             lastPosRef.current.x - centerX,
@@ -160,7 +163,6 @@ export function usePointerHandler(
           break;
         }
         case "zoom": {
-          // 垂直ドラッグでズーム
           const scale = 1 - dy / 200;
           onZoom(scale, centerX, centerY);
           break;

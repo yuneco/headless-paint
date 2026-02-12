@@ -12,19 +12,17 @@ import {
 import { useCallback, useMemo, useRef, useState } from "react";
 
 export interface UseExpandResult {
-  config: ExpandConfig;
-  compiled: CompiledExpand;
-  // Root level
-  setMode: (mode: ExpandMode) => void;
-  setDivisions: (divisions: number) => void;
-  setAngle: (angle: number) => void;
-  // Sub level (child)
-  subEnabled: boolean;
-  setSubEnabled: (enabled: boolean) => void;
-  setSubMode: (mode: ExpandMode) => void;
-  setSubDivisions: (divisions: number) => void;
-  setSubAngle: (angle: number) => void;
-  setSubOffset: (offset: Point) => void;
+  readonly config: ExpandConfig;
+  readonly compiled: CompiledExpand;
+  readonly setMode: (mode: ExpandMode) => void;
+  readonly setDivisions: (divisions: number) => void;
+  readonly setAngle: (angle: number) => void;
+  readonly subEnabled: boolean;
+  readonly setSubEnabled: (enabled: boolean) => void;
+  readonly setSubMode: (mode: ExpandMode) => void;
+  readonly setSubDivisions: (divisions: number) => void;
+  readonly setSubAngle: (angle: number) => void;
+  readonly setSubOffset: (offset: Point) => void;
 }
 
 const DEFAULT_SUB_LEVEL: ExpandLevel = {
@@ -55,7 +53,6 @@ export function useExpand(
 
   const compiled = useMemo(() => compileExpand(config), [config]);
 
-  // refs for stable callbacks
   const rootRef = useRef(rootLevel);
   rootRef.current = rootLevel;
   const subRef = useRef(subLevel);

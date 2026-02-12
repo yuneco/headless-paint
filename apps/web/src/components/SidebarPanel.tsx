@@ -1,7 +1,7 @@
 import type { BackgroundSettings, Layer } from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
+import type { LayerEntry } from "@headless-paint/react";
 import type { HistoryState } from "@headless-paint/stroke";
-import type { LayerEntry } from "../hooks/useLayers";
 import { AccordionPanel } from "./AccordionPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";
 import { LayerPanel } from "./LayerPanel";

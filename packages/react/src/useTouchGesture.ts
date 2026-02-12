@@ -16,7 +16,7 @@ import {
 } from "@headless-paint/input";
 import { useCallback, useRef, useState } from "react";
 
-interface UseTouchGestureOptions {
+export interface UseTouchGestureOptions {
   readonly transform: ViewTransform;
   readonly onStrokeStart?: (point: InputPoint, pendingOnly?: boolean) => void;
   readonly onStrokeMove?: (point: InputPoint) => void;
@@ -29,7 +29,7 @@ interface UseTouchGestureOptions {
   readonly debugEnabled?: boolean;
 }
 
-interface UseTouchGestureResult {
+export interface UseTouchGestureResult {
   readonly handlePointerEvent: (e: React.PointerEvent) => void;
   readonly touchPoints: ReadonlyMap<number, Point>;
   readonly gesturePhase: string;

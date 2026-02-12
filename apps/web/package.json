@@ -11,6 +11,7 @@
   "dependencies": {
     "@headless-paint/engine": "workspace:*",
     "@headless-paint/input": "workspace:*",
+    "@headless-paint/react": "workspace:*",
     "@headless-paint/stroke": "workspace:*",
     "lil-gui": "^0.20.0",
     "lucide-react": "^0.563.0",

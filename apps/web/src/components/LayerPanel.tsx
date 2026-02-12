@@ -1,6 +1,6 @@
 import type { BackgroundSettings } from "@headless-paint/engine";
+import type { LayerEntry } from "@headless-paint/react";
 import { ArrowDown, ArrowUp, Circle, Eye, EyeOff, Trash2 } from "lucide-react";
-import type { LayerEntry } from "../hooks/useLayers";
 
 interface LayerPanelProps {
   entries: readonly LayerEntry[];
