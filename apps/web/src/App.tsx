@@ -11,6 +11,7 @@ import {
   useWindowSize,
 } from "@headless-paint/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { DEFAULT_PEN_CONFIG, DEFAULT_SMOOTHING_CONFIG } from "./config";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
 import { SidebarPanel } from "./components/SidebarPanel";
@@ -49,11 +50,8 @@ export function App() {
   }, [fitToView]);
 
   // 設定系 hooks
-  const penSettings = usePenSettings({
-    initialColor: { r: 50, g: 50, b: 50, a: 255 },
-    initialLineWidth: 12,
-  });
-  const smoothing = useSmoothing();
+  const penSettings = usePenSettings(DEFAULT_PEN_CONFIG);
+  const smoothing = useSmoothing(DEFAULT_SMOOTHING_CONFIG);
   const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
   const patternPreview = usePatternPreview();
 
