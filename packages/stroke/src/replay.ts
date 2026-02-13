@@ -1,5 +1,6 @@
 import type {
   BrushRenderState,
+  BrushTipRegistry,
   Layer,
   StrokePoint,
 } from "@headless-paint/engine";
@@ -26,7 +27,11 @@ import { isDrawCommand } from "./types";
  * - 結果を expand で展開
  * - 各ストロークをブラシ種別に応じて描画
  */
-function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
+function replayStrokeCommand(
+  layer: Layer,
+  command: StrokeCommand,
+  registry?: BrushTipRegistry,
+): void {
   // フィルタパイプラインで入力点を処理
   const compiledFilter = compileFilterPipeline(command.filterPipeline);
   const filteredPoints = processAllPoints(command.inputPoints, compiledFilter);
@@ -49,11 +54,13 @@ function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
       command.style.brush.tip,
       Math.ceil(command.style.lineWidth * 2),
       command.style.color,
+      registry,
     );
     brushState = {
       accumulatedDistance: 0,
       tipCanvas,
       seed: command.brushSeed,
+      stampCount: 0,
     };
   }
 
@@ -74,13 +81,17 @@ function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
  * 単一のコマンドをレイヤーに適用
  * 構造コマンドはピクセルを変更しないため無視する
  */
-export function replayCommand(layer: Layer, command: Command): void {
+export function replayCommand(
+  layer: Layer,
+  command: Command,
+  registry?: BrushTipRegistry,
+): void {
   if (!isDrawCommand(command)) {
     return;
   }
   switch (command.type) {
     case "stroke":
-      replayStrokeCommand(layer, command);
+      replayStrokeCommand(layer, command, registry);
       break;
     case "clear":
       clearLayer(layer);
@@ -97,9 +108,10 @@ export function replayCommand(layer: Layer, command: Command): void {
 export function replayCommands(
   layer: Layer,
   commands: readonly Command[],
+  registry?: BrushTipRegistry,
 ): void {
   for (const command of commands) {
-    replayCommand(layer, command);
+    replayCommand(layer, command, registry);
   }
 }
 
@@ -110,6 +122,7 @@ export function replayCommands(
 export function rebuildLayerFromHistory(
   layer: Layer,
   state: HistoryState,
+  registry?: BrushTipRegistry,
 ): void {
   const checkpoint = findBestCheckpointForLayer(state, layer.id);
 
@@ -124,7 +137,7 @@ export function rebuildLayerFromHistory(
     layer.id,
     checkpoint,
   );
-  replayCommands(layer, commandsToReplay);
+  replayCommands(layer, commandsToReplay, registry);
 }
 
 /**

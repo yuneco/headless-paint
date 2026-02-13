@@ -43,6 +43,7 @@ export type {
   BrushDynamics,
   BrushRenderState,
   BrushTipConfig,
+  BrushTipRegistry,
   Color,
   CompiledExpand,
   ExpandConfig,

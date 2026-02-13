@@ -44,10 +44,10 @@ function renderBrushStroke(
 | `layer` | `Layer` | ○ | 描画先レイヤー |
 | `points` | `readonly StrokePoint[]` | ○ | 描画ポイント列（展開済みの単一ストローク） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（`brush` フィールドでブラシ種別を判定） |
-| `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では無視される（距離ベースのため不要） |
-| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` ブラシでは `accumulatedDistance` と `tipCanvas` を含む。`round-pen` では無視される |
+| `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
+| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` ブラシでは `accumulatedDistance`、`tipCanvas`、`stampCount` を含む。`round-pen` では無視される |
 
-**戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` ブラシでは `accumulatedDistance` が更新される。`round-pen` では `{ accumulatedDistance: 0, tipCanvas: null, seed: 0 }` を返す。
+**戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` ブラシでは `accumulatedDistance` と `stampCount` が更新される。`round-pen` では `{ accumulatedDistance: 0, tipCanvas: null, seed: 0, stampCount: 0 }` を返す。
 
 **動作**:
 1. `style.brush.type` を判定
@@ -56,7 +56,7 @@ function renderBrushStroke(
    - ポイント列を Catmull-Rom 補間
    - `accumulatedDistance` から `spacing` 間隔でパスを走査
    - 各スタンプ位置で `tipCanvas` を `drawImage` で配置
-   - jitter パラメータは位置ベース PRNG で決定
+   - jitter パラメータはスタンプ通し番号ベース PRNG で決定
 
 **使用例**:
 ```typescript
@@ -65,11 +65,20 @@ import { renderBrushStroke } from "@headless-paint/engine";
 // round-pen（従来互換）
 const state = renderBrushStroke(layer, points, style, overlapCount);
 
-// stamp ブラシ
+// stamp ブラシ（circle tip）
 const initialState: BrushRenderState = {
   accumulatedDistance: 0,
   tipCanvas: generateBrushTip(brush.tip, size, color),
   seed: brushSeed,
+  stampCount: 0,
+};
+
+// stamp ブラシ（image tip — registry 必須）
+const initialState: BrushRenderState = {
+  accumulatedDistance: 0,
+  tipCanvas: generateBrushTip(brush.tip, size, color, registry),
+  seed: brushSeed,
+  stampCount: 0,
 };
 const nextState = renderBrushStroke(layer, points, style, 0, initialState);
 // nextState.accumulatedDistance を次の呼び出しに渡す
@@ -145,6 +154,21 @@ interface BrushTipRegistry {
 
 **設計意図**: 画像チップの base64 埋め込みはコマンド履歴の肥大化を招くため、`imageId` 参照でランタイム解決する。
 
+**パイプラインへの受け渡し**: `BrushTipRegistry` は `useStrokeSession` / `usePaintEngine` の config に `registry` として渡す。これにより、ストローク開始時とリプレイ（Undo/Redo）時に image tip の解決が可能になる。
+
+```typescript
+import { createBrushTipRegistry } from "@headless-paint/engine";
+
+const registry = createBrushTipRegistry();
+
+// テクスチャを登録
+const bitmap = await createImageBitmap(canvas);
+registry.set("my-texture", bitmap);
+
+// usePaintEngine に渡す
+const engine = usePaintEngine({ ..., registry });
+```
+
 ---
 
 ## PRNG ユーティリティ
@@ -164,30 +188,30 @@ function mulberry32(seed: number): () => number
 
 ### hashSeed
 
-グローバルシードとストローク上の距離から、位置固有のシードを生成する。
+グローバルシードとスタンプ通し番号から、スタンプ固有のシードを生成する。
 
 ```typescript
-function hashSeed(globalSeed: number, distance: number): number
+function hashSeed(globalSeed: number, stampIndex: number): number
 ```
 
 **引数**:
 | 名前 | 型 | 説明 |
 |------|-----|------|
 | `globalSeed` | `number` | ストロークごとのグローバルシード |
-| `distance` | `number` | ストローク始点からの累積距離（`round(distance * 100)` で量子化される） |
+| `stampIndex` | `number` | スタンプの通し番号（`BrushRenderState.stampCount` で管理） |
 
-**戻り値**: `number` — 位置固有の 32bit シード
+**戻り値**: `number` — スタンプ固有の 32bit シード
 
 **設計意図**:
-位置ベースの PRNG により、committed と pending を独立に描画しても、同一距離のスタンプは同一の jitter を持つ。pending 再描画時に committed のスタンプ数を復元する必要がない。
+スタンプ通し番号ベースの PRNG により、incremental 描画（チャンク分割）と replay（一括描画）で同一の jitter パターンを保証する。累積距離ベースでは Catmull-Rom のチャンク境界クランプにより距離が微小に乖離し、長ストロークで PRNG シードがズレる問題があったため、通し番号を採用した。
 
 **使用例**:
 ```typescript
 // ストローク開始時にグローバルシードを生成
 const globalSeed = Math.random() * 0xffffffff | 0;
 
-// 各スタンプ位置で位置固有の乱数を生成
-const localSeed = hashSeed(globalSeed, accumulatedDistance);
+// 各スタンプで通し番号ベースの乱数を生成
+const localSeed = hashSeed(globalSeed, stampIndex);
 const rng = mulberry32(localSeed);
 const opacityVariation = rng() * opacityJitter;
 const sizeVariation = rng() * sizeJitter;
@@ -222,17 +246,6 @@ const MARKER: StampBrushConfig = {
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.15, flow: 0.8 },
 };
 
-const PASTEL: StampBrushConfig = {
-  type: "stamp",
-  tip: { type: "image", imageId: "pastel-grain" },
-  dynamics: {
-    ...DEFAULT_BRUSH_DYNAMICS,
-    spacing: 0.2,
-    rotationJitter: Math.PI,
-    scatter: 0.1,
-    opacityJitter: 0.2,
-  },
-};
 ```
 
 | プリセット | チップ | 特徴 |
@@ -240,4 +253,5 @@ const PASTEL: StampBrushConfig = {
 | AIRBRUSH | ソフト円 (hardness=0.0) | 密間隔・低フロー。滑らかな噴射効果 |
 | PENCIL | ほぼハード円 (hardness=0.95) | 微小なサイズ・位置のゆらぎ |
 | MARKER | やや柔らか (hardness=0.7) | 中間フロー。マーカー的な塗り |
-| PASTEL | テクスチャ画像 | 大きな回転・散布。乾燥メディア風 |
+
+> **Note**: エンジンが提供するプリセットは circle tip のみ。image tip を使うプリセット（鉛筆グレイン、散布ブラシ等）はアプリケーション側で `BrushTipRegistry` にテクスチャを登録して定義する。

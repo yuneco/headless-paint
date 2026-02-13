@@ -121,6 +121,64 @@
 
 ## ペンディング事項
 
+### P0: スタンプブラシ incremental vs replay のスタンプ配置差異（高優先度）
+
+**症状**: スタンプブラシ（特に Star scatter）で長いストロークを描いた後 Undo すると、残るストロークのスタンプ散布位置が微妙に変わる。2回目以降の Undo/Redo では安定する。つまり初回の incremental 描画と replay 描画で結果が異なる。
+
+**根本原因**: Catmull-Rom 補間のチャンク境界クランプ。
+
+incremental 描画はストロークを複数チャンクに分割し、overlap 付きで逐次描画する。各チャンク末尾では Catmull-Rom の p3 制御点がクランプされる（未来の点がまだ来ていないため最後の点を繰り返す）。一方 replay は全点を一括で補間するため正確な制御点を使う。この差により補間曲線が微小に異なり、accumulated distance が乖離する。
+
+**定量データ（デバッグログで計測済み）**:
+
+| ストローク長 | incremental stamps | replay stamps | dist 差 | spacingPx |
+|---|---|---|---|---|
+| ~1679px（短） | 175 | 175 | 1.13px | 9.6 |
+| ~3381px（長） | 352 | 353 | 4.88px | 9.6 |
+
+短いストロークでは stampCount 一致、長いストローク（~3000px+）では距離誤差が spacingPx を超え stampCount が1つズレる。stampCount が異なると stamp index ベースの PRNG シードもズレ、以降のスタンプ全ての jitter が異なる。
+
+**これまでの修正済み事項**:
+1. ~~overlap 区間の距離二重カウント~~ → `interpolateStrokePoints(points, overlapCount)` で round-pen と同じパターンに統一
+2. ~~distance ベース PRNG~~ → `hashSeed(seed, stampIndex)` に変更。stampCount 一致時は jitter 完全一致
+3. `BrushRenderState` に `stampCount` フィールド追加
+
+**推奨修正アプローチ: ストローク完了時にレイヤーを replay で再構築**
+
+incremental 描画は近似であり Catmull-Rom の差異は構造的に避けられない。そのため、スタンプブラシのストローク完了時に committed layer を replay で上書きする。
+
+```
+onStrokeComplete → pushCommand → rebuildLayerFromHistory (stamp ブラシのみ)
+```
+
+**実装箇所**: `packages/react/src/usePaintEngine.ts` の `onStrokeComplete` コールバック（L161-186）
+
+```typescript
+// pushCommand の後に追加（stamp ブラシのみ）
+if (data.strokeStyle.brush.type === "stamp") {
+  // setHistoryState の後で最新 historyState を使って rebuild
+  // setState updater 内で行うか、useEffect で行うか要検討
+  rebuildLayerFromHistory(currentEntry.committedLayer, newState, registryRef.current);
+  bumpRenderVersion();
+}
+```
+
+**注意点**:
+- `setHistoryState` は functional updater を使っているため、updater 内で `rebuildLayerFromHistory` を呼ぶことで最新の historyState を確実に参照できる
+- `rebuildLayerFromHistory` は checkpoint を活用するため、大量ストロークでも効率的
+- round-pen は影響なし（PRNG 不使用・曲線差異は視認不能レベル）
+- rebuild のコストはストローク完了時の一回限り（描画中のリアルタイム性に影響なし）
+
+**デバッグログの削除**: `brush-render.ts:181-184` の `console.log` を削除すること
+
+**関連ドキュメント更新**: `BrushRenderState.stampCount` の追加に対して以下のドキュメントを更新済み:
+- `packages/engine/docs/types.md` — BrushRenderState 型定義、設計意図、使用例
+- `packages/engine/docs/brush-api.md` — overlapCount の stamp 説明、BrushRenderState リテラル、hashSeed の説明
+- `packages/engine/docs/incremental-render-api.md` — BrushRenderState 戻り値
+- `packages/engine/docs/README.md` — BrushRenderState サマリ
+
+**テスト**: `brush-render.test.ts` に追加済みの "incremental（overlap 付き）と replay で stampCount が一致する" テスト（262 tests 全パス）は現状維持。rebuild 導入後は、ストローク完了時にレイヤー内容が replay と一致することを確認する E2E 的なテストがあると理想的。
+
 ### Phase 3-3 でスキップ・簡略化した項目
 
 | # | 項目 | 説明 | 優先度 |
@@ -132,7 +190,7 @@
 | P5 | **カスタムブラシの保持** | DebugPanel で dynamics を調整した後にプリセットを切り替えると調整値がリセットされる。「カスタム」ブラシスロットやプリセットの上書き保存機能がない | 低 |
 | P6 | **動的 spacing（筆圧連動）** | 現在は `baseLineWidth * spacing` の定数 spacing。筆圧で太さが大きく変わる場合（筆圧高→太い部分）でスタンプ密度が低く見える課題がある。`calculateRadius() * 2 * spacing` でセグメントごとに計算する動的 spacing は未実装。ただし蓄積が非線形になるため、距離ベース PRNG シードとの整合性に注意が必要 | 低 |
 
-依存関係: P1 は P2 が前提。P3〜P6 は独立。
+依存関係: P1 は P2 が前提。P3〜P6 は独立。P0 は全てと独立。
 
 ### ドキュメント整合性チェック（残存）
 

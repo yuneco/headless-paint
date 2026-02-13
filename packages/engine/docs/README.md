@@ -50,7 +50,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
 | `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig`） |
-| `BrushRenderState` | ブラシレンダリング状態 `{ accumulatedDistance, tipCanvas, seed }` |
+| `BrushRenderState` | ブラシレンダリング状態 `{ accumulatedDistance, tipCanvas, seed, stampCount }` |
 
 ### Layer 管理関数
 

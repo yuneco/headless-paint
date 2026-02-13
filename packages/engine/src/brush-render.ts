@@ -16,6 +16,7 @@ const DEFAULT_BRUSH_RENDER_STATE: BrushRenderState = {
   accumulatedDistance: 0,
   tipCanvas: null,
   seed: 0,
+  stampCount: 0,
 };
 
 // ============================================================
@@ -82,6 +83,7 @@ export function renderBrushStroke(
         style,
         style.brush,
         state ?? DEFAULT_BRUSH_RENDER_STATE,
+        overlapCount,
       );
   }
 }
@@ -96,6 +98,7 @@ function renderStampBrushStroke(
   style: StrokeStyle,
   brush: StampBrushConfig,
   state: BrushRenderState,
+  overlapCount = 0,
 ): BrushRenderState {
   const { dynamics } = brush;
   const spacingPx = style.lineWidth * dynamics.spacing;
@@ -104,15 +107,17 @@ function renderStampBrushStroke(
     return state;
   }
 
-  // overlapCount=0 で補間（stamp はスタンプ距離で重複制御するため overlap 不要）
-  const interpolated = interpolateStrokePoints(points, 0);
+  // round-pen と同じく overlapCount を渡す。
+  // overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される。
+  const interpolated = interpolateStrokePoints(points, overlapCount);
   if (interpolated.length < 2) return state;
 
   const ctx = layer.ctx;
   let totalDistance = state.accumulatedDistance;
+  let stampCount = state.stampCount;
 
-  // ストローク開始時（distance=0）は最初の点にスタンプを配置
-  if (totalDistance === 0) {
+  // ストローク開始時（distance=0, overlap なし）は最初の点にスタンプを配置
+  if (totalDistance === 0 && overlapCount === 0) {
     stampAt(
       ctx,
       state.tipCanvas,
@@ -120,8 +125,9 @@ function renderStampBrushStroke(
       style,
       dynamics,
       state.seed,
-      0,
+      stampCount,
     );
+    stampCount++;
   }
 
   // 次のスタンプ配置距離を計算
@@ -162,8 +168,9 @@ function renderStampBrushStroke(
         style,
         dynamics,
         state.seed,
-        nextStampDist,
+        stampCount,
       );
+      stampCount++;
 
       nextStampDist += spacingPx;
     }
@@ -175,11 +182,12 @@ function renderStampBrushStroke(
     accumulatedDistance: totalDistance,
     tipCanvas: state.tipCanvas,
     seed: state.seed,
+    stampCount,
   };
 }
 
 /**
- * 単一スタンプの配置。dynamics の jitter を位置ベース PRNG で適用する。
+ * 単一スタンプの配置。dynamics の jitter をスタンプ通し番号ベース PRNG で適用する。
  */
 function stampAt(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -188,9 +196,9 @@ function stampAt(
   style: StrokeStyle,
   dynamics: BrushDynamics,
   seed: number,
-  distance: number,
+  stampIndex: number,
 ): void {
-  const localSeed = hashSeed(seed, distance);
+  const localSeed = hashSeed(seed, stampIndex);
   const rng = mulberry32(localSeed);
 
   // 筆圧によるサイズ計算

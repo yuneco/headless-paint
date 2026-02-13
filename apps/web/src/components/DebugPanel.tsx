@@ -307,7 +307,7 @@ export function DebugPanel({
       };
 
       dynamicsFolder
-        .add(brushDynamicsDataRef.current, "spacing", 0.01, 0.5, 0.01)
+        .add(brushDynamicsDataRef.current, "spacing", 0.01, 2.0, 0.01)
         .name("Spacing")
         .listen()
         .onChange((v: number) => updateDynamics("spacing", v));
@@ -331,13 +331,19 @@ export function DebugPanel({
         .onChange((v: number) => updateDynamics("sizeJitter", v));
 
       dynamicsFolder
-        .add(brushDynamicsDataRef.current, "rotationJitter", 0, Math.PI, 0.1)
+        .add(
+          brushDynamicsDataRef.current,
+          "rotationJitter",
+          0,
+          Math.PI * 2,
+          0.1,
+        )
         .name("Rotation Jitter")
         .listen()
         .onChange((v: number) => updateDynamics("rotationJitter", v));
 
       dynamicsFolder
-        .add(brushDynamicsDataRef.current, "scatter", 0, 1, 0.01)
+        .add(brushDynamicsDataRef.current, "scatter", 0, 3.0, 0.01)
         .name("Scatter")
         .listen()
         .onChange((v: number) => updateDynamics("scatter", v));

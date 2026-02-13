@@ -162,6 +162,7 @@ export interface BrushRenderState {
   readonly accumulatedDistance: number;
   readonly tipCanvas: OffscreenCanvas | null;
   readonly seed: number;
+  readonly stampCount: number;
 }
 
 // ============================================================

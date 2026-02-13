@@ -112,6 +112,7 @@ describe("renderBrushStroke", () => {
         accumulatedDistance: 0,
         tipCanvas: null,
         seed: 0,
+        stampCount: 0,
       });
     });
 
@@ -123,6 +124,7 @@ describe("renderBrushStroke", () => {
         accumulatedDistance: 42,
         tipCanvas: null,
         seed: 123,
+        stampCount: 0,
       };
       const result = renderBrushStroke(layer, points, style, 0, inputState);
       expect(result).toBe(inputState);
@@ -156,6 +158,7 @@ describe("renderBrushStroke", () => {
           style.color,
         ),
         seed: 42,
+        stampCount: 0,
       };
     }
 
@@ -179,6 +182,7 @@ describe("renderBrushStroke", () => {
         accumulatedDistance: 0,
         tipCanvas: null,
         seed: 0,
+        stampCount: 0,
       };
 
       const result = renderBrushStroke(layer, points, style, 0, state);
@@ -263,6 +267,7 @@ describe("renderBrushStroke", () => {
           BLACK,
         ),
         seed: 42,
+        stampCount: 0,
       });
 
       // jitter あり
@@ -288,11 +293,59 @@ describe("renderBrushStroke", () => {
           BLACK,
         ),
         seed: 42,
+        stampCount: 0,
       });
 
       const pixels1 = layer1.ctx.getImageData(0, 0, 200, 200).data;
       const pixels2 = layer2.ctx.getImageData(0, 0, 200, 200).data;
       expect(pixels1).not.toEqual(pixels2);
+    });
+
+    it("incremental（overlap 付き）と replay で stampCount が一致する", () => {
+      const style = makeStampStyle();
+      // 曲線的なポイント列（直線より差が出やすい）
+      const allPoints: StrokePoint[] = [];
+      for (let i = 0; i < 30; i++) {
+        allPoints.push({
+          x: 10 + i * 6,
+          y: 100 + Math.sin(i * 0.4) * 30,
+          pressure: 0.5 + Math.sin(i * 0.2) * 0.3,
+        });
+      }
+
+      const initialState = makeInitialState(style);
+
+      // incremental: 3チャンクに分割（overlap=3）
+      const layer1 = createLayer(200, 200);
+      const chunk1 = allPoints.slice(0, 12);
+      const state1 = renderBrushStroke(layer1, chunk1, style, 0, initialState);
+
+      const chunk2 = allPoints.slice(9, 22); // overlap=3
+      const state2 = renderBrushStroke(layer1, chunk2, style, 3, state1);
+
+      const chunk3 = allPoints.slice(19, 30); // overlap=3
+      const state3 = renderBrushStroke(layer1, chunk3, style, 3, state2);
+
+      // replay: 一括
+      const layer2 = createLayer(200, 200);
+      const replayResult = renderBrushStroke(
+        layer2,
+        allPoints,
+        style,
+        0,
+        initialState,
+      );
+
+      // stampCount が一致すること（= stamp index PRNG の jitter が一致）
+      expect(state3.stampCount).toBe(replayResult.stampCount);
+
+      // accumulatedDistance は Catmull-Rom のチャンク境界クランプにより
+      // 微小な差が生じる（round-pen も同じ）。誤差 1% 以内を確認
+      const distDiff = Math.abs(
+        state3.accumulatedDistance - replayResult.accumulatedDistance,
+      );
+      const relError = distDiff / replayResult.accumulatedDistance;
+      expect(relError).toBeLessThan(0.01);
     });
   });
 });

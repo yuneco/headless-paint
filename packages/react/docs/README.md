@@ -343,6 +343,8 @@ interface UseStrokeSessionConfig {
   readonly compiledExpand: CompiledExpand;
   /** ストローク完了時に呼ばれるコールバック。履歴記録やコマンド生成に利用する */
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
+  /** 画像ベースチップ用のレジストリ。ImageTipConfig を使うブラシプリセットがある場合に必要 */
+  readonly registry?: BrushTipRegistry;
 }
 ```
 
@@ -468,6 +470,8 @@ interface PaintEngineConfig {
   readonly compiledExpand: CompiledExpand;
   /** 履歴の容量設定。省略時はデフォルト値が使われる */
   readonly historyConfig?: HistoryConfig;
+  /** 画像ベースチップ用のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
+  readonly registry?: BrushTipRegistry;
 }
 ```
 
@@ -682,6 +686,7 @@ interface UseLayersResult {
 | `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
+| `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
 | `ViewTransform` | input | ビュー変換行列 |
 | `InputPoint` | input | 入力ポイント（座標 + 筆圧 + タイムスタンプ） |
 | `CompiledFilterPipeline` | input | 構築済み FilterPipeline |

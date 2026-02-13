@@ -1,4 +1,7 @@
-import { DEFAULT_BACKGROUND_COLOR } from "@headless-paint/engine";
+import {
+  DEFAULT_BACKGROUND_COLOR,
+  createBrushTipRegistry,
+} from "@headless-paint/engine";
 import type { BackgroundSettings } from "@headless-paint/engine";
 import type { InputPoint } from "@headless-paint/input";
 import {
@@ -12,6 +15,7 @@ import {
   useWindowSize,
 } from "@headless-paint/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { registerAppBrushTips } from "./brush-presets";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
 import { SidebarPanel } from "./components/SidebarPanel";
@@ -50,6 +54,15 @@ export function App() {
     }
   }, [fitToView]);
 
+  // ブラシチップレジストリ
+  const registryRef = useRef(createBrushTipRegistry());
+  const [registryReady, setRegistryReady] = useState(false);
+  useEffect(() => {
+    registerAppBrushTips(registryRef.current).then(() =>
+      setRegistryReady(true),
+    );
+  }, []);
+
   // 設定系 hooks
   const penSettings = usePenSettings(DEFAULT_PEN_CONFIG);
   const smoothing = useSmoothing(DEFAULT_SMOOTHING_CONFIG);
@@ -64,6 +77,7 @@ export function App() {
     compiledFilterPipeline: smoothing.compiledFilterPipeline,
     expandConfig: expand.config,
     compiledExpand: expand.compiled,
+    registry: registryRef.current,
   });
 
   const [background, setBackground] = useState<BackgroundSettings>({
@@ -209,6 +223,8 @@ export function App() {
         canRedo={engine.canRedo}
         brush={penSettings.brush}
         onBrushChange={penSettings.setBrush}
+        registry={registryRef.current}
+        registryReady={registryReady}
         entries={engine.entries}
         activeLayerId={engine.activeLayerId}
         background={background}

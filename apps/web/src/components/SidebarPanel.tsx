@@ -1,6 +1,7 @@
 import type {
   BackgroundSettings,
   BrushConfig,
+  BrushTipRegistry,
   Layer,
 } from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
@@ -26,6 +27,8 @@ interface SidebarPanelProps {
   // Brush panel props
   brush: BrushConfig;
   onBrushChange: (brush: BrushConfig) => void;
+  registry: BrushTipRegistry;
+  registryReady: boolean;
   // Layer panel props
   entries: readonly LayerEntry[];
   activeLayerId: string | null;
@@ -54,6 +57,8 @@ export function SidebarPanel({
   canRedo,
   brush,
   onBrushChange,
+  registry,
+  registryReady,
   entries,
   activeLayerId,
   background,
@@ -93,7 +98,12 @@ export function SidebarPanel({
         isFirst={false}
         isLast={false}
       >
-        <BrushPanel brush={brush} onBrushChange={onBrushChange} />
+        <BrushPanel
+          brush={brush}
+          onBrushChange={onBrushChange}
+          registry={registry}
+          registryReady={registryReady}
+        />
       </AccordionPanel>
       <AccordionPanel
         title="Layers"

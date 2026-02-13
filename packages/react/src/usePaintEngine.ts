@@ -1,5 +1,6 @@
 import { createLayer, wrapShiftLayer } from "@headless-paint/engine";
 import type {
+  BrushTipRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
@@ -42,6 +43,7 @@ export interface PaintEngineConfig {
   readonly expandConfig: ExpandConfig;
   readonly compiledExpand: CompiledExpand;
   readonly historyConfig?: HistoryConfig;
+  readonly registry?: BrushTipRegistry;
 }
 
 export interface PaintEngineResult {
@@ -105,7 +107,11 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     expandConfig,
     compiledExpand,
     historyConfig = DEFAULT_HISTORY_CONFIG,
+    registry,
   } = config;
+
+  const registryRef = useRef(registry);
+  registryRef.current = registry;
 
   // ── レイヤー管理 ──
   const layerManager = useLayers(layerWidth, layerHeight);
@@ -187,6 +193,7 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     expandConfig,
     compiledExpand,
     onStrokeComplete,
+    registry,
   });
 
   // ── レイヤー操作（履歴付き） ──
@@ -331,7 +338,11 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
             if (cp) {
               restoreFromCheckpoint(entry.committedLayer, cp);
             } else {
-              rebuildLayerFromHistory(entry.committedLayer, newState);
+              rebuildLayerFromHistory(
+                entry.committedLayer,
+                newState,
+                registryRef.current,
+              );
             }
             break;
           }
@@ -353,7 +364,11 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
         for (const id of affectedIds) {
           const e = findEntry(id);
           if (!e) continue;
-          rebuildLayerFromHistory(e.committedLayer, newState);
+          rebuildLayerFromHistory(
+            e.committedLayer,
+            newState,
+            registryRef.current,
+          );
           if (!e.committedLayer.meta.visible) {
             setLayerVisible(e.id, true);
           }
@@ -420,7 +435,11 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
         for (const id of affectedIds) {
           const e = findEntry(id);
           if (!e) continue;
-          rebuildLayerFromHistory(e.committedLayer, newState);
+          rebuildLayerFromHistory(
+            e.committedLayer,
+            newState,
+            registryRef.current,
+          );
           if (!e.committedLayer.meta.visible) {
             setLayerVisible(e.id, true);
           }

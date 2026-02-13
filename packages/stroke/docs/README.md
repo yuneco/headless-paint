@@ -67,7 +67,7 @@ historyState = pushCommand(historyState, addCmd, null, config);
 // Undo → レイヤー単位でリビルド
 if (canUndo(historyState)) {
   historyState = undo(historyState);
-  rebuildLayerFromHistory(layer, historyState); // layer.id でフィルタ
+  rebuildLayerFromHistory(layer, historyState, registry); // layer.id でフィルタ, registry は image tip 用
 }
 ```
 
@@ -124,7 +124,9 @@ if (canUndo(historyState)) {
 | `redo(state)` | 1つ先に進む |
 | `canUndo(state)` | Undo可能か |
 | `canRedo(state)` | Redo可能か |
-| `rebuildLayerFromHistory(layer, state)` | `layer.id` に基づきレイヤーを再構築 |
+| `rebuildLayerFromHistory(layer, state, registry?)` | `layer.id` に基づきレイヤーを再構築。`registry` は image tip のリプレイ時に必要 |
+| `replayCommands(layer, commands, registry?)` | コマンドのリストを順番にリプレイ |
+| `replayCommand(layer, command, registry?)` | 単一コマンドをレイヤーに適用 |
 | `computeCumulativeOffset(state)` | グローバルな累積オフセットを返す |
 | `findBestCheckpointForLayer(state, layerId)` | 指定レイヤーの最適なチェックポイントを検索 |
 | `getCommandsToReplayForLayer(state, layerId)` | 指定レイヤーのリプレイ対象コマンドを取得 |

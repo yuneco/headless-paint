@@ -174,7 +174,6 @@ export function drawVariableWidthPath(
   const { ctx } = layer;
   const style = colorToStyle(color);
   ctx.fillStyle = style;
-
   const prevCompositeOp = ctx.globalCompositeOperation;
   if (compositeOperation) {
     ctx.globalCompositeOperation = compositeOperation;

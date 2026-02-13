@@ -22,7 +22,14 @@ export function appendToCommittedLayer(
   brushState?: BrushRenderState,
 ): BrushRenderState {
   if (points.length === 0) {
-    return brushState ?? { accumulatedDistance: 0, tipCanvas: null, seed: 0 };
+    return (
+      brushState ?? {
+        accumulatedDistance: 0,
+        tipCanvas: null,
+        seed: 0,
+        stampCount: 0,
+      }
+    );
   }
 
   let currentState = brushState;
@@ -38,7 +45,14 @@ export function appendToCommittedLayer(
       );
     }
   }
-  return currentState ?? { accumulatedDistance: 0, tipCanvas: null, seed: 0 };
+  return (
+    currentState ?? {
+      accumulatedDistance: 0,
+      tipCanvas: null,
+      seed: 0,
+      stampCount: 0,
+    }
+  );
 }
 
 /**

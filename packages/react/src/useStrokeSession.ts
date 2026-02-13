@@ -5,6 +5,7 @@ import {
 } from "@headless-paint/engine";
 import type {
   BrushRenderState,
+  BrushTipRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
@@ -49,6 +50,7 @@ export interface UseStrokeSessionConfig {
   readonly expandConfig: ExpandConfig;
   readonly compiledExpand: CompiledExpand;
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
+  readonly registry?: BrushTipRegistry;
 }
 
 export interface UseStrokeSessionResult {
@@ -81,7 +83,10 @@ interface SessionInternal {
  * スタンプブラシ用の初期 BrushRenderState を生成する。
  * round-pen では undefined を返す（brushState 不要）。
  */
-function createInitialBrushState(style: StrokeStyle): {
+function createInitialBrushState(
+  style: StrokeStyle,
+  registry?: BrushTipRegistry,
+): {
   brushState: BrushRenderState | undefined;
   brushSeed: number;
 } {
@@ -93,9 +98,15 @@ function createInitialBrushState(style: StrokeStyle): {
     style.brush.tip,
     Math.ceil(style.lineWidth * 2),
     style.color,
+    registry,
   );
   return {
-    brushState: { accumulatedDistance: 0, tipCanvas, seed: brushSeed },
+    brushState: {
+      accumulatedDistance: 0,
+      tipCanvas,
+      seed: brushSeed,
+      stampCount: 0,
+    },
     brushSeed,
   };
 }
@@ -111,6 +122,7 @@ export function useStrokeSession(
     expandConfig,
     compiledExpand,
     onStrokeComplete,
+    registry,
   } = config;
 
   const [renderVersion, setRenderVersion] = useState(0);
@@ -131,6 +143,8 @@ export function useStrokeSession(
   onStrokeCompleteRef.current = onStrokeComplete;
   const layerRef = useRef(layer);
   layerRef.current = layer;
+  const registryRef = useRef(registry);
+  registryRef.current = registry;
 
   const canDraw = layer?.meta.visible ?? false;
 
@@ -172,7 +186,7 @@ export function useStrokeSession(
       );
 
       const { brushState: initialBrushState, brushSeed } =
-        createInitialBrushState(style);
+        createInitialBrushState(style, registryRef.current);
 
       let brushState = initialBrushState;
 

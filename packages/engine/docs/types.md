@@ -513,6 +513,7 @@ interface BrushRenderState {
   readonly accumulatedDistance: number;
   readonly tipCanvas: OffscreenCanvas | null;
   readonly seed: number;
+  readonly stampCount: number;
 }
 ```
 
@@ -521,8 +522,9 @@ interface BrushRenderState {
 | `accumulatedDistance` | `number` | スタンプ配置の累積距離。committed→pending 間で引き継ぎ、ギャップや二重配置を防ぐ |
 | `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。ストローク開始時に生成し全スタンプで再利用する。`round-pen` では `null` |
 | `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
+| `stampCount` | `number` | 配置済みスタンプの通し番号。PRNG シードの入力に使用し、incremental/replay で同一の jitter を保証する |
 
-**設計意図**: スタンプブラシの jitter は位置ベース PRNG `hashSeed(seed, round(distance * 100))` で決定論的に生成される。committed と pending を独立に描画しても、同一距離のスタンプは同一の jitter を持つ。
+**設計意図**: スタンプブラシの jitter はスタンプ通し番号ベース PRNG `hashSeed(seed, stampIndex)` で決定論的に生成される。通し番号は `accumulatedDistance` より安定しており、incremental 描画（チャンク分割）と replay（一括描画）で同一の jitter パターンを保証する。
 
 **使用例**:
 ```typescript
@@ -531,9 +533,10 @@ const initialState: BrushRenderState = {
   accumulatedDistance: 0,
   tipCanvas: generateBrushTip(brush.tip, size, color),
   seed: Math.random() * 0xffffffff | 0,
+  stampCount: 0,
 };
 
 // committed 描画後に状態を引き継ぎ
 const nextState = renderBrushStroke(layer, points, style, 0, initialState);
-// nextState.accumulatedDistance を pending 描画に使う
+// nextState.accumulatedDistance, nextState.stampCount を pending 描画に使う
 ```
