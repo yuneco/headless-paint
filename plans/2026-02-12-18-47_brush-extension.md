@@ -224,30 +224,76 @@ type BrushConfig = StampBrushConfig; // round-pen も stamp の特殊ケース
 |------|------|------|
 | 画像チップの保存方式 | imageId 参照 | base64 埋め込みはコマンド履歴が肥大化。Registry でランタイム解決 |
 | jitter の決定論性 | seeded PRNG | undo/redo で同一結果を保証。seed は StrokeCommand に保存（8 bytes/stroke） |
-| spacing 累積の committed/pending 境界 | 軽微なアーティファクト許容 | Krita も同様。完全一致は committed 描画の差分モデルと両立困難 |
+| spacing 累積の committed/pending 境界 | ~~軽微なアーティファクト許容~~ **accumulatedDistance で完全対応可能** | PoC で検証済み。session ref に距離を保持し引き継ぐことで境界をまたいだ連続配置が実現できる |
 
-## 6. パッケージ配置
+## 6. PoC 検証結果からの学び
+
+[PoC 実装報告](2026-02-13-20-43_stamp-brush-poc.md) で以下が検証済み:
+
+### 6.1 committed/pending 境界は解決可能
+
+当初「軽微なアーティファクト許容」としていたが、PoC で **accumulatedDistance を session ref に保持し committed→pending 間で引き継ぐ** ことで、境界をまたいだスタンプ配置が二重スタンプやギャップなく動作することを確認。本実装でもこのアプローチを採用すべき。
+
+### 6.2 位置ベース PRNG が sequential より優れている
+
+計画では sequential PRNG（ストローク単位シード）を想定していたが、PoC で **位置ベースシード `hashSeed(globalSeed, round(distance * 100))`** を採用。利点:
+- committed と pending を independent に描画しても同一距離のスタンプは同一 jitter
+- pending 再描画時に committed のスタンプ数を復元する必要がない
+- Undo/Redo リプレイでも同じ distance → 同じ jitter（seed + distance で決定論的）
+
+**本実装でも位置ベース PRNG を採用すること。**
+
+### 6.3 型配置: interface は types.ts に集約
+
+PoC では StampConfig を stamp.ts に置く計画だったが、StrokeStyle（types.ts）が StampConfig を参照するため循環依存が発生。**interface は types.ts に、実装関数は機能モジュールに** というルールで本実装も進めるべき。
+
+つまり:
+- `BrushConfig`, `BrushDynamics`, `BrushTipConfig` → **`types.ts`** に配置
+- `renderBrushStroke`, `renderStampBrushStroke`, チップ生成 → `brush-render.ts` / `brush-tip.ts` に配置
+
+### 6.4 spacing 計算: 定数 vs 筆圧連動
+
+PoC では `baseLineWidth * spacing`（定数）を使用。定数でも視覚的に問題はなかったが、筆圧で大きくサイズが変わる場合（筆圧高→太い部分でスタンプ密度が低く見える）は改善の余地がある。
+
+本実装で検討すべきオプション:
+- **定数 spacing（PoC方式）**: 蓄積計算が単純、committed/pending 境界で一貫性が高い
+- **動的 spacing**: `calculateRadius() * 2 * spacing` でセグメントごとに計算。蓄積が非線形になるため、distance ベースの PRNG シードとの整合性に注意が必要
+
+### 6.5 チップへの色焼き込みは正しいアプローチ
+
+`drawStampStroke` に `color` を渡す設計だったが、チップ生成時に色を焼き込む方式では関数内で color を使用しない。**チップ生成を呼び出し側（useStrokeSession）の責務にし、drawStampStroke は tipCanvas のみを受け取る** 設計が自然。本実装でも `renderBrushStroke` は tip を受け取る形にすべき。
+
+### 6.6 App.tsx 配線は不要
+
+StrokeStyle に brush 情報を含めれば、既存のデータフロー（penSettings → strokeStyle → usePaintEngine → useStrokeSession → incremental-render）で自動的に伝播する。**App.tsx や PaintCanvas の変更なしでブラシ切り替えが動作する**。
+
+### 6.7 `appendToCommittedLayer` / `renderPendingLayer` の戻り値変更
+
+PoC では void→number（accumulatedDistance）に変更。本実装の `renderBrushStroke` ディスパッチ設計では、**戻り値をブラシ固有のコンテキスト（距離、スタンプ数等）を含むオブジェクトにする** ことも検討に値する。
+
+## 7. パッケージ配置
 
 全ブラシコードは **`packages/engine`** に配置（描画関心事のため）。
 
 ### 新規ファイル
-- `packages/engine/src/brush.ts` - BrushConfig 型定義 + DEFAULT_BRUSH_CONFIG
 - `packages/engine/src/brush-tip.ts` - チップ生成・キャッシュ・BrushTipRegistry
 - `packages/engine/src/brush-render.ts` - renderBrushStroke + renderStampBrushStroke
 
 ### 変更ファイル
-- `packages/engine/src/types.ts` - StrokeStyle に `brush?: BrushConfig` 追加
+- `packages/engine/src/types.ts` - BrushConfig 型群 + StrokeStyle に `brush?: BrushConfig` 追加
 - `packages/engine/src/incremental-render.ts` - drawVariableWidthPath → renderBrushStroke
 - `packages/engine/src/index.ts` - 新 API エクスポート
 - `packages/stroke/src/types.ts` - StrokeCommand に `brush?` + `brushSeed?` 追加
 - `packages/stroke/src/session.ts` - brush/brushSeed のパススルー
 - `packages/stroke/src/replay.ts` - drawVariableWidthPath → renderBrushStroke
 
-## 7. 実装フェーズ（参考・将来実行時のガイド）
+> **注**: PoC では `brush.ts` に型定義を置く計画だったが循環依存が発生した。型定義は `types.ts` に集約し、`brush.ts` は廃止して `brush-render.ts` + `brush-tip.ts` に分割する。
+
+## 8. 実装フェーズ（参考・将来実行時のガイド）
 
 ### Phase 1: Doc + 型定義 + リファクタ（挙動変更なし）
 - API ドキュメント作成（Doc-First）
-- 型定義 (`BrushConfig`, `BrushDynamics`, `BrushTipConfig`)
+- 型定義を **`types.ts`** に追加（`BrushConfig`, `BrushDynamics`, `BrushTipConfig`）
 - `renderBrushStroke` ディスパッチ関数（round-pen のみ実装）
 - incremental-render.ts, replay.ts の呼び出し置換
 - StrokeCommand 拡張
@@ -255,14 +301,17 @@ type BrushConfig = StampBrushConfig; // round-pen も stamp の特殊ケース
 
 ### Phase 2: スタンプブラシ実装
 - チップ生成 (`generateCircleTip` with hardness)
-- `renderStampBrushStroke` 実装
-- Seeded PRNG ユーティリティ
+- `renderStampBrushStroke` 実装（PoC の `drawStampStroke` を基に）
+  - **位置ベース PRNG** を採用（PoC で検証済み）
+  - **accumulatedDistance** による committed/pending 境界対応
+  - tip 生成は呼び出し側の責務（drawStampStroke は tipCanvas を受け取る）
+- Seeded PRNG ユーティリティ（mulberry32 + hashSeed）
 - BrushTipRegistry（image tip 用）
 - テスト
 
 ### Phase 3: プリセット + デモ
 - プリセットブラシ定義
-- Web デモにブラシ選択 UI
+- Web デモにブラシ選択 UI（PoC と同様、既存データフローで自動伝播するため App.tsx 変更は最小限）
 - image tip アセット
 
 ## 検証方法（将来実装時）
@@ -272,4 +321,7 @@ type BrushConfig = StampBrushConfig; // round-pen も stamp の特殊ケース
 - undo/redo でスタンプブラシのストロークが同一に再現される
 
 ## ステータス
-本ドキュメントは調査・設計提案段階。実装判断は別途行う。
+
+- 調査・設計提案: 完了
+- **PoC 検証: 完了** → [PoC報告](2026-02-13-20-43_stamp-brush-poc.md)
+- 本実装: 未着手
