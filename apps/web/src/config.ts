@@ -4,6 +4,7 @@
  * 各hookで使用されるデフォルト値を一箇所で管理する。
  * ペン設定・スムージング設定など、UIに表示される初期値はすべてここで定義する。
  */
+import { ROUND_PEN } from "@headless-paint/react";
 import type { PenSettingsConfig, SmoothingConfig } from "@headless-paint/react";
 
 // ── Pen ─────────────────────────────────────────
@@ -19,6 +20,7 @@ export const DEFAULT_PEN_CONFIG: Required<PenSettingsConfig> = {
   initialLineWidth: 12,
   initialPressureSensitivity: 1.0,
   initialPressureCurve: { y1: 0, y2: 0.4 },
+  initialBrush: ROUND_PEN,
 };
 
 // ── Smoothing ───────────────────────────────────

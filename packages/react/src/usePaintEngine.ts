@@ -164,11 +164,8 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
         data.inputPoints,
         data.filterPipelineConfig,
         data.expandConfig,
-        data.strokeStyle.color,
-        data.strokeStyle.lineWidth,
-        data.strokeStyle.pressureSensitivity,
-        data.strokeStyle.pressureCurve,
-        data.strokeStyle.compositeOperation,
+        data.strokeStyle,
+        data.brushSeed,
       );
       setHistoryState((prev) =>
         pushCommand(

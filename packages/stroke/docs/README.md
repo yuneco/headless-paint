@@ -56,8 +56,7 @@ let historyState = createHistoryState(1920, 1080);
 
 // ストロークセッション → コマンド生成
 const command = createStrokeCommand(
-  layer.id, inputPoints, filterConfig, expandConfig,
-  color, lineWidth, sensitivity, pressureCurve, compositeOp
+  layer.id, inputPoints, filterConfig, expandConfig, strokeStyle
 );
 historyState = pushCommand(historyState, command, layer, config);
 
@@ -106,7 +105,7 @@ if (canUndo(historyState)) {
 | `startStrokeSession(filterOutput, style, expand)` | セッション開始 |
 | `addPointToSession(state, filterOutput)` | 点を追加 |
 | `endStrokeSession(state, layerId, inputPoints, filterConfig)` | セッション終了（`layerId` 必須） |
-| `createStrokeCommand(layerId, inputPoints, ...)` | ストロークコマンドを直接作成 |
+| `createStrokeCommand(layerId, inputPoints, filterPipeline, expand, style, brushSeed?)` | ストロークコマンドを直接作成 |
 | `createClearCommand(layerId)` | クリアコマンドを作成 |
 | `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成（グローバル） |
 | `createAddLayerCommand(layerId, insertIndex, width, height, meta)` | レイヤー追加コマンドを作成 |

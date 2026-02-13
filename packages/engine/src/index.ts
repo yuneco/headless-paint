@@ -3,19 +3,41 @@
 
 export type {
   BackgroundSettings,
+  BrushConfig,
+  BrushDynamics,
+  BrushRenderState,
+  BrushTipConfig,
+  CircleTipConfig,
   Color,
   CompiledExpand,
   ExpandConfig,
   ExpandLevel,
   ExpandMode,
+  ImageTipConfig,
   Layer,
   LayerMeta,
   Point,
   PressureCurve,
+  RoundPenBrushConfig,
+  StampBrushConfig,
   StrokePoint,
   StrokeStyle,
 } from "./types";
-export { DEFAULT_BACKGROUND_COLOR, DEFAULT_PRESSURE_CURVE } from "./types";
+export {
+  AIRBRUSH,
+  DEFAULT_BACKGROUND_COLOR,
+  DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_PRESSURE_CURVE,
+  MARKER,
+  PENCIL,
+  ROUND_PEN,
+} from "./types";
+export { hashSeed, mulberry32, renderBrushStroke } from "./brush-render";
+export {
+  createBrushTipRegistry,
+  generateBrushTip,
+  type BrushTipRegistry,
+} from "./brush-tip";
 export {
   clearLayer,
   colorToStyle,

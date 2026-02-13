@@ -1,7 +1,13 @@
-import { drawVariableWidthPath } from "./draw";
+import { renderBrushStroke } from "./brush-render";
 import { expandStrokePoints } from "./expand";
 import { clearLayer } from "./layer";
-import type { CompiledExpand, Layer, StrokePoint, StrokeStyle } from "./types";
+import type {
+  BrushRenderState,
+  CompiledExpand,
+  Layer,
+  StrokePoint,
+  StrokeStyle,
+} from "./types";
 
 /**
  * 確定レイヤーに新しく確定した点を追加描画する
@@ -13,24 +19,26 @@ export function appendToCommittedLayer(
   style: StrokeStyle,
   compiledExpand: CompiledExpand,
   overlapCount = 0,
-): void {
-  if (points.length === 0) return;
+  brushState?: BrushRenderState,
+): BrushRenderState {
+  if (points.length === 0) {
+    return brushState ?? { accumulatedDistance: 0, tipCanvas: null, seed: 0 };
+  }
 
+  let currentState = brushState;
   const strokes = expandStrokePoints(points, compiledExpand);
   for (const stroke of strokes) {
     if (stroke.length > 0) {
-      drawVariableWidthPath(
+      currentState = renderBrushStroke(
         layer,
         stroke,
-        style.color,
-        style.lineWidth,
-        style.pressureSensitivity ?? 0,
-        style.pressureCurve,
-        style.compositeOperation,
+        style,
         overlapCount,
+        currentState,
       );
     }
   }
+  return currentState ?? { accumulatedDistance: 0, tipCanvas: null, seed: 0 };
 }
 
 /**
@@ -43,22 +51,22 @@ export function renderPendingLayer(
   points: readonly StrokePoint[],
   style: StrokeStyle,
   compiledExpand: CompiledExpand,
+  brushState?: BrushRenderState,
 ): void {
   clearLayer(layer);
 
   if (points.length === 0) return;
 
+  // pending は常に source-over で描画（消しゴムプレビューは LayerMeta.compositeOperation で実現）
+  const pendingStyle: StrokeStyle = {
+    ...style,
+    compositeOperation: "source-over",
+  };
+
   const strokes = expandStrokePoints(points, compiledExpand);
   for (const stroke of strokes) {
     if (stroke.length > 0) {
-      drawVariableWidthPath(
-        layer,
-        stroke,
-        style.color,
-        style.lineWidth,
-        style.pressureSensitivity ?? 0,
-        style.pressureCurve,
-      );
+      renderBrushStroke(layer, stroke, pendingStyle, 0, brushState);
     }
   }
 }

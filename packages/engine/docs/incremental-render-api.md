@@ -63,8 +63,9 @@ function appendToCommittedLayer(
   points: readonly StrokePoint[],
   style: StrokeStyle,
   compiledExpand: CompiledExpand,
-  overlapCount = 0,
-): void
+  overlapCount?: number,
+  brushState?: BrushRenderState,
+): BrushRenderState
 ```
 
 **引数**:
@@ -75,11 +76,15 @@ function appendToCommittedLayer(
 | `style` | `StrokeStyle` | ○ | 描画スタイル（pressureSensitivity含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
+| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。スタンプブラシの `accumulatedDistance` と `tipCanvas` を含む。`round-pen` では省略可 |
 
 **動作**:
 1. pointsを`expandStrokePoints`で展開（pressure保持）
-2. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画（`style.compositeOperation` を適用）
+2. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画
 3. 既存の描画は保持される（追加描画のみ）
+4. 更新された `BrushRenderState` を返す（`accumulatedDistance` が進む）
+
+**戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。スタンプブラシでは `accumulatedDistance` が更新されている。`round-pen` では `{ accumulatedDistance: 0, tipCanvas: null, seed: 0 }` を返す。
 
 **消しゴムモードの動作**:
 `style.compositeOperation` が `"destination-out"` の場合、committedレイヤーの既存ピクセルが直接消去される。
@@ -88,13 +93,15 @@ function appendToCommittedLayer(
 ```typescript
 // 新しく確定した点を描画（オーバーラップ付き）
 if (renderUpdate.newlyCommitted.length > renderUpdate.committedOverlapCount) {
-  appendToCommittedLayer(
+  const nextBrushState = appendToCommittedLayer(
     committedLayer,
     renderUpdate.newlyCommitted,
     renderUpdate.style,
     compiledExpand,
     renderUpdate.committedOverlapCount,
+    brushState,
   );
+  // nextBrushState を pending 描画に渡す
 }
 ```
 
@@ -109,7 +116,8 @@ function renderPendingLayer(
   layer: Layer,
   points: readonly StrokePoint[],
   style: StrokeStyle,
-  compiledExpand: CompiledExpand
+  compiledExpand: CompiledExpand,
+  brushState?: BrushRenderState,
 ): void
 ```
 
@@ -120,23 +128,25 @@ function renderPendingLayer(
 | `points` | `readonly StrokePoint[]` | ○ | 未確定点全体（pressure含む） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（pressureSensitivity含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
+| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。スタンプブラシでは committed 描画から引き継いだ `accumulatedDistance` を使用し、境界でのスタンプの連続性を保つ |
 
 **動作**:
 1. レイヤーをクリア
 2. pointsを`expandStrokePoints`で展開（pressure保持）
-3. 各展開ストロークを`drawVariableWidthPath`で可変太さ描画（`compositeOperation` は適用しない、常に `source-over`）
+3. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画（`compositeOperation` は適用しない、常に `source-over`）
 
 **消しゴムモードの注意**:
 pendingレイヤーは毎回クリアされるため、`destination-out` で描画しても不可視になる。消しゴムのpendingプレビューは `LayerMeta.compositeOperation` によるレイヤー合成時に実現される（→ renderLayers / composeLayers を参照）。
 
 **使用例**:
 ```typescript
-// 未確定点を再描画
+// 未確定点を再描画（brushState で committed からの連続性を保つ）
 renderPendingLayer(
   pendingLayer,
   renderUpdate.currentPending,
   renderUpdate.style,
-  compiledExpand
+  compiledExpand,
+  brushState,
 );
 ```
 
@@ -196,6 +206,7 @@ import {
   renderPendingLayer,
   composeLayers,
 } from "@headless-paint/engine";
+import type { BrushRenderState } from "@headless-paint/engine";
 
 // レイヤー作成
 const committedLayer = createLayer(width, height, { name: "Committed" });
@@ -204,25 +215,30 @@ const pendingLayer = createLayer(width, height, { name: "Pending" });
 // 展開設定をコンパイル
 const compiledExpand = compileExpand(expandConfig);
 
+// ブラシ状態（ストローク開始時に初期化）
+let brushState: BrushRenderState | undefined;
+
 // ストローク中の描画更新
 function onRenderUpdate(update: RenderUpdate) {
-  // 1. 新しく確定した点を確定レイヤーに追加（ゼロ新規点ガード付き）
+  // 1. 新しく確定した点を確定レイヤーに追加
   if (update.newlyCommitted.length > update.committedOverlapCount) {
-    appendToCommittedLayer(
+    brushState = appendToCommittedLayer(
       committedLayer,
       update.newlyCommitted,
       update.style,
       compiledExpand,
       update.committedOverlapCount,
+      brushState,
     );
   }
 
-  // 2. 未確定点を作業レイヤーに再描画
+  // 2. 未確定点を作業レイヤーに再描画（brushState で連続性を保つ）
   renderPendingLayer(
     pendingLayer,
     update.currentPending,
     update.style,
-    compiledExpand
+    compiledExpand,
+    brushState,
   );
 
   // 3. 合成して表示
@@ -232,10 +248,8 @@ function onRenderUpdate(update: RenderUpdate) {
 
 // ストローク終了時
 function onStrokeEnd() {
-  // 作業レイヤーをクリア
+  brushState = undefined;
   clearLayer(pendingLayer);
-
-  // 最終合成
   displayCtx.clearRect(0, 0, width, height);
   composeLayers(displayCtx, [committedLayer], viewTransform);
 }

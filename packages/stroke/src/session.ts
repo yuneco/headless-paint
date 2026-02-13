@@ -1,7 +1,6 @@
 import type {
   ExpandConfig,
   LayerMeta,
-  PressureCurve,
   StrokePoint,
 } from "@headless-paint/engine";
 import type {
@@ -174,11 +173,8 @@ export function endStrokeSession(
     inputPoints: [...inputPoints],
     filterPipeline,
     expand: state.expand,
-    color: state.style.color,
-    lineWidth: state.style.lineWidth,
-    pressureSensitivity: state.style.pressureSensitivity,
-    pressureCurve: state.style.pressureCurve,
-    compositeOperation: state.style.compositeOperation,
+    style: state.style,
+    brushSeed: 0,
     timestamp: Date.now(),
   };
 }
@@ -191,11 +187,8 @@ export function createStrokeCommand(
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
   expand: ExpandConfig,
-  color: StrokeStyle["color"],
-  lineWidth: number,
-  pressureSensitivity?: number,
-  pressureCurve?: PressureCurve,
-  compositeOperation?: GlobalCompositeOperation,
+  style: StrokeStyle,
+  brushSeed = 0,
 ): StrokeCommand {
   return {
     type: "stroke",
@@ -203,11 +196,8 @@ export function createStrokeCommand(
     inputPoints: [...inputPoints],
     filterPipeline,
     expand,
-    color,
-    lineWidth,
-    pressureSensitivity,
-    pressureCurve,
-    compositeOperation,
+    style,
+    brushSeed,
     timestamp: Date.now(),
   };
 }

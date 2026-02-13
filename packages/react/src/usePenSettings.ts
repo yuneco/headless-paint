@@ -1,5 +1,10 @@
-import type { Color, PressureCurve, StrokeStyle } from "@headless-paint/engine";
-import { DEFAULT_PRESSURE_CURVE } from "@headless-paint/engine";
+import type {
+  BrushConfig,
+  Color,
+  PressureCurve,
+  StrokeStyle,
+} from "@headless-paint/engine";
+import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "@headless-paint/engine";
 import { useCallback, useState } from "react";
 
 export interface PenSettingsConfig {
@@ -7,6 +12,7 @@ export interface PenSettingsConfig {
   readonly initialLineWidth?: number;
   readonly initialPressureSensitivity?: number;
   readonly initialPressureCurve?: PressureCurve;
+  readonly initialBrush?: BrushConfig;
 }
 
 export interface UsePenSettingsResult {
@@ -15,12 +21,14 @@ export interface UsePenSettingsResult {
   readonly pressureSensitivity: number;
   readonly pressureCurve: PressureCurve;
   readonly eraser: boolean;
+  readonly brush: BrushConfig;
   readonly strokeStyle: StrokeStyle;
   readonly setColor: (color: Color) => void;
   readonly setLineWidth: (width: number) => void;
   readonly setPressureSensitivity: (sensitivity: number) => void;
   readonly setPressureCurve: (curve: PressureCurve) => void;
   readonly setEraser: (eraser: boolean) => void;
+  readonly setBrush: (brush: BrushConfig) => void;
 }
 
 const DEFAULT_COLOR: Color = { r: 0, g: 0, b: 0, a: 255 };
@@ -43,13 +51,17 @@ export function usePenSettings(
     () => config?.initialPressureCurve ?? DEFAULT_PRESSURE_CURVE,
   );
   const [eraser, setEraser] = useState(false);
+  const [brush, setBrush] = useState<BrushConfig>(
+    () => config?.initialBrush ?? ROUND_PEN,
+  );
 
   const strokeStyle: StrokeStyle = {
     color,
     lineWidth,
     pressureSensitivity,
     pressureCurve,
-    compositeOperation: eraser ? "destination-out" : undefined,
+    compositeOperation: eraser ? "destination-out" : "source-over",
+    brush,
   };
 
   const handleSetColor = useCallback((c: Color) => {
@@ -72,17 +84,23 @@ export function usePenSettings(
     setEraser(e);
   }, []);
 
+  const handleSetBrush = useCallback((b: BrushConfig) => {
+    setBrush(b);
+  }, []);
+
   return {
     color,
     lineWidth,
     pressureSensitivity,
     pressureCurve,
     eraser,
+    brush,
     strokeStyle,
     setColor: handleSetColor,
     setLineWidth: handleSetLineWidth,
     setPressureSensitivity: handleSetPressureSensitivity,
     setPressureCurve: handleSetPressureCurve,
     setEraser: handleSetEraser,
+    setBrush: handleSetBrush,
   };
 }

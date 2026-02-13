@@ -1,4 +1,10 @@
-import type { ExpandMode, PatternMode, Point } from "@headless-paint/engine";
+import {
+  DEFAULT_BRUSH_DYNAMICS,
+  type ExpandMode,
+  type PatternMode,
+  type Point,
+  type StampBrushConfig,
+} from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
 import type {
   UseExpandResult,
@@ -73,6 +79,21 @@ export function DebugPanel({
     lineWidth: penSettings.lineWidth,
     pressureSensitivity: penSettings.pressureSensitivity,
   });
+
+  const brushDynamics =
+    penSettings.brush.type === "stamp"
+      ? penSettings.brush.dynamics
+      : DEFAULT_BRUSH_DYNAMICS;
+  const brushDynamicsDataRef = useRef({
+    spacing: brushDynamics.spacing,
+    flow: brushDynamics.flow,
+    opacityJitter: brushDynamics.opacityJitter,
+    sizeJitter: brushDynamics.sizeJitter,
+    rotationJitter: brushDynamics.rotationJitter,
+    scatter: brushDynamics.scatter,
+  });
+
+  const dynamicsFolderRef = useRef<ReturnType<GUI["addFolder"]> | null>(null);
 
   const patternDataRef = useRef({
     mode: patternPreview.config.mode,
@@ -273,6 +294,60 @@ export function DebugPanel({
 
       penFolder.open();
 
+      const dynamicsFolder = gui.addFolder("Brush Dynamics");
+
+      const updateDynamics = (field: string, value: number) => {
+        const ps = penSettingsRef.current;
+        if (ps.brush.type !== "stamp") return;
+        const updated: StampBrushConfig = {
+          ...ps.brush,
+          dynamics: { ...ps.brush.dynamics, [field]: value },
+        };
+        ps.setBrush(updated);
+      };
+
+      dynamicsFolder
+        .add(brushDynamicsDataRef.current, "spacing", 0.01, 0.5, 0.01)
+        .name("Spacing")
+        .listen()
+        .onChange((v: number) => updateDynamics("spacing", v));
+
+      dynamicsFolder
+        .add(brushDynamicsDataRef.current, "flow", 0, 1, 0.05)
+        .name("Flow")
+        .listen()
+        .onChange((v: number) => updateDynamics("flow", v));
+
+      dynamicsFolder
+        .add(brushDynamicsDataRef.current, "opacityJitter", 0, 1, 0.05)
+        .name("Opacity Jitter")
+        .listen()
+        .onChange((v: number) => updateDynamics("opacityJitter", v));
+
+      dynamicsFolder
+        .add(brushDynamicsDataRef.current, "sizeJitter", 0, 1, 0.05)
+        .name("Size Jitter")
+        .listen()
+        .onChange((v: number) => updateDynamics("sizeJitter", v));
+
+      dynamicsFolder
+        .add(brushDynamicsDataRef.current, "rotationJitter", 0, Math.PI, 0.1)
+        .name("Rotation Jitter")
+        .listen()
+        .onChange((v: number) => updateDynamics("rotationJitter", v));
+
+      dynamicsFolder
+        .add(brushDynamicsDataRef.current, "scatter", 0, 1, 0.01)
+        .name("Scatter")
+        .listen()
+        .onChange((v: number) => updateDynamics("scatter", v));
+
+      if (penSettingsRef.current.brush.type !== "stamp") {
+        dynamicsFolder.hide();
+      }
+      dynamicsFolder.open();
+      dynamicsFolderRef.current = dynamicsFolder;
+
       const patternFolder = gui.addFolder("Pattern Preview");
 
       patternFolder
@@ -391,6 +466,25 @@ export function DebugPanel({
     penDataRef.current.lineWidth = penSettings.lineWidth;
     penDataRef.current.pressureSensitivity = penSettings.pressureSensitivity;
   }, [penSettings.lineWidth, penSettings.pressureSensitivity]);
+
+  useEffect(() => {
+    const d =
+      penSettings.brush.type === "stamp"
+        ? penSettings.brush.dynamics
+        : DEFAULT_BRUSH_DYNAMICS;
+    brushDynamicsDataRef.current.spacing = d.spacing;
+    brushDynamicsDataRef.current.flow = d.flow;
+    brushDynamicsDataRef.current.opacityJitter = d.opacityJitter;
+    brushDynamicsDataRef.current.sizeJitter = d.sizeJitter;
+    brushDynamicsDataRef.current.rotationJitter = d.rotationJitter;
+    brushDynamicsDataRef.current.scatter = d.scatter;
+
+    if (penSettings.brush.type === "stamp") {
+      dynamicsFolderRef.current?.show();
+    } else {
+      dynamicsFolderRef.current?.hide();
+    }
+  }, [penSettings.brush]);
 
   useEffect(() => {
     patternDataRef.current.mode = patternPreview.config.mode;

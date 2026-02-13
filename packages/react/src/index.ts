@@ -39,6 +39,10 @@ export type { WindowSize } from "./useWindowSize";
 // ── Re-exports from core packages ──
 
 export type {
+  BrushConfig,
+  BrushDynamics,
+  BrushRenderState,
+  BrushTipConfig,
   Color,
   CompiledExpand,
   ExpandConfig,
@@ -47,7 +51,16 @@ export type {
   LayerMeta,
   Point,
   PressureCurve,
+  StampBrushConfig,
   StrokeStyle,
+} from "@headless-paint/engine";
+
+export {
+  AIRBRUSH,
+  DEFAULT_BRUSH_DYNAMICS,
+  MARKER,
+  PENCIL,
+  ROUND_PEN,
 } from "@headless-paint/engine";
 
 export type {

@@ -4,11 +4,13 @@ import {
   renderPendingLayer,
 } from "@headless-paint/engine";
 import type {
+  BrushRenderState,
   CompiledExpand,
   ExpandConfig,
   Layer,
   StrokeStyle,
 } from "@headless-paint/engine";
+import { generateBrushTip } from "@headless-paint/engine";
 import {
   compileFilterPipeline,
   createFilterPipelineState,
@@ -30,6 +32,7 @@ export interface StrokeCompleteData {
   readonly filterPipelineConfig: FilterPipelineConfig;
   readonly expandConfig: ExpandConfig;
   readonly strokeStyle: StrokeStyle;
+  readonly brushSeed: number;
   readonly totalPoints: number;
 }
 
@@ -70,6 +73,31 @@ interface SessionInternal {
   compiledExpand: CompiledExpand;
   compiledFilterPipeline: CompiledFilterPipeline;
   layerId: string;
+  brushState?: BrushRenderState;
+  brushSeed: number;
+}
+
+/**
+ * スタンプブラシ用の初期 BrushRenderState を生成する。
+ * round-pen では undefined を返す（brushState 不要）。
+ */
+function createInitialBrushState(style: StrokeStyle): {
+  brushState: BrushRenderState | undefined;
+  brushSeed: number;
+} {
+  if (style.brush.type !== "stamp") {
+    return { brushState: undefined, brushSeed: 0 };
+  }
+  const brushSeed = (Math.random() * 0xffffffff) | 0;
+  const tipCanvas = generateBrushTip(
+    style.brush.tip,
+    Math.ceil(style.lineWidth * 2),
+    style.color,
+  );
+  return {
+    brushState: { accumulatedDistance: 0, tipCanvas, seed: brushSeed },
+    brushSeed,
+  };
 }
 
 export function useStrokeSession(
@@ -143,6 +171,11 @@ export function useStrokeSession(
         expandConfigRef.current,
       );
 
+      const { brushState: initialBrushState, brushSeed } =
+        createInitialBrushState(style);
+
+      let brushState = initialBrushState;
+
       sessionRef.current = {
         strokeSession: strokeResult.state,
         filterState: filterResult.state,
@@ -150,18 +183,23 @@ export function useStrokeSession(
         compiledExpand: compiled,
         compiledFilterPipeline: activePipeline,
         layerId: currentLayer.id,
+        brushState,
+        brushSeed,
       };
 
       const pendingOnly = pendingOnlyRef.current;
       pendingLayer.meta.compositeOperation = style.compositeOperation;
 
       if (!pendingOnly) {
-        appendToCommittedLayer(
+        brushState = appendToCommittedLayer(
           currentLayer,
           strokeResult.renderUpdate.newlyCommitted,
           style,
           compiled,
+          0,
+          brushState,
         );
+        sessionRef.current.brushState = brushState;
       }
 
       const pendingPoints = pendingOnly
@@ -170,7 +208,13 @@ export function useStrokeSession(
             ...strokeResult.renderUpdate.currentPending,
           ]
         : strokeResult.renderUpdate.currentPending;
-      renderPendingLayer(pendingLayer, pendingPoints, style, compiled);
+      renderPendingLayer(
+        pendingLayer,
+        pendingPoints,
+        style,
+        compiled,
+        brushState,
+      );
 
       setStrokePoints([inputPoint]);
       setIsDrawing(true);
@@ -216,13 +260,15 @@ export function useStrokeSession(
         const { newlyCommitted, committedOverlapCount } =
           strokeResult.renderUpdate;
         if (newlyCommitted.length > committedOverlapCount) {
-          appendToCommittedLayer(
+          const brushState = appendToCommittedLayer(
             currentLayer,
             newlyCommitted,
             style,
             sessionRef.current.compiledExpand,
             committedOverlapCount,
+            sessionRef.current.brushState,
           );
+          sessionRef.current.brushState = brushState;
         }
       }
 
@@ -237,6 +283,7 @@ export function useStrokeSession(
         pendingPoints,
         style,
         sessionRef.current.compiledExpand,
+        sessionRef.current.brushState,
       );
 
       setStrokePoints((prev) => [...prev, inputPoint]);
@@ -270,6 +317,7 @@ export function useStrokeSession(
       filterState,
       compiledFilterPipeline: sessionFilter,
       compiledExpand: sessionExpand,
+      brushSeed,
     } = sessionRef.current;
 
     const currentLayer = layerRef.current;
@@ -293,6 +341,7 @@ export function useStrokeSession(
         style,
         sessionExpand,
         committedOverlapCount,
+        sessionRef.current.brushState,
       );
     }
 
@@ -304,6 +353,7 @@ export function useStrokeSession(
         filterPipelineConfig: sessionFilter.config,
         expandConfig: strokeSession.expand,
         strokeStyle: style,
+        brushSeed,
         totalPoints,
       });
     }
@@ -327,12 +377,15 @@ export function useStrokeSession(
     const style = strokeStyleRef.current;
 
     // 蓄積された全 committed ポイントを committed layer にフラッシュ
-    appendToCommittedLayer(
+    const brushState = appendToCommittedLayer(
       currentLayer,
       sessionRef.current.strokeSession.allCommitted,
       style,
       sessionRef.current.compiledExpand,
+      0,
+      sessionRef.current.brushState,
     );
+    sessionRef.current.brushState = brushState;
 
     bumpRenderVersion();
   }, [bumpRenderVersion]);

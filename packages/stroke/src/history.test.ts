@@ -70,8 +70,15 @@ function createTestCommand(
         { mode: "none", offset: { x: 50, y: 50 }, angle: 0, divisions: 1 },
       ],
     },
-    color: { r: 0, g: 0, b: 0, a: 255 },
-    lineWidth: 3,
+    style: {
+      color: { r: 0, g: 0, b: 0, a: 255 },
+      lineWidth: 3,
+      pressureSensitivity: 0,
+      pressureCurve: { y1: 1 / 3, y2: 2 / 3 },
+      compositeOperation: "source-over",
+      brush: { type: "round-pen" },
+    },
+    brushSeed: 0,
     timestamp,
   };
 }

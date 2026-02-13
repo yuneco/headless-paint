@@ -1,8 +1,13 @@
-import type { BackgroundSettings, Layer } from "@headless-paint/engine";
+import type {
+  BackgroundSettings,
+  BrushConfig,
+  Layer,
+} from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
 import type { LayerEntry } from "@headless-paint/react";
 import type { HistoryState } from "@headless-paint/stroke";
 import { AccordionPanel } from "./AccordionPanel";
+import { BrushPanel } from "./BrushPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";
 import { LayerPanel } from "./LayerPanel";
 import { Minimap } from "./Minimap";
@@ -18,6 +23,9 @@ interface SidebarPanelProps {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  // Brush panel props
+  brush: BrushConfig;
+  onBrushChange: (brush: BrushConfig) => void;
   // Layer panel props
   entries: readonly LayerEntry[];
   activeLayerId: string | null;
@@ -44,6 +52,8 @@ export function SidebarPanel({
   onRedo,
   canUndo,
   canRedo,
+  brush,
+  onBrushChange,
   entries,
   activeLayerId,
   background,
@@ -76,6 +86,14 @@ export function SidebarPanel({
           maxWidth={264}
           renderVersion={renderVersion}
         />
+      </AccordionPanel>
+      <AccordionPanel
+        title="Brush"
+        defaultExpanded
+        isFirst={false}
+        isLast={false}
+      >
+        <BrushPanel brush={brush} onBrushChange={onBrushChange} />
       </AccordionPanel>
       <AccordionPanel
         title="Layers"

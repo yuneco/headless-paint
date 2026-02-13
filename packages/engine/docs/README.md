@@ -43,11 +43,14 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Point` | 2D座標 `{ x, y }` |
 | `Color` | RGBA色 `{ r, g, b, a }` (各値 0-255) |
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
+| `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
+| `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig`） |
+| `BrushRenderState` | ブラシレンダリング状態 `{ accumulatedDistance, tipCanvas, seed }` |
 
 ### Layer 管理関数
 
@@ -75,6 +78,22 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `calculateRadius(pressure, baseLineWidth, pressureSensitivity, pressureCurve?)` | 筆圧から描画半径を計算 |
 | `applyPressureCurve(pressure, curve)` | 筆圧カーブを適用 |
 | `interpolateStrokePoints(points, overlapCount?)` | Catmull-Romスプライン補間 |
+
+### Brush API
+
+詳細は [brush-api.md](./brush-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `renderBrushStroke(layer, points, style, overlapCount?, state?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
+| `generateBrushTip(config, size, color, registry?)` | ブラシチップ画像を生成 |
+| `createBrushTipRegistry()` | 画像チップ管理用の `BrushTipRegistry` を作成 |
+| `mulberry32(seed)` | 32bit シードから PRNG を生成 |
+| `hashSeed(globalSeed, distance)` | 位置固有のシードを生成 |
+| `ROUND_PEN` | デフォルトの round-pen ブラシ定数 |
+| `AIRBRUSH` | エアブラシプリセット（ソフト円、密間隔・低フロー） |
+| `PENCIL` | 鉛筆プリセット（ほぼハード円、微小 jitter） |
+| `MARKER` | マーカープリセット（やや柔らか、中間フロー） |
 
 ### レンダリング関数
 
@@ -105,8 +124,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `appendToCommittedLayer(layer, points, style, expand, overlapCount?)` | 確定レイヤーに追加描画 |
-| `renderPendingLayer(layer, points, style, expand)` | 作業レイヤーを再描画 |
+| `appendToCommittedLayer(layer, points, style, expand, overlapCount?, brushState?)` | 確定レイヤーに追加描画。`BrushRenderState` を返す |
+| `renderPendingLayer(layer, points, style, expand, brushState?)` | 作業レイヤーを再描画 |
 | `composeLayers(target, layers, transform?)` | レイヤーを合成 |
 
 ### Pattern Preview

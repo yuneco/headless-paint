@@ -1,9 +1,14 @@
-import type { Layer, StrokePoint } from "@headless-paint/engine";
+import type {
+  BrushRenderState,
+  Layer,
+  StrokePoint,
+} from "@headless-paint/engine";
 import {
   clearLayer,
   compileExpand,
-  drawVariableWidthPath,
   expandStrokePoints,
+  generateBrushTip,
+  renderBrushStroke,
   wrapShiftLayer,
 } from "@headless-paint/engine";
 import { compileFilterPipeline, processAllPoints } from "@headless-paint/input";
@@ -19,7 +24,7 @@ import { isDrawCommand } from "./types";
  * ストロークコマンドをリプレイする
  * - inputPoints を filterPipeline で処理
  * - 結果を expand で展開
- * - 各ストロークを可変太さで描画
+ * - 各ストロークをブラシ種別に応じて描画
  */
 function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
   // フィルタパイプラインで入力点を処理
@@ -37,17 +42,29 @@ function replayStrokeCommand(layer: Layer, command: StrokeCommand): void {
   }));
   const strokes = expandStrokePoints(strokePoints, compiledExpand);
 
-  const pressureSensitivity = command.pressureSensitivity ?? 0;
+  // スタンプブラシの場合は tipCanvas を再生成して初期 BrushRenderState を構築
+  let brushState: BrushRenderState | undefined;
+  if (command.style.brush.type === "stamp") {
+    const tipCanvas = generateBrushTip(
+      command.style.brush.tip,
+      Math.ceil(command.style.lineWidth * 2),
+      command.style.color,
+    );
+    brushState = {
+      accumulatedDistance: 0,
+      tipCanvas,
+      seed: command.brushSeed,
+    };
+  }
+
   for (const points of strokes) {
     if (points.length > 0) {
-      drawVariableWidthPath(
+      brushState = renderBrushStroke(
         layer,
         points,
-        command.color,
-        command.lineWidth,
-        pressureSensitivity,
-        command.pressureCurve,
-        command.compositeOperation,
+        command.style,
+        0,
+        brushState,
       );
     }
   }

@@ -84,13 +84,95 @@ export const DEFAULT_PRESSURE_CURVE: PressureCurve = {
 };
 
 // ============================================================
+// Brush
+// ============================================================
+
+/** 手続き的円形チップ（hardness でエッジの柔らかさ制御） */
+export interface CircleTipConfig {
+  readonly type: "circle";
+  readonly hardness: number;
+}
+
+/** 画像ベースチップ（imageId で BrushTipRegistry から解決） */
+export interface ImageTipConfig {
+  readonly type: "image";
+  readonly imageId: string;
+}
+
+export type BrushTipConfig = CircleTipConfig | ImageTipConfig;
+
+export interface BrushDynamics {
+  readonly spacing: number;
+  readonly opacityJitter: number;
+  readonly sizeJitter: number;
+  readonly rotationJitter: number;
+  readonly scatter: number;
+  readonly flow: number;
+}
+
+export const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
+  spacing: 0.25,
+  opacityJitter: 0,
+  sizeJitter: 0,
+  rotationJitter: 0,
+  scatter: 0,
+  flow: 1.0,
+};
+
+/** 現在の circle+trapezoid 方式 */
+export interface RoundPenBrushConfig {
+  readonly type: "round-pen";
+}
+
+/** スタンプベースブラシ（汎用拡張型） */
+export interface StampBrushConfig {
+  readonly type: "stamp";
+  readonly tip: BrushTipConfig;
+  readonly dynamics: BrushDynamics;
+}
+
+export type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
+
+export const ROUND_PEN: RoundPenBrushConfig = { type: "round-pen" };
+
+export const AIRBRUSH: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.0 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+};
+
+export const PENCIL: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.95 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.1,
+    sizeJitter: 0.05,
+    scatter: 0.02,
+  },
+};
+
+export const MARKER: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.7 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.15, flow: 0.8 },
+};
+
+export interface BrushRenderState {
+  readonly accumulatedDistance: number;
+  readonly tipCanvas: OffscreenCanvas | null;
+  readonly seed: number;
+}
+
+// ============================================================
 // StrokeStyle
 // ============================================================
 
 export interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity?: number;
-  readonly pressureCurve?: PressureCurve;
-  readonly compositeOperation?: GlobalCompositeOperation;
+  readonly pressureSensitivity: number;
+  readonly pressureCurve: PressureCurve;
+  readonly compositeOperation: GlobalCompositeOperation;
+  readonly brush: BrushConfig;
 }

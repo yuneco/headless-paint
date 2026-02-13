@@ -279,19 +279,23 @@ const DEFAULT_PRESSURE_CURVE: PressureCurve = { y1: 1/3, y2: 2/3 };
 interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity?: number;
-  readonly pressureCurve?: PressureCurve;
-  readonly compositeOperation?: GlobalCompositeOperation;
+  readonly pressureSensitivity: number;
+  readonly pressureCurve: PressureCurve;
+  readonly compositeOperation: GlobalCompositeOperation;
+  readonly brush: BrushConfig;
 }
 ```
 
-| フィールド | 型 | デフォルト | 説明 |
-|---|---|---|---|
-| `color` | `Color` | - | 描画色 |
-| `lineWidth` | `number` | - | 線の基準太さ |
-| `pressureSensitivity` | `number` | `0` | 筆圧感度（0.0=均一太さ、1.0=最大感度） |
-| `pressureCurve` | `PressureCurve` | `undefined` | 筆圧カーブ（undefinedは線形） |
-| `compositeOperation` | `GlobalCompositeOperation` | `undefined` | Canvas合成モード。`undefined` は `"source-over"`。消しゴムでは `"destination-out"` を指定 |
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `color` | `Color` | 描画色 |
+| `lineWidth` | `number` | 線の基準太さ |
+| `pressureSensitivity` | `number` | 筆圧感度（0.0=均一太さ、1.0=最大感度） |
+| `pressureCurve` | `PressureCurve` | 筆圧カーブ（`DEFAULT_PRESSURE_CURVE` で線形） |
+| `compositeOperation` | `GlobalCompositeOperation` | Canvas合成モード。通常は `"source-over"`。消しゴムでは `"destination-out"` を指定 |
+| `brush` | `BrushConfig` | ブラシ設定。`{ type: "round-pen" }` で従来の circle+trapezoid 方式 |
+
+全フィールドが required。暗黙のデフォルト値に依存せず、常に明示的に指定する。
 
 **筆圧感度の動作**:
 - `0`: 全ポイントが `lineWidth` で均一描画
@@ -299,10 +303,237 @@ interface StrokeStyle {
 - `0〜1`: 均一太さと筆圧太さの線形補間
 
 **筆圧カーブの動作**:
-- `pressureCurve` が設定されている場合、筆圧感度の計算前に入力筆圧をカーブで変換する
-- `undefined` の場合は変換なし（線形のまま）
+- 筆圧感度の計算前に入力筆圧をカーブで変換する
+- `DEFAULT_PRESSURE_CURVE`（`{ y1: 1/3, y2: 2/3 }`）は線形（変換なし相当）
 
 **合成モードの動作**:
-- `"source-over"`（デフォルト）: 通常の加算描画
+- `"source-over"`: 通常の加算描画
 - `"destination-out"`: 消しゴムモード（描画した箇所を透明にする）
 - その他の `GlobalCompositeOperation` 値も将来的にサポート可能
+
+---
+
+## BrushTipConfig
+
+チップ形状の設定。判別共用体。
+
+```typescript
+/** 手続き的円形チップ（hardness でエッジの柔らかさ制御） */
+interface CircleTipConfig {
+  readonly type: "circle";
+  readonly hardness: number;
+}
+
+/** 画像ベースチップ（imageId で BrushTipRegistry から解決） */
+interface ImageTipConfig {
+  readonly type: "image";
+  readonly imageId: string;
+}
+
+type BrushTipConfig = CircleTipConfig | ImageTipConfig;
+```
+
+**CircleTipConfig**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"circle"` | チップ種別 |
+| `hardness` | `number` | エッジの硬さ（0.0=ガウシアンフォールオフ、1.0=ハード円） |
+
+**ImageTipConfig**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"image"` | チップ種別 |
+| `imageId` | `string` | BrushTipRegistry に登録された画像の識別子 |
+
+**使用例**:
+```typescript
+const softCircle: CircleTipConfig = { type: "circle", hardness: 0.0 };
+const hardCircle: CircleTipConfig = { type: "circle", hardness: 1.0 };
+const imageTip: ImageTipConfig = { type: "image", imageId: "pastel-grain" };
+```
+
+---
+
+## BrushDynamics
+
+スタンプブラシの動的パラメータ。スタンプごとの変動を制御する。
+
+```typescript
+interface BrushDynamics {
+  readonly spacing: number;
+  readonly opacityJitter: number;
+  readonly sizeJitter: number;
+  readonly rotationJitter: number;
+  readonly scatter: number;
+  readonly flow: number;
+}
+```
+
+全フィールドが required。`DEFAULT_BRUSH_DYNAMICS` からの spread で差分のみ指定できる。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `spacing` | `number` | ブラシ直径に対するスタンプ間隔の比率（0.25 = 直径の25%間隔） |
+| `opacityJitter` | `number` | 不透明度のランダム変動 [0, 1] |
+| `sizeJitter` | `number` | サイズのランダム変動 [0, 1] |
+| `rotationJitter` | `number` | 回転のランダム変動 [0, PI] ラジアン |
+| `scatter` | `number` | 散布距離（直径比率） |
+| `flow` | `number` | 1スタンプあたりの塗料量 [0, 1] |
+
+**関連定数**:
+
+```typescript
+const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
+  spacing: 0.25,
+  opacityJitter: 0,
+  sizeJitter: 0,
+  rotationJitter: 0,
+  scatter: 0,
+  flow: 1.0,
+};
+```
+
+**使用例**:
+```typescript
+// エアブラシ的な設定（密間隔・低フロー）
+const airbrushDynamics: BrushDynamics = {
+  ...DEFAULT_BRUSH_DYNAMICS,
+  spacing: 0.05,
+  flow: 0.1,
+};
+
+// パステル的な設定（散布・回転あり）
+const pastelDynamics: BrushDynamics = {
+  ...DEFAULT_BRUSH_DYNAMICS,
+  spacing: 0.2,
+  rotationJitter: Math.PI,
+  scatter: 0.1,
+  opacityJitter: 0.2,
+};
+```
+
+---
+
+## BrushConfig
+
+ブラシの設定。判別共用体でブラシ種別を切り替える。
+
+```typescript
+/** 現在の circle+trapezoid 方式（デフォルト） */
+interface RoundPenBrushConfig {
+  readonly type: "round-pen";
+}
+
+/** スタンプベースブラシ（汎用拡張型） */
+interface StampBrushConfig {
+  readonly type: "stamp";
+  readonly tip: BrushTipConfig;
+  readonly dynamics: BrushDynamics;
+}
+
+type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
+```
+
+**StampBrushConfig**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"stamp"` | ブラシ種別 |
+| `tip` | `BrushTipConfig` | チップ形状の設定 |
+| `dynamics` | `BrushDynamics` | 動的パラメータ |
+
+**関連定数**:
+
+```typescript
+const ROUND_PEN: RoundPenBrushConfig = { type: "round-pen" };
+
+const AIRBRUSH: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.0 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+};
+
+const PENCIL: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.95 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.1, sizeJitter: 0.05, scatter: 0.02 },
+};
+
+const MARKER: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.7 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.15, flow: 0.8 },
+};
+```
+
+| 定数 | チップ | 特徴 |
+|------|--------|------|
+| `ROUND_PEN` | — | 従来の circle+trapezoid 方式（デフォルト） |
+| `AIRBRUSH` | ソフト円 (hardness=0.0) | 密間隔・低フロー。滑らかな噴射効果 |
+| `PENCIL` | ほぼハード円 (hardness=0.95) | 微小なサイズ・位置のゆらぎ |
+| `MARKER` | やや柔らか (hardness=0.7) | 中間フロー。マーカー的な塗り |
+
+**使用例**:
+```typescript
+// エアブラシ
+const airbrush: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.0 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+};
+
+// 鉛筆
+const pencil: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.95 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.1, sizeJitter: 0.05, scatter: 0.02 },
+};
+
+// round-pen
+const style: StrokeStyle = {
+  color: { r: 0, g: 0, b: 0, a: 255 },
+  lineWidth: 8,
+  pressureSensitivity: 0,
+  pressureCurve: DEFAULT_PRESSURE_CURVE,
+  compositeOperation: "source-over",
+  brush: ROUND_PEN,
+};
+```
+
+---
+
+## BrushRenderState
+
+ブラシレンダリングの状態。committed→pending 間の状態受け渡しに使用する。
+
+```typescript
+interface BrushRenderState {
+  readonly accumulatedDistance: number;
+  readonly tipCanvas: OffscreenCanvas | null;
+  readonly seed: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `accumulatedDistance` | `number` | スタンプ配置の累積距離。committed→pending 間で引き継ぎ、ギャップや二重配置を防ぐ |
+| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。ストローク開始時に生成し全スタンプで再利用する。`round-pen` では `null` |
+| `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
+
+**設計意図**: スタンプブラシの jitter は位置ベース PRNG `hashSeed(seed, round(distance * 100))` で決定論的に生成される。committed と pending を独立に描画しても、同一距離のスタンプは同一の jitter を持つ。
+
+**使用例**:
+```typescript
+// ストローク開始時に初期状態を作成
+const initialState: BrushRenderState = {
+  accumulatedDistance: 0,
+  tipCanvas: generateBrushTip(brush.tip, size, color),
+  seed: Math.random() * 0xffffffff | 0,
+};
+
+// committed 描画後に状態を引き継ぎ
+const nextState = renderBrushStroke(layer, points, style, 0, initialState);
+// nextState.accumulatedDistance を pending 描画に使う
+```

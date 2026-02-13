@@ -1,8 +1,6 @@
 import type {
-  Color,
   ExpandConfig,
   LayerMeta,
-  PressureCurve,
   StrokePoint,
   StrokeStyle,
 } from "@headless-paint/engine";
@@ -45,11 +43,8 @@ export interface StrokeCommand {
   readonly inputPoints: readonly InputPoint[];
   readonly filterPipeline: FilterPipelineConfig;
   readonly expand: ExpandConfig;
-  readonly color: Color;
-  readonly lineWidth: number;
-  readonly pressureSensitivity?: number;
-  readonly pressureCurve?: PressureCurve;
-  readonly compositeOperation?: GlobalCompositeOperation;
+  readonly style: StrokeStyle;
+  readonly brushSeed: number;
   readonly timestamp: number;
 }
 

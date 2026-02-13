@@ -59,6 +59,7 @@ function usePenSettings(config?: PenSettingsConfig): UsePenSettingsResult;
 | `initialLineWidth` | `number` | `8` | 初期線幅（px） |
 | `initialPressureSensitivity` | `number` | `1.0` | 筆圧感度。0 で無効、1 で最大 |
 | `initialPressureCurve` | `PressureCurve` | `DEFAULT_PRESSURE_CURVE` | 筆圧の入出力カーブ |
+| `initialBrush` | `BrushConfig` | `ROUND_PEN` | 初期ブラシ設定 |
 
 #### UsePenSettingsResult
 
@@ -74,7 +75,9 @@ interface UsePenSettingsResult {
   readonly pressureCurve: PressureCurve;
   /** 消しゴムモードが有効か */
   readonly eraser: boolean;
-  /** 上記の値から自動構築された描画スタイル。useStrokeSession / usePaintEngine に渡す */
+  /** 現在のブラシ設定 */
+  readonly brush: BrushConfig;
+  /** 上記の値から自動構築された描画スタイル（brush を含む）。useStrokeSession / usePaintEngine に渡す */
   readonly strokeStyle: StrokeStyle;
   readonly setColor: (color: Color) => void;
   readonly setLineWidth: (width: number) => void;
@@ -82,6 +85,7 @@ interface UsePenSettingsResult {
   readonly setPressureCurve: (curve: PressureCurve) => void;
   /** true にすると compositeOperation が "destination-out" に設定される */
   readonly setEraser: (eraser: boolean) => void;
+  readonly setBrush: (brush: BrushConfig) => void;
 }
 ```
 
@@ -369,6 +373,8 @@ interface StrokeCompleteData {
   readonly expandConfig: ExpandConfig;
   /** ストローク時に使用された描画スタイル */
   readonly strokeStyle: StrokeStyle;
+  /** スタンプブラシの PRNG シード（round-pen では 0） */
+  readonly brushSeed: number;
   /** 確定済みポイントの総数 */
   readonly totalPoints: number;
 }
@@ -671,6 +677,11 @@ interface UseLayersResult {
 | `ExpandConfig` | engine | 対称展開の設定 |
 | `CompiledExpand` | engine | 構築済み対称展開変換 |
 | `ExpandMode` | engine | `"none" \| "axial" \| "radial" \| "kaleidoscope"` |
+| `BrushConfig` | engine | ブラシ設定（`RoundPenBrushConfig \| StampBrushConfig`） |
+| `StampBrushConfig` | engine | スタンプベースブラシの設定 |
+| `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
+| `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
+| `BrushRenderState` | engine | ブラシレンダリング状態 |
 | `ViewTransform` | input | ビュー変換行列 |
 | `InputPoint` | input | 入力ポイント（座標 + 筆圧 + タイムスタンプ） |
 | `CompiledFilterPipeline` | input | 構築済み FilterPipeline |
@@ -679,3 +690,13 @@ interface UseLayersResult {
 | `HistoryState` | stroke | 履歴の内部状態 |
 | `StraightLineConfig` | input | 直線フィルタの設定 |
 | `HistoryConfig` | stroke | 履歴の容量設定 |
+
+### 再エクスポート定数
+
+| 定数 | 元パッケージ | 説明 |
+|----|-------------|------|
+| `ROUND_PEN` | engine | デフォルトの round-pen ブラシ |
+| `AIRBRUSH` | engine | エアブラシプリセット |
+| `PENCIL` | engine | 鉛筆プリセット |
+| `MARKER` | engine | マーカープリセット |
+| `DEFAULT_BRUSH_DYNAMICS` | engine | `BrushDynamics` のデフォルト値 |

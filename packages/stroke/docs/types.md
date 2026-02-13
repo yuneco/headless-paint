@@ -9,7 +9,7 @@
 import type { InputPoint, FilterPipelineConfig, FilterOutput } from "@headless-paint/input";
 
 // @headless-paint/engine から
-import type { ExpandConfig, Color, StrokePoint, PressureCurve, StrokeStyle } from "@headless-paint/engine";
+import type { ExpandConfig, Color, StrokePoint, PressureCurve, StrokeStyle, BrushConfig } from "@headless-paint/engine";
 // re-export
 export type { StrokeStyle } from "@headless-paint/engine";
 ```
@@ -24,11 +24,14 @@ export type { StrokeStyle } from "@headless-paint/engine";
 interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity?: number;  // 0.0=均一, 1.0=最大感度
-  readonly pressureCurve?: PressureCurve; // 筆圧カーブ（undefined=線形）
-  readonly compositeOperation?: GlobalCompositeOperation; // 合成モード（undefined="source-over"）
+  readonly pressureSensitivity: number;           // 0.0=均一, 1.0=最大感度
+  readonly pressureCurve: PressureCurve;          // 筆圧カーブ（DEFAULT_PRESSURE_CURVE=線形）
+  readonly compositeOperation: GlobalCompositeOperation; // 合成モード（"source-over" が通常）
+  readonly brush: BrushConfig;                    // ブラシ設定（ROUND_PEN が従来方式）
 }
 ```
+
+全フィールド required。詳細は [engine/docs/types.md](../../engine/docs/types.md#strokestyle) を参照。
 
 ---
 
@@ -124,11 +127,8 @@ interface StrokeCommand {
   readonly inputPoints: readonly InputPoint[];
   readonly filterPipeline: FilterPipelineConfig;
   readonly expand: ExpandConfig;
-  readonly color: Color;
-  readonly lineWidth: number;
-  readonly pressureSensitivity?: number;
-  readonly pressureCurve?: PressureCurve;
-  readonly compositeOperation?: GlobalCompositeOperation;
+  readonly style: StrokeStyle;
+  readonly brushSeed: number;
   readonly timestamp: number;
 }
 ```
@@ -140,17 +140,14 @@ interface StrokeCommand {
 | `inputPoints` | `readonly InputPoint[]` | 変換前の入力点列 |
 | `filterPipeline` | `FilterPipelineConfig` | フィルタパイプライン設定 |
 | `expand` | `ExpandConfig` | 展開設定 |
-| `color` | `Color` | 描画色 |
-| `lineWidth` | `number` | 線の太さ |
-| `pressureSensitivity` | `number` | 筆圧感度（optional、undefined→0扱い） |
-| `pressureCurve` | `PressureCurve` | 筆圧カーブ（optional、undefined→線形） |
-| `compositeOperation` | `GlobalCompositeOperation` | 合成モード（optional、undefined→`"source-over"`）。消しゴムストロークでは `"destination-out"` |
+| `style` | `StrokeStyle` | 描画スタイル（色、線幅、筆圧、合成モード、ブラシ設定を含む）。全フィールド required のため replay 時の解釈不一致がない |
+| `brushSeed` | `number` | ブラシの PRNG シード。スタンプブラシの jitter を決定論的にリプレイするために使用。`round-pen` では `0` |
 | `timestamp` | `number` | 作成時刻 |
 
 **特徴**:
 - 入力点（フィルタ前）のみを保存
 - リプレイ時にフィルタ→展開を再適用
-- データサイズが小さい
+- `style: StrokeStyle` に集約することで、従来の個別フィールド展開（`color`, `lineWidth`, `pressureSensitivity?` 等）を廃止。command 保存と replay で optional の解釈不一致を構造的に排除
 
 ---
 

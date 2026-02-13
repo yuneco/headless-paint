@@ -1,3 +1,4 @@
+import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "@headless-paint/engine";
 import { describe, expect, it } from "vitest";
 import {
   addPointToSession,
@@ -16,6 +17,10 @@ describe("session", () => {
   const style: StrokeStyle = {
     color: { r: 0, g: 0, b: 0, a: 255 },
     lineWidth: 3,
+    pressureSensitivity: 0,
+    pressureCurve: DEFAULT_PRESSURE_CURVE,
+    compositeOperation: "source-over",
+    brush: ROUND_PEN,
   };
 
   const expandConfig = {
@@ -224,8 +229,8 @@ describe("session", () => {
       expect(command?.type).toBe("stroke");
       expect(command?.layerId).toBe("layer_1");
       expect(command?.inputPoints).toEqual(inputPoints);
-      expect(command?.color).toEqual(style.color);
-      expect(command?.lineWidth).toBe(style.lineWidth);
+      expect(command?.style).toEqual(style);
+      expect(command?.brushSeed).toBe(0);
     });
 
     it("should return StrokeCommand for single-point stroke (1 point)", () => {
@@ -268,7 +273,7 @@ describe("session", () => {
   });
 
   describe("createStrokeCommand", () => {
-    it("should create stroke command with layerId as first argument", () => {
+    it("should create stroke command with style", () => {
       const inputPoints = [
         { x: 10, y: 20, timestamp: 1000 },
         { x: 30, y: 40, timestamp: 1002 },
@@ -279,8 +284,7 @@ describe("session", () => {
         inputPoints,
         filterPipeline,
         expandConfig,
-        style.color,
-        style.lineWidth,
+        style,
       );
 
       expect(command.type).toBe("stroke");
@@ -288,8 +292,8 @@ describe("session", () => {
       expect(command.inputPoints).toEqual(inputPoints);
       expect(command.filterPipeline).toEqual(filterPipeline);
       expect(command.expand).toEqual(expandConfig);
-      expect(command.color).toEqual(style.color);
-      expect(command.lineWidth).toBe(style.lineWidth);
+      expect(command.style).toEqual(style);
+      expect(command.brushSeed).toBe(0);
       expect(typeof command.timestamp).toBe("number");
     });
   });

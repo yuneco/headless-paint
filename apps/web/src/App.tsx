@@ -207,6 +207,8 @@ export function App() {
         onRedo={engine.redo}
         canUndo={engine.canUndo}
         canRedo={engine.canRedo}
+        brush={penSettings.brush}
+        onBrushChange={penSettings.setBrush}
         entries={engine.entries}
         activeLayerId={engine.activeLayerId}
         background={background}
