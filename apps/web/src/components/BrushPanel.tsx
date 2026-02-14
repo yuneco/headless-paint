@@ -4,7 +4,7 @@ import type {
   StampBrushConfig,
 } from "@headless-paint/engine";
 import { generateBrushTip } from "@headless-paint/engine";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { APP_BRUSH_PRESETS } from "../brush-presets";
 
 interface BrushPanelProps {
@@ -87,7 +87,7 @@ function BrushPreviewCanvas({
   );
 }
 
-export function BrushPanel({
+function BrushPanelComponent({
   brush,
   onBrushChange,
   registry,
@@ -137,3 +137,5 @@ export function BrushPanel({
     </div>
   );
 }
+
+export const BrushPanel = memo(BrushPanelComponent);

@@ -1,5 +1,5 @@
 import type { Point } from "@headless-paint/input";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 interface TouchDebugOverlayProps {
   readonly enabled: boolean;
@@ -9,7 +9,7 @@ interface TouchDebugOverlayProps {
   readonly height: number;
 }
 
-export function TouchDebugOverlay({
+function TouchDebugOverlayComponent({
   enabled,
   touchPoints,
   gesturePhase,
@@ -101,3 +101,5 @@ export function TouchDebugOverlay({
     />
   );
 }
+
+export const TouchDebugOverlay = memo(TouchDebugOverlayComponent);

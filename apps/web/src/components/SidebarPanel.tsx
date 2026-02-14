@@ -7,6 +7,7 @@ import type {
 import type { ViewTransform } from "@headless-paint/input";
 import type { LayerEntry } from "@headless-paint/react";
 import type { HistoryState } from "@headless-paint/stroke";
+import { memo } from "react";
 import { AccordionPanel } from "./AccordionPanel";
 import { BrushPanel } from "./BrushPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";
@@ -14,7 +15,7 @@ import { LayerPanel } from "./LayerPanel";
 import { Minimap } from "./Minimap";
 
 interface SidebarPanelProps {
-  layers: readonly Layer[];
+  minimapLayers: readonly Layer[];
   viewTransform: ViewTransform;
   mainCanvasWidth: number;
   mainCanvasHeight: number;
@@ -44,8 +45,154 @@ interface SidebarPanelProps {
   layerIdToName: (layerId: string) => string;
 }
 
-export function SidebarPanel({
-  layers,
+interface MinimapSectionProps {
+  minimapLayers: readonly Layer[];
+  viewTransform: ViewTransform;
+  mainCanvasWidth: number;
+  mainCanvasHeight: number;
+  renderVersion?: number;
+}
+
+const MinimapSection = memo(function MinimapSection({
+  minimapLayers,
+  viewTransform,
+  mainCanvasWidth,
+  mainCanvasHeight,
+  renderVersion,
+}: MinimapSectionProps) {
+  return (
+    <AccordionPanel title="Minimap" defaultExpanded isFirst isLast={false}>
+      <Minimap
+        layers={minimapLayers}
+        viewTransform={viewTransform}
+        mainCanvasWidth={mainCanvasWidth}
+        mainCanvasHeight={mainCanvasHeight}
+        maxWidth={264}
+        renderVersion={renderVersion}
+      />
+    </AccordionPanel>
+  );
+});
+
+interface BrushSectionProps {
+  brush: BrushConfig;
+  onBrushChange: (brush: BrushConfig) => void;
+  registry: BrushTipRegistry;
+  registryReady: boolean;
+}
+
+const BrushSection = memo(function BrushSection({
+  brush,
+  onBrushChange,
+  registry,
+  registryReady,
+}: BrushSectionProps) {
+  return (
+    <AccordionPanel
+      title="Brush"
+      defaultExpanded
+      isFirst={false}
+      isLast={false}
+    >
+      <BrushPanel
+        brush={brush}
+        onBrushChange={onBrushChange}
+        registry={registry}
+        registryReady={registryReady}
+      />
+    </AccordionPanel>
+  );
+});
+
+interface LayersSectionProps {
+  entries: readonly LayerEntry[];
+  activeLayerId: string | null;
+  background: BackgroundSettings;
+  onSelectLayer: (id: string) => void;
+  onAddLayer: () => void;
+  onRemoveLayer: (id: string) => void;
+  onToggleVisibility: (id: string) => void;
+  onToggleBackground: () => void;
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
+}
+
+const LayersSection = memo(function LayersSection({
+  entries,
+  activeLayerId,
+  background,
+  onSelectLayer,
+  onAddLayer,
+  onRemoveLayer,
+  onToggleVisibility,
+  onToggleBackground,
+  onMoveUp,
+  onMoveDown,
+}: LayersSectionProps) {
+  return (
+    <AccordionPanel
+      title="Layers"
+      badge={entries.length}
+      defaultExpanded
+      isFirst={false}
+      isLast={false}
+    >
+      <LayerPanel
+        entries={entries}
+        activeLayerId={activeLayerId}
+        background={background}
+        onSelectLayer={onSelectLayer}
+        onAddLayer={onAddLayer}
+        onRemoveLayer={onRemoveLayer}
+        onToggleVisibility={onToggleVisibility}
+        onToggleBackground={onToggleBackground}
+        onMoveUp={onMoveUp}
+        onMoveDown={onMoveDown}
+      />
+    </AccordionPanel>
+  );
+});
+
+interface HistorySectionProps {
+  historyState: HistoryState;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  layerIdToName: (layerId: string) => string;
+}
+
+const HistorySection = memo(function HistorySection({
+  historyState,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  layerIdToName,
+}: HistorySectionProps) {
+  const entryCount = getHistoryEntryCount(historyState);
+  return (
+    <AccordionPanel
+      title="History"
+      badge={entryCount}
+      defaultExpanded
+      isFirst={false}
+      isLast
+    >
+      <HistoryContent
+        historyState={historyState}
+        onUndo={onUndo}
+        onRedo={onRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        layerIdToName={layerIdToName}
+      />
+    </AccordionPanel>
+  );
+});
+
+function SidebarPanelComponent({
+  minimapLayers,
   viewTransform,
   mainCanvasWidth,
   mainCanvasHeight,
@@ -71,8 +218,6 @@ export function SidebarPanel({
   onMoveDown,
   layerIdToName,
 }: SidebarPanelProps) {
-  const entryCount = getHistoryEntryCount(historyState);
-
   return (
     <div
       style={{
@@ -82,65 +227,41 @@ export function SidebarPanel({
         width: 280,
       }}
     >
-      <AccordionPanel title="Minimap" defaultExpanded isFirst isLast={false}>
-        <Minimap
-          layers={layers}
-          viewTransform={viewTransform}
-          mainCanvasWidth={mainCanvasWidth}
-          mainCanvasHeight={mainCanvasHeight}
-          maxWidth={264}
-          renderVersion={renderVersion}
-        />
-      </AccordionPanel>
-      <AccordionPanel
-        title="Brush"
-        defaultExpanded
-        isFirst={false}
-        isLast={false}
-      >
-        <BrushPanel
-          brush={brush}
-          onBrushChange={onBrushChange}
-          registry={registry}
-          registryReady={registryReady}
-        />
-      </AccordionPanel>
-      <AccordionPanel
-        title="Layers"
-        badge={entries.length}
-        defaultExpanded
-        isFirst={false}
-        isLast={false}
-      >
-        <LayerPanel
-          entries={entries}
-          activeLayerId={activeLayerId}
-          background={background}
-          onSelectLayer={onSelectLayer}
-          onAddLayer={onAddLayer}
-          onRemoveLayer={onRemoveLayer}
-          onToggleVisibility={onToggleVisibility}
-          onToggleBackground={onToggleBackground}
-          onMoveUp={onMoveUp}
-          onMoveDown={onMoveDown}
-        />
-      </AccordionPanel>
-      <AccordionPanel
-        title="History"
-        badge={entryCount}
-        defaultExpanded
-        isFirst={false}
-        isLast
-      >
-        <HistoryContent
-          historyState={historyState}
-          onUndo={onUndo}
-          onRedo={onRedo}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          layerIdToName={layerIdToName}
-        />
-      </AccordionPanel>
+      <MinimapSection
+        minimapLayers={minimapLayers}
+        viewTransform={viewTransform}
+        mainCanvasWidth={mainCanvasWidth}
+        mainCanvasHeight={mainCanvasHeight}
+        renderVersion={renderVersion}
+      />
+      <BrushSection
+        brush={brush}
+        onBrushChange={onBrushChange}
+        registry={registry}
+        registryReady={registryReady}
+      />
+      <LayersSection
+        entries={entries}
+        activeLayerId={activeLayerId}
+        background={background}
+        onSelectLayer={onSelectLayer}
+        onAddLayer={onAddLayer}
+        onRemoveLayer={onRemoveLayer}
+        onToggleVisibility={onToggleVisibility}
+        onToggleBackground={onToggleBackground}
+        onMoveUp={onMoveUp}
+        onMoveDown={onMoveDown}
+      />
+      <HistorySection
+        historyState={historyState}
+        onUndo={onUndo}
+        onRedo={onRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        layerIdToName={layerIdToName}
+      />
     </div>
   );
 }
+
+export const SidebarPanel = memo(SidebarPanelComponent);

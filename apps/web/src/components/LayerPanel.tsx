@@ -1,6 +1,7 @@
 import type { BackgroundSettings } from "@headless-paint/engine";
 import type { LayerEntry } from "@headless-paint/react";
 import { ArrowDown, ArrowUp, Circle, Eye, EyeOff, Trash2 } from "lucide-react";
+import { memo } from "react";
 
 interface LayerPanelProps {
   entries: readonly LayerEntry[];
@@ -15,7 +16,7 @@ interface LayerPanelProps {
   onMoveDown: (id: string) => void;
 }
 
-export function LayerPanel({
+function LayerPanelComponent({
   entries,
   activeLayerId,
   background,
@@ -238,3 +239,5 @@ export function LayerPanel({
     </div>
   );
 }
+
+export const LayerPanel = memo(LayerPanelComponent);

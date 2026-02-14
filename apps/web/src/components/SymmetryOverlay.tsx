@@ -1,7 +1,7 @@
 import type { ExpandConfig } from "@headless-paint/engine";
 import type { Point, ViewTransform } from "@headless-paint/input";
 import { layerToScreen, screenToLayer } from "@headless-paint/input";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { UI_SYMMETRY_GUIDE_COLOR } from "../config";
 
 interface GuideStyle {
@@ -28,7 +28,7 @@ const ORIGIN_RADIUS = 8;
 const CHILD_ORIGIN_RADIUS = 10;
 const CHILD_HIT_RADIUS = 16;
 
-export function SymmetryOverlay({
+function SymmetryOverlayComponent({
   config,
   transform,
   width,
@@ -304,6 +304,8 @@ function drawAxisLine(
   ctx.lineTo(origin.x + dx, origin.y + dy);
   ctx.stroke();
 }
+
+export const SymmetryOverlay = memo(SymmetryOverlayComponent);
 
 function drawRayLine(
   ctx: CanvasRenderingContext2D,

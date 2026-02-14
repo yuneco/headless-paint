@@ -10,7 +10,7 @@ import {
   Undo2,
   ZoomIn,
 } from "lucide-react";
-import type { ComponentType } from "react";
+import { memo, type ComponentType } from "react";
 
 function colorToHex(c: Color): string {
   const r = c.r.toString(16).padStart(2, "0");
@@ -50,7 +50,7 @@ const tools: {
   { type: "offset", label: "Offset", icon: ArrowLeftRight },
 ];
 
-export function Toolbar({
+function ToolbarComponent({
   currentTool,
   onToolChange,
   onUndo,
@@ -165,3 +165,5 @@ export function Toolbar({
     </div>
   );
 }
+
+export const Toolbar = memo(ToolbarComponent);

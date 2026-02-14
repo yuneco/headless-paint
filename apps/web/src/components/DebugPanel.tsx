@@ -12,7 +12,7 @@ import type {
   UseSmoothingResult,
 } from "@headless-paint/react";
 import type { GUI } from "lil-gui";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { UsePatternPreviewResult } from "../hooks/usePatternPreview";
 import { BezierCurveEditor } from "./BezierCurveEditor";
 
@@ -32,7 +32,7 @@ interface DebugPanelProps {
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 const PATTERN_MODES: PatternMode[] = ["none", "grid", "repeat-x", "repeat-y"];
 
-export function DebugPanel({
+function DebugPanelComponent({
   transform,
   strokeCount,
   expand,
@@ -543,3 +543,5 @@ export function DebugPanel({
     </div>
   );
 }
+
+export const DebugPanel = memo(DebugPanelComponent);

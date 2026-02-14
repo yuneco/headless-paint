@@ -1,7 +1,7 @@
 import type { Command, HistoryState } from "@headless-paint/stroke";
 import { isDrawCommand } from "@headless-paint/stroke";
 import { ChevronLeft } from "lucide-react";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 
 function getCommandLabel(
   command: Command,
@@ -63,7 +63,7 @@ interface HistoryContentProps {
   layerIdToName: (layerId: string) => string;
 }
 
-export function HistoryContent({
+function HistoryContentComponent({
   historyState,
   onUndo,
   onRedo,
@@ -184,6 +184,8 @@ export function HistoryContent({
     </>
   );
 }
+
+export const HistoryContent = memo(HistoryContentComponent);
 
 export function getHistoryEntryCount(historyState: HistoryState): number {
   return getHistoryEntries(historyState).length;

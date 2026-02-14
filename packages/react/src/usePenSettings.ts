@@ -5,7 +5,7 @@ import type {
   StrokeStyle,
 } from "@headless-paint/engine";
 import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "@headless-paint/engine";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 export interface PenSettingsConfig {
   readonly initialColor?: Color;
@@ -55,14 +55,17 @@ export function usePenSettings(
     () => config?.initialBrush ?? ROUND_PEN,
   );
 
-  const strokeStyle: StrokeStyle = {
-    color,
-    lineWidth,
-    pressureSensitivity,
-    pressureCurve,
-    compositeOperation: eraser ? "destination-out" : "source-over",
-    brush,
-  };
+  const strokeStyle = useMemo<StrokeStyle>(
+    () => ({
+      color,
+      lineWidth,
+      pressureSensitivity,
+      pressureCurve,
+      compositeOperation: eraser ? "destination-out" : "source-over",
+      brush,
+    }),
+    [color, lineWidth, pressureSensitivity, pressureCurve, eraser, brush],
+  );
 
   const handleSetColor = useCallback((c: Color) => {
     setColor(c);
@@ -88,19 +91,36 @@ export function usePenSettings(
     setBrush(b);
   }, []);
 
-  return {
-    color,
-    lineWidth,
-    pressureSensitivity,
-    pressureCurve,
-    eraser,
-    brush,
-    strokeStyle,
-    setColor: handleSetColor,
-    setLineWidth: handleSetLineWidth,
-    setPressureSensitivity: handleSetPressureSensitivity,
-    setPressureCurve: handleSetPressureCurve,
-    setEraser: handleSetEraser,
-    setBrush: handleSetBrush,
-  };
+  return useMemo(
+    () => ({
+      color,
+      lineWidth,
+      pressureSensitivity,
+      pressureCurve,
+      eraser,
+      brush,
+      strokeStyle,
+      setColor: handleSetColor,
+      setLineWidth: handleSetLineWidth,
+      setPressureSensitivity: handleSetPressureSensitivity,
+      setPressureCurve: handleSetPressureCurve,
+      setEraser: handleSetEraser,
+      setBrush: handleSetBrush,
+    }),
+    [
+      color,
+      lineWidth,
+      pressureSensitivity,
+      pressureCurve,
+      eraser,
+      brush,
+      strokeStyle,
+      handleSetColor,
+      handleSetLineWidth,
+      handleSetPressureSensitivity,
+      handleSetPressureCurve,
+      handleSetEraser,
+      handleSetBrush,
+    ],
+  );
 }

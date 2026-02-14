@@ -88,17 +88,32 @@ export function useExpand(
     setSubLevel((prev) => ({ ...prev, offset }));
   }, []);
 
-  return {
-    config,
-    compiled,
-    setMode,
-    setDivisions,
-    setAngle,
-    subEnabled,
-    setSubEnabled,
-    setSubMode,
-    setSubDivisions,
-    setSubAngle,
-    setSubOffset,
-  };
+  return useMemo(
+    () => ({
+      config,
+      compiled,
+      setMode,
+      setDivisions,
+      setAngle,
+      subEnabled,
+      setSubEnabled,
+      setSubMode,
+      setSubDivisions,
+      setSubAngle,
+      setSubOffset,
+    }),
+    [
+      config,
+      compiled,
+      setMode,
+      setDivisions,
+      setAngle,
+      subEnabled,
+      setSubEnabled,
+      setSubMode,
+      setSubDivisions,
+      setSubAngle,
+      setSubOffset,
+    ],
+  );
 }

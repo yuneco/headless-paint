@@ -1,6 +1,6 @@
 import type { PatternMode, PatternPreviewConfig } from "@headless-paint/engine";
 import { DEFAULT_PATTERN_PREVIEW_CONFIG } from "@headless-paint/engine";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 export interface UsePatternPreviewResult {
   readonly config: PatternPreviewConfig;
@@ -31,5 +31,8 @@ export function usePatternPreview(): UsePatternPreviewResult {
     setConfig((prev) => ({ ...prev, offsetY, offsetX: 0 }));
   }, []);
 
-  return { config, setMode, setOpacity, setOffsetX, setOffsetY };
+  return useMemo(
+    () => ({ config, setMode, setOpacity, setOffsetX, setOffsetY }),
+    [config, setMode, setOpacity, setOffsetX, setOffsetY],
+  );
 }

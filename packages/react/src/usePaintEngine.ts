@@ -89,6 +89,7 @@ export interface PaintEngineResult {
   readonly layers: readonly Layer[];
   readonly renderVersion: number;
   readonly canDraw: boolean;
+  readonly isDrawing: boolean;
   readonly strokePoints: readonly InputPoint[];
 }
 
@@ -478,10 +479,12 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
 
   // ── Cumulative offset ──
   const cumulativeOffsetFromHistory = computeCumulativeOffset(historyState);
-  const cumulativeOffset = {
-    x: cumulativeOffsetFromHistory.x + dragShiftRef.current.x,
-    y: cumulativeOffsetFromHistory.y + dragShiftRef.current.y,
-  };
+  const cumulativeX = cumulativeOffsetFromHistory.x + dragShiftRef.current.x;
+  const cumulativeY = cumulativeOffsetFromHistory.y + dragShiftRef.current.y;
+  const cumulativeOffset = useMemo(
+    () => ({ x: cumulativeX, y: cumulativeY }),
+    [cumulativeX, cumulativeY],
+  );
 
   return {
     // レイヤー
@@ -523,6 +526,7 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     layers,
     renderVersion: combinedRenderVersion,
     canDraw: session.canDraw,
+    isDrawing: session.isDrawing,
     strokePoints: session.strokePoints,
   };
 }

@@ -14,7 +14,7 @@ import {
   useViewTransform,
   useWindowSize,
 } from "@headless-paint/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { registerAppBrushTips } from "./brush-presets";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
@@ -98,6 +98,9 @@ export function App() {
   const handleToggleBackground = useCallback(() => {
     setBackground((prev) => ({ ...prev, visible: !prev.visible }));
   }, []);
+  const handleToggleTouchDebug = useCallback(() => {
+    setShowTouchDebug((prev) => !prev);
+  }, []);
 
   // タッチジェスチャー
   const touchGesture = useTouchGesture({
@@ -116,7 +119,7 @@ export function App() {
   const { shiftHeld } = useKeyboardShortcuts({
     tool,
     setTool: handleToolChange,
-    isDrawing: engine.strokePoints.length > 0,
+    isDrawing: engine.isDrawing,
     onUndo: engine.undo,
     onRedo: engine.redo,
     expandMode: expand.config.levels[0].mode,
@@ -144,6 +147,10 @@ export function App() {
       if (idx === -1) return "?";
       return `L${idx + 1}`;
     },
+    [engine.entries],
+  );
+  const minimapLayers = useMemo(
+    () => engine.entries.map((entry) => entry.committedLayer),
     [engine.entries],
   );
 
@@ -211,7 +218,7 @@ export function App() {
       </div>
 
       <SidebarPanel
-        layers={engine.layers}
+        minimapLayers={minimapLayers}
         viewTransform={transform}
         mainCanvasWidth={viewWidth}
         mainCanvasHeight={viewHeight}
@@ -248,7 +255,7 @@ export function App() {
         layerOffset={engine.cumulativeOffset}
         onResetOffset={engine.onResetOffset}
         showTouchDebug={showTouchDebug}
-        onToggleTouchDebug={() => setShowTouchDebug((prev) => !prev)}
+        onToggleTouchDebug={handleToggleTouchDebug}
       />
     </div>
   );

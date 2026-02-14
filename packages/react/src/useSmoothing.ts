@@ -43,11 +43,14 @@ export function useSmoothing(config?: SmoothingConfig): UseSmoothingResult {
     setWindowSizeState(odd);
   }, []);
 
-  return {
-    enabled,
-    windowSize,
-    compiledFilterPipeline,
-    setEnabled,
-    setWindowSize,
-  };
+  return useMemo(
+    () => ({
+      enabled,
+      windowSize,
+      compiledFilterPipeline,
+      setEnabled,
+      setWindowSize,
+    }),
+    [enabled, windowSize, compiledFilterPipeline, setEnabled, setWindowSize],
+  );
 }

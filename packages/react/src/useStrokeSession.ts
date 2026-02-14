@@ -126,11 +126,11 @@ export function useStrokeSession(
   } = config;
 
   const [renderVersion, setRenderVersion] = useState(0);
-  const [strokePoints, setStrokePoints] = useState<InputPoint[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
 
   const sessionRef = useRef<SessionInternal | null>(null);
   const pendingOnlyRef = useRef(false);
+  const strokePointsRef = useRef<InputPoint[]>([]);
 
   // refs で最新値をコールバック内から参照
   const expandConfigRef = useRef(expandConfig);
@@ -230,7 +230,7 @@ export function useStrokeSession(
         brushState,
       );
 
-      setStrokePoints([inputPoint]);
+      strokePointsRef.current = [inputPoint];
       setIsDrawing(true);
       bumpRenderVersion();
     },
@@ -263,12 +263,10 @@ export function useStrokeSession(
         filterResult.output,
       );
 
-      sessionRef.current = {
-        ...sessionRef.current,
-        strokeSession: strokeResult.state,
-        filterState: filterResult.state,
-        inputPoints: [...sessionRef.current.inputPoints, inputPoint],
-      };
+      sessionRef.current.strokeSession = strokeResult.state;
+      sessionRef.current.filterState = filterResult.state;
+      sessionRef.current.inputPoints.push(inputPoint);
+      strokePointsRef.current = [...strokePointsRef.current, inputPoint];
 
       if (!pendingOnlyRef.current) {
         const { newlyCommitted, committedOverlapCount } =
@@ -300,7 +298,6 @@ export function useStrokeSession(
         sessionRef.current.brushState,
       );
 
-      setStrokePoints((prev) => [...prev, inputPoint]);
       bumpRenderVersion();
     },
     [pendingLayer, bumpRenderVersion],
@@ -308,7 +305,7 @@ export function useStrokeSession(
 
   const onStrokeEnd = useCallback(() => {
     if (!sessionRef.current) {
-      setStrokePoints([]);
+      strokePointsRef.current = [];
       setIsDrawing(false);
       return;
     }
@@ -319,7 +316,7 @@ export function useStrokeSession(
       pendingLayer.meta.compositeOperation = undefined;
       sessionRef.current = null;
       pendingOnlyRef.current = false;
-      setStrokePoints([]);
+      strokePointsRef.current = [];
       setIsDrawing(false);
       bumpRenderVersion();
       return;
@@ -337,7 +334,7 @@ export function useStrokeSession(
     const currentLayer = layerRef.current;
     if (!currentLayer || currentLayer.id !== sessionRef.current.layerId) {
       sessionRef.current = null;
-      setStrokePoints([]);
+      strokePointsRef.current = [];
       setIsDrawing(false);
       return;
     }
@@ -377,7 +374,7 @@ export function useStrokeSession(
     bumpRenderVersion();
 
     sessionRef.current = null;
-    setStrokePoints([]);
+    strokePointsRef.current = [];
     setIsDrawing(false);
   }, [pendingLayer, bumpRenderVersion]);
 
@@ -409,7 +406,7 @@ export function useStrokeSession(
     pendingLayer.meta.compositeOperation = undefined;
     sessionRef.current = null;
     pendingOnlyRef.current = false;
-    setStrokePoints([]);
+    strokePointsRef.current = [];
     setIsDrawing(false);
     bumpRenderVersion();
   }, [pendingLayer, bumpRenderVersion]);
@@ -422,7 +419,7 @@ export function useStrokeSession(
     onDrawCancel,
     canDraw,
     renderVersion,
-    strokePoints,
+    strokePoints: strokePointsRef.current,
     isDrawing,
   };
 }
