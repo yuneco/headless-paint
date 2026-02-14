@@ -26,8 +26,8 @@ import { DEFAULT_PEN_CONFIG, DEFAULT_SMOOTHING_CONFIG } from "./config";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePatternPreview } from "./hooks/usePatternPreview";
 
-const LAYER_WIDTH = 1024;
-const LAYER_HEIGHT = 1024;
+const LAYER_WIDTH = 1024 * 2;
+const LAYER_HEIGHT = 1024 * 2;
 
 export function App() {
   const [tool, setTool] = useState<ToolType>("pen");

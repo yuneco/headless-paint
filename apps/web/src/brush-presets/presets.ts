@@ -16,10 +16,10 @@ const PENCIL_TEXTURED: StampBrushConfig = {
   tip: { type: "image", imageId: "pencil-grain" },
   dynamics: {
     ...DEFAULT_BRUSH_DYNAMICS,
-    spacing: 0.25,
-    flow: 0.5,
-    sizeJitter: 0.05,
-    scatter: 0.03,
+    spacing: 0.2,
+    flow: 0.45,
+    sizeJitter: 0.04,
+    scatter: 0.025,
     rotationJitter: Math.PI * 0.2,
   },
 };

@@ -8,11 +8,132 @@ function coordHash(x: number, y: number): number {
   return ((x * 374761393 + y * 668265263) ^ 0x12345678) >>> 0;
 }
 
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
+
+/** ハッシュ値を 0..1 の浮動小数に変換 */
+function hash01(x: number, y: number, seed: number): number {
+  return (coordHash(x + seed * 131, y - seed * 173) & 0xffff) / 0xffff;
+}
+
+/**
+ * 2D value noise（格子点ランダム値を双線形補間）
+ * cellSize を大きくすると低周波、小さくすると高周波の凹凸になる
+ */
+function valueNoise2D(
+  x: number,
+  y: number,
+  cellSize: number,
+  seed: number,
+): number {
+  const gx = x / cellSize;
+  const gy = y / cellSize;
+  const x0 = Math.floor(gx);
+  const y0 = Math.floor(gy);
+  const tx = gx - x0;
+  const ty = gy - y0;
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+
+  const n00 = hash01(x0, y0, seed);
+  const n10 = hash01(x0 + 1, y0, seed);
+  const n01 = hash01(x0, y0 + 1, seed);
+  const n11 = hash01(x0 + 1, y0 + 1, seed);
+
+  const nx0 = lerp(n00, n10, sx);
+  const nx1 = lerp(n01, n11, sx);
+  return lerp(nx0, nx1, sy);
+}
+
+/**
+ * fBm (fractal brownian motion): 複数スケールの value noise を合成
+ * 紙の凹凸のような有機的な連続濃淡を作るために使用
+ */
+function fractalNoise2D(
+  x: number,
+  y: number,
+  baseCellSize: number,
+  octaves: number,
+  persistence: number,
+  lacunarity: number,
+  seed: number,
+): number {
+  let amplitude = 1;
+  let amplitudeSum = 0;
+  let cellSize = baseCellSize;
+  let result = 0;
+
+  for (let i = 0; i < octaves; i++) {
+    result += valueNoise2D(x, y, cellSize, seed + i * 977) * amplitude;
+    amplitudeSum += amplitude;
+    amplitude *= persistence;
+    cellSize /= lacunarity;
+  }
+
+  return amplitudeSum > 0 ? result / amplitudeSum : 0;
+}
+
+/**
+ * 鉛筆グレイン生成の調整パラメータ
+ * 値を変更して手動チューニングしやすいよう、用途ごとに分離している
+ */
+const PENCIL_TEXTURE_PARAMS = {
+  // 外縁の硬さ。1.0 に近いほど縁ギリギリまで不透明を保ちハードになる。
+  edgeHardnessStart: 0.85,
+  // edgeHardnessStart 以降のフェード幅。小さいほどエッジが硬い。
+  edgeSoftness: 0.15,
+
+  // 紙地の大きなうねり（低周波）: 大きいほど塊が大きくなる。
+  macroCellRatio: 0.5,
+  // 紙地の中域ディテール（中周波）: 大きいほど模様がゆるやか。
+  midCellRatio: 0.4,
+  // 微細な紙目（高周波）: 小さいほどザラつきが細かくなる。
+  microCellRatio: 0.1,
+
+  // fBm の合成バランス（有機的な濃淡変化の滑らかさを決める）。
+  fbmOctaves: 3,
+  fbmPersistence: 0.55,
+  fbmLacunarity: 2.0,
+
+  // ドメインワープ量。紙目の境界を歪ませて人工的な格子感を減らす。
+  warpCellRatio: 0.7,
+  warpStrengthRatio: 0.08,
+
+  // 鉛筆芯の付きやすさ（紙の凸部で濃くなる度合い）。
+  toothContrast: 1.9,
+  toothInfluence: 0.68,
+  // 中域ディテールの寄与。増やすと内部の濃淡が増える。
+  midInfluence: 0.3,
+  // 微細紙目の寄与。増やすと細かなザラつきが増える。
+  microInfluence: 0.6,
+  // 全体濃度のオフセット。上げると全体が濃くなる。
+  baseCoverage: 0.16,
+
+  // 局所的な欠け（紙の谷）を作るパラメータ。
+  voidCellRatio: 0.13,
+  voidThreshold: 0.72,
+  voidSoftness: 0.12,
+  voidStrength: 0.68,
+
+  // 最終アルファカーブ。1 より大きいと薄部が減り芯の強さが出る。
+  alphaGamma: 4.5,
+} as const;
+
 /**
  * 鉛筆グレインテクスチャを生成
- * - 硬い円に座標ハッシュでノイズ穴を開けてざらつき感を表現
- * - 2段階のグレイン（粗い塊 + 細かい粒）で鉛筆らしい質感を再現
- * - 縁は distance falloff でフェード
+ * - エッジは硬め、内部は紙目に沿った有機的な濃淡にする
+ * - 低/中/高周波ノイズ + ドメインワープで実紙の凹凸に近づける
+ * - 局所的な欠けを入れて「芯が乗らない谷」を表現する
  */
 export async function generatePencilGrainBitmap(
   size: number,
@@ -25,14 +146,14 @@ export async function generatePencilGrainBitmap(
   const data = imageData.data;
   const center = size / 2;
   const radius = size / 2;
+  const p = PENCIL_TEXTURE_PARAMS;
 
-  // グレインのセルサイズ（size に対する比率で粗さを決定）
-  // 128px テクスチャが tipSize(24px) に縮小されるため、
-  // 縮小後も視認できる十分に大きなセルが必要
-  // coarse: size/3 ≈ 43px → 縮小後 ~8px（はっきり見える帯状のムラ）
-  // fine: size/8 ≈ 16px → 縮小後 ~3px（ディテール）
-  const coarseCell = Math.max(4, Math.round(size / 3));
-  const fineCell = Math.max(2, Math.round(size / 8));
+  const macroCell = Math.max(3, size * p.macroCellRatio);
+  const midCell = Math.max(2, size * p.midCellRatio);
+  const microCell = Math.max(1, size * p.microCellRatio);
+  const warpCell = Math.max(2, size * p.warpCellRatio);
+  const warpStrength = size * p.warpStrengthRatio;
+  const voidCell = Math.max(1, size * p.voidCellRatio);
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -42,34 +163,70 @@ export async function generatePencilGrainBitmap(
 
       if (dist > radius) continue;
 
-      // distance falloff: 外縁でフェード
-      const falloff =
-        dist < radius * 0.5
-          ? 1.0
-          : 1.0 - (dist - radius * 0.5) / (radius * 0.5);
+      // 半径正規化。外縁の狭い帯だけフェードさせて硬いエッジを維持する。
+      const radial = dist / radius;
+      const edgeAlpha =
+        1 -
+        smoothstep(
+          p.edgeHardnessStart,
+          p.edgeHardnessStart + p.edgeSoftness,
+          radial,
+        );
 
-      // 粗いグレイン: 大きなセル単位でハッシュ → 紙の凹凸の塊感
-      const cx = Math.floor(x / coarseCell);
-      const cy = Math.floor(y / coarseCell);
-      const coarseNoise = (coordHash(cx, cy) & 0xff) / 255;
+      // ドメインワープ: ノイズ座標を歪ませ、タイル状の見え方を抑える。
+      const warpX =
+        (valueNoise2D(x + 41.3, y - 19.7, warpCell, 811) - 0.5) * warpStrength;
+      const warpY =
+        (valueNoise2D(x - 73.1, y + 57.9, warpCell, 997) - 0.5) * warpStrength;
+      const nx = x + warpX;
+      const ny = y + warpY;
 
-      // 細かいグレイン: 中間セル単位でハッシュ → ディテール
-      const fx = Math.floor(x / fineCell);
-      const fy = Math.floor(y / fineCell);
-      const fineNoise = (coordHash(fx + 997, fy + 1013) & 0xff) / 255;
+      // 紙の凹凸（低/中/高周波）を個別に評価。
+      const macro = fractalNoise2D(
+        nx,
+        ny,
+        macroCell,
+        p.fbmOctaves,
+        p.fbmPersistence,
+        p.fbmLacunarity,
+        101,
+      );
+      const mid = fractalNoise2D(
+        nx + 137.7,
+        ny - 59.2,
+        midCell,
+        p.fbmOctaves,
+        p.fbmPersistence,
+        p.fbmLacunarity,
+        211,
+      );
+      const micro = valueNoise2D(nx - 211.4, ny + 89.6, microCell, 307);
 
-      // 粗いノイズで大きな穴（40%が穴）、細かいノイズで追加の穴（25%）
-      const coarsePass = coarseNoise > 0.4;
-      const finePass = fineNoise > 0.25;
-      // バイナリアルファ: 穴は完全透明、それ以外は falloff のみ
-      // 中途半端な半透明を避け、flow × spacing で重ね塗りの濃淡を制御
-      const grainAlpha = coarsePass && finePass ? falloff * 255 : 0;
+      // 凸部ほど濃く乗るようにコントラストを付ける。
+      const tooth = clamp01((macro - 0.5) * p.toothContrast + 0.5);
+      let graphite =
+        p.baseCoverage +
+        tooth * p.toothInfluence +
+        mid * p.midInfluence +
+        micro * p.microInfluence;
+
+      // 紙の谷で芯が乗らない「欠け」を局所的に作る。
+      const voidNoise = valueNoise2D(nx + 311.2, ny - 151.9, voidCell, 419);
+      const voidMask = smoothstep(
+        p.voidThreshold,
+        p.voidThreshold + p.voidSoftness,
+        voidNoise,
+      );
+      graphite *= 1 - voidMask * p.voidStrength;
+
+      const alpha = edgeAlpha * Math.pow(clamp01(graphite), p.alphaGamma);
+      const grainAlpha = Math.round(clamp01(alpha) * 255);
 
       const idx = (y * size + x) * 4;
       data[idx] = 255; // R
       data[idx + 1] = 255; // G
       data[idx + 2] = 255; // B
-      data[idx + 3] = Math.round(grainAlpha);
+      data[idx + 3] = grainAlpha;
     }
   }
 
