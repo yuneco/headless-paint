@@ -47,6 +47,27 @@ function makeLine(
   return points;
 }
 
+function countDifferentPixels(
+  a: Uint8ClampedArray,
+  b: Uint8ClampedArray,
+): number {
+  if (a.length !== b.length) {
+    throw new Error("Image buffers must have the same length");
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    if (
+      a[i] !== b[i] ||
+      a[i + 1] !== b[i + 1] ||
+      a[i + 2] !== b[i + 2] ||
+      a[i + 3] !== b[i + 3]
+    ) {
+      diff++;
+    }
+  }
+  return diff;
+}
+
 // ============================================================
 // PRNG tests
 // ============================================================
@@ -346,6 +367,61 @@ describe("renderBrushStroke", () => {
       );
       const relError = distDiff / replayResult.accumulatedDistance;
       expect(relError).toBeLessThan(0.01);
+    });
+
+    it("incremental（overlap 付き）と replay で最終ピクセルが一致する", () => {
+      const style = makeStampStyle();
+      const allPoints: StrokePoint[] = [];
+      for (let i = 0; i < 30; i++) {
+        allPoints.push({
+          x: 10 + i * 6,
+          y: 100 + Math.sin(i * 0.4) * 30,
+          pressure: 0.5 + Math.sin(i * 0.2) * 0.3,
+        });
+      }
+
+      const initialState = makeInitialState(style);
+
+      // incremental: 3チャンクに分割（overlap=3）
+      const incrementalLayer = createLayer(200, 200);
+      const chunk1 = allPoints.slice(0, 12);
+      const state1 = renderBrushStroke(
+        incrementalLayer,
+        chunk1,
+        style,
+        0,
+        initialState,
+      );
+
+      const chunk2 = allPoints.slice(9, 22); // overlap=3
+      const state2 = renderBrushStroke(
+        incrementalLayer,
+        chunk2,
+        style,
+        3,
+        state1,
+      );
+
+      const chunk3 = allPoints.slice(19, 30); // overlap=3
+      renderBrushStroke(incrementalLayer, chunk3, style, 3, state2);
+
+      // replay: 一括
+      const replayLayer = createLayer(200, 200);
+      renderBrushStroke(replayLayer, allPoints, style, 0, initialState);
+
+      const incrementalPixels = incrementalLayer.ctx.getImageData(
+        0,
+        0,
+        200,
+        200,
+      ).data;
+      const replayPixels = replayLayer.ctx.getImageData(0, 0, 200, 200).data;
+
+      const differentPixelCount = countDifferentPixels(
+        incrementalPixels,
+        replayPixels,
+      );
+      expect(differentPixelCount).toBe(0);
     });
   });
 });
