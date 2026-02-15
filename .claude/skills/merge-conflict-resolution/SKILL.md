@@ -1,4 +1,5 @@
 ---
+name: merge-conflict-resolution
 description: マージでコンフリクトが発生した時に従う解決フロー。意図の取りこぼしやlintエラーを防ぐ
 user-invocable: true
 ---

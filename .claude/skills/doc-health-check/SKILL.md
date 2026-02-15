@@ -1,4 +1,5 @@
 ---
+name: doc-health-check
 description: "ドキュメントと実装の乖離を検出・修正する健全性チェックを行う。ドキュメントのメンテナンス・最新化を求められたときに使用"
 user-invocable: true
 ---

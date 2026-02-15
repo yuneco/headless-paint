@@ -73,6 +73,13 @@ Expandは**入力時ではなく描画時**に適用される。SessionはExpand
 
 ## スキルと作業フロー
 
+### Skill同期ルール（Claude/Codex）
+
+- skill の正本は `/.claude/skills/` とする
+- 新しい skill を追加・更新したら、必ず Codex 側 `~/.codex/skills/` に同名のシンボリックリンクを作成・更新する
+- 各 `SKILL.md` の frontmatter には Codex 必須項目として `name` と `description` を必ず入れる
+- 例: `ln -sfn /Users/yuki/dev/headless-paint/.claude/skills/<skill-name> /Users/yuki/.codex/skills/<skill-name>`
+
 ### Doc-First開発 
 
 計画の作成や、計画に従った実装を行う際は、planning-flow skillのフローに必ず従う。

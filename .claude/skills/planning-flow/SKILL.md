@@ -1,4 +1,5 @@
 ---
+name: planning-flow
 description: "実装計画を立てる時、作業を計画する時、plan modeで作業する時に必ず従うフロー。立案済みの計画に基づいて実装を行う場合にもこのフローに従う。"
 user-invocable: true
 ---

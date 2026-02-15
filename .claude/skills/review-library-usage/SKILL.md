@@ -1,4 +1,5 @@
 ---
+name: review-library-usage
 description: コードの実装が完了したと判断したらユーザーに報告する前に行うセルフレビュー
 user-invocable: true
 ---
