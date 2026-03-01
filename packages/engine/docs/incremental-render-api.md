@@ -160,7 +160,8 @@ renderPendingLayer(
 function composeLayers(
   target: CanvasRenderingContext2D,
   layers: readonly Layer[],
-  transform?: ViewTransform
+  transform?: ViewTransform,
+  pendingOverlay?: PendingOverlay,
 ): void
 ```
 
@@ -180,13 +181,15 @@ interface ViewTransform {
 | `target` | `CanvasRenderingContext2D` | ○ | 出力先のコンテキスト |
 | `layers` | `readonly Layer[]` | ○ | 合成するレイヤー（下から順） |
 | `transform` | `ViewTransform` | - | ビュー変換（省略時は変換なし）。`{ scale, offsetX, offsetY }` 形式 |
+| `pendingOverlay` | `PendingOverlay` | - | pending レイヤーのプレ合成情報。`renderLayers` と同じプレ合成ロジックを適用する |
 
 **動作**:
 1. ターゲットキャンバスをクリア
 2. 各レイヤーについて、`meta.visible` が false のものはスキップ
-3. `meta.opacity` を `globalAlpha` に適用
-4. `meta.compositeOperation` が設定されていれば `globalCompositeOperation` に適用
-5. `drawImage` でレイヤーの内容を転写
+3. `pendingOverlay` が指定されており対象レイヤーにプレ合成が必要な場合、workLayer にプレ合成
+4. `meta.opacity` を `globalAlpha` に適用
+5. `meta.compositeOperation` が設定されていれば `globalCompositeOperation` に適用
+6. `drawImage` でレイヤーの内容を転写
 
 **使用例**:
 ```typescript

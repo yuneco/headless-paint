@@ -6,7 +6,7 @@ import {
   renderPendingLayer,
 } from "./incremental-render";
 import { clearLayer, createLayer, getPixel } from "./layer";
-import type { ExpandConfig, Point, StrokeStyle } from "./types";
+import type { ExpandConfig, PendingOverlay, Point, StrokeStyle } from "./types";
 import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "./types";
 
 const createTestStyle = (): StrokeStyle => ({
@@ -250,6 +250,235 @@ describe("composeLayers", () => {
     });
 
     const data = targetCtx.getImageData(60, 50, 1, 1).data;
+    expect(data[3]).toBeGreaterThan(0);
+  });
+
+  it("should apply pendingOverlay with pre-composite for opacity < 1", () => {
+    const committed = createLayer(100, 100, {
+      name: "Committed",
+      opacity: 0.5,
+    });
+    const pending = createLayer(100, 100, { name: "Pending" });
+    const workLayer = createLayer(100, 100, { name: "Work" });
+
+    const style = createTestStyle();
+    const compiled = createNoneExpand();
+
+    // Draw on committed
+    appendToCommittedLayer(
+      committed,
+      [
+        { x: 10, y: 50 },
+        { x: 90, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    // Draw on pending (overlapping area)
+    appendToCommittedLayer(
+      pending,
+      [
+        { x: 10, y: 50 },
+        { x: 90, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    const overlay: PendingOverlay = {
+      layer: pending,
+      targetLayerId: committed.id,
+      workLayer,
+    };
+
+    const targetCanvas = new OffscreenCanvas(100, 100);
+    const targetCtx = targetCanvas.getContext("2d");
+    if (!targetCtx) throw new Error("Failed to get context");
+
+    // With pre-composite: committed + pending merged first, then 50% opacity applied once
+    composeLayers(
+      targetCtx as unknown as CanvasRenderingContext2D,
+      [committed],
+      undefined,
+      overlay,
+    );
+    const withPreComposite = targetCtx.getImageData(50, 50, 1, 1).data;
+
+    // Without pre-composite (flat): committed at 50% + pending at 50% = double opacity
+    targetCtx.clearRect(0, 0, 100, 100);
+    composeLayers(targetCtx as unknown as CanvasRenderingContext2D, [
+      committed,
+      pending,
+    ]);
+    const withFlat = targetCtx.getImageData(50, 50, 1, 1).data;
+
+    // Pre-composite should produce lower alpha than flat (no double-application)
+    expect(withPreComposite[3]).toBeGreaterThan(0);
+    expect(withPreComposite[3]).toBeLessThanOrEqual(withFlat[3]);
+  });
+
+  it("should apply pendingOverlay with eraser (destination-out)", () => {
+    const committed = createLayer(100, 100, { name: "Committed" });
+    const pending = createLayer(100, 100, {
+      name: "Pending",
+      compositeOperation: "destination-out",
+    });
+    const workLayer = createLayer(100, 100, { name: "Work" });
+
+    const style = createTestStyle();
+    const compiled = createNoneExpand();
+
+    // Draw on committed
+    appendToCommittedLayer(
+      committed,
+      [
+        { x: 10, y: 50 },
+        { x: 90, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    // Draw on pending (eraser stroke over same area)
+    appendToCommittedLayer(
+      pending,
+      [
+        { x: 40, y: 50 },
+        { x: 60, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    const overlay: PendingOverlay = {
+      layer: pending,
+      targetLayerId: committed.id,
+      workLayer,
+    };
+
+    const targetCanvas = new OffscreenCanvas(100, 100);
+    const targetCtx = targetCanvas.getContext("2d");
+    if (!targetCtx) throw new Error("Failed to get context");
+
+    composeLayers(
+      targetCtx as unknown as CanvasRenderingContext2D,
+      [committed],
+      undefined,
+      overlay,
+    );
+
+    // Erased area should have lower alpha
+    const erasedData = targetCtx.getImageData(50, 50, 1, 1).data;
+    // Non-erased area should still have pixels
+    const unerasedData = targetCtx.getImageData(20, 50, 1, 1).data;
+
+    expect(unerasedData[3]).toBeGreaterThan(0);
+    expect(erasedData[3]).toBeLessThan(unerasedData[3]);
+  });
+
+  it("should skip pre-composite when all settings are normal", () => {
+    // opacity=1, compositeOperation=undefined, pending compositeOperation=undefined
+    const committed = createLayer(100, 100, { name: "Committed" });
+    const pending = createLayer(100, 100, { name: "Pending" });
+    const workLayer = createLayer(100, 100, { name: "Work" });
+
+    const style = createTestStyle();
+    const compiled = createNoneExpand();
+
+    appendToCommittedLayer(
+      committed,
+      [
+        { x: 10, y: 50 },
+        { x: 90, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+    appendToCommittedLayer(
+      pending,
+      [
+        { x: 10, y: 50 },
+        { x: 90, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    const overlay: PendingOverlay = {
+      layer: pending,
+      targetLayerId: committed.id,
+      workLayer,
+    };
+
+    const targetCanvas = new OffscreenCanvas(100, 100);
+    const targetCtx = targetCanvas.getContext("2d");
+    if (!targetCtx) throw new Error("Failed to get context");
+
+    // With overlay (flat path since all normal)
+    composeLayers(
+      targetCtx as unknown as CanvasRenderingContext2D,
+      [committed],
+      undefined,
+      overlay,
+    );
+    const withOverlay = targetCtx.getImageData(50, 50, 1, 1).data;
+
+    // Without overlay, manual flat
+    targetCtx.clearRect(0, 0, 100, 100);
+    composeLayers(targetCtx as unknown as CanvasRenderingContext2D, [
+      committed,
+      pending,
+    ]);
+    const withFlat = targetCtx.getImageData(50, 50, 1, 1).data;
+
+    // Results should be identical (both flat)
+    expect(withOverlay[0]).toBe(withFlat[0]);
+    expect(withOverlay[1]).toBe(withFlat[1]);
+    expect(withOverlay[2]).toBe(withFlat[2]);
+    expect(withOverlay[3]).toBe(withFlat[3]);
+  });
+
+  it("should apply blend mode with pre-composite", () => {
+    const committed = createLayer(100, 100, {
+      name: "Committed",
+      compositeOperation: "multiply",
+    });
+    const pending = createLayer(100, 100, { name: "Pending" });
+    const workLayer = createLayer(100, 100, { name: "Work" });
+
+    const style = createTestStyle();
+    const compiled = createNoneExpand();
+
+    appendToCommittedLayer(
+      committed,
+      [
+        { x: 10, y: 50 },
+        { x: 90, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    const overlay: PendingOverlay = {
+      layer: pending,
+      targetLayerId: committed.id,
+      workLayer,
+    };
+
+    const targetCanvas = new OffscreenCanvas(100, 100);
+    const targetCtx = targetCanvas.getContext("2d");
+    if (!targetCtx) throw new Error("Failed to get context");
+
+    // Should not throw and should produce visible output
+    composeLayers(
+      targetCtx as unknown as CanvasRenderingContext2D,
+      [committed],
+      undefined,
+      overlay,
+    );
+
+    const data = targetCtx.getImageData(50, 50, 1, 1).data;
     expect(data[3]).toBeGreaterThan(0);
   });
 });

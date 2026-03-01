@@ -66,12 +66,14 @@ renderLayerWithTransform(layer, ctx, transform);
 ```typescript
 interface RenderOptions {
   background?: BackgroundSettings;
+  pendingOverlay?: PendingOverlay;
 }
 ```
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `background` | `BackgroundSettings` | - | 背景設定。`visible: true` の場合、レイヤー領域に背景色を描画 |
+| `pendingOverlay` | `PendingOverlay` | - | pending レイヤーのプレ合成情報。指定時は対象 committed レイヤーと pending を正しく合成する |
 
 ---
 
@@ -100,8 +102,11 @@ function renderLayers(
 1. `options.background` が `visible: true` の場合、ビュー変換を適用してレイヤー領域に背景色を描画
 2. 配列の先頭から順に（背面→前面）描画
 3. 各レイヤーの `meta.visible` が false のものはスキップ
-4. 各レイヤーの `meta.opacity` を `globalAlpha` に適用
-5. 各レイヤーの `meta.compositeOperation` が設定されていれば `globalCompositeOperation` に適用（消しゴムのpendingレイヤープレビューに使用）
+4. `pendingOverlay` が指定されており、対象レイヤーにプレ合成が必要な場合:
+   - workLayer に committed + pending をプレ合成（pending は `meta.compositeOperation` で合成）
+   - workLayer を committed の `meta.opacity` / `meta.compositeOperation` で描画
+5. プレ合成不要な場合は committed → pending の順でフラット描画（従来と同等）
+6. 各レイヤーの `meta.opacity` を `globalAlpha` に、`meta.compositeOperation` を `globalCompositeOperation` に適用
 
 **使用例**:
 ```typescript

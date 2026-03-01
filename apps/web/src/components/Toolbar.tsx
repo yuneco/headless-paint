@@ -6,11 +6,12 @@ import {
   Hand,
   Pen,
   Redo2,
+  RotateCcw,
   RotateCw,
   Undo2,
   ZoomIn,
 } from "lucide-react";
-import { memo, type ComponentType } from "react";
+import { type ComponentType, memo } from "react";
 
 function colorToHex(c: Color): string {
   const r = c.r.toString(16).padStart(2, "0");
@@ -35,6 +36,7 @@ interface ToolbarProps {
   canRedo?: boolean;
   color?: Color;
   onColorChange?: (color: Color) => void;
+  onReset?: () => void;
 }
 
 const tools: {
@@ -59,6 +61,7 @@ function ToolbarComponent({
   canRedo = false,
   color,
   onColorChange,
+  onReset,
 }: ToolbarProps) {
   return (
     <div
@@ -160,6 +163,28 @@ function ToolbarComponent({
           aria-label="Redo"
         >
           <Redo2 size={16} />
+        </button>
+      )}
+      {onReset && (
+        <button
+          type="button"
+          onClick={onReset}
+          style={{
+            padding: 6,
+            border: "none",
+            borderRadius: 4,
+            cursor: "pointer",
+            backgroundColor: "#dc3545",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            marginLeft: 2,
+          }}
+          title="Reset"
+          aria-label="Reset"
+        >
+          <RotateCcw size={16} />
         </button>
       )}
     </div>

@@ -10,6 +10,15 @@ export { useExpand } from "./useExpand";
 export { usePointerHandler } from "./usePointerHandler";
 export { useTouchGesture } from "./useTouchGesture";
 export { useWindowSize } from "./useWindowSize";
+export {
+  PAINT_SNAPSHOT_VERSION,
+  createLayerFromInitialData,
+  exportPaintDocument,
+  exportPaintSettings,
+  importPaintDocument,
+  importPaintSettings,
+  parsePaintDocumentSnapshot,
+} from "./persistence";
 
 // ── Types (this package) ──
 
@@ -19,12 +28,34 @@ export type {
   UseStrokeSessionConfig,
   UseStrokeSessionResult,
 } from "./useStrokeSession";
-export type { PaintEngineConfig, PaintEngineResult } from "./usePaintEngine";
-export type { LayerEntry, UseLayersResult } from "./useLayers";
+export type {
+  PaintEngineConfig,
+  PaintEngineInitialDocument,
+  PaintEngineInitialLayer,
+  PaintEngineResult,
+} from "./usePaintEngine";
+export type {
+  InitialLayer,
+  LayerEntry,
+  UseLayersOptions,
+  UseLayersResult,
+} from "./useLayers";
 export type { UseViewTransformResult } from "./useViewTransform";
 export type { PenSettingsConfig, UsePenSettingsResult } from "./usePenSettings";
 export type { SmoothingConfig, UseSmoothingResult } from "./useSmoothing";
 export type { UseExpandResult } from "./useExpand";
+export type {
+  ExportPaintDocumentInput,
+  ExportPaintSettingsInput,
+  PaintDocumentLayerSnapshot,
+  PaintDocumentLayerSource,
+  PaintDocumentSnapshot,
+  PaintInitialDocument,
+  PaintInitialLayer,
+  PaintPenSettingsSnapshot,
+  PaintSettingsSnapshot,
+  PaintSmoothingSettingsSnapshot,
+} from "./persistence";
 export type {
   ToolType,
   UsePointerHandlerOptions,
@@ -50,6 +81,7 @@ export type {
   ExpandMode,
   Layer,
   LayerMeta,
+  PendingOverlay,
   Point,
   PressureCurve,
   StampBrushConfig,

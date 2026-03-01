@@ -472,6 +472,19 @@ interface PaintEngineConfig {
   readonly historyConfig?: HistoryConfig;
   /** 画像ベースチップ用のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
   readonly registry?: BrushTipRegistry;
+  /** 復元用の初期ドキュメント。指定時はこの内容でレイヤー群を初期化する */
+  readonly initialDocument?: PaintEngineInitialDocument;
+}
+
+interface PaintEngineInitialLayer {
+  readonly id: string;
+  readonly meta: LayerMeta;
+  readonly imageData: ImageData;
+}
+
+interface PaintEngineInitialDocument {
+  readonly layers: readonly PaintEngineInitialLayer[];
+  readonly activeLayerId: string | null;
 }
 ```
 
@@ -501,6 +514,10 @@ interface PaintEngineResult {
   readonly toggleVisibility: (layerId: string) => void;
   /** レイヤー名を変更する */
   readonly renameLayer: (layerId: string, name: string) => void;
+  /** レイヤーの不透明度を設定する（0.0〜1.0 にクランプ） */
+  readonly setLayerOpacity: (layerId: string, opacity: number) => void;
+  /** レイヤーのブレンドモードを設定する（undefined で通常合成） */
+  readonly setLayerBlendMode: (layerId: string, blendMode: GlobalCompositeOperation | undefined) => void;
 
   // ── レイヤー操作（履歴に自動記録される） ──
 
@@ -555,11 +572,12 @@ interface PaintEngineResult {
   /** 未確定ポイントの描画バッファ */
   readonly pendingLayer: Layer;
   /**
-   * 描画用のレイヤー配列。各レイヤーの committedLayer に加え、
-   * アクティブレイヤーの直後に pendingLayer が挿入済み。
-   * composeLayers にそのまま渡せる。
+   * 描画用のレイヤー配列。各レイヤーの committedLayer のみ。
+   * pendingOverlay と合わせて renderLayers / composeLayers に渡す。
    */
   readonly layers: readonly Layer[];
+  /** pending レイヤーのプレ合成情報。renderLayers / composeLayers の pendingOverlay に渡す */
+  readonly pendingOverlay: PendingOverlay | undefined;
   /** 描画操作のたびにインクリメントされる。Canvas の再描画トリガーとして使う */
   readonly renderVersion: number;
   /** アクティブレイヤーが描画可能な状態か */
@@ -608,7 +626,28 @@ const pointerHandlers = usePointerHandler(tool, {
 `usePaintEngine` の内部で使用されるが、独立して使うこともできる。
 
 ```typescript
-function useLayers(width: number, height: number): UseLayersResult;
+function useLayers(
+  width: number,
+  height: number,
+  options?: UseLayersOptions,
+): UseLayersResult;
+```
+
+### UseLayersOptions
+
+```typescript
+interface InitialLayer {
+  readonly id: string;
+  readonly meta: LayerMeta;
+  readonly imageData: ImageData;
+}
+
+interface UseLayersOptions {
+  /** 復元時の初期レイヤー配列。省略時は空白の Layer 1 が1枚作成される */
+  readonly initialLayers?: readonly InitialLayer[];
+  /** 復元時のアクティブレイヤーID */
+  readonly initialActiveLayerId?: string | null;
+}
 ```
 
 ### LayerEntry
@@ -656,12 +695,71 @@ interface UseLayersResult {
   readonly findEntry: (layerId: string) => LayerEntry | undefined;
   /** ID でインデックスを取得する */
   readonly getLayerIndex: (layerId: string) => number;
+  /** レイヤーの不透明度を設定する（0.0〜1.0 にクランプ） */
+  readonly setLayerOpacity: (layerId: string, opacity: number) => void;
+  /** レイヤーのブレンドモードを設定する（undefined で通常合成） */
+  readonly setLayerBlendMode: (layerId: string, blendMode: GlobalCompositeOperation | undefined) => void;
   /** 描画操作のたびにインクリメントされる再描画トリガー */
   readonly renderVersion: number;
   /** renderVersion を手動でインクリメントする */
   readonly bumpRenderVersion: () => void;
 }
 ```
+
+---
+
+## Persistence Helpers
+
+保存先（localStorage / IndexedDB / ネットワーク）はアプリケーション側責務とし、このパッケージは状態の入出力と簡易バリデーションのみ提供する。
+
+```typescript
+const PAINT_SNAPSHOT_VERSION = 1;
+
+function exportPaintSettings(input: ExportPaintSettingsInput): PaintSettingsSnapshot;
+function importPaintSettings(value: unknown): PaintSettingsSnapshot | null;
+
+function exportPaintDocument(input: ExportPaintDocumentInput): Promise<PaintDocumentSnapshot>;
+function parsePaintDocumentSnapshot(value: unknown): PaintDocumentSnapshot | null;
+function importPaintDocument(value: unknown): Promise<PaintInitialDocument | null>;
+```
+
+### 互換ルール
+
+- スナップショットには `version` を含める
+- 未知の `version` は非互換として `null` を返す
+- zod 等のスキーマライブラリは使わず、手書きの軽量チェックで安全に失敗させる
+
+### 使い方（保存先はアプリ側で選択）
+
+```typescript
+const settingsSnapshot = exportPaintSettings({
+  tool,
+  transform,
+  background,
+  pen: {
+    color: penSettings.color,
+    lineWidth: penSettings.lineWidth,
+    pressureSensitivity: penSettings.pressureSensitivity,
+    pressureCurve: penSettings.pressureCurve,
+    eraser: penSettings.eraser,
+    brush: penSettings.brush,
+  },
+  smoothing: {
+    enabled: smoothing.enabled,
+    windowSize: smoothing.windowSize,
+  },
+  expand: expand.config,
+});
+
+const documentSnapshot = await exportPaintDocument({
+  layerWidth: 2048,
+  layerHeight: 2048,
+  activeLayerId: engine.activeLayerId,
+  entries: engine.entries,
+});
+```
+
+低層 hook を組み合わせる場合も、`entries` と `activeLayerId` を同じ形で渡せば同一の保存/復元APIを利用できる。
 
 ---
 
@@ -675,6 +773,7 @@ interface UseLayersResult {
 | `Color` | engine | RGBA カラー値 |
 | `Layer` | engine | 描画レイヤー |
 | `LayerMeta` | engine | レイヤーのメタデータ（name, visible 等） |
+| `PendingOverlay` | engine | pending レイヤーのプレ合成情報 |
 | `StrokeStyle` | engine | 描画スタイル |
 | `PressureCurve` | engine | 筆圧カーブ |
 | `Point` | engine | 2D 座標 |

@@ -3,9 +3,13 @@ import {
   createBrushTipRegistry,
 } from "@headless-paint/engine";
 import type { BackgroundSettings } from "@headless-paint/engine";
+import { createViewTransform } from "@headless-paint/input";
 import type { InputPoint } from "@headless-paint/input";
 import {
+  type PaintSettingsSnapshot,
   type ToolType,
+  exportPaintSettings,
+  importPaintSettings,
   useExpand,
   usePaintEngine,
   usePenSettings,
@@ -28,8 +32,58 @@ import { usePatternPreview } from "./hooks/usePatternPreview";
 
 const LAYER_WIDTH = 1024 * 2;
 const LAYER_HEIGHT = 1024 * 2;
+const SETTINGS_STORAGE_KEY = "headless-paint:settings";
+
+function saveSettingsSnapshot(snapshot: PaintSettingsSnapshot): void {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // noop: localStorage の容量超過時もアプリは継続
+  }
+}
+
+function loadSettingsSnapshot(): PaintSettingsSnapshot | null {
+  const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return importPaintSettings(parsed);
+  } catch {
+    return null;
+  }
+}
 
 export function App() {
+  const [sessionKey, setSessionKey] = useState(0);
+  const [initialSettings, setInitialSettings] =
+    useState<PaintSettingsSnapshot | null>(() => loadSettingsSnapshot());
+
+  const handleReset = useCallback(() => {
+    const confirmed = window.confirm(
+      "設定と現在の描画内容をリセットします。保存されるのは設定のみです。よろしいですか？",
+    );
+    if (!confirmed) return;
+    localStorage.removeItem(SETTINGS_STORAGE_KEY);
+    setInitialSettings(null);
+    setSessionKey((prev) => prev + 1);
+  }, []);
+
+  return (
+    <PaintWorkspace
+      key={sessionKey}
+      initialSettings={initialSettings}
+      onReset={handleReset}
+    />
+  );
+}
+
+interface PaintWorkspaceProps {
+  readonly initialSettings: PaintSettingsSnapshot | null;
+  readonly onReset: () => void;
+}
+
+function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
+  const restoredSettings = initialSettings;
   const [tool, setTool] = useState<ToolType>("pen");
   const { width: viewWidth, height: viewHeight } = useWindowSize();
   const {
@@ -49,10 +103,12 @@ export function App() {
   const initialFitDone = useRef(false);
   useEffect(() => {
     if (!initialFitDone.current) {
-      fitToView();
+      if (!restoredSettings) {
+        fitToView();
+      }
       initialFitDone.current = true;
     }
-  }, [fitToView]);
+  }, [fitToView, restoredSettings]);
 
   // ブラシチップレジストリ
   const registryRef = useRef(createBrushTipRegistry());
@@ -64,8 +120,28 @@ export function App() {
   }, []);
 
   // 設定系 hooks
-  const penSettings = usePenSettings(DEFAULT_PEN_CONFIG);
-  const smoothing = useSmoothing(DEFAULT_SMOOTHING_CONFIG);
+  const penSettings = usePenSettings({
+    initialColor:
+      restoredSettings?.pen.color ?? DEFAULT_PEN_CONFIG.initialColor,
+    initialLineWidth:
+      restoredSettings?.pen.lineWidth ?? DEFAULT_PEN_CONFIG.initialLineWidth,
+    initialPressureSensitivity:
+      restoredSettings?.pen.pressureSensitivity ??
+      DEFAULT_PEN_CONFIG.initialPressureSensitivity,
+    initialPressureCurve:
+      restoredSettings?.pen.pressureCurve ??
+      DEFAULT_PEN_CONFIG.initialPressureCurve,
+    initialBrush:
+      restoredSettings?.pen.brush ?? DEFAULT_PEN_CONFIG.initialBrush,
+  });
+  const smoothing = useSmoothing({
+    initialEnabled:
+      restoredSettings?.smoothing.enabled ??
+      DEFAULT_SMOOTHING_CONFIG.initialEnabled,
+    initialWindowSize:
+      restoredSettings?.smoothing.windowSize ??
+      DEFAULT_SMOOTHING_CONFIG.initialWindowSize,
+  });
   const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
   const patternPreview = usePatternPreview();
 
@@ -81,19 +157,61 @@ export function App() {
   });
 
   const [background, setBackground] = useState<BackgroundSettings>({
-    color: DEFAULT_BACKGROUND_COLOR,
-    visible: true,
+    color: restoredSettings?.background.color ?? DEFAULT_BACKGROUND_COLOR,
+    visible: restoredSettings?.background.visible ?? true,
   });
 
   const [showTouchDebug, setShowTouchDebug] = useState(false);
+  const [settingsHydrated, setSettingsHydrated] = useState(false);
 
-  const handleToolChange = useCallback(
-    (newTool: ToolType) => {
-      setTool(newTool);
-      penSettings.setEraser(newTool === "eraser");
-    },
-    [penSettings.setEraser],
-  );
+  useEffect(() => {
+    if (!restoredSettings) {
+      setSettingsHydrated(true);
+      return;
+    }
+
+    const restoredTransform = createViewTransform();
+    for (let i = 0; i < 9; i++) {
+      restoredTransform[i] = restoredSettings.transform[i];
+    }
+    handleSetTransform(restoredTransform);
+
+    const root = restoredSettings.expand.levels[0];
+    if (root) {
+      expand.setMode(root.mode);
+      expand.setDivisions(root.divisions);
+      expand.setAngle(root.angle);
+    }
+
+    const sub = restoredSettings.expand.levels[1];
+    if (sub) {
+      expand.setSubEnabled(true);
+      expand.setSubMode(sub.mode);
+      expand.setSubDivisions(sub.divisions);
+      expand.setSubAngle(sub.angle);
+      expand.setSubOffset(sub.offset);
+    } else {
+      expand.setSubEnabled(false);
+    }
+
+    setTool(restoredSettings.tool);
+    setSettingsHydrated(true);
+  }, [
+    restoredSettings,
+    handleSetTransform,
+    expand.setMode,
+    expand.setDivisions,
+    expand.setAngle,
+    expand.setSubEnabled,
+    expand.setSubMode,
+    expand.setSubDivisions,
+    expand.setSubAngle,
+    expand.setSubOffset,
+  ]);
+
+  const handleToolChange = useCallback((newTool: ToolType) => {
+    setTool(newTool);
+  }, []);
 
   const handleToggleBackground = useCallback(() => {
     setBackground((prev) => ({ ...prev, visible: !prev.visible }));
@@ -101,6 +219,50 @@ export function App() {
   const handleToggleTouchDebug = useCallback(() => {
     setShowTouchDebug((prev) => !prev);
   }, []);
+
+  useEffect(() => {
+    penSettings.setEraser(tool === "eraser");
+  }, [tool, penSettings.setEraser]);
+
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    const timerId = window.setTimeout(() => {
+      const snapshot = exportPaintSettings({
+        tool,
+        transform,
+        background,
+        pen: {
+          color: penSettings.color,
+          lineWidth: penSettings.lineWidth,
+          pressureSensitivity: penSettings.pressureSensitivity,
+          pressureCurve: penSettings.pressureCurve,
+          eraser: penSettings.eraser,
+          brush: penSettings.brush,
+        },
+        smoothing: {
+          enabled: smoothing.enabled,
+          windowSize: smoothing.windowSize,
+        },
+        expand: expand.config,
+      });
+      saveSettingsSnapshot(snapshot);
+    }, 300);
+    return () => window.clearTimeout(timerId);
+  }, [
+    settingsHydrated,
+    tool,
+    transform,
+    background,
+    penSettings.color,
+    penSettings.lineWidth,
+    penSettings.pressureSensitivity,
+    penSettings.pressureCurve,
+    penSettings.eraser,
+    penSettings.brush,
+    smoothing.enabled,
+    smoothing.windowSize,
+    expand.config,
+  ]);
 
   // タッチジェスチャー
   const touchGesture = useTouchGesture({
@@ -161,6 +323,7 @@ export function App() {
         transform={transform}
         background={background}
         patternPreview={patternPreview.config}
+        pendingOverlay={engine.pendingOverlay}
         tool={tool}
         onPan={handlePan}
         onZoom={handleZoom}
@@ -214,6 +377,7 @@ export function App() {
           canRedo={engine.canRedo}
           color={penSettings.color}
           onColorChange={penSettings.setColor}
+          onReset={onReset}
         />
       </div>
 
@@ -242,6 +406,8 @@ export function App() {
         onToggleBackground={handleToggleBackground}
         onMoveUp={engine.moveLayerUp}
         onMoveDown={engine.moveLayerDown}
+        onSetOpacity={engine.setLayerOpacity}
+        onSetBlendMode={engine.setLayerBlendMode}
         layerIdToName={layerIdToName}
       />
 

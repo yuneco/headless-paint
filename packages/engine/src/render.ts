@@ -1,9 +1,10 @@
 import type { mat3 } from "gl-matrix";
-import { colorToStyle } from "./layer";
-import type { BackgroundSettings, Layer } from "./types";
+import { clearLayer, colorToStyle } from "./layer";
+import type { BackgroundSettings, Layer, PendingOverlay } from "./types";
 
 export interface RenderOptions {
   background?: BackgroundSettings;
+  pendingOverlay?: PendingOverlay;
 }
 
 /**
@@ -73,31 +74,88 @@ export function renderLayers(
     ctx.restore();
   }
 
+  const overlay = options?.pendingOverlay;
+
   for (const layer of layers) {
     // 非表示レイヤーはスキップ
     if (!layer.meta.visible) continue;
 
-    ctx.save();
+    const hasPending = overlay && layer.id === overlay.targetLayerId;
+    const needsPreComposite =
+      hasPending &&
+      (layer.meta.opacity < 1 ||
+        (layer.meta.compositeOperation !== undefined &&
+          layer.meta.compositeOperation !== "source-over") ||
+        (overlay.layer.meta.compositeOperation !== undefined &&
+          overlay.layer.meta.compositeOperation !== "source-over"));
 
-    ctx.imageSmoothingEnabled = smoothing;
+    if (needsPreComposite) {
+      // プレ合成: work に committed + pending を合成し、work を layer の meta で描画
+      const { workLayer } = overlay;
+      clearLayer(workLayer);
+      workLayer.ctx.drawImage(layer.canvas, 0, 0);
+      workLayer.ctx.globalAlpha = 1;
+      if (overlay.layer.meta.compositeOperation) {
+        workLayer.ctx.globalCompositeOperation =
+          overlay.layer.meta.compositeOperation;
+      }
+      workLayer.ctx.drawImage(overlay.layer.canvas, 0, 0);
+      workLayer.ctx.globalCompositeOperation = "source-over";
 
-    // 不透明度・合成モードを適用
-    ctx.globalAlpha = layer.meta.opacity;
-    if (layer.meta.compositeOperation) {
-      ctx.globalCompositeOperation = layer.meta.compositeOperation;
+      ctx.save();
+      ctx.imageSmoothingEnabled = smoothing;
+      ctx.globalAlpha = layer.meta.opacity;
+      if (layer.meta.compositeOperation) {
+        ctx.globalCompositeOperation = layer.meta.compositeOperation;
+      }
+      ctx.setTransform(
+        transform[0],
+        transform[1],
+        transform[3],
+        transform[4],
+        transform[6],
+        transform[7],
+      );
+      ctx.drawImage(workLayer.canvas, 0, 0);
+      ctx.restore();
+    } else {
+      // フラット描画
+      ctx.save();
+      ctx.imageSmoothingEnabled = smoothing;
+      ctx.globalAlpha = layer.meta.opacity;
+      if (layer.meta.compositeOperation) {
+        ctx.globalCompositeOperation = layer.meta.compositeOperation;
+      }
+      ctx.setTransform(
+        transform[0],
+        transform[1],
+        transform[3],
+        transform[4],
+        transform[6],
+        transform[7],
+      );
+      ctx.drawImage(layer.canvas, 0, 0);
+      ctx.restore();
+
+      // pending をフラットに描画（プレ合成不要な場合）
+      if (hasPending) {
+        ctx.save();
+        ctx.imageSmoothingEnabled = smoothing;
+        ctx.globalAlpha = layer.meta.opacity;
+        if (layer.meta.compositeOperation) {
+          ctx.globalCompositeOperation = layer.meta.compositeOperation;
+        }
+        ctx.setTransform(
+          transform[0],
+          transform[1],
+          transform[3],
+          transform[4],
+          transform[6],
+          transform[7],
+        );
+        ctx.drawImage(overlay.layer.canvas, 0, 0);
+        ctx.restore();
+      }
     }
-
-    // mat3 を setTransform に適用
-    ctx.setTransform(
-      transform[0],
-      transform[1],
-      transform[3],
-      transform[4],
-      transform[6],
-      transform[7],
-    );
-
-    ctx.drawImage(layer.canvas, 0, 0);
-    ctx.restore();
   }
 }

@@ -54,6 +54,20 @@ export interface CompiledExpand {
 }
 
 // ============================================================
+// Pending Overlay (プレ合成)
+// ============================================================
+
+/** pending レイヤーのプレ合成情報 */
+export interface PendingOverlay {
+  /** pending レイヤー */
+  readonly layer: Layer;
+  /** グループ化する committed レイヤーの ID */
+  readonly targetLayerId: string;
+  /** プレ合成用ワークレイヤー（呼び出し側で事前確保） */
+  readonly workLayer: Layer;
+}
+
+// ============================================================
 // Background
 // ============================================================
 

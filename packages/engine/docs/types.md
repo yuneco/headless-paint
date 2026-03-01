@@ -101,6 +101,47 @@ interface Layer {
 
 ---
 
+## PendingOverlay
+
+pending レイヤーのプレ合成情報。`renderLayers` / `composeLayers` に渡すことで、committed + pending の合成を正しく行う。
+
+```typescript
+interface PendingOverlay {
+  /** pending レイヤー */
+  readonly layer: Layer;
+  /** グループ化する committed レイヤーの ID */
+  readonly targetLayerId: string;
+  /** プレ合成用ワークレイヤー（呼び出し側で事前確保） */
+  readonly workLayer: Layer;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `layer` | `Layer` | pending（未確定ポイント）の描画レイヤー |
+| `targetLayerId` | `string` | プレ合成のグループ化対象となる committed レイヤーの ID |
+| `workLayer` | `Layer` | プレ合成用の一時レイヤー。呼び出し側で `createLayer()` により事前確保する |
+
+**プレ合成が必要な条件**（いずれかに該当する場合）:
+- レイヤーの `opacity < 1`
+- レイヤーの `compositeOperation` が `"source-over"` 以外（ブレンドモード設定時）
+- pending の `compositeOperation` が `"source-over"` 以外（消しゴム使用時）
+
+上記の条件をすべて満たさない場合（通常ペン描画）はプレ合成がスキップされ、パフォーマンスへの影響はない。
+
+**使用例**:
+```typescript
+const workLayer = createLayer(width, height, { name: "__work" });
+const pendingOverlay: PendingOverlay = {
+  layer: pendingLayer,
+  targetLayerId: activeLayerId,
+  workLayer,
+};
+renderLayers(layers, ctx, transform, { background, pendingOverlay });
+```
+
+---
+
 ## ExpandMode
 
 対称展開モードの種類。

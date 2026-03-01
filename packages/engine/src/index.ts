@@ -16,6 +16,7 @@ export type {
   ImageTipConfig,
   Layer,
   LayerMeta,
+  PendingOverlay,
   Point,
   PressureCurve,
   RoundPenBrushConfig,

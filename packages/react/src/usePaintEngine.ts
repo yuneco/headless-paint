@@ -4,6 +4,8 @@ import type {
   CompiledExpand,
   ExpandConfig,
   Layer,
+  LayerMeta,
+  PendingOverlay,
   StrokeStyle,
 } from "@headless-paint/engine";
 import type { CompiledFilterPipeline, InputPoint } from "@headless-paint/input";
@@ -27,7 +29,7 @@ import {
 } from "@headless-paint/stroke";
 import type { HistoryConfig, HistoryState } from "@headless-paint/stroke";
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { LayerEntry } from "./useLayers";
+import type { InitialLayer, LayerEntry } from "./useLayers";
 import { useLayers } from "./useLayers";
 import type {
   StrokeCompleteData,
@@ -44,6 +46,18 @@ export interface PaintEngineConfig {
   readonly compiledExpand: CompiledExpand;
   readonly historyConfig?: HistoryConfig;
   readonly registry?: BrushTipRegistry;
+  readonly initialDocument?: PaintEngineInitialDocument;
+}
+
+export interface PaintEngineInitialLayer {
+  readonly id: string;
+  readonly meta: LayerMeta;
+  readonly imageData: ImageData;
+}
+
+export interface PaintEngineInitialDocument {
+  readonly layers: readonly PaintEngineInitialLayer[];
+  readonly activeLayerId: string | null;
 }
 
 export interface PaintEngineResult {
@@ -54,6 +68,11 @@ export interface PaintEngineResult {
   readonly setActiveLayerId: (id: string | null) => void;
   readonly toggleVisibility: (layerId: string) => void;
   readonly renameLayer: (layerId: string, name: string) => void;
+  readonly setLayerOpacity: (layerId: string, opacity: number) => void;
+  readonly setLayerBlendMode: (
+    layerId: string,
+    blendMode: GlobalCompositeOperation | undefined,
+  ) => void;
 
   // ── レイヤー操作（履歴に自動記録される） ──
   readonly addLayer: () => void;
@@ -87,6 +106,7 @@ export interface PaintEngineResult {
   // ── レンダリング ──
   readonly pendingLayer: Layer;
   readonly layers: readonly Layer[];
+  readonly pendingOverlay: PendingOverlay | undefined;
   readonly renderVersion: number;
   readonly canDraw: boolean;
   readonly isDrawing: boolean;
@@ -109,13 +129,19 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     compiledExpand,
     historyConfig = DEFAULT_HISTORY_CONFIG,
     registry,
+    initialDocument,
   } = config;
 
   const registryRef = useRef(registry);
   registryRef.current = registry;
 
   // ── レイヤー管理 ──
-  const layerManager = useLayers(layerWidth, layerHeight);
+  const initialLayers: readonly InitialLayer[] | undefined =
+    initialDocument?.layers;
+  const layerManager = useLayers(layerWidth, layerHeight, {
+    initialLayers,
+    initialActiveLayerId: initialDocument?.activeLayerId ?? null,
+  });
   const {
     entries,
     entriesRef,
@@ -130,6 +156,8 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     setLayerVisible,
     moveLayerUp: moveLayerUpRaw,
     moveLayerDown: moveLayerDownRaw,
+    setLayerOpacity,
+    setLayerBlendMode,
     findEntry,
     getLayerIndex,
     renderVersion: layerRenderVersion,
@@ -465,17 +493,20 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
   // ── レイヤー配列構築 ──
   const combinedRenderVersion = layerRenderVersion + session.renderVersion;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: combinedRenderVersion は canvas 更新を検知する再描画トリガー
-  const layers: readonly Layer[] = useMemo(() => {
-    const result: Layer[] = [];
-    for (const entry of entries) {
-      result.push(entry.committedLayer);
-      if (entry.id === activeLayerId) {
-        result.push(pendingLayer);
-      }
-    }
-    return result;
-  }, [entries, activeLayerId, pendingLayer, combinedRenderVersion]);
+  const layers: readonly Layer[] = useMemo(
+    () => entries.map((e) => e.committedLayer),
+    [entries],
+  );
+
+  // プレ合成用ワークレイヤー
+  const workLayer = useMemo(
+    () => createLayer(layerWidth, layerHeight, { name: "__work" }),
+    [layerWidth, layerHeight],
+  );
+
+  const pendingOverlay: PendingOverlay | undefined = activeLayerId
+    ? { layer: pendingLayer, targetLayerId: activeLayerId, workLayer }
+    : undefined;
 
   // ── Cumulative offset ──
   const cumulativeOffsetFromHistory = computeCumulativeOffset(historyState);
@@ -494,6 +525,8 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     setActiveLayerId,
     toggleVisibility,
     renameLayer,
+    setLayerOpacity,
+    setLayerBlendMode,
 
     // レイヤー操作（履歴付き）
     addLayer: handleAddLayer,
@@ -524,6 +557,7 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     // レンダリング
     pendingLayer,
     layers,
+    pendingOverlay,
     renderVersion: combinedRenderVersion,
     canDraw: session.canDraw,
     isDrawing: session.isDrawing,

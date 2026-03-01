@@ -5,6 +5,7 @@ import type {
   BrushRenderState,
   CompiledExpand,
   Layer,
+  PendingOverlay,
   StrokePoint,
   StrokeStyle,
 } from "./types";
@@ -101,6 +102,7 @@ export function composeLayers(
   target: CanvasRenderingContext2D,
   layers: readonly Layer[],
   transform?: ViewTransform,
+  pendingOverlay?: PendingOverlay,
 ): void {
   const { canvas } = target;
   target.clearRect(0, 0, canvas.width, canvas.height);
@@ -115,13 +117,52 @@ export function composeLayers(
   for (const layer of layers) {
     if (!layer.meta.visible) continue;
 
-    target.globalAlpha = layer.meta.opacity;
-    if (layer.meta.compositeOperation) {
-      target.globalCompositeOperation = layer.meta.compositeOperation;
-    }
-    target.drawImage(layer.canvas, 0, 0);
-    if (layer.meta.compositeOperation) {
-      target.globalCompositeOperation = "source-over";
+    const hasPending =
+      pendingOverlay && layer.id === pendingOverlay.targetLayerId;
+    const needsPreComposite =
+      hasPending &&
+      (layer.meta.opacity < 1 ||
+        (layer.meta.compositeOperation !== undefined &&
+          layer.meta.compositeOperation !== "source-over") ||
+        (pendingOverlay.layer.meta.compositeOperation !== undefined &&
+          pendingOverlay.layer.meta.compositeOperation !== "source-over"));
+
+    if (needsPreComposite) {
+      const { workLayer } = pendingOverlay;
+      clearLayer(workLayer);
+      workLayer.ctx.drawImage(layer.canvas, 0, 0);
+      workLayer.ctx.globalAlpha = 1;
+      if (pendingOverlay.layer.meta.compositeOperation) {
+        workLayer.ctx.globalCompositeOperation =
+          pendingOverlay.layer.meta.compositeOperation;
+      }
+      workLayer.ctx.drawImage(pendingOverlay.layer.canvas, 0, 0);
+      workLayer.ctx.globalCompositeOperation = "source-over";
+
+      target.globalAlpha = layer.meta.opacity;
+      if (layer.meta.compositeOperation) {
+        target.globalCompositeOperation = layer.meta.compositeOperation;
+      }
+      target.drawImage(workLayer.canvas, 0, 0);
+      target.globalAlpha = 1;
+      if (layer.meta.compositeOperation) {
+        target.globalCompositeOperation = "source-over";
+      }
+    } else {
+      target.globalAlpha = layer.meta.opacity;
+      if (layer.meta.compositeOperation) {
+        target.globalCompositeOperation = layer.meta.compositeOperation;
+      }
+      target.drawImage(layer.canvas, 0, 0);
+
+      if (hasPending) {
+        target.drawImage(pendingOverlay.layer.canvas, 0, 0);
+      }
+
+      target.globalAlpha = 1;
+      if (layer.meta.compositeOperation) {
+        target.globalCompositeOperation = "source-over";
+      }
     }
   }
 

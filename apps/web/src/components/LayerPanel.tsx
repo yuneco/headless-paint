@@ -3,6 +3,28 @@ import type { LayerEntry } from "@headless-paint/react";
 import { ArrowDown, ArrowUp, Circle, Eye, EyeOff, Trash2 } from "lucide-react";
 import { memo } from "react";
 
+const BLEND_MODES: readonly {
+  readonly value: string;
+  readonly label: string;
+}[] = [
+  { value: "", label: "Normal" },
+  { value: "multiply", label: "Multiply" },
+  { value: "screen", label: "Screen" },
+  { value: "overlay", label: "Overlay" },
+  { value: "darken", label: "Darken" },
+  { value: "lighten", label: "Lighten" },
+  { value: "color-dodge", label: "Color Dodge" },
+  { value: "color-burn", label: "Color Burn" },
+  { value: "hard-light", label: "Hard Light" },
+  { value: "soft-light", label: "Soft Light" },
+  { value: "difference", label: "Difference" },
+  { value: "exclusion", label: "Exclusion" },
+  { value: "hue", label: "Hue" },
+  { value: "saturation", label: "Saturation" },
+  { value: "color", label: "Color" },
+  { value: "luminosity", label: "Luminosity" },
+];
+
 interface LayerPanelProps {
   entries: readonly LayerEntry[];
   activeLayerId: string | null;
@@ -14,6 +36,11 @@ interface LayerPanelProps {
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onSetOpacity: (layerId: string, opacity: number) => void;
+  onSetBlendMode: (
+    layerId: string,
+    blendMode: GlobalCompositeOperation | undefined,
+  ) => void;
 }
 
 function LayerPanelComponent({
@@ -27,12 +54,67 @@ function LayerPanelComponent({
   onToggleBackground,
   onMoveUp,
   onMoveDown,
+  onSetOpacity,
+  onSetBlendMode,
 }: LayerPanelProps) {
   // 表示順: 上=前面（配列の逆順）
   const reversedEntries = [...entries].reverse();
+  const activeEntry = entries.find((e) => e.id === activeLayerId);
 
   return (
     <div>
+      {/* Active Layer Controls */}
+      {activeEntry && (
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            marginBottom: 4,
+            alignItems: "center",
+            fontSize: 11,
+          }}
+        >
+          <select
+            value={activeEntry.committedLayer.meta.compositeOperation ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              onSetBlendMode(
+                activeEntry.id,
+                val === "" ? undefined : (val as GlobalCompositeOperation),
+              );
+            }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 11,
+              padding: "2px 4px",
+              border: "1px solid #ccc",
+              borderRadius: 3,
+            }}
+          >
+            {BLEND_MODES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(activeEntry.committedLayer.meta.opacity * 100)}
+            onChange={(e) => {
+              onSetOpacity(activeEntry.id, Number(e.target.value) / 100);
+            }}
+            style={{ width: 64 }}
+            title="Opacity"
+          />
+          <span style={{ width: 28, textAlign: "right" }}>
+            {Math.round(activeEntry.committedLayer.meta.opacity * 100)}%
+          </span>
+        </div>
+      )}
+
       {/* Add Layer Button */}
       <button
         type="button"

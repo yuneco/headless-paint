@@ -2,6 +2,7 @@ import type {
   BackgroundSettings,
   Layer,
   PatternPreviewConfig,
+  PendingOverlay,
 } from "@headless-paint/engine";
 import {
   createPatternTile,
@@ -19,6 +20,7 @@ interface PaintCanvasProps {
   transform: ViewTransform;
   background?: BackgroundSettings;
   patternPreview?: PatternPreviewConfig;
+  pendingOverlay?: PendingOverlay;
   tool: ToolType;
   onPan: (dx: number, dy: number) => void;
   onZoom: (scale: number, centerX: number, centerY: number) => void;
@@ -42,6 +44,7 @@ export function PaintCanvas({
   transform,
   background,
   patternPreview,
+  pendingOverlay,
   tool,
   onPan,
   onZoom,
@@ -94,7 +97,10 @@ export function PaintCanvas({
       }
     }
 
-    renderLayers(layers, ctx, applyDpr(transform, dpr), { background });
+    renderLayers(layers, ctx, applyDpr(transform, dpr), {
+      background,
+      pendingOverlay,
+    });
 
     const layerCorners = [
       { x: 0, y: 0 },
@@ -157,6 +163,7 @@ export function PaintCanvas({
     transform,
     background,
     patternPreview,
+    pendingOverlay,
     wrapOffset,
     width,
     height,

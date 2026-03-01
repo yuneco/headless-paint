@@ -41,6 +41,11 @@ interface SidebarPanelProps {
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onSetOpacity: (layerId: string, opacity: number) => void;
+  onSetBlendMode: (
+    layerId: string,
+    blendMode: GlobalCompositeOperation | undefined,
+  ) => void;
   // History panel props
   layerIdToName: (layerId: string) => string;
 }
@@ -115,6 +120,11 @@ interface LayersSectionProps {
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onSetOpacity: (layerId: string, opacity: number) => void;
+  onSetBlendMode: (
+    layerId: string,
+    blendMode: GlobalCompositeOperation | undefined,
+  ) => void;
 }
 
 const LayersSection = memo(function LayersSection({
@@ -128,6 +138,8 @@ const LayersSection = memo(function LayersSection({
   onToggleBackground,
   onMoveUp,
   onMoveDown,
+  onSetOpacity,
+  onSetBlendMode,
 }: LayersSectionProps) {
   return (
     <AccordionPanel
@@ -148,6 +160,8 @@ const LayersSection = memo(function LayersSection({
         onToggleBackground={onToggleBackground}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}
+        onSetOpacity={onSetOpacity}
+        onSetBlendMode={onSetBlendMode}
       />
     </AccordionPanel>
   );
@@ -216,6 +230,8 @@ function SidebarPanelComponent({
   onToggleBackground,
   onMoveUp,
   onMoveDown,
+  onSetOpacity,
+  onSetBlendMode,
   layerIdToName,
 }: SidebarPanelProps) {
   return (
@@ -251,6 +267,8 @@ function SidebarPanelComponent({
         onToggleBackground={onToggleBackground}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}
+        onSetOpacity={onSetOpacity}
+        onSetBlendMode={onSetBlendMode}
       />
       <HistorySection
         historyState={historyState}

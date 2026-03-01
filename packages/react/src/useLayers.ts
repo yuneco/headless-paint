@@ -7,6 +7,17 @@ export interface LayerEntry {
   readonly committedLayer: Layer;
 }
 
+export interface InitialLayer {
+  readonly id: string;
+  readonly meta: LayerMeta;
+  readonly imageData: ImageData;
+}
+
+export interface UseLayersOptions {
+  readonly initialLayers?: readonly InitialLayer[];
+  readonly initialActiveLayerId?: string | null;
+}
+
 export interface UseLayersResult {
   readonly entries: readonly LayerEntry[];
   readonly entriesRef: React.RefObject<LayerEntry[]>;
@@ -31,25 +42,69 @@ export interface UseLayersResult {
   ) => { fromIndex: number; toIndex: number } | null;
   readonly findEntry: (layerId: string) => LayerEntry | undefined;
   readonly getLayerIndex: (layerId: string) => number;
+  readonly setLayerOpacity: (layerId: string, opacity: number) => void;
+  readonly setLayerBlendMode: (
+    layerId: string,
+    blendMode: GlobalCompositeOperation | undefined,
+  ) => void;
   readonly renderVersion: number;
   readonly bumpRenderVersion: () => void;
 }
 
-export function useLayers(width: number, height: number): UseLayersResult {
+function createInitialEntries(
+  width: number,
+  height: number,
+  initialLayers?: readonly InitialLayer[],
+): LayerEntry[] {
+  if (!initialLayers || initialLayers.length < 1) {
+    const layer = createLayer(width, height, { name: "Layer 1" });
+    return [{ id: layer.id, committedLayer: layer }];
+  }
+
+  const entries: LayerEntry[] = [];
+  for (const initial of initialLayers) {
+    if (
+      initial.imageData.width !== width ||
+      initial.imageData.height !== height ||
+      initial.id.length < 1
+    ) {
+      continue;
+    }
+    const layer = createLayer(width, height, initial.meta);
+    layer.ctx.putImageData(initial.imageData, 0, 0);
+    (layer as { id: string }).id = initial.id;
+    entries.push({ id: initial.id, committedLayer: layer });
+  }
+
+  if (entries.length < 1) {
+    const layer = createLayer(width, height, { name: "Layer 1" });
+    return [{ id: layer.id, committedLayer: layer }];
+  }
+  return entries;
+}
+
+export function useLayers(
+  width: number,
+  height: number,
+  options?: UseLayersOptions,
+): UseLayersResult {
   const [renderVersion, setRenderVersion] = useState(0);
   const bumpRenderVersion = useCallback(
     () => setRenderVersion((n) => n + 1),
     [],
   );
 
-  const [entries, setEntries] = useState<LayerEntry[]>(() => {
-    const layer = createLayer(width, height, { name: "Layer 1" });
-    return [{ id: layer.id, committedLayer: layer }];
-  });
-
-  const [activeLayerId, setActiveLayerId] = useState<string | null>(
-    () => entries[0]?.id ?? null,
+  const [entries, setEntries] = useState<LayerEntry[]>(() =>
+    createInitialEntries(width, height, options?.initialLayers),
   );
+
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(() => {
+    const requested = options?.initialActiveLayerId;
+    if (requested && entries.some((entry) => entry.id === requested)) {
+      return requested;
+    }
+    return entries[0]?.id ?? null;
+  });
 
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -57,7 +112,7 @@ export function useLayers(width: number, height: number): UseLayersResult {
   const activeLayerIdRef = useRef(activeLayerId);
   activeLayerIdRef.current = activeLayerId;
 
-  const layerCounterRef = useRef(1);
+  const layerCounterRef = useRef(entries.length);
 
   const findEntry = useCallback(
     (layerId: string) => entriesRef.current.find((e) => e.id === layerId),
@@ -181,6 +236,25 @@ export function useLayers(width: number, height: number): UseLayersResult {
     return { fromIndex, toIndex };
   }, []);
 
+  const setLayerOpacity = useCallback((layerId: string, opacity: number) => {
+    const entry = entriesRef.current.find((e) => e.id === layerId);
+    if (!entry) return;
+    entry.committedLayer.meta.opacity = Math.max(0, Math.min(1, opacity));
+    setEntries([...entriesRef.current]);
+    setRenderVersion((n) => n + 1);
+  }, []);
+
+  const setLayerBlendMode = useCallback(
+    (layerId: string, blendMode: GlobalCompositeOperation | undefined) => {
+      const entry = entriesRef.current.find((e) => e.id === layerId);
+      if (!entry) return;
+      entry.committedLayer.meta.compositeOperation = blendMode;
+      setEntries([...entriesRef.current]);
+      setRenderVersion((n) => n + 1);
+    },
+    [],
+  );
+
   return {
     entries,
     entriesRef,
@@ -195,6 +269,8 @@ export function useLayers(width: number, height: number): UseLayersResult {
     setLayerVisible,
     moveLayerUp,
     moveLayerDown,
+    setLayerOpacity,
+    setLayerBlendMode,
     findEntry,
     getLayerIndex,
     renderVersion,
