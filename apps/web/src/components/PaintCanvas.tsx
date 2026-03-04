@@ -82,7 +82,7 @@ export function PaintCanvas({
 
     // パターンプレビュー（レイヤー領域外のみ、DPR未調整のtransformを使用）
     if (patternPreview) {
-      const tile = createPatternTile(layers, patternPreview);
+      const tile = createPatternTile(layers, patternPreview, background);
       if (tile) {
         renderPatternPreview(
           ctx,

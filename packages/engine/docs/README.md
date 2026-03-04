@@ -134,7 +134,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `createPatternTile(layers, config)` | レイヤー内容からパターンタイルを生成 |
+| `createPatternTile(layers, config, background?)` | レイヤー内容からパターンタイルを生成 |
 | `renderPatternPreview(ctx, tile, config, transform, ...)` | レイヤー領域外にパターンを半透明描画 |
 
 ### Layer Collection

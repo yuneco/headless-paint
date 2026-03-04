@@ -1,5 +1,6 @@
 import type { mat3 } from "gl-matrix";
-import type { Layer } from "./types";
+import { colorToStyle } from "./layer";
+import type { BackgroundSettings, Layer } from "./types";
 
 // ---- Types ----
 
@@ -64,6 +65,7 @@ function transformPoint(
 export function createPatternTile(
   layers: readonly Layer[],
   config: PatternPreviewConfig,
+  background?: BackgroundSettings,
 ): OffscreenCanvas | null {
   if (config.mode === "none") return null;
 
@@ -72,14 +74,24 @@ export function createPatternTile(
 
   const { width, height } = visibleLayers[0];
 
-  // 基本タイル: 全visibleレイヤーを合成（背景色なし）
+  // 基本タイル: 背景色 + 全visibleレイヤーをブレンドモード付きで合成
   const baseTile = new OffscreenCanvas(width, height);
   const baseCtx = baseTile.getContext("2d");
   if (!baseCtx) return null;
 
+  if (background?.visible) {
+    baseCtx.fillStyle = colorToStyle(background.color);
+    baseCtx.fillRect(0, 0, width, height);
+  }
+
   for (const layer of visibleLayers) {
     baseCtx.globalAlpha = layer.meta.opacity;
+    if (layer.meta.compositeOperation) {
+      baseCtx.globalCompositeOperation = layer.meta.compositeOperation;
+    }
     baseCtx.drawImage(layer.canvas, 0, 0);
+    baseCtx.globalAlpha = 1;
+    baseCtx.globalCompositeOperation = "source-over";
   }
 
   // オフセットなし or grid以外 → 基本タイルをそのまま返す

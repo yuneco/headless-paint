@@ -60,6 +60,7 @@ const DEFAULT_PATTERN_PREVIEW_CONFIG: PatternPreviewConfig = {
 function createPatternTile(
   layers: readonly Layer[],
   config: PatternPreviewConfig,
+  background?: BackgroundSettings,
 ): OffscreenCanvas | null;
 ```
 
@@ -68,13 +69,14 @@ function createPatternTile(
 |---|---|---|---|
 | `layers` | `readonly Layer[]` | ○ | タイル化するレイヤー群 |
 | `config` | `PatternPreviewConfig` | ○ | パターン設定 |
+| `background` | `BackgroundSettings` | - | 背景設定。指定時はタイルに背景色を含め、レイヤーのブレンドモードも適用する |
 
 **戻り値**: `OffscreenCanvas | null`
 - `mode === "none"` または visible レイヤーなし → `null`
 - それ以外 → パターンタイル用の OffscreenCanvas
 
 **処理内容**:
-1. 全 visible レイヤーを合成して1枚のタイルを生成（背景色なし = ストロークのみ）
+1. 全 visible レイヤーを合成して1枚のタイルを生成。`background` 指定時は背景色を先に敷き、各レイヤーの `compositeOperation` を適用して合成する（メイン表示と同じ見た目になる）
 2. grid + `offsetX > 0`: W × 2H のメタタイルを生成（行0に基本タイル、行1に水平オフセット+ラップアラウンド）
 3. grid + `offsetY > 0`: 2W × H のメタタイルを生成（列0に基本タイル、列1に垂直オフセット+ラップアラウンド）
 4. それ以外: 基本タイルをそのまま返す
@@ -153,7 +155,7 @@ ctx.fillStyle = "#f0f0f0";
 ctx.fillRect(0, 0, viewportWidth, viewportHeight);
 
 // 2. パターンプレビュー（レイヤー外のみ）
-const tile = createPatternTile(layers, patternConfig);
+const tile = createPatternTile(layers, patternConfig, background);
 if (tile) {
   renderPatternPreview(
     ctx, tile, patternConfig,
