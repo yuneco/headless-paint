@@ -41,6 +41,7 @@ interface LayerPanelProps {
     layerId: string,
     blendMode: GlobalCompositeOperation | undefined,
   ) => void;
+  onTransform?: (layerId: string) => void;
 }
 
 function LayerPanelComponent({
@@ -56,6 +57,7 @@ function LayerPanelComponent({
   onMoveDown,
   onSetOpacity,
   onSetBlendMode,
+  onTransform,
 }: LayerPanelProps) {
   // 表示順: 上=前面（配列の逆順）
   const reversedEntries = [...entries].reverse();
@@ -112,6 +114,23 @@ function LayerPanelComponent({
           <span style={{ width: 28, textAlign: "right" }}>
             {Math.round(activeEntry.committedLayer.meta.opacity * 100)}%
           </span>
+          {onTransform && (
+            <button
+              type="button"
+              onClick={() => onTransform(activeEntry.id)}
+              style={{
+                padding: "2px 6px",
+                fontSize: 10,
+                border: "1px solid #ccc",
+                borderRadius: 3,
+                backgroundColor: "#fff",
+                cursor: "pointer",
+              }}
+              title="Transform layer"
+            >
+              T
+            </button>
+          )}
         </div>
       )}
 

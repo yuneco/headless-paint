@@ -51,6 +51,6 @@ export function useSmoothing(config?: SmoothingConfig): UseSmoothingResult {
       setEnabled,
       setWindowSize,
     }),
-    [enabled, windowSize, compiledFilterPipeline, setEnabled, setWindowSize],
+    [enabled, windowSize, compiledFilterPipeline, setWindowSize],
   );
 }

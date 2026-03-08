@@ -26,9 +26,11 @@ import { SidebarPanel } from "./components/SidebarPanel";
 import { SymmetryOverlay } from "./components/SymmetryOverlay";
 import { Toolbar } from "./components/Toolbar";
 import { TouchDebugOverlay } from "./components/TouchDebugOverlay";
+import { TransformOverlay } from "./components/TransformOverlay";
 import { DEFAULT_PEN_CONFIG, DEFAULT_SMOOTHING_CONFIG } from "./config";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePatternPreview } from "./hooks/usePatternPreview";
+import { useTransformMode } from "./hooks/useTransformMode";
 
 const LAYER_WIDTH = 1024 * 2;
 const LAYER_HEIGHT = 1024 * 2;
@@ -160,6 +162,24 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     color: restoredSettings?.background.color ?? DEFAULT_BACKGROUND_COLOR,
     visible: restoredSettings?.background.visible ?? true,
   });
+
+  // 変換モード
+  const transformMode = useTransformMode({
+    commitTransform: engine.commitTransform,
+  });
+  const isTransformLocked = transformMode.isActive;
+
+  const handleStartTransform = useCallback(
+    (layerId: string) => {
+      const entry = engine.entries.find((e) => e.id === layerId);
+      if (!entry) return;
+      const started = transformMode.start(layerId, entry.committedLayer);
+      if (!started) {
+        window.alert("空のレイヤーは変換できません");
+      }
+    },
+    [engine.entries, transformMode.start],
+  );
 
   const [showTouchDebug, setShowTouchDebug] = useState(false);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
@@ -324,16 +344,25 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         background={background}
         patternPreview={patternPreview.config}
         pendingOverlay={engine.pendingOverlay}
+        layerTransformPreview={transformMode.preview}
         tool={tool}
-        onPan={handlePan}
-        onZoom={handleZoom}
-        onRotate={handleRotate}
-        onStrokeStart={engine.canDraw ? handleStrokeStart : undefined}
-        onStrokeMove={engine.canDraw ? engine.onStrokeMove : undefined}
-        onStrokeEnd={engine.canDraw ? engine.onStrokeEnd : undefined}
-        onTouchPointerEvent={touchGesture.handlePointerEvent}
-        onWrapShift={engine.onWrapShift}
-        onWrapShiftEnd={engine.onWrapShiftEnd}
+        onPan={!isTransformLocked ? handlePan : undefined}
+        onZoom={!isTransformLocked ? handleZoom : undefined}
+        onRotate={!isTransformLocked ? handleRotate : undefined}
+        onStrokeStart={
+          !isTransformLocked && engine.canDraw ? handleStrokeStart : undefined
+        }
+        onStrokeMove={
+          !isTransformLocked && engine.canDraw ? engine.onStrokeMove : undefined
+        }
+        onStrokeEnd={
+          !isTransformLocked && engine.canDraw ? engine.onStrokeEnd : undefined
+        }
+        onTouchPointerEvent={
+          !isTransformLocked ? touchGesture.handlePointerEvent : undefined
+        }
+        onWrapShift={!isTransformLocked ? engine.onWrapShift : undefined}
+        onWrapShiftEnd={!isTransformLocked ? engine.onWrapShiftEnd : undefined}
         wrapOffset={engine.cumulativeOffset}
         width={viewWidth}
         height={viewHeight}
@@ -341,6 +370,18 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         layerHeight={LAYER_HEIGHT}
         renderVersion={engine.renderVersion}
       />
+
+      {transformMode.state && (
+        <TransformOverlay
+          state={transformMode.state}
+          transform={transform}
+          width={viewWidth}
+          height={viewHeight}
+          onUpdateMatrix={transformMode.updateMatrix}
+          onConfirm={transformMode.confirm}
+          onCancel={transformMode.cancel}
+        />
+      )}
 
       <SymmetryOverlay
         config={expand.config}
@@ -408,6 +449,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         onMoveDown={engine.moveLayerDown}
         onSetOpacity={engine.setLayerOpacity}
         onSetBlendMode={engine.setLayerBlendMode}
+        onTransform={!isTransformLocked ? handleStartTransform : undefined}
         layerIdToName={layerIdToName}
       />
 

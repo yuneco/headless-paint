@@ -545,6 +545,63 @@ const style: StrokeStyle = {
 
 ---
 
+## ContentBounds
+
+レイヤー内容の非透明ピクセル境界矩形。`getContentBounds()` が返す。
+
+```typescript
+interface ContentBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `x` | `number` | 境界矩形の左端 x 座標 |
+| `y` | `number` | 境界矩形の上端 y 座標 |
+| `width` | `number` | 境界矩形の幅 |
+| `height` | `number` | 境界矩形の高さ |
+
+**使用例**:
+```typescript
+const bounds = getContentBounds(layer);
+if (bounds) {
+  console.log(`Content at (${bounds.x}, ${bounds.y}), size ${bounds.width}x${bounds.height}`);
+}
+```
+
+---
+
+## LayerTransformPreview
+
+レイヤー変換プレビュー。`PendingOverlay` と同様の一時的レンダリング状態。`renderLayers` の `RenderOptions` 経由で渡す。
+
+```typescript
+interface LayerTransformPreview {
+  readonly layerId: string;
+  readonly matrix: Float32Array;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `layerId` | `string` | 変換対象のレイヤー ID |
+| `matrix` | `Float32Array` | 適用するアフィン変換行列（gl-matrix の `mat3` と互換） |
+
+**使用例**:
+```typescript
+import { renderLayers } from "@headless-paint/engine";
+
+renderLayers(layers, ctx, transform, {
+  layerTransformPreview: { layerId: "layer_1", matrix: translationMatrix },
+});
+```
+
+---
+
 ## BrushRenderState
 
 ブラシレンダリングの状態。committed→pending 間の状態受け渡しに使用する。

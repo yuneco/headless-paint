@@ -77,10 +77,12 @@ export type {
   BrushTipRegistry,
   Color,
   CompiledExpand,
+  ContentBounds,
   ExpandConfig,
   ExpandMode,
   Layer,
   LayerMeta,
+  LayerTransformPreview,
   PendingOverlay,
   Point,
   PressureCurve,
@@ -105,4 +107,8 @@ export type {
   ViewTransform,
 } from "@headless-paint/input";
 
-export type { HistoryConfig, HistoryState } from "@headless-paint/stroke";
+export type {
+  HistoryConfig,
+  HistoryState,
+  TransformLayerCommand,
+} from "@headless-paint/stroke";

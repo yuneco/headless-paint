@@ -54,6 +54,28 @@ export interface CompiledExpand {
 }
 
 // ============================================================
+// Content Bounds (レイヤー内容境界)
+// ============================================================
+
+/** レイヤー内容の非透明ピクセル境界矩形 */
+export interface ContentBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+// ============================================================
+// Layer Transform Preview
+// ============================================================
+
+/** レイヤー変換プレビュー（PendingOverlay と同様の一時的レンダリング状態） */
+export interface LayerTransformPreview {
+  readonly layerId: string;
+  readonly matrix: Float32Array;
+}
+
+// ============================================================
 // Pending Overlay (プレ合成)
 // ============================================================
 

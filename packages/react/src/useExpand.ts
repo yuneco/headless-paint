@@ -109,7 +109,6 @@ export function useExpand(
       setDivisions,
       setAngle,
       subEnabled,
-      setSubEnabled,
       setSubMode,
       setSubDivisions,
       setSubAngle,

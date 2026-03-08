@@ -61,7 +61,17 @@ export interface WrapShiftCommand {
   readonly timestamp: number;
 }
 
-export type LayerDrawCommand = StrokeCommand | ClearCommand;
+export interface TransformLayerCommand {
+  readonly type: "transform-layer";
+  readonly layerId: string;
+  readonly matrix: readonly number[];
+  readonly timestamp: number;
+}
+
+export type LayerDrawCommand =
+  | StrokeCommand
+  | ClearCommand
+  | TransformLayerCommand;
 
 export type DrawCommand = LayerDrawCommand | WrapShiftCommand;
 
@@ -108,12 +118,19 @@ export type Command = DrawCommand | StructuralCommand;
 
 export function isDrawCommand(cmd: Command): cmd is DrawCommand {
   return (
-    cmd.type === "stroke" || cmd.type === "clear" || cmd.type === "wrap-shift"
+    cmd.type === "stroke" ||
+    cmd.type === "clear" ||
+    cmd.type === "wrap-shift" ||
+    cmd.type === "transform-layer"
   );
 }
 
 export function isLayerDrawCommand(cmd: Command): cmd is LayerDrawCommand {
-  return cmd.type === "stroke" || cmd.type === "clear";
+  return (
+    cmd.type === "stroke" ||
+    cmd.type === "clear" ||
+    cmd.type === "transform-layer"
+  );
 }
 
 export function isStructuralCommand(cmd: Command): cmd is StructuralCommand {

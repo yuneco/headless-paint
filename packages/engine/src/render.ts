@@ -1,10 +1,17 @@
+import { mat3 as m3 } from "gl-matrix";
 import type { mat3 } from "gl-matrix";
 import { clearLayer, colorToStyle } from "./layer";
-import type { BackgroundSettings, Layer, PendingOverlay } from "./types";
+import type {
+  BackgroundSettings,
+  Layer,
+  LayerTransformPreview,
+  PendingOverlay,
+} from "./types";
 
 export interface RenderOptions {
   background?: BackgroundSettings;
   pendingOverlay?: PendingOverlay;
+  layerTransformPreview?: LayerTransformPreview;
 }
 
 /**
@@ -75,12 +82,15 @@ export function renderLayers(
   }
 
   const overlay = options?.pendingOverlay;
+  const transformPreview = options?.layerTransformPreview;
 
   for (const layer of layers) {
     // 非表示レイヤーはスキップ
     if (!layer.meta.visible) continue;
 
     const hasPending = overlay && layer.id === overlay.targetLayerId;
+    const hasTransformPreview =
+      transformPreview && layer.id === transformPreview.layerId;
     const needsPreComposite =
       hasPending &&
       (layer.meta.opacity < 1 ||
@@ -89,19 +99,65 @@ export function renderLayers(
         (overlay.layer.meta.compositeOperation !== undefined &&
           overlay.layer.meta.compositeOperation !== "source-over"));
 
+    // ビュー変換にレイヤーローカル変換を合成: viewTransform * layerTransform
+    let effectiveTransform: mat3;
+    if (hasTransformPreview) {
+      effectiveTransform = m3.multiply(
+        m3.create(),
+        transform,
+        transformPreview.matrix,
+      );
+    } else {
+      effectiveTransform = transform;
+    }
+
     if (needsPreComposite) {
       // プレ合成: work に committed + pending を合成し、work を layer の meta で描画
       const { workLayer } = overlay;
       clearLayer(workLayer);
-      workLayer.ctx.drawImage(layer.canvas, 0, 0);
+
+      // committed を workLayer に描画（変換プレビュー時はレイヤーローカル変換を適用）
+      if (hasTransformPreview) {
+        workLayer.ctx.save();
+        workLayer.ctx.setTransform(
+          transformPreview.matrix[0],
+          transformPreview.matrix[1],
+          transformPreview.matrix[3],
+          transformPreview.matrix[4],
+          transformPreview.matrix[6],
+          transformPreview.matrix[7],
+        );
+        workLayer.ctx.drawImage(layer.canvas, 0, 0);
+        workLayer.ctx.restore();
+      } else {
+        workLayer.ctx.drawImage(layer.canvas, 0, 0);
+      }
+
       workLayer.ctx.globalAlpha = 1;
       if (overlay.layer.meta.compositeOperation) {
         workLayer.ctx.globalCompositeOperation =
           overlay.layer.meta.compositeOperation;
       }
-      workLayer.ctx.drawImage(overlay.layer.canvas, 0, 0);
+
+      // pending も同様に変換プレビューを適用
+      if (hasTransformPreview) {
+        workLayer.ctx.save();
+        workLayer.ctx.setTransform(
+          transformPreview.matrix[0],
+          transformPreview.matrix[1],
+          transformPreview.matrix[3],
+          transformPreview.matrix[4],
+          transformPreview.matrix[6],
+          transformPreview.matrix[7],
+        );
+        workLayer.ctx.drawImage(overlay.layer.canvas, 0, 0);
+        workLayer.ctx.restore();
+      } else {
+        workLayer.ctx.drawImage(overlay.layer.canvas, 0, 0);
+      }
       workLayer.ctx.globalCompositeOperation = "source-over";
 
+      // workLayer をビュー変換のみで描画（ローカル変換は workLayer 内で適用済み）
       ctx.save();
       ctx.imageSmoothingEnabled = smoothing;
       ctx.globalAlpha = layer.meta.opacity;
@@ -127,12 +183,12 @@ export function renderLayers(
         ctx.globalCompositeOperation = layer.meta.compositeOperation;
       }
       ctx.setTransform(
-        transform[0],
-        transform[1],
-        transform[3],
-        transform[4],
-        transform[6],
-        transform[7],
+        effectiveTransform[0],
+        effectiveTransform[1],
+        effectiveTransform[3],
+        effectiveTransform[4],
+        effectiveTransform[6],
+        effectiveTransform[7],
       );
       ctx.drawImage(layer.canvas, 0, 0);
       ctx.restore();
@@ -146,12 +202,12 @@ export function renderLayers(
           ctx.globalCompositeOperation = layer.meta.compositeOperation;
         }
         ctx.setTransform(
-          transform[0],
-          transform[1],
-          transform[3],
-          transform[4],
-          transform[6],
-          transform[7],
+          effectiveTransform[0],
+          effectiveTransform[1],
+          effectiveTransform[3],
+          effectiveTransform[4],
+          effectiveTransform[6],
+          effectiveTransform[7],
         );
         ctx.drawImage(overlay.layer.canvas, 0, 0);
         ctx.restore();

@@ -219,7 +219,7 @@ export async function generatePencilGrainBitmap(
       );
       graphite *= 1 - voidMask * p.voidStrength;
 
-      const alpha = edgeAlpha * Math.pow(clamp01(graphite), p.alphaGamma);
+      const alpha = edgeAlpha * clamp01(graphite) ** p.alphaGamma;
       const grainAlpha = Math.round(clamp01(alpha) * 255);
 
       const idx = (y * size + x) * 4;

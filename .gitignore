@@ -25,6 +25,7 @@ pnpm-debug.log*
 
 # Test
 coverage/
+__screenshots__/
 
 # Misc
 *.local

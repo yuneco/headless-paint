@@ -67,6 +67,7 @@ renderLayerWithTransform(layer, ctx, transform);
 interface RenderOptions {
   background?: BackgroundSettings;
   pendingOverlay?: PendingOverlay;
+  layerTransformPreview?: LayerTransformPreview;
 }
 ```
 
@@ -74,6 +75,7 @@ interface RenderOptions {
 |---|---|---|---|
 | `background` | `BackgroundSettings` | - | 背景設定。`visible: true` の場合、レイヤー領域に背景色を描画 |
 | `pendingOverlay` | `PendingOverlay` | - | pending レイヤーのプレ合成情報。指定時は対象 committed レイヤーと pending を正しく合成する |
+| `layerTransformPreview` | `LayerTransformPreview` | - | レイヤー変換プレビュー。指定時は対象レイヤーの描画にレイヤーローカル変換を合成する |
 
 ---
 

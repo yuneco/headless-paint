@@ -48,6 +48,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
+| `ContentBounds` | レイヤー内容の非透明ピクセル境界矩形 `{ x, y, width, height }` |
+| `LayerTransformPreview` | レイヤー変換プレビュー `{ layerId, matrix }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
 | `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig`） |
 | `BrushRenderState` | ブラシレンダリング状態 `{ accumulatedDistance, tipCanvas, seed, stampCount }` |
@@ -147,6 +149,15 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `getLayerIndex(layers, layerId)` | IDからインデックスを取得（-1 = 未検出） |
 | `moveLayer(layers, fromIndex, toIndex)` | レイヤーの順序を変更 |
 | `updateLayerMeta(layers, layerId, meta)` | レイヤーのメタデータを更新 |
+
+### Transform API
+
+詳細は [transform-api.md](./transform-api.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `getContentBounds(layer)` | レイヤーの非透明ピクセル境界矩形を返す。空レイヤーは `null` |
+| `transformLayer(layer, matrix, temp?)` | アフィン変換をピクセルに焼き込む（temp canvas パターン） |
 
 ### Wrap Shift
 

@@ -46,6 +46,7 @@ interface SidebarPanelProps {
     layerId: string,
     blendMode: GlobalCompositeOperation | undefined,
   ) => void;
+  onTransform?: (layerId: string) => void;
   // History panel props
   layerIdToName: (layerId: string) => string;
 }
@@ -125,6 +126,7 @@ interface LayersSectionProps {
     layerId: string,
     blendMode: GlobalCompositeOperation | undefined,
   ) => void;
+  onTransform?: (layerId: string) => void;
 }
 
 const LayersSection = memo(function LayersSection({
@@ -140,6 +142,7 @@ const LayersSection = memo(function LayersSection({
   onMoveDown,
   onSetOpacity,
   onSetBlendMode,
+  onTransform,
 }: LayersSectionProps) {
   return (
     <AccordionPanel
@@ -162,6 +165,7 @@ const LayersSection = memo(function LayersSection({
         onMoveDown={onMoveDown}
         onSetOpacity={onSetOpacity}
         onSetBlendMode={onSetBlendMode}
+        onTransform={onTransform}
       />
     </AccordionPanel>
   );
@@ -232,6 +236,7 @@ function SidebarPanelComponent({
   onMoveDown,
   onSetOpacity,
   onSetBlendMode,
+  onTransform,
   layerIdToName,
 }: SidebarPanelProps) {
   return (
@@ -269,6 +274,7 @@ function SidebarPanelComponent({
         onMoveDown={onMoveDown}
         onSetOpacity={onSetOpacity}
         onSetBlendMode={onSetBlendMode}
+        onTransform={onTransform}
       />
       <HistorySection
         historyState={historyState}

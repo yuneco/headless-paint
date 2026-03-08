@@ -17,6 +17,7 @@ import type {
   StrokeSessionResult,
   StrokeSessionState,
   StrokeStyle,
+  TransformLayerCommand,
 } from "./types";
 
 const COMMITTED_OVERLAP_COUNT = 3;
@@ -233,6 +234,21 @@ export function createWrapShiftCommand(
     type: "wrap-shift",
     dx,
     dy,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * レイヤー変換コマンドを作成する
+ */
+export function createTransformLayerCommand(
+  layerId: string,
+  matrix: Float32Array,
+): TransformLayerCommand {
+  return {
+    type: "transform-layer",
+    layerId,
+    matrix: Array.from(matrix),
     timestamp: Date.now(),
   };
 }

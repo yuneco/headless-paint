@@ -178,6 +178,37 @@ function onPointerUp() {
 
 ---
 
+## createTransformLayerCommand
+
+レイヤー変換コマンドを作成する。
+
+```typescript
+function createTransformLayerCommand(
+  layerId: string,
+  matrix: Float32Array,
+): TransformLayerCommand
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `layerId` | `string` | ○ | 対象レイヤーの ID |
+| `matrix` | `Float32Array` | ○ | 適用するアフィン変換行列（gl-matrix の `mat3` と互換） |
+
+**戻り値**: `TransformLayerCommand`
+
+**使用例**:
+```typescript
+import { createTransformLayerCommand } from "@headless-paint/stroke";
+import { mat3 } from "gl-matrix";
+
+const m = mat3.fromTranslation(mat3.create(), [100, -50]);
+const command = createTransformLayerCommand(layer.id, m);
+historyState = pushCommand(historyState, command, layer, config);
+```
+
+---
+
 ## 典型的な使用パターン
 
 ```typescript

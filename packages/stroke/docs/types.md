@@ -180,12 +180,38 @@ interface WrapShiftCommand {
 
 ---
 
+## TransformLayerCommand
+
+レイヤー変換コマンド。アフィン変換（移動・リサイズ・回転・反転）を記録する。
+
+```typescript
+interface TransformLayerCommand {
+  readonly type: "transform-layer";
+  readonly layerId: string;
+  readonly matrix: readonly number[];
+  readonly timestamp: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"transform-layer"` | コマンド種別 |
+| `layerId` | `string` | 対象レイヤーの ID |
+| `matrix` | `readonly number[]` | mat3 のフラット配列（9要素）。gl-matrix の mat3 をシリアライズした形式 |
+| `timestamp` | `number` | 作成時刻 |
+
+**特徴**:
+- `LayerDrawCommand` に含まれるため、`getCommandsToReplayForLayer`、`getAffectedLayerIds`、`pushCommand` のチェックポイント生成が自動的に動作する
+- リプレイ時は engine の `transformLayer` を呼び出してピクセルに焼き込む
+
+---
+
 ## LayerDrawCommand
 
 レイヤーに紐づく描画コマンド。`layerId` を持つ。
 
 ```typescript
-type LayerDrawCommand = StrokeCommand | ClearCommand;
+type LayerDrawCommand = StrokeCommand | ClearCommand | TransformLayerCommand;
 ```
 
 ---
@@ -195,7 +221,7 @@ type LayerDrawCommand = StrokeCommand | ClearCommand;
 描画コマンドのUnion型。レイヤーのピクセルに影響する操作。`LayerDrawCommand` はレイヤー固有、`WrapShiftCommand` はグローバル（全レイヤーに適用）。
 
 ```typescript
-type DrawCommand = StrokeCommand | ClearCommand | WrapShiftCommand;
+type DrawCommand = StrokeCommand | ClearCommand | WrapShiftCommand | TransformLayerCommand;
 ```
 
 ---
@@ -280,6 +306,8 @@ function isDrawCommand(cmd: Command): cmd is DrawCommand;
 function isLayerDrawCommand(cmd: Command): cmd is LayerDrawCommand;
 function isStructuralCommand(cmd: Command): cmd is StructuralCommand;
 ```
+
+`isDrawCommand` と `isLayerDrawCommand` は `"transform-layer"` を含む。
 
 ---
 

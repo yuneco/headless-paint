@@ -16,6 +16,7 @@ export type {
   StrokeSessionState,
   StrokeStyle,
   StructuralCommand,
+  TransformLayerCommand,
   WrapShiftCommand,
 } from "./types";
 export {
@@ -33,6 +34,7 @@ export {
   createRemoveLayerCommand,
   createReorderLayerCommand,
   createStrokeCommand,
+  createTransformLayerCommand,
   createWrapShiftCommand,
   endStrokeSession,
   startStrokeSession,

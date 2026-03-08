@@ -10,9 +10,11 @@ import {
   expandStrokePoints,
   generateBrushTip,
   renderBrushStroke,
+  transformLayer,
   wrapShiftLayer,
 } from "@headless-paint/engine";
 import { compileFilterPipeline, processAllPoints } from "@headless-paint/input";
+import type { mat3 } from "gl-matrix";
 import { restoreFromCheckpoint } from "./checkpoint";
 import {
   findBestCheckpointForLayer,
@@ -98,6 +100,9 @@ export function replayCommand(
       break;
     case "wrap-shift":
       wrapShiftLayer(layer, command.dx, command.dy);
+      break;
+    case "transform-layer":
+      transformLayer(layer, new Float32Array(command.matrix) as mat3);
       break;
   }
 }

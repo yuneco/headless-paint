@@ -1,6 +1,7 @@
 import type {
   BackgroundSettings,
   Layer,
+  LayerTransformPreview,
   PatternPreviewConfig,
   PendingOverlay,
 } from "@headless-paint/engine";
@@ -21,6 +22,7 @@ interface PaintCanvasProps {
   background?: BackgroundSettings;
   patternPreview?: PatternPreviewConfig;
   pendingOverlay?: PendingOverlay;
+  layerTransformPreview?: LayerTransformPreview;
   tool: ToolType;
   onPan: (dx: number, dy: number) => void;
   onZoom: (scale: number, centerX: number, centerY: number) => void;
@@ -45,6 +47,7 @@ export function PaintCanvas({
   background,
   patternPreview,
   pendingOverlay,
+  layerTransformPreview,
   tool,
   onPan,
   onZoom,
@@ -100,6 +103,7 @@ export function PaintCanvas({
     renderLayers(layers, ctx, applyDpr(transform, dpr), {
       background,
       pendingOverlay,
+      layerTransformPreview,
     });
 
     const layerCorners = [
@@ -164,6 +168,7 @@ export function PaintCanvas({
     background,
     patternPreview,
     pendingOverlay,
+    layerTransformPreview,
     wrapOffset,
     width,
     height,

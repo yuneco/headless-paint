@@ -1,4 +1,8 @@
-import { createLayer, wrapShiftLayer } from "@headless-paint/engine";
+import {
+  createLayer,
+  transformLayer,
+  wrapShiftLayer,
+} from "@headless-paint/engine";
 import type {
   BrushTipRegistry,
   CompiledExpand,
@@ -18,6 +22,7 @@ import {
   createRemoveLayerCommand,
   createReorderLayerCommand,
   createStrokeCommand,
+  createTransformLayerCommand,
   createWrapShiftCommand,
   getAffectedLayerIds,
   isStructuralCommand,
@@ -28,6 +33,7 @@ import {
   undo,
 } from "@headless-paint/stroke";
 import type { HistoryConfig, HistoryState } from "@headless-paint/stroke";
+import type { mat3 } from "gl-matrix";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { InitialLayer, LayerEntry } from "./useLayers";
 import { useLayers } from "./useLayers";
@@ -89,6 +95,9 @@ export interface PaintEngineResult {
   readonly onStrokeEnd: () => void;
   readonly onDrawConfirm: () => void;
   readonly onDrawCancel: () => void;
+
+  // ── Transform ──
+  readonly commitTransform: (layerId: string, matrix: mat3) => void;
 
   // ── Wrap shift ──
   readonly onWrapShift: (dx: number, dy: number) => void;
@@ -319,6 +328,29 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     );
   }, []);
 
+  // ── Transform ──
+  const handleCommitTransform = useCallback(
+    (layerId: string, matrix: mat3) => {
+      const entry = findEntry(layerId);
+      if (!entry) return;
+      transformLayer(entry.committedLayer, matrix, shiftTempCanvas);
+      const command = createTransformLayerCommand(
+        layerId,
+        matrix as Float32Array,
+      );
+      setHistoryState((prev) =>
+        pushCommand(
+          prev,
+          command,
+          entry.committedLayer,
+          historyConfigRef.current,
+        ),
+      );
+      bumpRenderVersion();
+    },
+    [findEntry, shiftTempCanvas, bumpRenderVersion],
+  );
+
   const handleResetOffset = useCallback(() => {
     setHistoryState((prev) => {
       const { x, y } = computeCumulativeOffset(prev);
@@ -540,6 +572,9 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     onStrokeEnd: session.onStrokeEnd,
     onDrawConfirm: session.onDrawConfirm,
     onDrawCancel: session.onDrawCancel,
+
+    // Transform
+    commitTransform: handleCommitTransform,
 
     // Wrap shift
     onWrapShift: handleWrapShift,

@@ -85,8 +85,9 @@ if (canUndo(historyState)) {
 | `StrokeCommand` | ストロークコマンド（`layerId` 付き） |
 | `ClearCommand` | クリアコマンド（`layerId` 付き） |
 | `WrapShiftCommand` | ラップシフトコマンド（グローバル） |
+| `TransformLayerCommand` | レイヤー変換コマンド（`layerId` 付き、mat3 フラット配列） |
 | `LayerDrawCommand` | レイヤー固有の描画コマンド（`layerId` 付き） |
-| `DrawCommand` | `StrokeCommand \| ClearCommand \| WrapShiftCommand` |
+| `DrawCommand` | `StrokeCommand \| ClearCommand \| WrapShiftCommand \| TransformLayerCommand` |
 | `AddLayerCommand` | レイヤー追加コマンド |
 | `RemoveLayerCommand` | レイヤー削除コマンド |
 | `ReorderLayerCommand` | レイヤー並び替えコマンド |
@@ -108,6 +109,7 @@ if (canUndo(historyState)) {
 | `createStrokeCommand(layerId, inputPoints, filterPipeline, expand, style, brushSeed?)` | ストロークコマンドを直接作成 |
 | `createClearCommand(layerId)` | クリアコマンドを作成 |
 | `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成（グローバル） |
+| `createTransformLayerCommand(layerId, matrix)` | レイヤー変換コマンドを作成 |
 | `createAddLayerCommand(layerId, insertIndex, width, height, meta)` | レイヤー追加コマンドを作成 |
 | `createRemoveLayerCommand(layerId, removedIndex)` | レイヤー削除コマンドを作成 |
 | `createReorderLayerCommand(layerId, fromIndex, toIndex)` | レイヤー並び替えコマンドを作成 |

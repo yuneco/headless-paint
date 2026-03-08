@@ -10,12 +10,14 @@ export type {
   CircleTipConfig,
   Color,
   CompiledExpand,
+  ContentBounds,
   ExpandConfig,
   ExpandLevel,
   ExpandMode,
   ImageTipConfig,
   Layer,
   LayerMeta,
+  LayerTransformPreview,
   PendingOverlay,
   Point,
   PressureCurve,
@@ -83,6 +85,8 @@ export {
   type PatternMode,
   type PatternPreviewConfig,
 } from "./pattern-preview";
+export { getContentBounds } from "./content-bounds";
+export { transformLayer } from "./transform-layer";
 export { wrapShiftLayer } from "./wrap-shift";
 export {
   addLayer,
