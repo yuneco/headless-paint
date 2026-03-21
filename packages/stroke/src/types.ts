@@ -111,6 +111,20 @@ export type StructuralCommand =
   | ReorderLayerCommand;
 
 // ============================================================
+// Pixel Scope (ピクセル影響スコープ)
+// ============================================================
+
+export type PixelScope<TCustom = never> =
+  | { readonly type: "layer"; readonly layerId: string }
+  | { readonly type: "all" }
+  | { readonly type: "structural" }
+  | { readonly type: "custom"; readonly command: TCustom };
+
+export type AffectedLayers =
+  | { readonly type: "partial"; readonly layerIds: ReadonlySet<string> }
+  | { readonly type: "all" };
+
+// ============================================================
 // Command (統合型)
 // ============================================================
 

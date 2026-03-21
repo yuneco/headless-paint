@@ -93,6 +93,8 @@ if (canUndo(historyState)) {
 | `ReorderLayerCommand` | レイヤー並び替えコマンド |
 | `StructuralCommand` | `AddLayerCommand \| RemoveLayerCommand \| ReorderLayerCommand` |
 | `Command<TCustom>` | `DrawCommand \| StructuralCommand \| TCustom`（デフォルト `never`） |
+| `PixelScope<TCustom>` | 単一コマンドのピクセル影響スコープ（`"layer"` / `"all"` / `"structural"` / `"custom"`） |
+| `AffectedLayers` | コマンド範囲のピクセル影響集約（`"partial"` / `"all"`） |
 | `HistoryState<TCustom>` | 履歴状態（デフォルト `never`） |
 | `HistoryConfig` | 履歴設定 |
 | `Checkpoint` | チェックポイント（`layerId` 付き） |
@@ -132,7 +134,8 @@ if (canUndo(historyState)) {
 | `computeCumulativeOffset(state)` | グローバルな累積オフセットを返す |
 | `findBestCheckpointForLayer(state, layerId)` | 指定レイヤーの最適なチェックポイントを検索 |
 | `getCommandsToReplayForLayer(state, layerId)` | 指定レイヤーのリプレイ対象コマンドを取得 |
-| `getAffectedLayerIds(state, fromIndex, toIndex)` | 指定範囲で影響を受けるレイヤーIDの集合を取得 |
+| `getCommandPixelScope(command)` | 単一コマンドのピクセル影響スコープを返す |
+| `getAffectedLayerIds(state, fromIndex, toIndex)` | 指定範囲のピクセル影響を集約して返す（`AffectedLayers`） |
 | `isDrawCommand(command)` | 描画コマンドの型ガード |
 | `isLayerDrawCommand(command)` | レイヤー固有の描画コマンドの型ガード |
 | `isStructuralCommand(command)` | 構造コマンドの型ガード |

@@ -472,12 +472,16 @@ export function usePaintEngine<TCustom = never>(
           }
         }
       } else {
-        const affectedIds = getAffectedLayerIds(
+        const affected = getAffectedLayerIds(
           prev,
           newState.currentIndex,
           prev.currentIndex,
         );
-        for (const id of affectedIds) {
+        const ids =
+          affected.type === "all"
+            ? entriesRef.current.map((e) => e.id)
+            : affected.layerIds;
+        for (const id of ids) {
           const e = findEntry(id);
           if (!e) continue;
           rebuildLayerFromHistory(
@@ -550,12 +554,16 @@ export function usePaintEngine<TCustom = never>(
           }
         }
       } else {
-        const affectedIds = getAffectedLayerIds(
+        const affected = getAffectedLayerIds(
           newState,
           prev.currentIndex,
           newState.currentIndex,
         );
-        for (const id of affectedIds) {
+        const ids =
+          affected.type === "all"
+            ? entriesRef.current.map((e) => e.id)
+            : affected.layerIds;
+        for (const id of ids) {
           const e = findEntry(id);
           if (!e) continue;
           rebuildLayerFromHistory(

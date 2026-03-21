@@ -81,7 +81,7 @@ function pushCommand<TCustom = never>(
 2. コマンドを追加
 3. DrawCommand の場合: `drawsSinceCheckpoint` をインクリメントし、`checkpointInterval` に達したらチェックポイント作成 & カウンタリセット
 4. `remove-layer` の場合: 強制チェックポイント作成 & カウンタリセット
-5. DrawCommand の総数が `maxHistorySize` を超えたら、最も古い DrawCommand とそれ以前のコマンドをまとめて切り捨て
+5. DrawCommand の総数が `maxHistorySize` を超えたら、最も古い DrawCommand のみを除去（それ以前の構造コマンドやカスタムコマンドは保持）
 6. maxCheckpoints を超えたら古いチェックポイントを削除
 
 **チェックポイント間隔**: `drawsSinceCheckpoint` カウンタに基づく。StructuralCommand やカスタムコマンドはカウントに含まれないため、コマンド種別の比率に依存せず一定間隔でチェックポイントが作成される。
@@ -427,16 +427,76 @@ function createReorderLayerCommand(
 
 ---
 
+## getCommandPixelScope
+
+単一コマンドのピクセル影響スコープを返す。コマンドがどの範囲のピクセルに影響するかを分類する。
+
+```typescript
+function getCommandPixelScope<TCustom = never>(
+  cmd: Command<TCustom>,
+): PixelScope<TCustom>
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `cmd` | `Command<TCustom>` | ○ | 分類するコマンド |
+
+**戻り値**: `PixelScope<TCustom>` - コマンドのピクセル影響スコープ
+
+| コマンド | 戻り値 |
+|---------|--------|
+| `stroke` / `clear` / `transform-layer` | `{ type: "layer", layerId }` |
+| `wrap-shift` | `{ type: "all" }` |
+| `add-layer` / `remove-layer` / `reorder-layer` | `{ type: "structural" }` |
+| TCustom | `{ type: "custom", command }` |
+
+**使用例**（pushCommand 時の dirty tracking）:
+```typescript
+const scope = getCommandPixelScope(command);
+switch (scope.type) {
+  case "layer": markDirty(scope.layerId); break;
+  case "all": markAllDirty(); break;
+  case "structural": break;
+  case "custom": handleCustomDirty(scope.command); break;
+}
+```
+
+---
+
 ## getAffectedLayerIds
 
-指定範囲で影響を受けるレイヤーIDの集合を取得する。
+指定範囲で影響を受けるレイヤーのピクセル影響を集約して返す。範囲内に `wrap-shift` が含まれる場合は全レイヤー影響を示す。
 
 ```typescript
 function getAffectedLayerIds<TCustom = never>(
   state: HistoryState<TCustom>,
   fromIndex: number,
   toIndex: number,
-): ReadonlySet<string>
+): AffectedLayers
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `state` | `HistoryState<TCustom>` | ○ | 履歴状態 |
+| `fromIndex` | `number` | ○ | 範囲の開始インデックス |
+| `toIndex` | `number` | ○ | 範囲の終了インデックス |
+
+**戻り値**: `AffectedLayers` - ピクセル影響の集約結果
+
+- 範囲内に `wrap-shift` があれば `{ type: "all" }` を返す
+- それ以外は `{ type: "partial", layerIds }` を返す（`LayerDrawCommand` の `layerId` を集約）
+- `StructuralCommand` とカスタムコマンドはピクセル影響なしとして無視される
+
+**使用例**（undo/redo 時の dirty tracking）:
+```typescript
+const affected = getAffectedLayerIds(state, from, to);
+if (affected.type === "all") {
+  for (const entry of entries) { rebuildLayer(entry.id); }
+} else {
+  for (const id of affected.layerIds) { rebuildLayer(id); }
+}
 ```
 
 ---

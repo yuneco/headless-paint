@@ -291,6 +291,44 @@ type StructuralCommand = AddLayerCommand | RemoveLayerCommand | ReorderLayerComm
 
 ---
 
+## PixelScope
+
+単一コマンドのピクセル影響スコープ。コマンドがどの範囲のピクセルに影響するかを分類する。
+
+```typescript
+type PixelScope<TCustom = never> =
+  | { readonly type: "layer"; readonly layerId: string }
+  | { readonly type: "all" }
+  | { readonly type: "structural" }
+  | { readonly type: "custom"; readonly command: TCustom };
+```
+
+| バリアント | 該当コマンド | 説明 |
+|---|---|---|
+| `layer` | `stroke`, `clear`, `transform-layer` | 特定レイヤーのピクセルのみ影響 |
+| `all` | `wrap-shift` | 全レイヤーのピクセルに影響 |
+| `structural` | `add-layer`, `remove-layer`, `reorder-layer` | ピクセル変更なし（レイヤー構造の変更） |
+| `custom` | `TCustom` | アプリ定義。影響判定はアプリ側で行う |
+
+---
+
+## AffectedLayers
+
+コマンド範囲のピクセル影響を集約した結果。`getAffectedLayerIds` の戻り値。
+
+```typescript
+type AffectedLayers =
+  | { readonly type: "partial"; readonly layerIds: ReadonlySet<string> }
+  | { readonly type: "all" };
+```
+
+| バリアント | 説明 |
+|---|---|
+| `partial` | 特定レイヤーのみ影響。`layerIds` が空の場合はピクセル変更なし |
+| `all` | 全レイヤーに影響（範囲内に `wrap-shift` が含まれる場合） |
+
+---
+
 ## Command
 
 コマンドのUnion型。描画コマンド・構造コマンド・カスタムコマンドを含む。

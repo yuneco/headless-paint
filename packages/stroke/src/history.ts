@@ -1,14 +1,17 @@
 import type { Layer } from "@headless-paint/engine";
 import { createCheckpoint } from "./checkpoint";
 import type {
+  AffectedLayers,
   Checkpoint,
   Command,
   DrawCommand,
   HistoryConfig,
   HistoryState,
+  PixelScope,
 } from "./types";
 import {
   DEFAULT_HISTORY_CONFIG,
+  isCustomCommand,
   isDrawCommand,
   isLayerDrawCommand,
   isStructuralCommand,
@@ -269,24 +272,48 @@ export function getCommandsToReplayForLayer<TCustom = never>(
 }
 
 /**
- * 2つのindex間で影響するレイヤーIDセットを取得
+ * 単一コマンドのピクセル影響スコープを返す
+ */
+export function getCommandPixelScope<TCustom = never>(
+  cmd: Command<TCustom>,
+): PixelScope<TCustom> {
+  if (isLayerDrawCommand(cmd)) {
+    return { type: "layer", layerId: cmd.layerId };
+  }
+  if (isDrawCommand(cmd)) {
+    // wrap-shift
+    return { type: "all" };
+  }
+  if (isStructuralCommand(cmd)) {
+    return { type: "structural" };
+  }
+  // custom command — isCustomCommand check is implicit (exhaustive)
+  return { type: "custom", command: cmd as TCustom };
+}
+
+/**
+ * 2つのindex間で影響するレイヤーのピクセル影響を集約して返す。
+ * 範囲内に wrap-shift が含まれる場合は { type: "all" } を返す。
  */
 export function getAffectedLayerIds<TCustom = never>(
   state: HistoryState<TCustom>,
   fromIndex: number,
   toIndex: number,
-): ReadonlySet<string> {
+): AffectedLayers {
   const ids = new Set<string>();
   const lo = Math.min(fromIndex, toIndex);
   const hi = Math.max(fromIndex, toIndex);
   for (let i = lo; i <= hi; i++) {
     if (i < 0 || i >= state.commands.length) continue;
     const cmd = state.commands[i];
+    if (isDrawCommand(cmd) && cmd.type === "wrap-shift") {
+      return { type: "all" };
+    }
     if (isLayerDrawCommand(cmd)) {
       ids.add(cmd.layerId);
     }
   }
-  return ids;
+  return { type: "partial", layerIds: ids };
 }
 
 /**

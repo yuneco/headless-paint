@@ -1,6 +1,7 @@
 // Types
 export type {
   AddLayerCommand,
+  AffectedLayers,
   Checkpoint,
   ClearCommand,
   Command,
@@ -8,6 +9,7 @@ export type {
   HistoryConfig,
   HistoryState,
   LayerDrawCommand,
+  PixelScope,
   RemoveLayerCommand,
   RenderUpdate,
   ReorderLayerCommand,
@@ -50,6 +52,7 @@ export {
   findBestCheckpoint,
   findBestCheckpointForLayer,
   getAffectedLayerIds,
+  getCommandPixelScope,
   getCommandsToReplay,
   getCommandsToReplayForLayer,
   pushCommand,

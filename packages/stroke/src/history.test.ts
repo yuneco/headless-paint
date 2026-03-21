@@ -7,6 +7,7 @@ import {
   findBestCheckpoint,
   findBestCheckpointForLayer,
   getAffectedLayerIds,
+  getCommandPixelScope,
   getCommandsToReplay,
   getCommandsToReplayForLayer,
   pushCommand,
@@ -22,6 +23,7 @@ import type {
   RemoveLayerCommand,
   ReorderLayerCommand,
   StrokeCommand,
+  TransformLayerCommand,
   WrapShiftCommand,
 } from "./types";
 import { isCustomCommand, isDrawCommand, isStructuralCommand } from "./types";
@@ -658,10 +660,13 @@ describe("history", () => {
         drawsSinceCheckpoint: 0,
       };
 
-      const ids = getAffectedLayerIds(state, 0, 2);
-      expect(ids.has("layer_1")).toBe(true);
-      expect(ids.has("layer_2")).toBe(true);
-      expect(ids.size).toBe(2);
+      const result = getAffectedLayerIds(state, 0, 2);
+      expect(result.type).toBe("partial");
+      if (result.type === "partial") {
+        expect(result.layerIds.has("layer_1")).toBe(true);
+        expect(result.layerIds.has("layer_2")).toBe(true);
+        expect(result.layerIds.size).toBe(2);
+      }
     });
 
     it("should return single layerId for single-layer range", () => {
@@ -678,12 +683,15 @@ describe("history", () => {
         drawsSinceCheckpoint: 0,
       };
 
-      const ids = getAffectedLayerIds(state, 0, 1);
-      expect(ids.size).toBe(1);
-      expect(ids.has("layer_1")).toBe(true);
+      const result = getAffectedLayerIds(state, 0, 1);
+      expect(result.type).toBe("partial");
+      if (result.type === "partial") {
+        expect(result.layerIds.size).toBe(1);
+        expect(result.layerIds.has("layer_1")).toBe(true);
+      }
     });
 
-    it("should not include wrap-shift in affected layer ids", () => {
+    it("should return 'all' when range contains wrap-shift", () => {
       const commands: Command[] = [
         createTestCommand(1000, "layer_1"),
         {
@@ -702,12 +710,35 @@ describe("history", () => {
         drawsSinceCheckpoint: 0,
       };
 
-      const ids = getAffectedLayerIds(state, 0, 1);
-      expect(ids.size).toBe(1);
-      expect(ids.has("layer_1")).toBe(true);
+      const result = getAffectedLayerIds(state, 0, 1);
+      expect(result.type).toBe("all");
     });
 
-    it("should return empty set for structural-only range", () => {
+    it("should return 'all' when wrap-shift is mixed with draw commands", () => {
+      const commands: Command[] = [
+        createTestCommand(1000, "layer_1"),
+        {
+          type: "wrap-shift",
+          dx: 10,
+          dy: 20,
+          timestamp: 1001,
+        } as WrapShiftCommand,
+        createTestCommand(1002, "layer_2"),
+      ];
+      const state: HistoryState = {
+        commands,
+        checkpoints: [],
+        currentIndex: 2,
+        layerWidth: 800,
+        layerHeight: 600,
+        drawsSinceCheckpoint: 0,
+      };
+
+      const result = getAffectedLayerIds(state, 0, 2);
+      expect(result.type).toBe("all");
+    });
+
+    it("should return empty partial for structural-only range", () => {
       const commands: Command[] = [
         {
           type: "add-layer",
@@ -735,8 +766,104 @@ describe("history", () => {
         drawsSinceCheckpoint: 0,
       };
 
-      const ids = getAffectedLayerIds(state, 0, 1);
-      expect(ids.size).toBe(0);
+      const result = getAffectedLayerIds(state, 0, 1);
+      expect(result.type).toBe("partial");
+      if (result.type === "partial") {
+        expect(result.layerIds.size).toBe(0);
+      }
+    });
+  });
+
+  describe("getCommandPixelScope", () => {
+    it("should return layer scope for stroke command", () => {
+      const cmd = createTestCommand(1000, "layer_1");
+      const scope = getCommandPixelScope(cmd);
+      expect(scope).toEqual({ type: "layer", layerId: "layer_1" });
+    });
+
+    it("should return layer scope for clear command", () => {
+      const cmd: Command = {
+        type: "clear",
+        layerId: "layer_1",
+        timestamp: 1000,
+      };
+      const scope = getCommandPixelScope(cmd);
+      expect(scope).toEqual({ type: "layer", layerId: "layer_1" });
+    });
+
+    it("should return layer scope for transform-layer command", () => {
+      const cmd: TransformLayerCommand = {
+        type: "transform-layer",
+        layerId: "layer_1",
+        matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+        timestamp: 1000,
+      };
+      const scope = getCommandPixelScope(cmd);
+      expect(scope).toEqual({ type: "layer", layerId: "layer_1" });
+    });
+
+    it("should return all scope for wrap-shift command", () => {
+      const cmd: WrapShiftCommand = {
+        type: "wrap-shift",
+        dx: 10,
+        dy: 20,
+        timestamp: 1000,
+      };
+      const scope = getCommandPixelScope(cmd);
+      expect(scope).toEqual({ type: "all" });
+    });
+
+    it("should return structural scope for add-layer command", () => {
+      const cmd: AddLayerCommand = {
+        type: "add-layer",
+        layerId: "layer_2",
+        insertIndex: 1,
+        width: 100,
+        height: 100,
+        meta: { name: "L2", visible: true, opacity: 1 },
+        timestamp: 1000,
+      };
+      const scope = getCommandPixelScope(cmd);
+      expect(scope).toEqual({ type: "structural" });
+    });
+
+    it("should return structural scope for remove-layer command", () => {
+      const cmd: RemoveLayerCommand = {
+        type: "remove-layer",
+        layerId: "layer_1",
+        removedIndex: 0,
+        meta: { name: "L1", visible: true, opacity: 1 },
+        timestamp: 1000,
+      };
+      const scope = getCommandPixelScope(cmd);
+      expect(scope).toEqual({ type: "structural" });
+    });
+
+    it("should return structural scope for reorder-layer command", () => {
+      const cmd: ReorderLayerCommand = {
+        type: "reorder-layer",
+        layerId: "layer_1",
+        fromIndex: 0,
+        toIndex: 1,
+        timestamp: 1000,
+      };
+      const scope = getCommandPixelScope(cmd);
+      expect(scope).toEqual({ type: "structural" });
+    });
+
+    it("should return custom scope for custom command", () => {
+      type MyCmd = {
+        readonly type: "rename";
+        readonly layerId: string;
+        readonly newName: string;
+      };
+      const cmd: MyCmd = {
+        type: "rename",
+        layerId: "layer_1",
+        newName: "BG",
+      };
+      const scope = getCommandPixelScope<MyCmd>(cmd);
+      expect(scope).toEqual({ type: "custom", command: cmd });
     });
   });
 
