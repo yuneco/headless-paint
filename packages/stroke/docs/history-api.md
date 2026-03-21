@@ -35,7 +35,7 @@ Commands[checkpoint.index + 1 ... current]
 空の履歴状態を作成する。
 
 ```typescript
-function createHistoryState(width: number, height: number): HistoryState
+function createHistoryState<TCustom = never>(width: number, height: number): HistoryState<TCustom>
 ```
 
 **引数**:
@@ -44,7 +44,7 @@ function createHistoryState(width: number, height: number): HistoryState
 | `width` | `number` | ○ | レイヤーの幅 |
 | `height` | `number` | ○ | レイヤーの高さ |
 
-**戻り値**: `HistoryState` - 初期状態
+**戻り値**: `HistoryState<TCustom>` - 初期状態（`drawsSinceCheckpoint: 0`）
 
 **使用例**:
 ```typescript
@@ -58,30 +58,35 @@ const historyState = createHistoryState(1920, 1080);
 コマンドを履歴に追加する。
 
 ```typescript
-function pushCommand(
-  state: HistoryState,
-  command: Command,
+function pushCommand<TCustom = never>(
+  state: HistoryState<TCustom>,
+  command: Command<TCustom>,
   layer: Layer | null,
   config?: HistoryConfig
-): HistoryState
+): HistoryState<TCustom>
 ```
 
 **引数**:
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
-| `state` | `HistoryState` | ○ | 現在の履歴状態 |
-| `command` | `Command` | ○ | 追加するコマンド |
-| `layer` | `Layer \| null` | ○ | 現在のレイヤー（チェックポイント作成用）。wrap-shift や構造コマンドでは `null` を渡す |
+| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
+| `command` | `Command<TCustom>` | ○ | 追加するコマンド |
+| `layer` | `Layer \| null` | ○ | 現在のレイヤー（チェックポイント作成用）。wrap-shift や構造コマンド、カスタムコマンドでは `null` を渡す |
 | `config` | `HistoryConfig` | - | 履歴設定（省略時は `DEFAULT_HISTORY_CONFIG`） |
 
-**戻り値**: `HistoryState` - 更新された履歴状態
+**戻り値**: `HistoryState<TCustom>` - 更新された履歴状態
 
 **動作**:
 1. currentIndex より後のコマンドを削除（Redo履歴のクリア）
 2. コマンドを追加
-3. checkpointInterval に達したらチェックポイント作成
-4. maxHistorySize を超えたら古いコマンドを削除
-5. maxCheckpoints を超えたら古いチェックポイントを削除
+3. DrawCommand の場合: `drawsSinceCheckpoint` をインクリメントし、`checkpointInterval` に達したらチェックポイント作成 & カウンタリセット
+4. `remove-layer` の場合: 強制チェックポイント作成 & カウンタリセット
+5. DrawCommand の総数が `maxHistorySize` を超えたら、最も古い DrawCommand とそれ以前のコマンドをまとめて切り捨て
+6. maxCheckpoints を超えたら古いチェックポイントを削除
+
+**チェックポイント間隔**: `drawsSinceCheckpoint` カウンタに基づく。StructuralCommand やカスタムコマンドはカウントに含まれないため、コマンド種別の比率に依存せず一定間隔でチェックポイントが作成される。
+
+**最大履歴数**: DrawCommand の数でカウント。StructuralCommand やカスタムコマンドは軽量であり、カウントに含めない。
 
 **使用例**:
 ```typescript
@@ -99,15 +104,15 @@ historyState = pushCommand(historyState, command, layer, {
 1つ前の状態に戻る。
 
 ```typescript
-function undo(state: HistoryState): HistoryState
+function undo<TCustom = never>(state: HistoryState<TCustom>): HistoryState<TCustom>
 ```
 
 **引数**:
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
-| `state` | `HistoryState` | ○ | 現在の履歴状態 |
+| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
 
-**戻り値**: `HistoryState` - currentIndex が1減った状態
+**戻り値**: `HistoryState<TCustom>` - currentIndex が1減った状態
 
 **注意**: この関数は currentIndex を更新するだけ。レイヤーの再構築は `rebuildLayerFromHistory` で行う。
 
@@ -127,15 +132,15 @@ if (canUndo(historyState)) {
 1つ先の状態に進む。
 
 ```typescript
-function redo(state: HistoryState): HistoryState
+function redo<TCustom = never>(state: HistoryState<TCustom>): HistoryState<TCustom>
 ```
 
 **引数**:
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
-| `state` | `HistoryState` | ○ | 現在の履歴状態 |
+| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
 
-**戻り値**: `HistoryState` - currentIndex が1増えた状態
+**戻り値**: `HistoryState<TCustom>` - currentIndex が1増えた状態
 
 **使用例**:
 ```typescript
@@ -153,7 +158,7 @@ if (canRedo(historyState)) {
 Undoが可能かどうかを判定する。
 
 ```typescript
-function canUndo(state: HistoryState): boolean
+function canUndo<TCustom = never>(state: HistoryState<TCustom>): boolean
 ```
 
 **戻り値**: `boolean` - currentIndex >= 0 の場合 true
@@ -165,10 +170,54 @@ function canUndo(state: HistoryState): boolean
 Redoが可能かどうかを判定する。
 
 ```typescript
-function canRedo(state: HistoryState): boolean
+function canRedo<TCustom = never>(state: HistoryState<TCustom>): boolean
 ```
 
 **戻り値**: `boolean` - currentIndex < commands.length - 1 の場合 true
+
+---
+
+## findBestCheckpointForLayer
+
+指定レイヤーに対する最適なチェックポイントを取得する。`currentIndex` 以前のチェックポイントのうち、最も新しいものを返す。
+
+```typescript
+function findBestCheckpointForLayer<TCustom = never>(
+  state: HistoryState<TCustom>,
+  layerId: string,
+): Checkpoint | undefined
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
+| `layerId` | `string` | ○ | 対象レイヤーのID |
+
+**戻り値**: `Checkpoint | undefined` - 見つかった場合はチェックポイント、なければ `undefined`
+
+---
+
+## getCommandsToReplayForLayer
+
+指定レイヤーのリプレイ対象コマンドを取得する（描画コマンドのみ）。`wrap-shift` はグローバル操作のため全レイヤーのリプレイに含まれる。
+
+```typescript
+function getCommandsToReplayForLayer<TCustom = never>(
+  state: HistoryState<TCustom>,
+  layerId: string,
+  fromCheckpoint?: Checkpoint,
+): readonly DrawCommand[]
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
+| `layerId` | `string` | ○ | 対象レイヤーのID |
+| `fromCheckpoint` | `Checkpoint` | - | 起点チェックポイント（省略時は先頭から） |
+
+**戻り値**: `readonly DrawCommand[]` - リプレイ対象の描画コマンド列
 
 ---
 
@@ -177,14 +226,19 @@ function canRedo(state: HistoryState): boolean
 履歴状態から指定レイヤーを再構築する。レイヤー ID に基づいてチェックポイントとコマンドをフィルタリングし、該当レイヤーの描画のみをリプレイする。
 
 ```typescript
-function rebuildLayerFromHistory(layer: Layer, state: HistoryState): void
+function rebuildLayerFromHistory<TCustom = never>(
+  layer: Layer,
+  state: HistoryState<TCustom>,
+  registry?: BrushTipRegistry,
+): void
 ```
 
 **引数**:
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 再構築するレイヤー |
-| `state` | `HistoryState` | ○ | 履歴状態 |
+| `state` | `HistoryState<TCustom>` | ○ | 履歴状態 |
+| `registry` | `BrushTipRegistry` | - | ブラシチップレジストリ（スタンプブラシのリプレイに必要） |
 
 **動作**:
 1. `layer.id` に対応する最適なチェックポイントを探す
@@ -373,18 +427,32 @@ function createReorderLayerCommand(
 
 ---
 
+## getAffectedLayerIds
+
+指定範囲で影響を受けるレイヤーIDの集合を取得する。
+
+```typescript
+function getAffectedLayerIds<TCustom = never>(
+  state: HistoryState<TCustom>,
+  fromIndex: number,
+  toIndex: number,
+): ReadonlySet<string>
+```
+
+---
+
 ## computeCumulativeOffset
 
 wrap-shift の累積オフセットを算出する（グローバル、全レイヤー共通）。
 
 ```typescript
-function computeCumulativeOffset(state: HistoryState): { readonly x: number; readonly y: number }
+function computeCumulativeOffset<TCustom = never>(state: HistoryState<TCustom>): { readonly x: number; readonly y: number }
 ```
 
 **引数**:
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
-| `state` | `HistoryState` | ○ | 現在の履歴状態 |
+| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
 
 **戻り値**: `{ x, y }` - 正規化された累積オフセット（`[0, width)`, `[0, height)` の範囲）
 

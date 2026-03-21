@@ -25,6 +25,7 @@ import {
   createTransformLayerCommand,
   createWrapShiftCommand,
   getAffectedLayerIds,
+  isCustomCommand,
   isStructuralCommand,
   pushCommand,
   rebuildLayerFromHistory,
@@ -32,7 +33,11 @@ import {
   restoreFromCheckpoint,
   undo,
 } from "@headless-paint/stroke";
-import type { HistoryConfig, HistoryState } from "@headless-paint/stroke";
+import type {
+  Command,
+  HistoryConfig,
+  HistoryState,
+} from "@headless-paint/stroke";
 import type { mat3 } from "gl-matrix";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { InitialLayer, LayerEntry } from "./useLayers";
@@ -43,7 +48,18 @@ import type {
 } from "./useStrokeSession";
 import { useStrokeSession } from "./useStrokeSession";
 
-export interface PaintEngineConfig {
+export interface CustomCommandHandler<TCustom> {
+  readonly apply: (cmd: TCustom, ctx: CustomCommandContext) => void;
+  readonly undo: (cmd: TCustom, ctx: CustomCommandContext) => void;
+}
+
+export interface CustomCommandContext {
+  readonly entries: readonly LayerEntry[];
+  readonly findEntry: (layerId: string) => LayerEntry | undefined;
+  readonly bumpRenderVersion: () => void;
+}
+
+export interface PaintEngineConfig<TCustom = never> {
   readonly layerWidth: number;
   readonly layerHeight: number;
   readonly strokeStyle: StrokeStyle;
@@ -53,6 +69,7 @@ export interface PaintEngineConfig {
   readonly historyConfig?: HistoryConfig;
   readonly registry?: BrushTipRegistry;
   readonly initialDocument?: PaintEngineInitialDocument;
+  readonly customCommandHandler?: CustomCommandHandler<TCustom>;
 }
 
 export interface PaintEngineInitialLayer {
@@ -66,7 +83,7 @@ export interface PaintEngineInitialDocument {
   readonly activeLayerId: string | null;
 }
 
-export interface PaintEngineResult {
+export interface PaintEngineResult<TCustom = never> {
   // ── レイヤー ──
   readonly entries: readonly LayerEntry[];
   readonly activeLayerId: string | null;
@@ -105,12 +122,15 @@ export interface PaintEngineResult {
   readonly onResetOffset: () => void;
   readonly cumulativeOffset: { readonly x: number; readonly y: number };
 
+  // ── カスタムコマンド ──
+  readonly pushCustomCommand: (cmd: TCustom) => void;
+
   // ── 履歴 ──
   readonly undo: () => void;
   readonly redo: () => void;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
-  readonly historyState: HistoryState;
+  readonly historyState: HistoryState<TCustom>;
 
   // ── レンダリング ──
   readonly pendingLayer: Layer;
@@ -128,7 +148,9 @@ const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
   maxCheckpoints: 10,
 };
 
-export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
+export function usePaintEngine<TCustom = never>(
+  config: PaintEngineConfig<TCustom>,
+): PaintEngineResult<TCustom> {
   const {
     layerWidth,
     layerHeight,
@@ -139,10 +161,14 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     historyConfig = DEFAULT_HISTORY_CONFIG,
     registry,
     initialDocument,
+    customCommandHandler,
   } = config;
 
   const registryRef = useRef(registry);
   registryRef.current = registry;
+
+  const customCommandHandlerRef = useRef(customCommandHandler);
+  customCommandHandlerRef.current = customCommandHandler;
 
   // ── レイヤー管理 ──
   const initialLayers: readonly InitialLayer[] | undefined =
@@ -180,8 +206,8 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
   );
 
   // ── 履歴 ──
-  const [historyState, setHistoryState] = useState<HistoryState>(() =>
-    createHistoryState(layerWidth, layerHeight),
+  const [historyState, setHistoryState] = useState<HistoryState<TCustom>>(() =>
+    createHistoryState<TCustom>(layerWidth, layerHeight),
   );
 
   const historyConfigRef = useRef(historyConfig);
@@ -364,6 +390,28 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
     });
   }, [entriesRef, shiftTempCanvas, bumpRenderVersion]);
 
+  // ── Custom Commands ──
+  const handlePushCustomCommand = useCallback(
+    (cmd: TCustom) => {
+      const handler = customCommandHandlerRef.current;
+      if (!handler) return;
+      setHistoryState((prev) =>
+        pushCommand(
+          prev,
+          cmd as Command<TCustom>,
+          null,
+          historyConfigRef.current,
+        ),
+      );
+      handler.apply(cmd, {
+        entries: entriesRef.current,
+        findEntry,
+        bumpRenderVersion,
+      });
+    },
+    [entriesRef, findEntry, bumpRenderVersion],
+  );
+
   // ── Undo/Redo ──
   const handleUndo = useCallback(() => {
     setHistoryState((prev) => {
@@ -371,7 +419,14 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
       const undoneCommand = prev.commands[prev.currentIndex];
       const newState = undo(prev);
 
-      if (undoneCommand.type === "wrap-shift") {
+      if (isCustomCommand(undoneCommand)) {
+        // カスタムコマンド: ハンドラに委譲
+        customCommandHandlerRef.current?.undo(undoneCommand, {
+          entries: entriesRef.current,
+          findEntry,
+          bumpRenderVersion,
+        });
+      } else if (undoneCommand.type === "wrap-shift") {
         for (const entry of entriesRef.current) {
           wrapShiftLayer(
             entry.committedLayer,
@@ -457,7 +512,14 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
       const newState = redo(prev);
       const redoneCommand = newState.commands[newState.currentIndex];
 
-      if (redoneCommand.type === "wrap-shift") {
+      if (isCustomCommand(redoneCommand)) {
+        // カスタムコマンド: ハンドラに委譲
+        customCommandHandlerRef.current?.apply(redoneCommand, {
+          entries: entriesRef.current,
+          findEntry,
+          bumpRenderVersion,
+        });
+      } else if (redoneCommand.type === "wrap-shift") {
         for (const entry of entriesRef.current) {
           wrapShiftLayer(
             entry.committedLayer,
@@ -575,6 +637,9 @@ export function usePaintEngine(config: PaintEngineConfig): PaintEngineResult {
 
     // Transform
     commitTransform: handleCommitTransform,
+
+    // Custom commands
+    pushCustomCommand: handlePushCustomCommand,
 
     // Wrap shift
     onWrapShift: handleWrapShift,

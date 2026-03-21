@@ -11,38 +11,55 @@ import {
   DEFAULT_HISTORY_CONFIG,
   isDrawCommand,
   isLayerDrawCommand,
+  isStructuralCommand,
 } from "./types";
 
 /**
  * 新しい履歴状態を作成
  */
-export function createHistoryState(
+export function createHistoryState<TCustom = never>(
   width: number,
   height: number,
-): HistoryState {
+): HistoryState<TCustom> {
   return {
     commands: [],
     checkpoints: [],
     currentIndex: -1,
     layerWidth: width,
     layerHeight: height,
+    drawsSinceCheckpoint: 0,
   };
+}
+
+/**
+ * DrawCommand の数をカウントする
+ */
+function countDrawCommands<TCustom>(
+  commands: readonly Command<TCustom>[],
+  upTo?: number,
+): number {
+  const end = upTo !== undefined ? upTo + 1 : commands.length;
+  let count = 0;
+  for (let i = 0; i < end; i++) {
+    if (isDrawCommand(commands[i])) count++;
+  }
+  return count;
 }
 
 /**
  * コマンドを履歴に追加
  * - 現在位置より後のコマンドは削除される（Undo後の新操作）
- * - 描画コマンド: checkpointInterval ごとにチェックポイントを作成
+ * - 描画コマンド: drawsSinceCheckpoint が checkpointInterval に達したらチェックポイントを作成
  * - remove-layer: チェックポイントを強制作成
  * - add-layer / reorder-layer: チェックポイント不要（layer=null）
- * - 最大履歴数を超えた場合は古いエントリを削除
+ * - 最大履歴数は DrawCommand の数でカウント
  */
-export function pushCommand(
-  state: HistoryState,
-  command: Command,
+export function pushCommand<TCustom = never>(
+  state: HistoryState<TCustom>,
+  command: Command<TCustom>,
   layer: Layer | null,
   config: HistoryConfig = DEFAULT_HISTORY_CONFIG,
-): HistoryState {
+): HistoryState<TCustom> {
   // 現在位置より後のコマンドを削除
   const newCommands = [
     ...state.commands.slice(0, state.currentIndex + 1),
@@ -50,24 +67,51 @@ export function pushCommand(
   ];
   const newIndex = newCommands.length - 1;
 
+  // Future を切り捨てた場合、drawsSinceCheckpoint を再計算
+  const isTruncating = state.currentIndex < state.commands.length - 1;
+  let drawsSinceCheckpoint: number;
+  if (isTruncating) {
+    // 切り捨て後に残った最後の checkpoint 以降の DrawCommand 数を再計算
+    const remainingCheckpoints = state.checkpoints.filter(
+      (cp) => cp.commandIndex <= state.currentIndex,
+    );
+    const lastCpIndex =
+      remainingCheckpoints.length > 0
+        ? Math.max(...remainingCheckpoints.map((cp) => cp.commandIndex))
+        : -1;
+    let count = 0;
+    for (let i = lastCpIndex + 1; i <= state.currentIndex; i++) {
+      if (isDrawCommand(newCommands[i])) count++;
+    }
+    drawsSinceCheckpoint = count;
+  } else {
+    drawsSinceCheckpoint = state.drawsSinceCheckpoint;
+  }
+
   // 現在位置より後のチェックポイントを削除
   let newCheckpoints = state.checkpoints.filter(
     (cp) => cp.commandIndex <= state.currentIndex,
   );
 
   // チェックポイント作成の判定
+  const isDrawCmd = isDrawCommand(command);
+
+  if (isDrawCmd) {
+    drawsSinceCheckpoint++;
+  }
+
   if (layer !== null) {
-    if (command.type === "remove-layer") {
-      // remove-layer: 強制作成
+    if (isStructuralCommand(command) && command.type === "remove-layer") {
+      // remove-layer: 強制作成 & カウンタリセット
       const checkpoint = createCheckpoint(layer, newIndex);
       newCheckpoints = [...newCheckpoints, checkpoint];
-    } else if (isDrawCommand(command)) {
-      // 描画コマンド: interval に従う
-      const shouldCreateCheckpoint =
-        (newIndex + 1) % config.checkpointInterval === 0;
-      if (shouldCreateCheckpoint) {
+      drawsSinceCheckpoint = 0;
+    } else if (isDrawCmd) {
+      // 描画コマンド: drawsSinceCheckpoint が interval に達したら checkpoint 作成
+      if (drawsSinceCheckpoint >= config.checkpointInterval) {
         const checkpoint = createCheckpoint(layer, newIndex);
         newCheckpoints = [...newCheckpoints, checkpoint];
+        drawsSinceCheckpoint = 0;
       }
     }
 
@@ -77,25 +121,55 @@ export function pushCommand(
     }
   }
 
-  // 最大履歴数を超えた場合
-  if (newCommands.length > config.maxHistorySize) {
-    const removeCount = newCommands.length - config.maxHistorySize;
-    const trimmedCommands = newCommands.slice(removeCount);
+  // 最大履歴数を超えた場合（DrawCommand の数でカウント）
+  if (isDrawCmd) {
+    const totalDrawCount = countDrawCommands(newCommands);
+    if (totalDrawCount > config.maxHistorySize) {
+      // 最も古い DrawCommand を見つけて削除し、それより前のカスタムコマンドは保持する
+      let oldestDrawIndex = -1;
+      for (let i = 0; i < newCommands.length; i++) {
+        if (isDrawCommand(newCommands[i])) {
+          oldestDrawIndex = i;
+          break;
+        }
+      }
+      // DrawCommand のみ除去し、その前のカスタム/構造コマンドは残す
+      const trimmedCommands = [
+        ...newCommands.slice(0, oldestDrawIndex),
+        ...newCommands.slice(oldestDrawIndex + 1),
+      ];
+      const removeCount = 1; // 1つの DrawCommand だけ除去
 
-    // チェックポイントのインデックスを調整
-    newCheckpoints = newCheckpoints
-      .filter((cp) => cp.commandIndex >= removeCount)
-      .map((cp) => ({
-        ...cp,
-        commandIndex: cp.commandIndex - removeCount,
-      }));
+      // チェックポイントのインデックスを調整
+      // oldestDrawIndex の位置が削除されたので、それより後のインデックスを1つずらす
+      newCheckpoints = newCheckpoints
+        .filter((cp) => cp.commandIndex !== oldestDrawIndex)
+        .map((cp) => ({
+          ...cp,
+          commandIndex:
+            cp.commandIndex > oldestDrawIndex
+              ? cp.commandIndex - 1
+              : cp.commandIndex,
+        }));
 
-    return {
-      ...state,
-      commands: trimmedCommands,
-      checkpoints: newCheckpoints,
-      currentIndex: trimmedCommands.length - 1,
-    };
+      // drawsSinceCheckpoint を再計算
+      const lastCpIndex =
+        newCheckpoints.length > 0
+          ? Math.max(...newCheckpoints.map((cp) => cp.commandIndex))
+          : -1;
+      let recount = 0;
+      for (let i = lastCpIndex + 1; i < trimmedCommands.length; i++) {
+        if (isDrawCommand(trimmedCommands[i])) recount++;
+      }
+
+      return {
+        ...state,
+        commands: trimmedCommands,
+        checkpoints: newCheckpoints,
+        currentIndex: trimmedCommands.length - 1,
+        drawsSinceCheckpoint: recount,
+      };
+    }
   }
 
   return {
@@ -103,27 +177,34 @@ export function pushCommand(
     commands: newCommands,
     checkpoints: newCheckpoints,
     currentIndex: newIndex,
+    drawsSinceCheckpoint,
   };
 }
 
 /**
  * Undo可能かどうか
  */
-export function canUndo(state: HistoryState): boolean {
+export function canUndo<TCustom = never>(
+  state: HistoryState<TCustom>,
+): boolean {
   return state.currentIndex >= 0;
 }
 
 /**
  * Redo可能かどうか
  */
-export function canRedo(state: HistoryState): boolean {
+export function canRedo<TCustom = never>(
+  state: HistoryState<TCustom>,
+): boolean {
   return state.currentIndex < state.commands.length - 1;
 }
 
 /**
  * Undo（1つ前の状態に戻る）
  */
-export function undo(state: HistoryState): HistoryState {
+export function undo<TCustom = never>(
+  state: HistoryState<TCustom>,
+): HistoryState<TCustom> {
   if (!canUndo(state)) {
     return state;
   }
@@ -136,7 +217,9 @@ export function undo(state: HistoryState): HistoryState {
 /**
  * Redo（1つ先の状態に進む）
  */
-export function redo(state: HistoryState): HistoryState {
+export function redo<TCustom = never>(
+  state: HistoryState<TCustom>,
+): HistoryState<TCustom> {
   if (!canRedo(state)) {
     return state;
   }
@@ -149,8 +232,8 @@ export function redo(state: HistoryState): HistoryState {
 /**
  * 特定レイヤーの最適なチェックポイントを取得
  */
-export function findBestCheckpointForLayer(
-  state: HistoryState,
+export function findBestCheckpointForLayer<TCustom = never>(
+  state: HistoryState<TCustom>,
   layerId: string,
 ): Checkpoint | undefined {
   let bestCheckpoint: Checkpoint | undefined;
@@ -167,8 +250,8 @@ export function findBestCheckpointForLayer(
 /**
  * 特定レイヤーのリプレイ対象コマンドを取得（描画コマンドのみ）
  */
-export function getCommandsToReplayForLayer(
-  state: HistoryState,
+export function getCommandsToReplayForLayer<TCustom = never>(
+  state: HistoryState<TCustom>,
   layerId: string,
   fromCheckpoint?: Checkpoint,
 ): readonly DrawCommand[] {
@@ -176,7 +259,7 @@ export function getCommandsToReplayForLayer(
   const commands: DrawCommand[] = [];
   for (let i = startIndex; i <= state.currentIndex; i++) {
     const cmd = state.commands[i];
-    if (cmd.type === "wrap-shift") {
+    if (isDrawCommand(cmd) && cmd.type === "wrap-shift") {
       commands.push(cmd);
     } else if (isLayerDrawCommand(cmd) && cmd.layerId === layerId) {
       commands.push(cmd);
@@ -188,8 +271,8 @@ export function getCommandsToReplayForLayer(
 /**
  * 2つのindex間で影響するレイヤーIDセットを取得
  */
-export function getAffectedLayerIds(
-  state: HistoryState,
+export function getAffectedLayerIds<TCustom = never>(
+  state: HistoryState<TCustom>,
   fromIndex: number,
   toIndex: number,
 ): ReadonlySet<string> {
@@ -209,7 +292,9 @@ export function getAffectedLayerIds(
 /**
  * wrap-shift の累積オフセットを算出（グローバル、全レイヤー共通）
  */
-export function computeCumulativeOffset(state: HistoryState): {
+export function computeCumulativeOffset<TCustom = never>(
+  state: HistoryState<TCustom>,
+): {
   readonly x: number;
   readonly y: number;
 } {
@@ -217,7 +302,7 @@ export function computeCumulativeOffset(state: HistoryState): {
   let y = 0;
   for (let i = 0; i <= state.currentIndex; i++) {
     const cmd = state.commands[i];
-    if (cmd.type === "wrap-shift") {
+    if (isDrawCommand(cmd) && cmd.type === "wrap-shift") {
       x += cmd.dx;
       y += cmd.dy;
     }
@@ -234,8 +319,8 @@ export function computeCumulativeOffset(state: HistoryState): {
 /**
  * @deprecated Use findBestCheckpointForLayer instead
  */
-export function findBestCheckpoint(
-  state: HistoryState,
+export function findBestCheckpoint<TCustom = never>(
+  state: HistoryState<TCustom>,
 ): Checkpoint | undefined {
   let bestCheckpoint: Checkpoint | undefined;
   for (const cp of state.checkpoints) {
@@ -251,10 +336,10 @@ export function findBestCheckpoint(
 /**
  * @deprecated Use getCommandsToReplayForLayer instead
  */
-export function getCommandsToReplay(
-  state: HistoryState,
+export function getCommandsToReplay<TCustom = never>(
+  state: HistoryState<TCustom>,
   fromCheckpoint?: Checkpoint,
-): readonly Command[] {
+): readonly Command<TCustom>[] {
   const startIndex = fromCheckpoint ? fromCheckpoint.commandIndex + 1 : 0;
   return state.commands.slice(startIndex, state.currentIndex + 1);
 }

@@ -83,9 +83,9 @@ function replayStrokeCommand(
  * 単一のコマンドをレイヤーに適用
  * 構造コマンドはピクセルを変更しないため無視する
  */
-export function replayCommand(
+export function replayCommand<TCustom = never>(
   layer: Layer,
-  command: Command,
+  command: Command<TCustom>,
   registry?: BrushTipRegistry,
 ): void {
   if (!isDrawCommand(command)) {
@@ -110,9 +110,9 @@ export function replayCommand(
 /**
  * コマンドのリストを順番にリプレイ
  */
-export function replayCommands(
+export function replayCommands<TCustom = never>(
   layer: Layer,
-  commands: readonly Command[],
+  commands: readonly Command<TCustom>[],
   registry?: BrushTipRegistry,
 ): void {
   for (const command of commands) {
@@ -124,9 +124,9 @@ export function replayCommands(
  * 特定レイヤーを履歴状態に基づいて再構築する
  * - layer.id でフィルタし、そのレイヤーの描画コマンドのみリプレイ
  */
-export function rebuildLayerFromHistory(
+export function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
-  state: HistoryState,
+  state: HistoryState<TCustom>,
   registry?: BrushTipRegistry,
 ): void {
   const checkpoint = findBestCheckpointForLayer(state, layer.id);
@@ -148,6 +148,9 @@ export function rebuildLayerFromHistory(
 /**
  * @deprecated Use rebuildLayerFromHistory instead
  */
-export function rebuildLayerState(layer: Layer, state: HistoryState): void {
+export function rebuildLayerState<TCustom = never>(
+  layer: Layer,
+  state: HistoryState<TCustom>,
+): void {
   rebuildLayerFromHistory(layer, state);
 }

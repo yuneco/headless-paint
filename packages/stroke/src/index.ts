@@ -21,6 +21,7 @@ export type {
 } from "./types";
 export {
   DEFAULT_HISTORY_CONFIG,
+  isCustomCommand,
   isDrawCommand,
   isLayerDrawCommand,
   isStructuralCommand,

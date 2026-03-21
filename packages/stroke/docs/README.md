@@ -92,8 +92,8 @@ if (canUndo(historyState)) {
 | `RemoveLayerCommand` | レイヤー削除コマンド |
 | `ReorderLayerCommand` | レイヤー並び替えコマンド |
 | `StructuralCommand` | `AddLayerCommand \| RemoveLayerCommand \| ReorderLayerCommand` |
-| `Command` | `DrawCommand \| StructuralCommand` |
-| `HistoryState` | 履歴状態 |
+| `Command<TCustom>` | `DrawCommand \| StructuralCommand \| TCustom`（デフォルト `never`） |
+| `HistoryState<TCustom>` | 履歴状態（デフォルト `never`） |
 | `HistoryConfig` | 履歴設定 |
 | `Checkpoint` | チェックポイント（`layerId` 付き） |
 
@@ -136,6 +136,26 @@ if (canUndo(historyState)) {
 | `isDrawCommand(command)` | 描画コマンドの型ガード |
 | `isLayerDrawCommand(command)` | レイヤー固有の描画コマンドの型ガード |
 | `isStructuralCommand(command)` | 構造コマンドの型ガード |
+| `isCustomCommand(command)` | カスタムコマンドの型ガード |
+
+### カスタムコマンド
+
+`Command<TCustom>` と `HistoryState<TCustom>` はジェネリクスを受け取り、アプリ定義のコマンド型を同じ undo/redo タイムラインに統合できる。カスタムコマンドはチェックポイントやピクセルリプレイの対象外で、apply/undo はアプリ側が実装する。
+
+```typescript
+type MyCmd = { readonly type: "rename"; readonly layerId: string; readonly oldName: string; readonly newName: string };
+
+let history = createHistoryState<MyCmd>(1024, 1024);
+history = pushCommand(history, { type: "rename", layerId: "a", oldName: "Layer 1", newName: "BG" }, null);
+
+// 型ガードで分岐
+const cmd = history.commands[history.currentIndex];
+if (isCustomCommand(cmd)) {
+  // cmd は MyCmd 型
+}
+```
+
+React での統合例（`usePaintEngine` + `CustomCommandHandler`）は [@headless-paint/react の README](../../react/docs/README.md#カスタムコマンドの使い方) を参照。
 
 ## アーキテクチャ
 

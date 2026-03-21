@@ -293,21 +293,30 @@ type StructuralCommand = AddLayerCommand | RemoveLayerCommand | ReorderLayerComm
 
 ## Command
 
-コマンドのUnion型。描画コマンドと構造コマンドの両方を含む。
+コマンドのUnion型。描画コマンド・構造コマンド・カスタムコマンドを含む。
 
 ```typescript
-type Command = DrawCommand | StructuralCommand;
+type Command<TCustom = never> = DrawCommand | StructuralCommand | TCustom;
 ```
+
+| 型パラメータ | デフォルト | 説明 |
+|---|---|---|
+| `TCustom` | `never` | アプリ定義のカスタムコマンド型。省略時はライブラリ組み込みコマンドのみ |
+
+`TCustom = never` の場合、`Command` は従来通り `DrawCommand | StructuralCommand` と等価になる（後方互換）。
 
 ### 型ガード
 
 ```typescript
-function isDrawCommand(cmd: Command): cmd is DrawCommand;
-function isLayerDrawCommand(cmd: Command): cmd is LayerDrawCommand;
-function isStructuralCommand(cmd: Command): cmd is StructuralCommand;
+function isDrawCommand<TCustom>(cmd: Command<TCustom>): cmd is DrawCommand;
+function isLayerDrawCommand<TCustom>(cmd: Command<TCustom>): cmd is LayerDrawCommand;
+function isStructuralCommand<TCustom>(cmd: Command<TCustom>): cmd is StructuralCommand;
+function isCustomCommand<TCustom>(cmd: Command<TCustom>): cmd is TCustom;
 ```
 
 `isDrawCommand` と `isLayerDrawCommand` は `"transform-layer"` を含む。
+
+`isCustomCommand` は `isDrawCommand` と `isStructuralCommand` のどちらにも該当しないコマンドを `TCustom` と判定する。
 
 ---
 
@@ -340,22 +349,26 @@ interface Checkpoint {
 履歴の状態。
 
 ```typescript
-interface HistoryState {
-  readonly commands: readonly Command[];
+interface HistoryState<TCustom = never> {
+  readonly commands: readonly Command<TCustom>[];
   readonly checkpoints: readonly Checkpoint[];
   readonly currentIndex: number;
   readonly layerWidth: number;
   readonly layerHeight: number;
+  readonly drawsSinceCheckpoint: number;
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `commands` | `readonly Command[]` | 記録されたコマンド一覧 |
+| `commands` | `readonly Command<TCustom>[]` | 記録されたコマンド一覧 |
 | `checkpoints` | `readonly Checkpoint[]` | チェックポイント一覧 |
 | `currentIndex` | `number` | 現在位置（-1 は空の状態） |
 | `layerWidth` | `number` | レイヤーの幅 |
 | `layerHeight` | `number` | レイヤーの高さ |
+| `drawsSinceCheckpoint` | `number` | 最後のチェックポイント以降の DrawCommand 数。チェックポイント作成間隔の判定に使用 |
+
+`TCustom = never` の場合、従来の `HistoryState` と等価（後方互換）。
 
 ---
 
@@ -373,9 +386,11 @@ interface HistoryConfig {
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `maxHistorySize` | `number` | 100 | 最大履歴数 |
-| `checkpointInterval` | `number` | 10 | チェックポイント作成間隔 |
+| `maxHistorySize` | `number` | 100 | 最大履歴数（DrawCommand のみカウント） |
+| `checkpointInterval` | `number` | 10 | チェックポイント作成間隔（DrawCommand のみカウント） |
 | `maxCheckpoints` | `number` | 10 | 最大チェックポイント数 |
+
+**カウント対象**: `maxHistorySize` と `checkpointInterval` は DrawCommand の数に基づいてカウントされる。StructuralCommand やカスタムコマンドはカウントに含まれない。
 
 ### DEFAULT_HISTORY_CONFIG
 

@@ -29,6 +29,8 @@ export type {
   UseStrokeSessionResult,
 } from "./useStrokeSession";
 export type {
+  CustomCommandContext,
+  CustomCommandHandler,
   PaintEngineConfig,
   PaintEngineInitialDocument,
   PaintEngineInitialLayer,
@@ -108,6 +110,7 @@ export type {
 } from "@headless-paint/input";
 
 export type {
+  Command,
   HistoryConfig,
   HistoryState,
   TransformLayerCommand,

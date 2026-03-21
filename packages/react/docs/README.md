@@ -449,13 +449,47 @@ const pointerHandlers = usePointerHandler("pen", {
 描画スタイル（`strokeStyle`）やスムージング（`compiledFilterPipeline`）、対称展開（`expandConfig` / `compiledExpand`）はアプリケーション側の hooks から渡す設計のため、設定 UI の構成は自由に決められる。
 
 ```typescript
-function usePaintEngine(config: PaintEngineConfig): PaintEngineResult;
+function usePaintEngine<TCustom = never>(config: PaintEngineConfig<TCustom>): PaintEngineResult<TCustom>;
 ```
+
+### CustomCommandHandler
+
+カスタムコマンドの apply/undo ロジックをアプリケーションが提供するインターフェース。
+
+```typescript
+interface CustomCommandHandler<TCustom> {
+  readonly apply: (cmd: TCustom, ctx: CustomCommandContext) => void;
+  readonly undo: (cmd: TCustom, ctx: CustomCommandContext) => void;
+}
+```
+
+| メソッド | 説明 |
+|---|---|
+| `apply` | コマンドを適用する。redo 時にも呼ばれる |
+| `undo` | コマンドを元に戻す |
+
+### CustomCommandContext
+
+ハンドラに渡されるコンテキスト。レイヤーの参照と再描画トリガーを提供する。
+
+```typescript
+interface CustomCommandContext {
+  readonly entries: readonly LayerEntry[];
+  readonly findEntry: (layerId: string) => LayerEntry | undefined;
+  readonly bumpRenderVersion: () => void;
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `entries` | 現在の全レイヤーエントリ |
+| `findEntry` | ID でエントリを検索 |
+| `bumpRenderVersion` | 再描画トリガーを発火する |
 
 ### PaintEngineConfig
 
 ```typescript
-interface PaintEngineConfig {
+interface PaintEngineConfig<TCustom = never> {
   /** レイヤーの幅（px） */
   readonly layerWidth: number;
   /** レイヤーの高さ（px） */
@@ -474,6 +508,8 @@ interface PaintEngineConfig {
   readonly registry?: BrushTipRegistry;
   /** 復元用の初期ドキュメント。指定時はこの内容でレイヤー群を初期化する */
   readonly initialDocument?: PaintEngineInitialDocument;
+  /** カスタムコマンドの apply/undo ハンドラ。TCustom を指定する場合は必須 */
+  readonly customCommandHandler?: CustomCommandHandler<TCustom>;
 }
 
 interface PaintEngineInitialLayer {
@@ -499,7 +535,7 @@ interface PaintEngineInitialDocument {
 ### PaintEngineResult
 
 ```typescript
-interface PaintEngineResult {
+interface PaintEngineResult<TCustom = never> {
   // ── レイヤー ──
 
   /** 全レイヤーのエントリ一覧 */
@@ -554,6 +590,11 @@ interface PaintEngineResult {
   /** 全 wrap-shift コマンドの累積オフセット + 現在のドラッグ中の移動量 */
   readonly cumulativeOffset: { readonly x: number; readonly y: number };
 
+  // ── カスタムコマンド ──
+
+  /** アプリ定義のカスタムコマンドを履歴に追加する。TCustom = never の場合は呼び出し不可 */
+  readonly pushCustomCommand: (cmd: TCustom) => void;
+
   // ── 履歴 ──
 
   /** 直前の操作を元に戻す */
@@ -565,7 +606,7 @@ interface PaintEngineResult {
   /** Redo 可能か */
   readonly canRedo: boolean;
   /** 履歴の内部状態（HistoryContent 等の UI コンポーネントに渡す用途） */
-  readonly historyState: HistoryState;
+  readonly historyState: HistoryState<TCustom>;
 
   // ── レンダリング ──
 
@@ -617,6 +658,87 @@ const pointerHandlers = usePointerHandler(tool, {
 
 // Canvas に engine.layers と engine.renderVersion を渡して描画する
 ```
+
+### カスタムコマンドの使い方
+
+アプリ固有の操作（レイヤー名変更、不透明度変更など）を同じ undo/redo タイムラインに統合できる。
+
+```typescript
+// ① アプリ固有のコマンド型を定義（discriminated union）
+interface RenameLayerCommand {
+  readonly type: "rename-layer";
+  readonly layerId: string;
+  readonly oldName: string;
+  readonly newName: string;
+  readonly timestamp: number;
+}
+
+interface SetOpacityCommand {
+  readonly type: "set-opacity";
+  readonly layerId: string;
+  readonly oldOpacity: number;
+  readonly newOpacity: number;
+  readonly timestamp: number;
+}
+
+type MyCustomCommand = RenameLayerCommand | SetOpacityCommand;
+
+// ② apply/undo ハンドラを実装
+const customCommandHandler: CustomCommandHandler<MyCustomCommand> = {
+  apply(cmd, ctx) {
+    const entry = ctx.findEntry(cmd.layerId);
+    if (!entry) return;
+    switch (cmd.type) {
+      case "rename-layer":
+        entry.committedLayer.meta.name = cmd.newName;
+        break;
+      case "set-opacity":
+        entry.committedLayer.meta.opacity = cmd.newOpacity;
+        break;
+    }
+    ctx.bumpRenderVersion();
+  },
+  undo(cmd, ctx) {
+    const entry = ctx.findEntry(cmd.layerId);
+    if (!entry) return;
+    switch (cmd.type) {
+      case "rename-layer":
+        entry.committedLayer.meta.name = cmd.oldName;
+        break;
+      case "set-opacity":
+        entry.committedLayer.meta.opacity = cmd.oldOpacity;
+        break;
+    }
+    ctx.bumpRenderVersion();
+  },
+};
+
+// ③ usePaintEngine にジェネリクスで渡す
+const engine = usePaintEngine<MyCustomCommand>({
+  layerWidth: 1024,
+  layerHeight: 1024,
+  strokeStyle: pen.strokeStyle,
+  compiledFilterPipeline: smoothing.compiledFilterPipeline,
+  expandConfig: expand.config,
+  compiledExpand: expand.compiled,
+  customCommandHandler,
+});
+
+// ④ UIイベントからカスタムコマンドを push
+const handleRename = (layerId: string, newName: string) => {
+  const entry = engine.entries.find((e) => e.id === layerId);
+  if (!entry) return;
+  engine.pushCustomCommand({
+    type: "rename-layer",
+    layerId,
+    oldName: entry.committedLayer.meta.name,
+    newName,
+    timestamp: Date.now(),
+  });
+};
+```
+
+`TCustom` を省略すると従来通りの動作になる（`pushCustomCommand` は `(cmd: never) => void` 型で呼び出し不可）。
 
 ---
 
@@ -791,7 +913,7 @@ const documentSnapshot = await exportPaintDocument({
 | `CompiledFilterPipeline` | input | 構築済み FilterPipeline |
 | `FilterPipelineConfig` | input | FilterPipeline の設定 |
 | `SamplingConfig` | input | ポイントサンプリングの設定 |
-| `HistoryState` | stroke | 履歴の内部状態 |
+| `HistoryState<TCustom>` | stroke | 履歴の内部状態 |
 | `StraightLineConfig` | input | 直線フィルタの設定 |
 | `HistoryConfig` | stroke | 履歴の容量設定 |
 

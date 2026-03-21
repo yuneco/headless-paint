@@ -114,31 +114,47 @@ export type StructuralCommand =
 // Command (統合型)
 // ============================================================
 
-export type Command = DrawCommand | StructuralCommand;
+export type Command<TCustom = never> =
+  | DrawCommand
+  | StructuralCommand
+  | TCustom;
 
-export function isDrawCommand(cmd: Command): cmd is DrawCommand {
+export function isDrawCommand<TCustom>(
+  cmd: Command<TCustom>,
+): cmd is DrawCommand {
+  const c = cmd as { type?: string };
   return (
-    cmd.type === "stroke" ||
-    cmd.type === "clear" ||
-    cmd.type === "wrap-shift" ||
-    cmd.type === "transform-layer"
+    c.type === "stroke" ||
+    c.type === "clear" ||
+    c.type === "wrap-shift" ||
+    c.type === "transform-layer"
   );
 }
 
-export function isLayerDrawCommand(cmd: Command): cmd is LayerDrawCommand {
+export function isLayerDrawCommand<TCustom>(
+  cmd: Command<TCustom>,
+): cmd is LayerDrawCommand {
+  const c = cmd as { type?: string };
   return (
-    cmd.type === "stroke" ||
-    cmd.type === "clear" ||
-    cmd.type === "transform-layer"
+    c.type === "stroke" || c.type === "clear" || c.type === "transform-layer"
   );
 }
 
-export function isStructuralCommand(cmd: Command): cmd is StructuralCommand {
+export function isStructuralCommand<TCustom>(
+  cmd: Command<TCustom>,
+): cmd is StructuralCommand {
+  const c = cmd as { type?: string };
   return (
-    cmd.type === "add-layer" ||
-    cmd.type === "remove-layer" ||
-    cmd.type === "reorder-layer"
+    c.type === "add-layer" ||
+    c.type === "remove-layer" ||
+    c.type === "reorder-layer"
   );
+}
+
+export function isCustomCommand<TCustom>(
+  cmd: Command<TCustom>,
+): cmd is TCustom {
+  return !isDrawCommand(cmd) && !isStructuralCommand(cmd);
 }
 
 // ============================================================
@@ -153,12 +169,13 @@ export interface Checkpoint {
   readonly createdAt: number;
 }
 
-export interface HistoryState {
-  readonly commands: readonly Command[];
+export interface HistoryState<TCustom = never> {
+  readonly commands: readonly Command<TCustom>[];
   readonly checkpoints: readonly Checkpoint[];
   readonly currentIndex: number;
   readonly layerWidth: number;
   readonly layerHeight: number;
+  readonly drawsSinceCheckpoint: number;
 }
 
 export interface HistoryConfig {
