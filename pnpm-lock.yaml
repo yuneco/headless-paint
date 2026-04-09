@@ -105,6 +105,34 @@ importers:
         specifier: ^4.5.4
         version: 4.5.4(rollup@4.56.0)(typescript@5.9.3)(vite@8.0.8)
 
+  packages/headless-paint:
+    dependencies:
+      react:
+        specifier: ^18.0.0 || ^19.0.0
+        version: 19.2.3
+    devDependencies:
+      '@headless-paint/core':
+        specifier: workspace:*
+        version: link:../core
+      '@headless-paint/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@headless-paint/input':
+        specifier: workspace:*
+        version: link:../input
+      '@headless-paint/react':
+        specifier: workspace:*
+        version: link:../react
+      '@headless-paint/stroke':
+        specifier: workspace:*
+        version: link:../stroke
+      vite:
+        specifier: ^8.0.8
+        version: 8.0.8
+      vite-plugin-dts:
+        specifier: ^4.5.4
+        version: 4.5.4(rollup@4.56.0)(typescript@5.9.3)(vite@8.0.8)
+
   packages/input:
     dependencies:
       gl-matrix:

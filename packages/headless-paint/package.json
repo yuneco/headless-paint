@@ -1,7 +1,6 @@
 {
-  "name": "@headless-paint/react",
+  "name": "@yuneco/headless-paint",
   "version": "0.0.1",
-  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +8,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
     }
   },
   "files": ["dist"],
@@ -17,13 +24,19 @@
     "dev": "vite build --watch"
   },
   "peerDependencies": {
-    "@headless-paint/core": "^0.0.1",
     "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@headless-paint/core": "workspace:*",
-    "@types/react": "^19.0.0",
-    "react": "^19.0.0",
+    "@headless-paint/engine": "workspace:*",
+    "@headless-paint/input": "workspace:*",
+    "@headless-paint/react": "workspace:*",
+    "@headless-paint/stroke": "workspace:*",
     "vite": "^8.0.8",
     "vite-plugin-dts": "^4.5.4"
   }
