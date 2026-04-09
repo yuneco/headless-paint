@@ -3,8 +3,8 @@ import type {
   Color,
   PressureCurve,
   StrokeStyle,
-} from "@headless-paint/engine";
-import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "@headless-paint/engine";
+} from "@headless-paint/core";
+import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "@headless-paint/core";
 import { useCallback, useMemo, useState } from "react";
 
 export interface PenSettingsConfig {

@@ -1,8 +1,8 @@
 import type {
   CompiledFilterPipeline,
   FilterPipelineConfig,
-} from "@headless-paint/input";
-import { compileFilterPipeline } from "@headless-paint/input";
+} from "@headless-paint/core";
+import { compileFilterPipeline } from "@headless-paint/core";
 import { useCallback, useMemo, useState } from "react";
 
 export interface SmoothingConfig {

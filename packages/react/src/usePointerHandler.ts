@@ -6,7 +6,7 @@ import {
   createSamplingState,
   screenToLayer,
   shouldAcceptPoint,
-} from "@headless-paint/input";
+} from "@headless-paint/core";
 import { useCallback, useRef } from "react";
 
 export type ToolType =

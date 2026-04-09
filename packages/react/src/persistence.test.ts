@@ -1,6 +1,5 @@
-import { createLayer } from "@headless-paint/engine";
-import type { ViewTransform } from "@headless-paint/input";
-import { createViewTransform } from "@headless-paint/input";
+import { createLayer, createViewTransform } from "@headless-paint/core";
+import type { ViewTransform } from "@headless-paint/core";
 import { describe, expect, it } from "vitest";
 import {
   exportPaintDocument,

@@ -2,7 +2,7 @@ import {
   appendToCommittedLayer,
   clearLayer,
   renderPendingLayer,
-} from "@headless-paint/engine";
+} from "@headless-paint/core";
 import type {
   BrushRenderState,
   BrushTipRegistry,
@@ -10,22 +10,22 @@ import type {
   ExpandConfig,
   Layer,
   StrokeStyle,
-} from "@headless-paint/engine";
-import { generateBrushTip } from "@headless-paint/engine";
+} from "@headless-paint/core";
+import { generateBrushTip } from "@headless-paint/core";
 import {
   compileFilterPipeline,
   createFilterPipelineState,
   finalizePipeline,
   processPoint,
-} from "@headless-paint/input";
+} from "@headless-paint/core";
 import type {
   CompiledFilterPipeline,
   FilterPipelineConfig,
   FilterPipelineState,
   InputPoint,
-} from "@headless-paint/input";
-import { addPointToSession, startStrokeSession } from "@headless-paint/stroke";
-import type { StrokeSessionState } from "@headless-paint/stroke";
+} from "@headless-paint/core";
+import { addPointToSession, startStrokeSession } from "@headless-paint/core";
+import type { StrokeSessionState } from "@headless-paint/core";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 export interface StrokeCompleteData {

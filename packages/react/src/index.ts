@@ -78,19 +78,29 @@ export type {
   BrushTipConfig,
   BrushTipRegistry,
   Color,
+  Command,
   CompiledExpand,
+  CompiledFilterPipeline,
   ContentBounds,
   ExpandConfig,
   ExpandMode,
+  FilterPipelineConfig,
+  HistoryConfig,
+  HistoryState,
+  InputPoint,
   Layer,
   LayerMeta,
   LayerTransformPreview,
   PendingOverlay,
   Point,
   PressureCurve,
+  SamplingConfig,
   StampBrushConfig,
+  StraightLineConfig,
   StrokeStyle,
-} from "@headless-paint/engine";
+  TransformLayerCommand,
+  ViewTransform,
+} from "@headless-paint/core";
 
 export {
   AIRBRUSH,
@@ -98,20 +108,4 @@ export {
   MARKER,
   PENCIL,
   ROUND_PEN,
-} from "@headless-paint/engine";
-
-export type {
-  CompiledFilterPipeline,
-  FilterPipelineConfig,
-  InputPoint,
-  SamplingConfig,
-  StraightLineConfig,
-  ViewTransform,
-} from "@headless-paint/input";
-
-export type {
-  Command,
-  HistoryConfig,
-  HistoryState,
-  TransformLayerCommand,
-} from "@headless-paint/stroke";
+} from "@headless-paint/core";

@@ -4,11 +4,11 @@ import type {
   ExpandLevel,
   ExpandMode,
   Point,
-} from "@headless-paint/engine";
+} from "@headless-paint/core";
 import {
   compileExpand,
   createDefaultExpandConfig,
-} from "@headless-paint/engine";
+} from "@headless-paint/core";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 export interface UseExpandResult {

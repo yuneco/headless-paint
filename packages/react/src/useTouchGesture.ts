@@ -13,7 +13,7 @@ import {
   processGestureEvent,
   screenToLayer,
   shouldAcceptPoint,
-} from "@headless-paint/input";
+} from "@headless-paint/core";
 import { useCallback, useRef, useState } from "react";
 import type { StrokeStartOptions } from "./useStrokeSession";
 

@@ -2,7 +2,7 @@ import {
   createLayer,
   transformLayer,
   wrapShiftLayer,
-} from "@headless-paint/engine";
+} from "@headless-paint/core";
 import type {
   BrushTipRegistry,
   CompiledExpand,
@@ -11,8 +11,8 @@ import type {
   LayerMeta,
   PendingOverlay,
   StrokeStyle,
-} from "@headless-paint/engine";
-import type { CompiledFilterPipeline, InputPoint } from "@headless-paint/input";
+} from "@headless-paint/core";
+import type { CompiledFilterPipeline, InputPoint } from "@headless-paint/core";
 import {
   canRedo as checkCanRedo,
   canUndo as checkCanUndo,
@@ -32,12 +32,12 @@ import {
   redo,
   restoreFromCheckpoint,
   undo,
-} from "@headless-paint/stroke";
+} from "@headless-paint/core";
 import type {
   Command,
   HistoryConfig,
   HistoryState,
-} from "@headless-paint/stroke";
+} from "@headless-paint/core";
 import type { mat3 } from "gl-matrix";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { InitialLayer, LayerEntry } from "./useLayers";

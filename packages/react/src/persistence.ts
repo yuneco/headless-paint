@@ -1,4 +1,4 @@
-import { createLayer } from "@headless-paint/engine";
+import { createLayer } from "@headless-paint/core";
 import type {
   BackgroundSettings,
   BrushConfig,
@@ -7,8 +7,8 @@ import type {
   Layer,
   LayerMeta,
   PressureCurve,
-} from "@headless-paint/engine";
-import type { ViewTransform } from "@headless-paint/input";
+} from "@headless-paint/core";
+import type { ViewTransform } from "@headless-paint/core";
 import type { ToolType } from "./usePointerHandler";
 
 export const PAINT_SNAPSHOT_VERSION = 1;

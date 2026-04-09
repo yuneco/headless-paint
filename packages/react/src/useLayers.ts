@@ -1,5 +1,5 @@
-import { createLayer } from "@headless-paint/engine";
-import type { Layer, LayerMeta } from "@headless-paint/engine";
+import { createLayer } from "@headless-paint/core";
+import type { Layer, LayerMeta } from "@headless-paint/core";
 import { useCallback, useRef, useState } from "react";
 
 export interface LayerEntry {

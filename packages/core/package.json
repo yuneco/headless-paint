@@ -1,7 +1,6 @@
 {
-  "name": "@headless-paint/stroke",
+  "name": "@headless-paint/core",
   "version": "0.0.1",
-  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,19 +13,15 @@
   "files": ["dist"],
   "scripts": {
     "build": "vite build",
-    "dev": "vite build --watch",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "dev": "vite build --watch"
   },
-  "peerDependencies": {
-    "@headless-paint/engine": "workspace:*",
-    "@headless-paint/input": "workspace:*"
-  },
-  "devDependencies": {
+  "dependencies": {
     "@headless-paint/engine": "workspace:*",
     "@headless-paint/input": "workspace:*",
+    "@headless-paint/stroke": "workspace:*"
+  },
+  "devDependencies": {
     "vite": "^6.0.0",
-    "vite-plugin-dts": "^4.4.0",
-    "vitest": "^2.0.0"
+    "vite-plugin-dts": "^4.4.0"
   }
 }

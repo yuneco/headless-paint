@@ -5,7 +5,7 @@ import {
   pan,
   rotate,
   zoom,
-} from "@headless-paint/input";
+} from "@headless-paint/core";
 import { useCallback, useState } from "react";
 
 export interface UseViewTransformResult {
