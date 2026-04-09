@@ -34,7 +34,11 @@ export {
   ROUND_PEN,
 } from "@headless-paint/engine";
 
-export { hashSeed, mulberry32, renderBrushStroke } from "@headless-paint/engine";
+export {
+  hashSeed,
+  mulberry32,
+  renderBrushStroke,
+} from "@headless-paint/engine";
 export {
   createBrushTipRegistry,
   generateBrushTip,
@@ -203,7 +207,10 @@ export {
   redo,
   undo,
 } from "@headless-paint/stroke";
-export { createCheckpoint, restoreFromCheckpoint } from "@headless-paint/stroke";
+export {
+  createCheckpoint,
+  restoreFromCheckpoint,
+} from "@headless-paint/stroke";
 export {
   rebuildLayerFromHistory,
   rebuildLayerState,

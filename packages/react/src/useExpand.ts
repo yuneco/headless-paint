@@ -5,10 +5,7 @@ import type {
   ExpandMode,
   Point,
 } from "@headless-paint/core";
-import {
-  compileExpand,
-  createDefaultExpandConfig,
-} from "@headless-paint/core";
+import { compileExpand, createDefaultExpandConfig } from "@headless-paint/core";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 export interface UseExpandResult {

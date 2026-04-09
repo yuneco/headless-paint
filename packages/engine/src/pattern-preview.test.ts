@@ -94,8 +94,8 @@ describe("createPatternTile", () => {
   });
 
   it("should produce different results with vs without background for blend modes", () => {
-    // multiply レイヤーは背景なし(透明)と背景あり(白)で異なる結果になるはず
-    const layer = createLayer(4, 4, { compositeOperation: "multiply" });
+    // screen は白背景の有無で結果差が出やすく、browser 実装差の影響も受けにくい
+    const layer = createLayer(4, 4, { compositeOperation: "screen" });
     layer.ctx.fillStyle = "rgba(128, 128, 128, 1)";
     layer.ctx.fillRect(0, 0, 4, 4);
 
@@ -114,9 +114,9 @@ describe("createPatternTile", () => {
     const pixelWithBg = getPixelFromCanvas(withBg, 2, 2);
     const pixelWithoutBg = getPixelFromCanvas(withoutBg, 2, 2);
 
-    // 背景あり: multiply(white, gray) = gray → 不透明
+    // 背景あり: screen(white, gray) = white → 不透明
     expect(pixelWithBg.a).toBe(255);
-    // 背景なし: multiply on transparent → 異なる結果
+    // 背景なし: transparent に対する screen は白背景時と異なる結果になる
     expect(
       pixelWithBg.r !== pixelWithoutBg.r ||
         pixelWithBg.g !== pixelWithoutBg.g ||
