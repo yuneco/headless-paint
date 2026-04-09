@@ -1,6 +1,5 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
-import dts from "vite-plugin-dts";
 
 export default defineConfig({
   resolve: {
@@ -26,9 +25,4 @@ export default defineConfig({
       external: ["react", "react/jsx-runtime"],
     },
   },
-  plugins: [
-    dts({
-      include: ["src/**/*"],
-    }),
-  ],
 });

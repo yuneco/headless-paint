@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm -F @headless-paint/web dev",
-    "build": "pnpm -r build",
+    "build": "pnpm -r build && node ./scripts/verify-publish-artifacts.mjs",
     "publish:dry-run": "pnpm --filter @yuneco/headless-paint publish --access public --dry-run",
     "publish:packages": "pnpm --filter @yuneco/headless-paint publish --access public",
     "test": "vitest",

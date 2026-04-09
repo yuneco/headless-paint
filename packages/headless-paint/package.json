@@ -20,7 +20,7 @@
   },
   "files": ["dist"],
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && rollup -c rollup.dts.config.mjs",
     "dev": "vite build --watch"
   },
   "peerDependencies": {
@@ -31,12 +31,17 @@
       "optional": true
     }
   },
+  "dependencies": {
+    "gl-matrix": "^3.4.3"
+  },
   "devDependencies": {
     "@headless-paint/core": "workspace:*",
     "@headless-paint/engine": "workspace:*",
     "@headless-paint/input": "workspace:*",
     "@headless-paint/react": "workspace:*",
     "@headless-paint/stroke": "workspace:*",
+    "rollup": "^4.50.0",
+    "rollup-plugin-dts": "^6.2.3",
     "vite": "^8.0.8",
     "vite-plugin-dts": "^4.5.4"
   }
