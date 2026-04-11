@@ -117,17 +117,17 @@ function renderPatternPreview(
 | `layerHeight` | `number` | ○ | レイヤー高さ |
 
 **処理内容**:
-1. `tile` から `ctx.createPattern(tile, repetition)` でCanvasPatternを生成
-   - `grid` → `"repeat"`, `repeat-x` → `"repeat-x"`, `repeat-y` → `"repeat-y"`
-2. `pattern.setTransform()` に `transform`（mat3→DOMMatrix変換）を適用
-3. evenodd クリップパスでレイヤー領域を除外
+1. `transform` の逆行列で viewport 四隅を Layer Space に戻し、可視範囲を求める
+2. evenodd クリップパスでレイヤー領域を除外
    - 外枠: viewport全体の矩形
    - 内枠: transformで変換したレイヤー四隅
-4. `ctx.globalAlpha = config.opacity` で半透明描画
-5. `ctx.fillRect(0, 0, viewportWidth, viewportHeight)` でパターン塗りつぶし（レイヤー外のみ）
+3. `ctx.transform(...)` でビュー変換を適用し、可視範囲に入るメタタイルだけを `drawImage()` で描画
+   - `grid` → x/y 両方向に反復
+   - `repeat-x` → x方向のみ反復
+   - `repeat-y` → y方向のみ反復
 
 **DPR対応**:
-`pattern.setTransform()` は `ctx` の既存 `scale(dpr, dpr)` と合成されるため、`transform` にはDPR未調整のオリジナルを渡す。viewportサイズもCSS pixel単位。
+`ctx` の既存 `scale(dpr, dpr)` の上に `ctx.transform(...)` を合成するため、`transform` にはDPR未調整のオリジナルを渡す。viewportサイズもCSS pixel単位。
 
 ---
 

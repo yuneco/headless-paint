@@ -1,6 +1,7 @@
+import { mat3 } from "gl-matrix";
 import { describe, expect, it } from "vitest";
 import { createLayer } from "./layer";
-import { createPatternTile } from "./pattern-preview";
+import { createPatternTile, renderPatternPreview } from "./pattern-preview";
 import type { PatternPreviewConfig } from "./pattern-preview";
 import type { BackgroundSettings } from "./types";
 
@@ -144,5 +145,57 @@ describe("createPatternTile", () => {
     expect(pixel.g).toBeGreaterThan(100);
     expect(pixel.g).toBeLessThan(160);
     expect(pixel.a).toBe(255);
+  });
+});
+
+describe("renderPatternPreview", () => {
+  it("should render repeated tiles only outside the original layer area", () => {
+    const layer = createLayer(2, 2);
+    layer.ctx.fillStyle = "rgba(255, 0, 0, 1)";
+    layer.ctx.fillRect(0, 0, 2, 2);
+
+    const tile = createPatternTile([layer], GRID_CONFIG);
+    expect(tile).not.toBeNull();
+    if (!tile) return;
+
+    const output = new OffscreenCanvas(6, 6);
+    const ctx = output.getContext("2d");
+    expect(ctx).not.toBeNull();
+    if (!ctx) return;
+
+    renderPatternPreview(ctx, tile, GRID_CONFIG, mat3.create(), 6, 6, 2, 2);
+
+    const inside = getPixelFromCanvas(output, 1, 1);
+    const outside = getPixelFromCanvas(output, 3, 1);
+
+    expect(inside.a).toBe(0);
+    expect(outside.r).toBe(255);
+    expect(outside.g).toBe(0);
+    expect(outside.b).toBe(0);
+    expect(outside.a).toBeGreaterThan(0);
+  });
+
+  it("should keep offset grid rows visible outside the clipped layer area", () => {
+    const layer = createLayer(2, 2);
+    layer.ctx.fillStyle = "rgba(0, 0, 255, 1)";
+    layer.ctx.fillRect(0, 0, 2, 2);
+
+    const tile = createPatternTile([layer], {
+      ...GRID_CONFIG,
+      offsetX: 0.5,
+    });
+    expect(tile).not.toBeNull();
+    if (!tile) return;
+
+    const output = new OffscreenCanvas(6, 6);
+    const ctx = output.getContext("2d");
+    expect(ctx).not.toBeNull();
+    if (!ctx) return;
+
+    renderPatternPreview(ctx, tile, GRID_CONFIG, mat3.create(), 6, 6, 2, 2);
+
+    const shiftedRow = getPixelFromCanvas(output, 1, 3);
+    expect(shiftedRow.b).toBe(255);
+    expect(shiftedRow.a).toBeGreaterThan(0);
   });
 });

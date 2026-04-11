@@ -1,3 +1,4 @@
+import { mat3 as m3 } from "gl-matrix";
 import type { mat3 } from "gl-matrix";
 import { colorToStyle } from "./layer";
 import type { BackgroundSettings, Layer } from "./types";
@@ -25,21 +26,48 @@ export const DEFAULT_PATTERN_PREVIEW_CONFIG: PatternPreviewConfig = {
 
 // ---- Internal helpers ----
 
-function patternRepetition(
-  mode: PatternMode,
-): "repeat" | "repeat-x" | "repeat-y" {
-  switch (mode) {
-    case "repeat-x":
-      return "repeat-x";
-    case "repeat-y":
-      return "repeat-y";
-    default:
-      return "repeat";
+function viewportBoundsInLayerSpace(
+  transform: mat3,
+  viewportWidth: number,
+  viewportHeight: number,
+): {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+} | null {
+  const inverse = m3.create();
+  if (!m3.invert(inverse, transform)) {
+    return null;
   }
+
+  const corners = [
+    transformPoint(inverse, 0, 0),
+    transformPoint(inverse, viewportWidth, 0),
+    transformPoint(inverse, viewportWidth, viewportHeight),
+    transformPoint(inverse, 0, viewportHeight),
+  ];
+
+  return {
+    minX: Math.min(...corners.map((corner) => corner.x)),
+    maxX: Math.max(...corners.map((corner) => corner.x)),
+    minY: Math.min(...corners.map((corner) => corner.y)),
+    maxY: Math.max(...corners.map((corner) => corner.y)),
+  };
 }
 
-function mat3ToDOMMatrix(m: mat3): DOMMatrix {
-  return new DOMMatrix([m[0], m[1], m[3], m[4], m[6], m[7]]);
+function tileIndexRange(
+  min: number,
+  max: number,
+  size: number,
+): {
+  start: number;
+  end: number;
+} {
+  return {
+    start: Math.floor(min / size) - 1,
+    end: Math.ceil(max / size) + 1,
+  };
 }
 
 function transformPoint(
@@ -157,10 +185,14 @@ export function renderPatternPreview(
   layerWidth: number,
   layerHeight: number,
 ): void {
-  const pattern = ctx.createPattern(tile, patternRepetition(config.mode));
-  if (!pattern) return;
-
-  pattern.setTransform(mat3ToDOMMatrix(transform));
+  const bounds = viewportBoundsInLayerSpace(
+    transform,
+    viewportWidth,
+    viewportHeight,
+  );
+  if (!bounds) {
+    return;
+  }
 
   ctx.save();
 
@@ -182,8 +214,30 @@ export function renderPatternPreview(
 
   // パターンを半透明で描画
   ctx.globalAlpha = config.opacity;
-  ctx.fillStyle = pattern;
-  ctx.fillRect(0, 0, viewportWidth, viewportHeight);
+  ctx.imageSmoothingEnabled = Math.hypot(transform[0], transform[1]) < 1;
+  ctx.transform(
+    transform[0],
+    transform[1],
+    transform[3],
+    transform[4],
+    transform[6],
+    transform[7],
+  );
+
+  const xRange =
+    config.mode === "repeat-y"
+      ? { start: 0, end: 0 }
+      : tileIndexRange(bounds.minX, bounds.maxX, tile.width);
+  const yRange =
+    config.mode === "repeat-x"
+      ? { start: 0, end: 0 }
+      : tileIndexRange(bounds.minY, bounds.maxY, tile.height);
+
+  for (let y = yRange.start; y <= yRange.end; y++) {
+    for (let x = xRange.start; x <= xRange.end; x++) {
+      ctx.drawImage(tile, x * tile.width, y * tile.height);
+    }
+  }
 
   ctx.restore();
 }
