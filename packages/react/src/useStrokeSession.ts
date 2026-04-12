@@ -79,6 +79,18 @@ interface SessionInternal {
   brushSeed: number;
 }
 
+function shouldDeferCommittedRendering(style: StrokeStyle): boolean {
+  return style.brush.type === "stamp";
+}
+
+function toStrokePoints(points: readonly InputPoint[]) {
+  return points.map((point) => ({
+    x: point.x,
+    y: point.y,
+    pressure: point.pressure,
+  }));
+}
+
 /**
  * スタンプブラシ用の初期 BrushRenderState を生成する。
  * round-pen では undefined を返す（brushState 不要）。
@@ -202,9 +214,11 @@ export function useStrokeSession(
       };
 
       const pendingOnly = pendingOnlyRef.current;
+      const deferCommittedRendering =
+        !pendingOnly && shouldDeferCommittedRendering(style);
       pendingLayer.meta.compositeOperation = style.compositeOperation;
 
-      if (!pendingOnly) {
+      if (!pendingOnly && !deferCommittedRendering) {
         brushState = appendToCommittedLayer(
           currentLayer,
           strokeResult.renderUpdate.newlyCommitted,
@@ -216,18 +230,19 @@ export function useStrokeSession(
         sessionRef.current.brushState = brushState;
       }
 
-      const pendingPoints = pendingOnly
-        ? [
-            ...strokeResult.renderUpdate.newlyCommitted,
-            ...strokeResult.renderUpdate.currentPending,
-          ]
-        : strokeResult.renderUpdate.currentPending;
+      const pendingPoints =
+        pendingOnly || deferCommittedRendering
+          ? [
+              ...toStrokePoints(strokeResult.state.allCommitted),
+              ...toStrokePoints(strokeResult.state.currentPending),
+            ]
+          : strokeResult.renderUpdate.currentPending;
       renderPendingLayer(
         pendingLayer,
         pendingPoints,
         style,
         compiled,
-        brushState,
+        deferCommittedRendering ? initialBrushState : brushState,
       );
 
       strokePointsRef.current = [inputPoint];
@@ -268,7 +283,9 @@ export function useStrokeSession(
       sessionRef.current.inputPoints.push(inputPoint);
       strokePointsRef.current = [...strokePointsRef.current, inputPoint];
 
-      if (!pendingOnlyRef.current) {
+      const deferCommittedRendering = shouldDeferCommittedRendering(style);
+
+      if (!pendingOnlyRef.current && !deferCommittedRendering) {
         const { newlyCommitted, committedOverlapCount } =
           strokeResult.renderUpdate;
         if (newlyCommitted.length > committedOverlapCount) {
@@ -284,12 +301,13 @@ export function useStrokeSession(
         }
       }
 
-      const pendingPoints = pendingOnlyRef.current
-        ? [
-            ...strokeResult.state.allCommitted,
-            ...strokeResult.renderUpdate.currentPending,
-          ]
-        : strokeResult.renderUpdate.currentPending;
+      const pendingPoints =
+        pendingOnlyRef.current || deferCommittedRendering
+          ? [
+              ...toStrokePoints(strokeResult.state.allCommitted),
+              ...toStrokePoints(strokeResult.state.currentPending),
+            ]
+          : strokeResult.renderUpdate.currentPending;
       renderPendingLayer(
         pendingLayer,
         pendingPoints,
@@ -340,12 +358,22 @@ export function useStrokeSession(
     }
 
     const style = strokeStyleRef.current;
+    const deferCommittedRendering = shouldDeferCommittedRendering(style);
     const finalOutput = finalizePipeline(filterState, sessionFilter);
     const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
 
     const { newlyCommitted, committedOverlapCount } =
       finalStrokeResult.renderUpdate;
-    if (newlyCommitted.length > committedOverlapCount) {
+    if (deferCommittedRendering) {
+      appendToCommittedLayer(
+        currentLayer,
+        toStrokePoints(finalStrokeResult.state.allCommitted),
+        style,
+        sessionExpand,
+        0,
+        sessionRef.current.brushState,
+      );
+    } else if (newlyCommitted.length > committedOverlapCount) {
       appendToCommittedLayer(
         currentLayer,
         newlyCommitted,

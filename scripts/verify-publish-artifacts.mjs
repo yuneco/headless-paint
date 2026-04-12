@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -41,13 +41,11 @@ for (const relativeTarget of exportTargets) {
 
 const forbiddenPatterns = [
   {
-    pattern:
-      /@headless-paint\/(?:core|react|engine|input|stroke)(?:\/|["'])?/g,
+    pattern: /@headless-paint\/(?:core|react|engine|input|stroke)(?:\/|["'])?/g,
     reason: "internal workspace package reference",
   },
   {
-    pattern:
-      /\.\.\/\.\.\/(?:core|react|engine|input|stroke)\/src\/[^\s"']+/g,
+    pattern: /\.\.\/\.\.\/(?:core|react|engine|input|stroke)\/src\/[^\s"']+/g,
     reason: "source file reference outside dist",
   },
 ];
@@ -61,7 +59,9 @@ for (const fileName of await readdir(distDir)) {
   for (const { pattern, reason } of forbiddenPatterns) {
     const matches = [...content.matchAll(pattern)];
     for (const match of matches) {
-      failures.push(`${path.relative(repoRoot, absolutePath)}: ${reason}: ${match[0]}`);
+      failures.push(
+        `${path.relative(repoRoot, absolutePath)}: ${reason}: ${match[0]}`,
+      );
     }
   }
 }

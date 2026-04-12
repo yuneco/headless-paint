@@ -1,8 +1,8 @@
 import { colorToStyle } from "./layer";
+import { interpolateStrokePointsCentripetal } from "./stroke-interpolation";
 import type { Color, Layer, Point, PressureCurve, StrokePoint } from "./types";
 
 const DEFAULT_PRESSURE = 0.5;
-const MIN_INTERPOLATION_DISTANCE = 2;
 
 export function drawLine(
   layer: Layer,
@@ -99,61 +99,7 @@ export function interpolateStrokePoints(
   points: readonly StrokePoint[],
   overlapCount = 0,
 ): StrokePoint[] {
-  if (points.length < 2) {
-    return points.map((p) => ({ ...p }));
-  }
-
-  const skipSegments = Math.max(0, overlapCount - 1);
-  const result: StrokePoint[] = [];
-
-  for (let i = 0; i < points.length; i++) {
-    const p0 = points[Math.max(0, i - 1)];
-    const p1 = points[i];
-    const p2 = points[Math.min(points.length - 1, i + 1)];
-    const p3 = points[Math.min(points.length - 1, i + 2)];
-
-    if (i >= skipSegments) {
-      result.push({ x: p1.x, y: p1.y, pressure: p1.pressure });
-    }
-
-    if (i < points.length - 1 && i >= skipSegments) {
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const segments = Math.max(
-        1,
-        Math.ceil(dist / MIN_INTERPOLATION_DISTANCE),
-      );
-
-      for (let j = 1; j < segments; j++) {
-        const t = j / segments;
-        const tt = t * t;
-        const ttt = tt * t;
-
-        const x =
-          0.5 *
-          (2 * p1.x +
-            (-p0.x + p2.x) * t +
-            (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * tt +
-            (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * ttt);
-
-        const y =
-          0.5 *
-          (2 * p1.y +
-            (-p0.y + p2.y) * t +
-            (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * tt +
-            (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * ttt);
-
-        const pressure1 = p1.pressure ?? DEFAULT_PRESSURE;
-        const pressure2 = p2.pressure ?? DEFAULT_PRESSURE;
-        const pressure = pressure1 + (pressure2 - pressure1) * t;
-
-        result.push({ x, y, pressure });
-      }
-    }
-  }
-
-  return result;
+  return interpolateStrokePointsCentripetal(points, { overlapCount });
 }
 
 /**

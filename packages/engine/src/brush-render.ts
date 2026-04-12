@@ -1,4 +1,5 @@
 import { calculateRadius, drawVariableWidthPath } from "./draw";
+import { interpolateStrokePointsCentripetal } from "./stroke-interpolation";
 import type {
   BrushDynamics,
   BrushRenderState,
@@ -14,8 +15,6 @@ const DEFAULT_BRUSH_RENDER_STATE: BrushRenderState = {
   seed: 0,
   stampCount: 0,
 };
-const DEFAULT_PRESSURE = 0.5;
-const MIN_INTERPOLATION_DISTANCE = 2;
 
 // ============================================================
 // PRNG ユーティリティ
@@ -92,74 +91,17 @@ export function renderBrushStroke(
 
 /**
  * スタンプ用の補間。
- * chunk 境界で future 点の有無に依存しないよう、p3 は常に (p2 + (p2 - p1)) で外挿する。
- * これにより incremental / replay で同一入力列に対して同一補間結果になる。
+ * ストローク末尾だけ future 点の有無に依存しないよう、tail のみ p3 を外挿する。
+ * 途中セグメントは実際の future 点を使うことで、曲率を滑らかに分配する。
  */
 function interpolateStampStrokePoints(
   points: readonly StrokePoint[],
   overlapCount = 0,
 ): StrokePoint[] {
-  if (points.length < 2) {
-    return points.map((p) => ({ ...p }));
-  }
-
-  const skipSegments = Math.max(0, overlapCount - 1);
-  const result: StrokePoint[] = [];
-
-  for (let i = 0; i < points.length; i++) {
-    const p0 = points[Math.max(0, i - 1)];
-    const p1 = points[i];
-    const p2 = points[Math.min(points.length - 1, i + 1)];
-    const p3: StrokePoint = {
-      x: p2.x + (p2.x - p1.x),
-      y: p2.y + (p2.y - p1.y),
-      pressure:
-        (p2.pressure ?? DEFAULT_PRESSURE) +
-        ((p2.pressure ?? DEFAULT_PRESSURE) - (p1.pressure ?? DEFAULT_PRESSURE)),
-    };
-
-    if (i >= skipSegments) {
-      result.push({ x: p1.x, y: p1.y, pressure: p1.pressure });
-    }
-
-    if (i < points.length - 1 && i >= skipSegments) {
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const segments = Math.max(
-        1,
-        Math.ceil(dist / MIN_INTERPOLATION_DISTANCE),
-      );
-
-      for (let j = 1; j < segments; j++) {
-        const t = j / segments;
-        const tt = t * t;
-        const ttt = tt * t;
-
-        const x =
-          0.5 *
-          (2 * p1.x +
-            (-p0.x + p2.x) * t +
-            (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * tt +
-            (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * ttt);
-
-        const y =
-          0.5 *
-          (2 * p1.y +
-            (-p0.y + p2.y) * t +
-            (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * tt +
-            (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * ttt);
-
-        const pressure1 = p1.pressure ?? DEFAULT_PRESSURE;
-        const pressure2 = p2.pressure ?? DEFAULT_PRESSURE;
-        const pressure = pressure1 + (pressure2 - pressure1) * t;
-
-        result.push({ x, y, pressure });
-      }
-    }
-  }
-
-  return result;
+  return interpolateStrokePointsCentripetal(points, {
+    overlapCount,
+    futureIndependentTail: true,
+  });
 }
 
 function renderStampBrushStroke(
