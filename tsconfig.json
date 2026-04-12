@@ -11,10 +11,5 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true
-  },
-  "references": [
-    { "path": "./packages/engine" },
-    { "path": "./packages/input" },
-    { "path": "./apps/web" }
-  ]
+  }
 }

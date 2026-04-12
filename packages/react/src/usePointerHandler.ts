@@ -19,9 +19,9 @@ export type ToolType =
 
 export interface UsePointerHandlerOptions {
   readonly transform: ViewTransform;
-  readonly onPan: (dx: number, dy: number) => void;
-  readonly onZoom: (scale: number, centerX: number, centerY: number) => void;
-  readonly onRotate: (
+  readonly onPan?: (dx: number, dy: number) => void;
+  readonly onZoom?: (scale: number, centerX: number, centerY: number) => void;
+  readonly onRotate?: (
     angleRad: number,
     centerX: number,
     centerY: number,
@@ -147,7 +147,7 @@ export function usePointerHandler(
           break;
         }
         case "scroll":
-          onPan(dx, dy);
+          onPan?.(dx, dy);
           break;
         case "rotate": {
           const prevAngle = Math.atan2(
@@ -159,12 +159,12 @@ export function usePointerHandler(
             currentX - centerX,
           );
           const deltaAngle = currentAngle - prevAngle;
-          onRotate(deltaAngle, centerX, centerY);
+          onRotate?.(deltaAngle, centerX, centerY);
           break;
         }
         case "zoom": {
           const scale = 1 - dy / 200;
-          onZoom(scale, centerX, centerY);
+          onZoom?.(scale, centerX, centerY);
           break;
         }
         case "offset": {
@@ -226,7 +226,7 @@ export function usePointerHandler(
   const onWheel = useCallback(
     (e: WheelEvent) => {
       const scale = e.deltaY > 0 ? 0.9 : 1.1;
-      onZoom(scale, e.offsetX, e.offsetY);
+      onZoom?.(scale, e.offsetX, e.offsetY);
     },
     [onZoom],
   );

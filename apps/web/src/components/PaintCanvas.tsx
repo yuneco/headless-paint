@@ -24,9 +24,9 @@ interface PaintCanvasProps {
   pendingOverlay?: PendingOverlay;
   layerTransformPreview?: LayerTransformPreview;
   tool: ToolType;
-  onPan: (dx: number, dy: number) => void;
-  onZoom: (scale: number, centerX: number, centerY: number) => void;
-  onRotate: (angleRad: number, centerX: number, centerY: number) => void;
+  onPan?: (dx: number, dy: number) => void;
+  onZoom?: (scale: number, centerX: number, centerY: number) => void;
+  onRotate?: (angleRad: number, centerX: number, centerY: number) => void;
   onStrokeStart?: (point: InputPoint) => void;
   onStrokeMove?: (point: InputPoint) => void;
   onStrokeEnd?: () => void;

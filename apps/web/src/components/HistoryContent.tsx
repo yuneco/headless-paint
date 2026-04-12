@@ -16,7 +16,7 @@ function getCommandLabel(
     const name = layerIdToName(command.layerId);
     switch (command.type) {
       case "stroke":
-        return command.compositeOperation === "destination-out"
+        return command.style.compositeOperation === "destination-out"
           ? `${name} Eraser`
           : `${name} Stroke`;
       case "clear":

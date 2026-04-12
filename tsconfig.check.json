@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@headless-paint/engine": ["./packages/engine/src/index.ts"],
+      "@headless-paint/input": ["./packages/input/src/index.ts"],
+      "@headless-paint/stroke": ["./packages/stroke/src/index.ts"],
+      "@headless-paint/core": ["./packages/core/src/index.ts"],
+      "@headless-paint/react": ["./packages/react/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*",
+    "apps/*/src/**/*"
+  ],
+  "exclude": [
+    "**/dist/**",
+    "**/node_modules/**"
+  ]
+}
