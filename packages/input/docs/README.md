@@ -2,10 +2,13 @@
 
 ポインター入力の処理とビュー変換を行うパッケージです。
 
+このドキュメントは workspace 内部パッケージ `@headless-paint/input` に対応する。
+外部アプリケーションから利用する場合は `@yuneco/headless-paint` をインストールし、`@yuneco/headless-paint/core` から同等の API を import する。
+
 ## インストール
 
 ```bash
-pnpm add @headless-paint/input
+pnpm add @yuneco/headless-paint
 ```
 
 ## 基本的な使い方
@@ -36,7 +39,7 @@ import {
   processGestureEvent,
   DEFAULT_GESTURE_CONFIG,
   computeSimilarityTransform,
-} from "@headless-paint/input";
+} from "@yuneco/headless-paint/core";
 
 // ビュー変換を作成
 let transform = createViewTransform();
@@ -184,8 +187,8 @@ for (const event of events) {
 アプリ層で `ctx.scale(dpr, dpr)` を適用することで、`offsetX/Y` をそのまま Screen Space として使用できます。描画時のビュー変換には `applyDpr` で DPR スケーリングを適用してください。
 
 ```typescript
-import { applyDpr } from "@headless-paint/input";
-import { renderLayers } from "@headless-paint/engine";
+import { applyDpr } from "@yuneco/headless-paint/core";
+import { renderLayers } from "@yuneco/headless-paint/core";
 
 const dpr = window.devicePixelRatio;
 canvas.width = logicalWidth * dpr;

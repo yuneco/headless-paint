@@ -100,7 +100,7 @@ function compileExpand(config: ExpandConfig): CompiledExpand
 
 **使用例**:
 ```typescript
-import { compileExpand } from "@headless-paint/engine";
+import { compileExpand } from "@yuneco/headless-paint/core";
 
 // 単一レベル: 6分割の回転対称
 const compiled = compileExpand({
@@ -155,7 +155,7 @@ function compileLocalTransforms(mode: ExpandMode, divisions: number): mat3[]
 
 **使用例**:
 ```typescript
-import { compileLocalTransforms } from "@headless-paint/engine";
+import { compileLocalTransforms } from "@yuneco/headless-paint/core";
 
 // radial 6分割のローカル行列
 const matrices = compileLocalTransforms("radial", 6);

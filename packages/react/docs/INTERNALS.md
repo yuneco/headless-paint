@@ -143,6 +143,6 @@ setRenderVersion((n) => n + 1); // 副作用なし
 ## ビルド設定
 
 - Vite の ES モジュールライブラリビルド
-- external: `react`, `react/jsx-runtime`, `@headless-paint/engine`, `@headless-paint/input`, `@headless-paint/stroke`
+- external: `react`, `react/jsx-runtime`, `@headless-paint/core`
 - `vite-plugin-dts` で型定義を生成
-- peerDependencies: react ^18.0.0 || ^19.0.0, headless-paint の3パッケージ
+- peerDependencies: react ^18.0.0 || ^19.0.0, `@headless-paint/core`

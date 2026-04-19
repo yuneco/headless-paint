@@ -198,7 +198,7 @@ function decomposeTransform(
 
 **使用例**:
 ```typescript
-import { decomposeTransform } from "@headless-paint/input";
+import { decomposeTransform } from "@yuneco/headless-paint/core";
 
 const components = decomposeTransform(transform);
 
@@ -248,7 +248,7 @@ function fitToView(
 
 **使用例**:
 ```typescript
-import { fitToView } from "@headless-paint/input";
+import { fitToView } from "@yuneco/headless-paint/core";
 
 // 1024x768 のレイヤーを 800x600 のビューポートにフィット
 const transform = fitToView(800, 600, 1024, 768);
@@ -289,8 +289,8 @@ function applyDpr(
 
 **使用例**:
 ```typescript
-import { applyDpr } from "@headless-paint/input";
-import { renderLayers } from "@headless-paint/engine";
+import { applyDpr } from "@yuneco/headless-paint/core";
+import { renderLayers } from "@yuneco/headless-paint/core";
 
 // Canvas の物理サイズを DPR に合わせる
 const dpr = window.devicePixelRatio;
@@ -344,7 +344,7 @@ ty = S1y - b·L1x - a·L1y
 
 **使用例**:
 ```typescript
-import { computeSimilarityTransform, screenToLayer } from "@headless-paint/input";
+import { computeSimilarityTransform, screenToLayer } from "@yuneco/headless-paint/core";
 
 // ジェスチャー開始時: スクリーン座標からレイヤーアンカーを記録
 const layerP1 = screenToLayer(screenP1, currentTransform);

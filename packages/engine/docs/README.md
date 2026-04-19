@@ -2,10 +2,13 @@
 
 ヘッドレス環境で動作するCanvas2Dベースのペイントエンジンです。
 
+このドキュメントは workspace 内部パッケージ `@headless-paint/engine` に対応する。
+外部アプリケーションから利用する場合は `@yuneco/headless-paint` をインストールし、`@yuneco/headless-paint/core` から同等の API を import する。
+
 ## インストール
 
 ```bash
-pnpm add @headless-paint/engine
+pnpm add @yuneco/headless-paint
 ```
 
 ## 基本的な使い方
@@ -18,7 +21,7 @@ import {
   drawPath,
   getPixel,
   setPixel,
-} from "@headless-paint/engine";
+} from "@yuneco/headless-paint/core";
 
 // レイヤーを作成
 const layer = createLayer(640, 480, { name: "MyLayer" });

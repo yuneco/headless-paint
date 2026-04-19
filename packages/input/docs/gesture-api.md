@@ -35,7 +35,7 @@ function createGestureState(): GestureState;
 **使用例**:
 
 ```typescript
-import { createGestureState } from "@headless-paint/input";
+import { createGestureState } from "@yuneco/headless-paint/core";
 
 const state = createGestureState();
 // { phase: "idle" }
@@ -81,7 +81,7 @@ import {
   processGestureEvent,
   DEFAULT_GESTURE_CONFIG,
   createViewTransform,
-} from "@headless-paint/input";
+} from "@yuneco/headless-paint/core";
 
 let state = createGestureState();
 const config = DEFAULT_GESTURE_CONFIG;

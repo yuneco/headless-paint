@@ -25,7 +25,7 @@ function getContentBounds(layer: Layer): ContentBounds | null
 
 **使用例**:
 ```typescript
-import { getContentBounds } from "@headless-paint/engine";
+import { getContentBounds } from "@yuneco/headless-paint/core";
 
 const bounds = getContentBounds(layer);
 if (!bounds) {
@@ -65,7 +65,7 @@ function transformLayer(
 
 **使用例**:
 ```typescript
-import { transformLayer } from "@headless-paint/engine";
+import { transformLayer } from "@yuneco/headless-paint/core";
 import { mat3 } from "gl-matrix";
 
 // 100px 右、50px 上に移動

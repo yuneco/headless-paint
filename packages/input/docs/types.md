@@ -38,7 +38,7 @@ type ViewTransform = mat3;  // gl-matrix の mat3 型
 
 **使用例**:
 ```typescript
-import { createViewTransform, pan, zoom } from "@headless-paint/input";
+import { createViewTransform, pan, zoom } from "@yuneco/headless-paint/core";
 
 let transform = createViewTransform();  // 単位行列
 transform = pan(transform, 100, 50);
@@ -136,7 +136,7 @@ interface TransformComponents {
 
 **使用例**:
 ```typescript
-import { decomposeTransform } from "@headless-paint/input";
+import { decomposeTransform } from "@yuneco/headless-paint/core";
 
 const components = decomposeTransform(transform);
 
@@ -412,7 +412,7 @@ interface GestureConfig {
 
 **使用例**:
 ```typescript
-import { DEFAULT_GESTURE_CONFIG } from "@headless-paint/input";
+import { DEFAULT_GESTURE_CONFIG } from "@yuneco/headless-paint/core";
 
 // デフォルト設定を使用
 const config = DEFAULT_GESTURE_CONFIG;

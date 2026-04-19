@@ -529,8 +529,8 @@ import {
   canUndo,
   canRedo,
   rebuildLayerFromHistory,
-} from "@headless-paint/stroke";
-import { createLayer, clearLayer } from "@headless-paint/engine";
+} from "@yuneco/headless-paint/core";
+import { createLayer, clearLayer } from "@yuneco/headless-paint/core";
 
 // 初期化
 const layer = createLayer(1920, 1080);

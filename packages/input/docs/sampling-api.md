@@ -58,7 +58,7 @@ function createSamplingState(): SamplingState
 
 **使用例**:
 ```typescript
-import { createSamplingState } from "@headless-paint/input";
+import { createSamplingState } from "@yuneco/headless-paint/core";
 
 // ストローク開始時に初期状態を作成
 let samplingState = createSamplingState();
@@ -71,8 +71,8 @@ let samplingState = createSamplingState();
 ### 基本的な使用パターン
 
 ```typescript
-import { shouldAcceptPoint, screenToLayer } from "@headless-paint/input";
-import type { SamplingState, SamplingConfig } from "@headless-paint/input";
+import { shouldAcceptPoint, screenToLayer } from "@yuneco/headless-paint/core";
+import type { SamplingState, SamplingConfig } from "@yuneco/headless-paint/core";
 
 const config: SamplingConfig = { minDistance: 2 };
 let samplingState: SamplingState = { lastPoint: null, lastTimestamp: null };

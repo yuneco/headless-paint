@@ -5,20 +5,20 @@
 このパッケージは以下の型を他のパッケージからインポートする：
 
 ```typescript
-// @headless-paint/input から
-import type { InputPoint, FilterPipelineConfig, FilterOutput } from "@headless-paint/input";
+// @yuneco/headless-paint/core から
+import type { InputPoint, FilterPipelineConfig, FilterOutput } from "@yuneco/headless-paint/core";
 
-// @headless-paint/engine から
-import type { ExpandConfig, Color, StrokePoint, PressureCurve, StrokeStyle, BrushConfig } from "@headless-paint/engine";
+// @yuneco/headless-paint/core から
+import type { ExpandConfig, Color, StrokePoint, PressureCurve, StrokeStyle, BrushConfig } from "@yuneco/headless-paint/core";
 // re-export
-export type { StrokeStyle } from "@headless-paint/engine";
+export type { StrokeStyle } from "@yuneco/headless-paint/core";
 ```
 
 ---
 
 ## StrokeStyle
 
-`@headless-paint/engine` からの re-export。詳細は [engine/docs/types.md](../../engine/docs/types.md#strokestyle) を参照。
+`@yuneco/headless-paint/core` からの re-export。詳細は [engine/docs/types.md](../../engine/docs/types.md#strokestyle) を参照。
 
 ```typescript
 interface StrokeStyle {
@@ -55,7 +55,7 @@ interface StrokeSessionState {
 | `currentPending` | `readonly InputPoint[]` | 現在の未確定点 |
 | `lastRenderedCommitIndex` | `number` | 前回描画した確定点のインデックス |
 | `style` | `StrokeStyle` | 描画スタイル |
-| `expand` | `ExpandConfig` | 展開設定（@headless-paint/engine から） |
+| `expand` | `ExpandConfig` | 展開設定（@yuneco/headless-paint/core から） |
 
 ---
 

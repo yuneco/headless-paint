@@ -60,7 +60,7 @@ function renderBrushStroke(
 
 **使用例**:
 ```typescript
-import { renderBrushStroke } from "@headless-paint/engine";
+import { renderBrushStroke } from "@yuneco/headless-paint/core";
 
 // round-pen（従来互換）
 const state = renderBrushStroke(layer, points, style, overlapCount);
@@ -157,7 +157,7 @@ interface BrushTipRegistry {
 **パイプラインへの受け渡し**: `BrushTipRegistry` は `useStrokeSession` / `usePaintEngine` の config に `registry` として渡す。これにより、ストローク開始時とリプレイ（Undo/Redo）時に image tip の解決が可能になる。
 
 ```typescript
-import { createBrushTipRegistry } from "@headless-paint/engine";
+import { createBrushTipRegistry } from "@yuneco/headless-paint/core";
 
 const registry = createBrushTipRegistry();
 
@@ -221,10 +221,10 @@ const sizeVariation = rng() * sizeJitter;
 
 ## プリセットブラシ
 
-エクスポートされた標準ブラシプリセット定数。`@headless-paint/engine` および `@headless-paint/react` から import できる。
+エクスポートされた標準ブラシプリセット定数。`@yuneco/headless-paint/core` および `@yuneco/headless-paint/react` から import できる。
 
 ```typescript
-import { ROUND_PEN, AIRBRUSH, PENCIL, MARKER } from "@headless-paint/engine";
+import { ROUND_PEN, AIRBRUSH, PENCIL, MARKER } from "@yuneco/headless-paint/core";
 ```
 
 ```typescript

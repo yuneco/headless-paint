@@ -2,10 +2,13 @@
 
 ストロークセッション管理と履歴管理（Undo/Redo）を行うパッケージ。
 
+このドキュメントは workspace 内部パッケージ `@headless-paint/stroke` に対応する。
+外部アプリケーションから利用する場合は `@yuneco/headless-paint` をインストールし、`@yuneco/headless-paint/core` から同等の API を import する。
+
 ## インストール
 
 ```bash
-pnpm add @headless-paint/stroke
+pnpm add @yuneco/headless-paint
 ```
 
 ## 概要
@@ -25,12 +28,12 @@ pnpm add @headless-paint/stroke
 - 入力デバイス処理（→ input担当）
 - 複数ストロークの同時管理（1ストローク原則）
 
-### パッケージ依存関係
+### 実装上のパッケージ依存関係
 
 ```
 stroke
-  ├── @headless-paint/input  (FilterPipelineConfig, InputPoint)
-  └── @headless-paint/engine (ExpandConfig, Layer, Color)
+  ├── @headless-paint/input   (FilterPipelineConfig, InputPoint)
+  └── @headless-paint/engine  (ExpandConfig, Layer, Color)
 ```
 
 ## 基本使用例
@@ -47,8 +50,8 @@ import {
   rebuildLayerFromHistory,
   createAddLayerCommand,
   isStructuralCommand,
-} from "@headless-paint/stroke";
-import { createLayer } from "@headless-paint/engine";
+} from "@yuneco/headless-paint/core";
+import { createLayer } from "@yuneco/headless-paint/core";
 
 // 初期化（全コマンドに layerId が付く）
 const layer = createLayer(1920, 1080);
@@ -158,7 +161,7 @@ if (isCustomCommand(cmd)) {
 }
 ```
 
-React での統合例（`usePaintEngine` + `CustomCommandHandler`）は [@headless-paint/react の README](../../react/docs/README.md#カスタムコマンドの使い方) を参照。
+React での統合例（`usePaintEngine` + `CustomCommandHandler`）は [react/docs/README.md](../../react/docs/README.md#カスタムコマンドの使い方) を参照。
 
 ## アーキテクチャ
 

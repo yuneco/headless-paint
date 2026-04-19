@@ -38,10 +38,11 @@
 
 ## RenderUpdate
 
-描画更新のデータ構造。`@headless-paint/stroke` パッケージで定義・エクスポートされている（engine パッケージには含まれない）。
+描画更新のデータ構造。外部利用では `@yuneco/headless-paint/core` から import できる。
+実装上は stroke パッケージで定義・エクスポートされており、engine パッケージには含まれない。
 
 ```typescript
-// @headless-paint/stroke で定義
+// stroke で定義され、公開 API では @yuneco/headless-paint/core から利用できる
 interface RenderUpdate {
   readonly newlyCommitted: readonly StrokePoint[];  // 今回新たに確定した点（pressure含む）
   readonly currentPending: readonly StrokePoint[];  // 現在のpending全体（pressure含む）
@@ -208,8 +209,8 @@ import {
   appendToCommittedLayer,
   renderPendingLayer,
   composeLayers,
-} from "@headless-paint/engine";
-import type { BrushRenderState } from "@headless-paint/engine";
+} from "@yuneco/headless-paint/core";
+import type { BrushRenderState } from "@yuneco/headless-paint/core";
 
 // レイヤー作成
 const committedLayer = createLayer(width, height, { name: "Committed" });

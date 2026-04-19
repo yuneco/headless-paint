@@ -4,13 +4,14 @@
 
 ## transform（mat3）
 
-`@headless-paint/input` パッケージで `ViewTransform` として定義されるビュー変換行列。
+外部利用では `@yuneco/headless-paint/core` から `ViewTransform` として import できるビュー変換行列。
+実装上は input パッケージで定義される。
 パン・ズーム・回転情報を含む 3x3 行列（gl-matrix の `mat3` 形式）。
 
 ```typescript
 import type { mat3 } from "gl-matrix";
 // or
-import type { ViewTransform } from "@headless-paint/input";  // ViewTransform = mat3
+import type { ViewTransform } from "@yuneco/headless-paint/core";  // ViewTransform = mat3
 ```
 
 ---
@@ -42,8 +43,8 @@ function renderLayerWithTransform(
 
 **使用例**:
 ```typescript
-import { createViewTransform, zoom } from "@headless-paint/input";
-import { renderLayerWithTransform } from "@headless-paint/engine";
+import { createViewTransform, zoom } from "@yuneco/headless-paint/core";
+import { renderLayerWithTransform } from "@yuneco/headless-paint/core";
 
 const canvas = document.querySelector("canvas");
 const ctx = canvas.getContext("2d");
@@ -112,8 +113,8 @@ function renderLayers(
 
 **使用例**:
 ```typescript
-import { createLayer, DEFAULT_BACKGROUND_COLOR } from "@headless-paint/engine";
-import { createViewTransform } from "@headless-paint/input";
+import { createLayer, DEFAULT_BACKGROUND_COLOR } from "@yuneco/headless-paint/core";
+import { createViewTransform } from "@yuneco/headless-paint/core";
 
 const drawing = createLayer(1920, 1080, { name: "Drawing" });
 const layers = [drawing];
@@ -137,10 +138,10 @@ renderLayers(layers, ctx, transform);
 
 `renderLayerWithTransform` は内部で `ctx.setTransform()` を使用するため、呼び出し前に設定した `ctx.scale(dpr, dpr)` がリセットされます。そのため、DPR スケーリングをビュー変換行列に含める必要があります。
 
-`@headless-paint/input` の `applyDpr` ユーティリティを使うと簡潔に対応できます。
+外部利用では `@yuneco/headless-paint/core` から import できる `applyDpr` ユーティリティを使うと簡潔に対応できます。
 
 ```typescript
-import { applyDpr } from "@headless-paint/input";
+import { applyDpr } from "@yuneco/headless-paint/core";
 
 // 1. キャンバスのDPR対応
 const dpr = window.devicePixelRatio;

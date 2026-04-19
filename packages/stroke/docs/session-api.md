@@ -39,7 +39,7 @@ function startStrokeSession(
 |------|-----|------|------|
 | `filterOutput` | `FilterOutput` | ○ | フィルタパイプラインの出力（最初の点） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル |
-| `expand` | `ExpandConfig` | ○ | 展開設定（@headless-paint/engine から） |
+| `expand` | `ExpandConfig` | ○ | 展開設定（@yuneco/headless-paint/core から） |
 
 **戻り値**: `StrokeSessionResult`
 - `state`: 次の呼び出しに渡すセッション状態
@@ -47,8 +47,8 @@ function startStrokeSession(
 
 **使用例**:
 ```typescript
-import { startStrokeSession } from "@headless-paint/stroke";
-import { processPoint, createFilterPipelineState } from "@headless-paint/input";
+import { startStrokeSession } from "@yuneco/headless-paint/core";
+import { processPoint, createFilterPipelineState } from "@yuneco/headless-paint/core";
 
 function onPointerDown(e: PointerEvent) {
   // フィルタパイプラインで入力を処理
@@ -199,7 +199,7 @@ function createTransformLayerCommand(
 
 **使用例**:
 ```typescript
-import { createTransformLayerCommand } from "@headless-paint/stroke";
+import { createTransformLayerCommand } from "@yuneco/headless-paint/core";
 import { mat3 } from "gl-matrix";
 
 const m = mat3.fromTranslation(mat3.create(), [100, -50]);
@@ -216,19 +216,19 @@ import {
   startStrokeSession,
   addPointToSession,
   endStrokeSession,
-} from "@headless-paint/stroke";
+} from "@yuneco/headless-paint/core";
 import {
   compileFilterPipeline,
   createFilterPipelineState,
   processPoint,
   finalizePipeline,
-} from "@headless-paint/input";
+} from "@yuneco/headless-paint/core";
 import {
   compileExpand,
   appendToCommittedLayer,
   renderPendingLayer,
   composeLayers,
-} from "@headless-paint/engine";
+} from "@yuneco/headless-paint/core";
 
 // 設定のコンパイル（設定変更時のみ）
 const compiledFilter = compileFilterPipeline(filterConfig);

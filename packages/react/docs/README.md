@@ -3,6 +3,15 @@
 headless-paint の描画エンジンを React アプリケーションに統合するための hooks パッケージ。
 UI コンポーネントは含まず、状態管理とロジックを hooks として提供する。Canvas のレンダリング方法やUIデザインはアプリケーション側で自由に決められる。
 
+このドキュメントは workspace 内部パッケージ `@headless-paint/react` に対応する。
+外部アプリケーションから利用する場合は `@yuneco/headless-paint` をインストールし、`@yuneco/headless-paint/react` から import する。
+
+## インストール
+
+```bash
+pnpm add @yuneco/headless-paint
+```
+
 ## hooks の選び方
 
 このパッケージは、アプリケーションの複雑さに応じて組み合わせ可能な hooks を提供する。
@@ -890,7 +899,7 @@ const documentSnapshot = await exportPaintDocument({
 ## 再エクスポート型
 
 利用頻度の高い型をこのパッケージから再エクスポートしている。
-アプリケーション側で `@headless-paint/engine` 等を直接 import する必要を減らす。
+アプリケーション側で `@yuneco/headless-paint/core` を別途直接 import する必要を減らす。
 
 | 型 | 元パッケージ | 説明 |
 |----|-------------|------|

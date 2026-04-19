@@ -148,7 +148,7 @@ import {
   createPatternTile,
   renderPatternPreview,
   renderLayers,
-} from "@headless-paint/engine";
+} from "@yuneco/headless-paint/core";
 
 // 1. UI背景
 ctx.fillStyle = "#f0f0f0";

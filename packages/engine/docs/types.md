@@ -593,7 +593,7 @@ interface LayerTransformPreview {
 
 **使用例**:
 ```typescript
-import { renderLayers } from "@headless-paint/engine";
+import { renderLayers } from "@yuneco/headless-paint/core";
 
 renderLayers(layers, ctx, transform, {
   layerTransformPreview: { layerId: "layer_1", matrix: translationMatrix },

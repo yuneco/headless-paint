@@ -65,7 +65,7 @@ function compileFilterPipeline(config: FilterPipelineConfig): CompiledFilterPipe
 
 **使用例**:
 ```typescript
-import { compileFilterPipeline } from "@headless-paint/input";
+import { compileFilterPipeline } from "@yuneco/headless-paint/core";
 
 // スムージングを含むパイプライン
 const compiled = compileFilterPipeline({
@@ -206,7 +206,7 @@ import {
   createFilterPipelineState,
   processPoint,
   finalizePipeline,
-} from "@headless-paint/input";
+} from "@yuneco/headless-paint/core";
 
 // パイプラインをコンパイル（設定変更時のみ）
 const compiled = useMemo(() => {
