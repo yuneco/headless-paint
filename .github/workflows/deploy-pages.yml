@@ -31,7 +31,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @headless-paint/web build
+      - run: pnpm --filter "@headless-paint/web..." build
 
       - uses: actions/configure-pages@v5
 
