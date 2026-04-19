@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "/headless-paint/" : "/",
   plugins: [react()],
   resolve: {
     alias: {
@@ -11,4 +12,4 @@ export default defineConfig({
       "@headless-paint/stroke": resolve(__dirname, "../../packages/stroke/src/index.ts"),
     },
   },
-});
+}));
