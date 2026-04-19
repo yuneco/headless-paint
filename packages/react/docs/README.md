@@ -412,7 +412,7 @@ interface UseStrokeSessionResult {
 }
 ```
 
-`stamp` ブラシは live 描画中のみ `pendingLayer` 側でストローク全体を再描画し、ストローク終了時に `committed layer` へ確定する。高速カーブで future context を失った補間結果を早期確定しないための挙動で、外部 API の使い方は変わらない。
+描画ブラシは live 描画中のみ `pendingLayer` 側でストローク全体を再描画し、ストローク終了時に `committed layer` へ確定する。高速カーブや急コーナーで future context を失った補間結果を早期確定しないための挙動で、外部 API の使い方は変わらない。
 
 ### 使い方
 

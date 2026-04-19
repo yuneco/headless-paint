@@ -3,7 +3,7 @@
 ## Summary
 
 - `uniform Catmull-Rom` を `centripetal Catmull-Rom` に置き換える
-- `stamp` ブラシの live 描画は `pending` 全再描画に寄せ、stroke end 時だけ `committed` に flush する
+- 描画ブラシの live 描画は `pending` 全再描画に寄せ、stroke end 時だけ `committed` に flush する
 - `stamp` の補間は途中セグメントで実際の future 点を使い、tail のみ future-independent にする
 
 ## Doc-First Phases
@@ -11,7 +11,7 @@
 ### Phase 1: API設計・ドキュメント作成
 
 - 公開 API / 型 / 保存形式は変更しない
-- `packages/react/docs/README.md` に `stamp` ブラシの live preview 挙動を追記する
+- `packages/react/docs/README.md` に描画ブラシの live preview 挙動を追記する
 
 ### Phase 2: 利用イメージレビュー
 
@@ -22,12 +22,12 @@
 
 - `packages/engine/src/stroke-interpolation.ts` を追加し、`draw.ts` と `brush-render.ts` から共通利用する
 - `brush-render.ts` の `stamp` 補間は tail のみ future-independent とし、途中セグメントでは実 future 点を使う
-- `useStrokeSession.ts` で `stamp` の live 中 `appendToCommittedLayer()` を止め、`pendingLayer` に `allCommitted + currentPending` を再描画する
-- stroke end 時に `stamp` のみ `allCommitted` を `committedLayer` へ 1 回だけ反映する
+- `useStrokeSession.ts` で描画ブラシの live 中 `appendToCommittedLayer()` を止め、`pendingLayer` に `allCommitted + currentPending` を再描画する
+- stroke end 時にのみ `allCommitted` を `committedLayer` へ 1 回だけ反映する
 
 ### Phase 4: アーキテクトレビュー
 
-- `stamp` の品質改善が `useStrokeSession` 内で閉じていること
+- 描画ブラシの品質改善が `useStrokeSession` 内で閉じていること
 - replay / rebuild の determinism を壊さないこと
 - `stamp` では「曲線の chunk 分割 incremental 描画と replay の最終ピクセル一致」を前提にしないこと
 - docs と実装が一致していること

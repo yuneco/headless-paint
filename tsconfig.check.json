@@ -11,12 +11,6 @@
       "@headless-paint/react": ["./packages/react/src/index.ts"]
     }
   },
-  "include": [
-    "packages/*/src/**/*",
-    "apps/*/src/**/*"
-  ],
-  "exclude": [
-    "**/dist/**",
-    "**/node_modules/**"
-  ]
+  "include": ["packages/*/src/**/*", "apps/*/src/**/*"],
+  "exclude": ["**/dist/**", "**/node_modules/**"]
 }

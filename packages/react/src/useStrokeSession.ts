@@ -79,16 +79,19 @@ interface SessionInternal {
   brushSeed: number;
 }
 
-function shouldDeferCommittedRendering(style: StrokeStyle): boolean {
-  return style.brush.type === "stamp";
-}
-
 function toStrokePoints(points: readonly InputPoint[]) {
   return points.map((point) => ({
     x: point.x,
     y: point.y,
     pressure: point.pressure,
   }));
+}
+
+function buildLiveStrokePoints(session: StrokeSessionState) {
+  return [
+    ...toStrokePoints(session.allCommitted),
+    ...toStrokePoints(session.currentPending),
+  ];
 }
 
 /**
@@ -200,8 +203,6 @@ export function useStrokeSession(
       const { brushState: initialBrushState, brushSeed } =
         createInitialBrushState(style, registryRef.current);
 
-      let brushState = initialBrushState;
-
       sessionRef.current = {
         strokeSession: strokeResult.state,
         filterState: filterResult.state,
@@ -209,40 +210,17 @@ export function useStrokeSession(
         compiledExpand: compiled,
         compiledFilterPipeline: activePipeline,
         layerId: currentLayer.id,
-        brushState,
+        brushState: initialBrushState,
         brushSeed,
       };
 
-      const pendingOnly = pendingOnlyRef.current;
-      const deferCommittedRendering =
-        !pendingOnly && shouldDeferCommittedRendering(style);
       pendingLayer.meta.compositeOperation = style.compositeOperation;
-
-      if (!pendingOnly && !deferCommittedRendering) {
-        brushState = appendToCommittedLayer(
-          currentLayer,
-          strokeResult.renderUpdate.newlyCommitted,
-          style,
-          compiled,
-          0,
-          brushState,
-        );
-        sessionRef.current.brushState = brushState;
-      }
-
-      const pendingPoints =
-        pendingOnly || deferCommittedRendering
-          ? [
-              ...toStrokePoints(strokeResult.state.allCommitted),
-              ...toStrokePoints(strokeResult.state.currentPending),
-            ]
-          : strokeResult.renderUpdate.currentPending;
       renderPendingLayer(
         pendingLayer,
-        pendingPoints,
+        buildLiveStrokePoints(strokeResult.state),
         style,
         compiled,
-        deferCommittedRendering ? initialBrushState : brushState,
+        initialBrushState,
       );
 
       strokePointsRef.current = [inputPoint];
@@ -282,35 +260,9 @@ export function useStrokeSession(
       sessionRef.current.filterState = filterResult.state;
       sessionRef.current.inputPoints.push(inputPoint);
       strokePointsRef.current = [...strokePointsRef.current, inputPoint];
-
-      const deferCommittedRendering = shouldDeferCommittedRendering(style);
-
-      if (!pendingOnlyRef.current && !deferCommittedRendering) {
-        const { newlyCommitted, committedOverlapCount } =
-          strokeResult.renderUpdate;
-        if (newlyCommitted.length > committedOverlapCount) {
-          const brushState = appendToCommittedLayer(
-            currentLayer,
-            newlyCommitted,
-            style,
-            sessionRef.current.compiledExpand,
-            committedOverlapCount,
-            sessionRef.current.brushState,
-          );
-          sessionRef.current.brushState = brushState;
-        }
-      }
-
-      const pendingPoints =
-        pendingOnlyRef.current || deferCommittedRendering
-          ? [
-              ...toStrokePoints(strokeResult.state.allCommitted),
-              ...toStrokePoints(strokeResult.state.currentPending),
-            ]
-          : strokeResult.renderUpdate.currentPending;
       renderPendingLayer(
         pendingLayer,
-        pendingPoints,
+        buildLiveStrokePoints(strokeResult.state),
         style,
         sessionRef.current.compiledExpand,
         sessionRef.current.brushState,
@@ -358,31 +310,16 @@ export function useStrokeSession(
     }
 
     const style = strokeStyleRef.current;
-    const deferCommittedRendering = shouldDeferCommittedRendering(style);
     const finalOutput = finalizePipeline(filterState, sessionFilter);
     const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
-
-    const { newlyCommitted, committedOverlapCount } =
-      finalStrokeResult.renderUpdate;
-    if (deferCommittedRendering) {
-      appendToCommittedLayer(
-        currentLayer,
-        toStrokePoints(finalStrokeResult.state.allCommitted),
-        style,
-        sessionExpand,
-        0,
-        sessionRef.current.brushState,
-      );
-    } else if (newlyCommitted.length > committedOverlapCount) {
-      appendToCommittedLayer(
-        currentLayer,
-        newlyCommitted,
-        style,
-        sessionExpand,
-        committedOverlapCount,
-        sessionRef.current.brushState,
-      );
-    }
+    appendToCommittedLayer(
+      currentLayer,
+      toStrokePoints(finalStrokeResult.state.allCommitted),
+      style,
+      sessionExpand,
+      0,
+      sessionRef.current.brushState,
+    );
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
 
