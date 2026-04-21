@@ -200,8 +200,18 @@ export function PaintCanvas({
       pointerHandlers.onWheel(e);
     };
 
+    // Apple Pencil の Scribble による pointerdown の飲み込みを防ぐ
+    // React の onTouchStart は passive なので preventDefault() が効かず、native listener で登録する
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+    };
+
     canvas.addEventListener("wheel", handleWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", handleWheel);
+    canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+    return () => {
+      canvas.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("touchstart", handleTouchStart);
+    };
   }, [pointerHandlers]);
 
   return (
