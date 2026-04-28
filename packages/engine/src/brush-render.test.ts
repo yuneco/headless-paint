@@ -247,6 +247,47 @@ describe("renderBrushStroke", () => {
       expect(hasNonZero).toBe(true);
     });
 
+    it("1点だけのスタンプストロークでも開始点に描画する", () => {
+      const layer = createLayer(100, 100);
+      const style = makeStampStyle();
+      const state = makeInitialState(style);
+
+      const result = renderBrushStroke(
+        layer,
+        [{ x: 50, y: 50, pressure: 1 }],
+        style,
+        0,
+        state,
+      );
+
+      const pixel = layer.ctx.getImageData(50, 50, 1, 1).data;
+      expect(pixel[3]).toBeGreaterThan(0);
+      expect(result.stampCount).toBe(1);
+      expect(result.accumulatedDistance).toBe(0);
+    });
+
+    it("overlap 文脈だけの単一点では重複スタンプを打たない", () => {
+      const layer = createLayer(100, 100);
+      const style = makeStampStyle();
+      const state = {
+        ...makeInitialState(style),
+        accumulatedDistance: 10,
+        stampCount: 4,
+      };
+
+      const result = renderBrushStroke(
+        layer,
+        [{ x: 50, y: 50, pressure: 1 }],
+        style,
+        1,
+        state,
+      );
+
+      const pixel = layer.ctx.getImageData(50, 50, 1, 1).data;
+      expect(pixel[3]).toBe(0);
+      expect(result).toEqual(state);
+    });
+
     it("jitter パラメータが描画結果に影響する", () => {
       const points = makeLine(10, 100, 190, 100, 20);
 

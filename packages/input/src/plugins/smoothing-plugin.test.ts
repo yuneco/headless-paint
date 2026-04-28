@@ -116,6 +116,37 @@ describe("smoothingPlugin", () => {
       expect(committed.pressure).toBeGreaterThan(0);
       expect(committed.pressure).toBeLessThanOrEqual(1);
     });
+
+    it("should keep the first pending point at the raw contact position", () => {
+      const config: SmoothingConfig = { windowSize: 5 };
+      let state = smoothingPlugin.createState(config);
+
+      const result1 = smoothingPlugin.process(state, createPoint(10, 20, 0));
+      state = result1.state;
+      const result2 = smoothingPlugin.process(state, createPoint(40, 80, 1));
+
+      expect(result2.pending[0]).toMatchObject({ x: 10, y: 20 });
+    });
+
+    it("should not pin later points that share the first timestamp", () => {
+      const config: SmoothingConfig = { windowSize: 5 };
+      let state = smoothingPlugin.createState(config);
+
+      const points = [
+        createPoint(10, 20, 0),
+        createPoint(40, 80, 0),
+        createPoint(70, 100, 1),
+      ];
+
+      for (const point of points) {
+        const result = smoothingPlugin.process(state, point);
+        state = result.state;
+      }
+
+      const finalResult = smoothingPlugin.finalize(state);
+      expect(finalResult.committed[0]).toMatchObject({ x: 10, y: 20 });
+      expect(finalResult.committed[1]).not.toMatchObject({ x: 10, y: 20 });
+    });
   });
 
   describe("finalize", () => {

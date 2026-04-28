@@ -13,6 +13,7 @@ interface SmoothingState extends FilterState {
   readonly buffer: readonly InputPoint[];
   readonly windowSize: number;
   readonly hasCommitted: boolean;
+  readonly firstPoint: InputPoint | null;
 }
 
 /**
@@ -65,7 +66,12 @@ function smoothPointAtIndex(
   buffer: readonly InputPoint[],
   index: number,
   windowSize: number,
+  firstPoint: InputPoint | null,
 ): InputPoint {
+  if (firstPoint && buffer[index] === firstPoint) {
+    return firstPoint;
+  }
+
   const halfWindow = Math.floor(windowSize / 2);
   const start = Math.max(0, index - halfWindow);
   const end = Math.min(buffer.length, index + halfWindow + 1);
@@ -87,12 +93,13 @@ function calculatePendingPoints(
   buffer: readonly InputPoint[],
   windowSize: number,
   startIndex: number,
+  firstPoint: InputPoint | null,
 ): InputPoint[] {
   if (buffer.length === 0 || startIndex >= buffer.length) return [];
 
   const result: InputPoint[] = [];
   for (let index = startIndex; index < buffer.length; index++) {
-    result.push(smoothPointAtIndex(buffer, index, windowSize));
+    result.push(smoothPointAtIndex(buffer, index, windowSize, firstPoint));
   }
   return result;
 }
@@ -109,12 +116,14 @@ export const smoothingPlugin: FilterPlugin = {
       buffer: [],
       windowSize: smoothingConfig.windowSize,
       hasCommitted: false,
+      firstPoint: null,
     };
   },
 
   process(state: FilterState, point: InputPoint): FilterStepResult {
     const smoothingState = state as SmoothingState;
     let buffer = [...smoothingState.buffer, point];
+    const firstPoint = smoothingState.firstPoint ?? point;
     const committed: InputPoint[] = [];
     const halfWindow = Math.floor(smoothingState.windowSize / 2);
     let hasCommitted = smoothingState.hasCommitted;
@@ -135,7 +144,12 @@ export const smoothingPlugin: FilterPlugin = {
         // エッジ点は縮小ウィンドウで計算（finalize と同じ手法）
         for (let i = 0; i <= halfWindow; i++) {
           committed.push(
-            smoothPointAtIndex(window, i, smoothingState.windowSize),
+            smoothPointAtIndex(
+              window,
+              i,
+              smoothingState.windowSize,
+              firstPoint,
+            ),
           );
         }
       } else {
@@ -159,12 +173,14 @@ export const smoothingPlugin: FilterPlugin = {
         buffer,
         windowSize: smoothingState.windowSize,
         hasCommitted,
+        firstPoint,
       } as SmoothingState,
       committed,
       pending: calculatePendingPoints(
         buffer,
         smoothingState.windowSize,
         pendingStartIndex,
+        firstPoint,
       ),
     };
   },
@@ -180,6 +196,7 @@ export const smoothingPlugin: FilterPlugin = {
           buffer: [],
           windowSize: smoothingState.windowSize,
           hasCommitted: false,
+          firstPoint: null,
         },
         committed: [],
         pending: [],
@@ -199,7 +216,14 @@ export const smoothingPlugin: FilterPlugin = {
     const committed: InputPoint[] = [];
 
     for (let i = startIndex; i < buffer.length; i++) {
-      committed.push(smoothPointAtIndex(buffer, i, smoothingState.windowSize));
+      committed.push(
+        smoothPointAtIndex(
+          buffer,
+          i,
+          smoothingState.windowSize,
+          smoothingState.firstPoint,
+        ),
+      );
     }
 
     return {
@@ -207,6 +231,7 @@ export const smoothingPlugin: FilterPlugin = {
         buffer: [],
         windowSize: smoothingState.windowSize,
         hasCommitted: false,
+        firstPoint: null,
       } as SmoothingState,
       committed,
       pending: [],

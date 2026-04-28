@@ -115,14 +115,14 @@ function renderStampBrushStroke(
   const { dynamics } = brush;
   const spacingPx = style.lineWidth * dynamics.spacing;
 
-  if (spacingPx <= 0 || !state.tipCanvas || points.length < 2) {
+  if (spacingPx <= 0 || !state.tipCanvas || points.length === 0) {
     return state;
   }
 
   // round-pen と同じく overlapCount を渡す。
   // overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される。
   const interpolated = interpolateStampStrokePoints(points, overlapCount);
-  if (interpolated.length < 2) return state;
+  if (interpolated.length === 0) return state;
 
   const ctx = layer.ctx;
   let totalDistance = state.accumulatedDistance;
@@ -140,6 +140,15 @@ function renderStampBrushStroke(
       stampCount,
     );
     stampCount++;
+  }
+
+  if (interpolated.length < 2) {
+    return {
+      accumulatedDistance: totalDistance,
+      tipCanvas: state.tipCanvas,
+      seed: state.seed,
+      stampCount,
+    };
   }
 
   // 次のスタンプ配置距離を計算
