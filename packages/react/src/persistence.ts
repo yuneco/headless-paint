@@ -329,17 +329,20 @@ function cloneBrushConfig(brush: BrushConfig): BrushConfig {
   if (brush.type === "round-pen") {
     return { type: "round-pen" };
   }
+  const mixing = brush.mixing ? { ...brush.mixing } : undefined;
   if (brush.tip.type === "circle") {
     return {
       type: "stamp",
       tip: { type: "circle", hardness: brush.tip.hardness },
       dynamics: { ...brush.dynamics },
+      mixing,
     };
   }
   return {
     type: "stamp",
     tip: { type: "image", imageId: brush.tip.imageId },
     dynamics: { ...brush.dynamics },
+    mixing,
   };
 }
 
@@ -437,14 +440,31 @@ function isBrushConfig(value: unknown): value is BrushConfig {
   if (!tipValid) return false;
 
   const dynamics = value.dynamics;
-  return (
-    isFiniteNumber(dynamics.spacing) &&
-    isFiniteNumber(dynamics.flow) &&
-    isFiniteNumber(dynamics.opacityJitter) &&
-    isFiniteNumber(dynamics.sizeJitter) &&
-    isFiniteNumber(dynamics.rotationJitter) &&
-    isFiniteNumber(dynamics.scatter)
-  );
+  if (
+    !(
+      isFiniteNumber(dynamics.spacing) &&
+      isFiniteNumber(dynamics.flow) &&
+      isFiniteNumber(dynamics.opacityJitter) &&
+      isFiniteNumber(dynamics.sizeJitter) &&
+      isFiniteNumber(dynamics.rotationJitter) &&
+      isFiniteNumber(dynamics.scatter)
+    )
+  ) {
+    return false;
+  }
+
+  if (value.mixing !== undefined) {
+    if (!isRecord(value.mixing)) return false;
+    if (
+      typeof value.mixing.enabled !== "boolean" ||
+      !isFiniteNumber(value.mixing.pickup) ||
+      !isFiniteNumber(value.mixing.restore)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function isExpandConfig(value: unknown): value is ExpandConfig {

@@ -155,6 +155,18 @@ export const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
   flow: 1.0,
 };
 
+export interface BrushMixing {
+  readonly enabled: boolean;
+  readonly pickup: number;
+  readonly restore: number;
+}
+
+export const DEFAULT_BRUSH_MIXING: BrushMixing = {
+  enabled: false,
+  pickup: 0,
+  restore: 0.15,
+};
+
 /** 現在の circle+trapezoid 方式 */
 export interface RoundPenBrushConfig {
   readonly type: "round-pen";
@@ -165,6 +177,7 @@ export interface StampBrushConfig {
   readonly type: "stamp";
   readonly tip: BrushTipConfig;
   readonly dynamics: BrushDynamics;
+  readonly mixing?: BrushMixing;
 }
 
 export type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
@@ -194,11 +207,18 @@ export const MARKER: StampBrushConfig = {
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.15, flow: 0.8 },
 };
 
+export interface BrushBranchRenderState {
+  readonly accumulatedDistance: number;
+  readonly stampCount: number;
+  readonly colorBuffer?: OffscreenCanvas;
+}
+
 export interface BrushRenderState {
   readonly accumulatedDistance: number;
   readonly tipCanvas: OffscreenCanvas | null;
   readonly seed: number;
   readonly stampCount: number;
+  readonly branches?: readonly BrushBranchRenderState[];
 }
 
 // ============================================================

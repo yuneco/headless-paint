@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import {
   DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
   ROUND_PEN,
 } from "./types";
@@ -387,6 +388,51 @@ describe("renderBrushStroke", () => {
       );
       const relError = distDiff / replayResult.accumulatedDistance;
       expect(relError).toBeLessThan(0.01);
+    });
+
+    it("混色は背景footprintの局所色差をcolorBufferに保持する", () => {
+      const source = createLayer(100, 100);
+      source.ctx.fillStyle = "rgb(255, 0, 0)";
+      source.ctx.fillRect(0, 0, 50, 100);
+      source.ctx.fillStyle = "rgb(0, 0, 255)";
+      source.ctx.fillRect(50, 0, 50, 100);
+
+      const target = createLayer(100, 100);
+      const style = makeStyle({
+        color: { r: 0, g: 0, b: 255, a: 255 },
+        lineWidth: 20,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1.0 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 1,
+            flow: 1,
+          },
+          mixing: {
+            ...DEFAULT_BRUSH_MIXING,
+            enabled: true,
+            pickup: 1,
+            restore: 0,
+          },
+        },
+      });
+      const state = makeInitialState(style);
+
+      const result = renderBrushStroke(
+        target,
+        [{ x: 50, y: 50, pressure: 1 }],
+        style,
+        0,
+        state,
+        source,
+      );
+
+      const left = target.ctx.getImageData(44, 50, 1, 1).data;
+      const right = target.ctx.getImageData(56, 50, 1, 1).data;
+      expect(left[0]).toBeGreaterThan(left[2]);
+      expect(right[2]).toBeGreaterThan(right[0]);
+      expect(result.branches?.[0].colorBuffer).toBeInstanceOf(OffscreenCanvas);
     });
   });
 });

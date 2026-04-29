@@ -4,7 +4,9 @@
 export type {
   BackgroundSettings,
   BrushConfig,
+  BrushBranchRenderState,
   BrushDynamics,
+  BrushMixing,
   BrushRenderState,
   BrushTipConfig,
   CircleTipConfig,
@@ -30,6 +32,7 @@ export {
   AIRBRUSH,
   DEFAULT_BACKGROUND_COLOR,
   DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
   MARKER,
   PENCIL,

@@ -68,7 +68,7 @@ function usePenSettings(config?: PenSettingsConfig): UsePenSettingsResult;
 | `initialLineWidth` | `number` | `8` | 初期線幅（px） |
 | `initialPressureSensitivity` | `number` | `1.0` | 筆圧感度。0 で無効、1 で最大 |
 | `initialPressureCurve` | `PressureCurve` | `DEFAULT_PRESSURE_CURVE` | 筆圧の入出力カーブ |
-| `initialBrush` | `BrushConfig` | `ROUND_PEN` | 初期ブラシ設定 |
+| `initialBrush` | `BrushConfig` | `ROUND_PEN` | 初期ブラシ設定。`StampBrushConfig.mixing` を含む場合もそのまま保持する |
 
 #### UsePenSettingsResult
 
@@ -86,7 +86,7 @@ interface UsePenSettingsResult {
   readonly eraser: boolean;
   /** 現在のブラシ設定 */
   readonly brush: BrushConfig;
-  /** 上記の値から自動構築された描画スタイル（brush を含む）。useStrokeSession / usePaintEngine に渡す */
+  /** 上記の値から自動構築された描画スタイル（brush と brush.mixing を含む）。useStrokeSession / usePaintEngine に渡す */
   readonly strokeStyle: StrokeStyle;
   readonly setColor: (color: Color) => void;
   readonly setLineWidth: (width: number) => void;
@@ -917,6 +917,7 @@ const documentSnapshot = await exportPaintDocument({
 | `StampBrushConfig` | engine | スタンプベースブラシの設定 |
 | `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
+| `BrushMixing` | engine | スタンプブラシの混色パラメータ |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
 | `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
 | `ViewTransform` | input | ビュー変換行列 |

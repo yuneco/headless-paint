@@ -72,8 +72,10 @@ export type { WindowSize } from "./useWindowSize";
 // ── Re-exports from core packages ──
 
 export type {
+  BrushBranchRenderState,
   BrushConfig,
   BrushDynamics,
+  BrushMixing,
   BrushRenderState,
   BrushTipConfig,
   BrushTipRegistry,
@@ -105,6 +107,7 @@ export type {
 export {
   AIRBRUSH,
   DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_BRUSH_MIXING,
   MARKER,
   PENCIL,
   ROUND_PEN,

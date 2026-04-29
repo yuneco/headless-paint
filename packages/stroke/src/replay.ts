@@ -5,11 +5,11 @@ import type {
   StrokePoint,
 } from "@headless-paint/engine";
 import {
+  appendToCommittedLayer,
   clearLayer,
   compileExpand,
-  expandStrokePoints,
+  createLayer,
   generateBrushTip,
-  renderBrushStroke,
   transformLayer,
   wrapShiftLayer,
 } from "@headless-paint/engine";
@@ -47,8 +47,6 @@ function replayStrokeCommand(
     y: p.y,
     pressure: p.pressure,
   }));
-  const strokes = expandStrokePoints(strokePoints, compiledExpand);
-
   // スタンプブラシの場合は tipCanvas を再生成して初期 BrushRenderState を構築
   let brushState: BrushRenderState | undefined;
   if (command.style.brush.type === "stamp") {
@@ -65,18 +63,26 @@ function replayStrokeCommand(
       stampCount: 0,
     };
   }
+  const sourceLayer =
+    command.style.brush.type === "stamp" && command.style.brush.mixing?.enabled
+      ? cloneLayerForSampling(layer)
+      : undefined;
 
-  for (const points of strokes) {
-    if (points.length > 0) {
-      brushState = renderBrushStroke(
-        layer,
-        points,
-        command.style,
-        0,
-        brushState,
-      );
-    }
-  }
+  appendToCommittedLayer(
+    layer,
+    strokePoints,
+    command.style,
+    compiledExpand,
+    0,
+    brushState,
+    sourceLayer,
+  );
+}
+
+function cloneLayerForSampling(layer: Layer): Layer {
+  const clone = createLayer(layer.width, layer.height);
+  clone.ctx.drawImage(layer.canvas, 0, 0);
+  return clone;
 }
 
 /**

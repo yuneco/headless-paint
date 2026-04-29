@@ -1,6 +1,7 @@
 import {
   appendToCommittedLayer,
   clearLayer,
+  createLayer,
   renderPendingLayer,
 } from "@headless-paint/core";
 import type {
@@ -77,6 +78,8 @@ interface SessionInternal {
   layerId: string;
   brushState?: BrushRenderState;
   brushSeed: number;
+  samplingLayer?: Layer;
+  committedSnapshot?: Layer;
 }
 
 function toStrokePoints(points: readonly InputPoint[]) {
@@ -124,6 +127,29 @@ function createInitialBrushState(
     },
     brushSeed,
   };
+}
+
+function needsSamplingLayer(style: StrokeStyle): boolean {
+  return style.brush.type === "stamp" && !!style.brush.mixing?.enabled;
+}
+
+function cloneLayerContent(layer: Layer): Layer {
+  const snapshot = createLayer(layer.width, layer.height);
+  snapshot.ctx.drawImage(layer.canvas, 0, 0);
+  return snapshot;
+}
+
+function restoreLayerContent(layer: Layer, snapshot: Layer): void {
+  clearLayer(layer);
+  layer.ctx.drawImage(snapshot.canvas, 0, 0);
+}
+
+function getPendingCompositeOperation(
+  style: StrokeStyle,
+): GlobalCompositeOperation {
+  return needsSamplingLayer(style) && style.compositeOperation === "source-over"
+    ? "copy"
+    : style.compositeOperation;
 }
 
 export function useStrokeSession(
@@ -202,6 +228,12 @@ export function useStrokeSession(
 
       const { brushState: initialBrushState, brushSeed } =
         createInitialBrushState(style, registryRef.current);
+      const committedSnapshot = pendingOnlyRef.current
+        ? undefined
+        : cloneLayerContent(currentLayer);
+      const samplingLayer = needsSamplingLayer(style)
+        ? committedSnapshot
+        : undefined;
 
       sessionRef.current = {
         strokeSession: strokeResult.state,
@@ -212,15 +244,35 @@ export function useStrokeSession(
         layerId: currentLayer.id,
         brushState: initialBrushState,
         brushSeed,
+        samplingLayer,
+        committedSnapshot,
       };
 
-      pendingLayer.meta.compositeOperation = style.compositeOperation;
+      if (!pendingOnlyRef.current) {
+        const brushState = appendToCommittedLayer(
+          currentLayer,
+          strokeResult.renderUpdate.newlyCommitted,
+          style,
+          compiled,
+          strokeResult.renderUpdate.committedOverlapCount,
+          initialBrushState,
+          samplingLayer,
+        );
+        sessionRef.current.brushState = brushState;
+      }
+
+      pendingLayer.meta.compositeOperation =
+        getPendingCompositeOperation(style);
       renderPendingLayer(
         pendingLayer,
-        buildLiveStrokePoints(strokeResult.state),
+        pendingOnlyRef.current
+          ? buildLiveStrokePoints(strokeResult.state)
+          : strokeResult.renderUpdate.currentPending,
         style,
         compiled,
-        initialBrushState,
+        sessionRef.current.brushState,
+        samplingLayer ?? currentLayer,
+        needsSamplingLayer(style) ? currentLayer : undefined,
       );
 
       strokePointsRef.current = [inputPoint];
@@ -260,12 +312,30 @@ export function useStrokeSession(
       sessionRef.current.filterState = filterResult.state;
       sessionRef.current.inputPoints.push(inputPoint);
       strokePointsRef.current = [...strokePointsRef.current, inputPoint];
+
+      if (!pendingOnlyRef.current) {
+        const brushState = appendToCommittedLayer(
+          currentLayer,
+          strokeResult.renderUpdate.newlyCommitted,
+          style,
+          sessionRef.current.compiledExpand,
+          strokeResult.renderUpdate.committedOverlapCount,
+          sessionRef.current.brushState,
+          sessionRef.current.samplingLayer,
+        );
+        sessionRef.current.brushState = brushState;
+      }
+
       renderPendingLayer(
         pendingLayer,
-        buildLiveStrokePoints(strokeResult.state),
+        pendingOnlyRef.current
+          ? buildLiveStrokePoints(strokeResult.state)
+          : strokeResult.renderUpdate.currentPending,
         style,
         sessionRef.current.compiledExpand,
         sessionRef.current.brushState,
+        sessionRef.current.samplingLayer ?? currentLayer,
+        needsSamplingLayer(style) ? currentLayer : undefined,
       );
 
       bumpRenderVersion();
@@ -299,6 +369,7 @@ export function useStrokeSession(
       compiledFilterPipeline: sessionFilter,
       compiledExpand: sessionExpand,
       brushSeed,
+      samplingLayer,
     } = sessionRef.current;
 
     const currentLayer = layerRef.current;
@@ -312,14 +383,16 @@ export function useStrokeSession(
     const style = strokeStyleRef.current;
     const finalOutput = finalizePipeline(filterState, sessionFilter);
     const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
-    appendToCommittedLayer(
+    const brushState = appendToCommittedLayer(
       currentLayer,
-      toStrokePoints(finalStrokeResult.state.allCommitted),
+      finalStrokeResult.renderUpdate.newlyCommitted,
       style,
       sessionExpand,
-      0,
+      finalStrokeResult.renderUpdate.committedOverlapCount,
       sessionRef.current.brushState,
+      samplingLayer,
     );
+    sessionRef.current.brushState = brushState;
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
 
@@ -351,6 +424,11 @@ export function useStrokeSession(
     if (!currentLayer || currentLayer.id !== sessionRef.current.layerId) return;
 
     const style = strokeStyleRef.current;
+    const committedSnapshot = cloneLayerContent(currentLayer);
+    sessionRef.current.committedSnapshot = committedSnapshot;
+    sessionRef.current.samplingLayer = needsSamplingLayer(style)
+      ? committedSnapshot
+      : undefined;
 
     // 蓄積された全 committed ポイントを committed layer にフラッシュ
     const brushState = appendToCommittedLayer(
@@ -360,6 +438,7 @@ export function useStrokeSession(
       sessionRef.current.compiledExpand,
       0,
       sessionRef.current.brushState,
+      sessionRef.current.samplingLayer,
     );
     sessionRef.current.brushState = brushState;
 
@@ -367,6 +446,16 @@ export function useStrokeSession(
   }, [bumpRenderVersion]);
 
   const onDrawCancel = useCallback(() => {
+    const currentSession = sessionRef.current;
+    const currentLayer = layerRef.current;
+    if (
+      currentSession &&
+      currentLayer &&
+      currentLayer.id === currentSession.layerId &&
+      currentSession.committedSnapshot
+    ) {
+      restoreLayerContent(currentLayer, currentSession.committedSnapshot);
+    }
     clearLayer(pendingLayer);
     pendingLayer.meta.compositeOperation = undefined;
     sessionRef.current = null;

@@ -2,6 +2,7 @@ import { renderBrushStroke } from "./brush-render";
 import { expandStrokePoints } from "./expand";
 import { clearLayer } from "./layer";
 import type {
+  BrushBranchRenderState,
   BrushRenderState,
   CompiledExpand,
   Layer,
@@ -21,6 +22,7 @@ export function appendToCommittedLayer(
   compiledExpand: CompiledExpand,
   overlapCount = 0,
   brushState?: BrushRenderState,
+  sourceLayer?: Layer,
 ): BrushRenderState {
   if (points.length === 0) {
     return (
@@ -35,15 +37,40 @@ export function appendToCommittedLayer(
 
   let currentState = brushState;
   const strokes = expandStrokePoints(points, compiledExpand);
-  for (const stroke of strokes) {
+  if (!usesBranchBrushState(style)) {
+    for (const stroke of strokes) {
+      if (stroke.length > 0) {
+        currentState = renderBrushStroke(
+          layer,
+          stroke,
+          style,
+          overlapCount,
+          currentState,
+          sourceLayer ?? layer,
+        );
+      }
+    }
+    return currentState ?? createDefaultBrushState();
+  }
+
+  const nextBranches: BrushBranchRenderState[] = [
+    ...(brushState?.branches ?? []),
+  ];
+  for (let i = 0; i < strokes.length; i++) {
+    const stroke = strokes[i];
     if (stroke.length > 0) {
-      currentState = renderBrushStroke(
+      const branchState = getBranchBrushState(currentState, i);
+      const renderedState = renderBrushStroke(
         layer,
         stroke,
         style,
         overlapCount,
-        currentState,
+        branchState,
+        sourceLayer ?? layer,
       );
+      const renderedBranch = stateToBranch(renderedState);
+      nextBranches[i] = renderedBranch;
+      currentState = mergeBrushState(renderedState, nextBranches);
     }
   }
   return (
@@ -67,8 +94,17 @@ export function renderPendingLayer(
   style: StrokeStyle,
   compiledExpand: CompiledExpand,
   brushState?: BrushRenderState,
+  sourceLayer?: Layer,
+  previewBaseLayer?: Layer,
 ): void {
   clearLayer(layer);
+  const rendersFullPreview = shouldRenderFullMixedPreview(
+    style,
+    previewBaseLayer,
+  );
+  if (rendersFullPreview && previewBaseLayer) {
+    layer.ctx.drawImage(previewBaseLayer.canvas, 0, 0);
+  }
 
   if (points.length === 0) return;
 
@@ -78,12 +114,129 @@ export function renderPendingLayer(
     compositeOperation: "source-over",
   };
 
+  if (!usesBranchBrushState(style)) {
+    const strokes = expandStrokePoints(points, compiledExpand);
+    for (const stroke of strokes) {
+      if (stroke.length > 0) {
+        renderBrushStroke(layer, stroke, pendingStyle, 0, brushState);
+      }
+    }
+    return;
+  }
+
+  const pendingState = cloneBrushRenderState(brushState);
   const strokes = expandStrokePoints(points, compiledExpand);
-  for (const stroke of strokes) {
+  const nextBranches: BrushBranchRenderState[] = [
+    ...(pendingState?.branches ?? []),
+  ];
+  let currentState = pendingState;
+  for (let i = 0; i < strokes.length; i++) {
+    const stroke = strokes[i];
     if (stroke.length > 0) {
-      renderBrushStroke(layer, stroke, pendingStyle, 0, brushState);
+      const branchState = getBranchBrushState(currentState, i);
+      const renderedState = renderBrushStroke(
+        layer,
+        stroke,
+        pendingStyle,
+        0,
+        branchState,
+        sourceLayer ?? layer,
+      );
+      nextBranches[i] = stateToBranch(renderedState);
+      currentState = mergeBrushState(renderedState, nextBranches);
     }
   }
+}
+
+function shouldRenderFullMixedPreview(
+  style: StrokeStyle,
+  previewBaseLayer: Layer | undefined,
+): boolean {
+  return (
+    !!previewBaseLayer &&
+    style.compositeOperation === "source-over" &&
+    style.brush.type === "stamp" &&
+    !!style.brush.mixing?.enabled
+  );
+}
+
+function usesBranchBrushState(style: StrokeStyle): boolean {
+  return style.brush.type === "stamp" && !!style.brush.mixing?.enabled;
+}
+
+function createDefaultBrushState(): BrushRenderState {
+  return {
+    accumulatedDistance: 0,
+    tipCanvas: null,
+    seed: 0,
+    stampCount: 0,
+  };
+}
+
+function getBranchBrushState(
+  state: BrushRenderState | undefined,
+  branchIndex: number,
+): BrushRenderState {
+  const base = state ?? createDefaultBrushState();
+  const branch = base.branches?.[branchIndex];
+  if (!branch) return base;
+  return {
+    accumulatedDistance: branch.accumulatedDistance,
+    tipCanvas: base.tipCanvas,
+    seed: base.seed,
+    stampCount: branch.stampCount,
+    branches: [branch],
+  };
+}
+
+function stateToBranch(state: BrushRenderState): BrushBranchRenderState {
+  const branch = state.branches?.[0];
+  return {
+    accumulatedDistance:
+      branch?.accumulatedDistance ?? state.accumulatedDistance,
+    stampCount: branch?.stampCount ?? state.stampCount,
+    colorBuffer: branch?.colorBuffer,
+  };
+}
+
+function mergeBrushState(
+  state: BrushRenderState,
+  branches: readonly BrushBranchRenderState[],
+): BrushRenderState {
+  return {
+    accumulatedDistance: state.accumulatedDistance,
+    tipCanvas: state.tipCanvas,
+    seed: state.seed,
+    stampCount: state.stampCount,
+    branches,
+  };
+}
+
+function cloneBrushRenderState(
+  state: BrushRenderState | undefined,
+): BrushRenderState | undefined {
+  if (!state) return undefined;
+  return {
+    accumulatedDistance: state.accumulatedDistance,
+    tipCanvas: state.tipCanvas,
+    seed: state.seed,
+    stampCount: state.stampCount,
+    branches: state.branches?.map((branch) => ({
+      accumulatedDistance: branch.accumulatedDistance,
+      stampCount: branch.stampCount,
+      colorBuffer: branch.colorBuffer
+        ? cloneCanvas(branch.colorBuffer)
+        : undefined,
+    })),
+  };
+}
+
+function cloneCanvas(canvas: OffscreenCanvas): OffscreenCanvas {
+  const next = new OffscreenCanvas(canvas.width, canvas.height);
+  const ctx = next.getContext("2d");
+  if (!ctx) throw new Error("Failed to get 2d context for canvas clone");
+  ctx.drawImage(canvas, 0, 0);
+  return next;
 }
 
 /**

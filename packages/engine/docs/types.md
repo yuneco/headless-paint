@@ -472,6 +472,7 @@ interface StampBrushConfig {
   readonly type: "stamp";
   readonly tip: BrushTipConfig;
   readonly dynamics: BrushDynamics;
+  readonly mixing?: BrushMixing;
 }
 
 type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
@@ -484,6 +485,35 @@ type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
 | `type` | `"stamp"` | ブラシ種別 |
 | `tip` | `BrushTipConfig` | チップ形状の設定 |
 | `dynamics` | `BrushDynamics` | 動的パラメータ |
+| `mixing` | `BrushMixing` | 混色設定。未指定または `enabled: false` で混色なし |
+
+### BrushMixing
+
+スタンプブラシの混色設定。dab ごとに描画先レイヤーの footprint を分岐ごとのブラシ色バッファへ転写し、元の描画色で復元する強さを制御する。
+
+```typescript
+interface BrushMixing {
+  readonly enabled: boolean;
+  readonly pickup: number;
+  readonly restore: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `enabled` | `boolean` | 混色を有効にする |
+| `pickup` | `number` | 描画先 footprint をブラシ色バッファへ転写する強さ [0, 1] |
+| `restore` | `number` | 元の描画色をブラシ色バッファへ戻す強さ [0, 1] |
+
+**関連定数**:
+
+```typescript
+const DEFAULT_BRUSH_MIXING: BrushMixing = {
+  enabled: false,
+  pickup: 0,
+  restore: 0.15,
+};
+```
 
 **関連定数**:
 
@@ -607,11 +637,18 @@ renderLayers(layers, ctx, transform, {
 ブラシレンダリングの状態。committed→pending 間の状態受け渡しに使用する。
 
 ```typescript
+interface BrushBranchRenderState {
+  readonly accumulatedDistance: number;
+  readonly stampCount: number;
+  readonly colorBuffer?: OffscreenCanvas;
+}
+
 interface BrushRenderState {
   readonly accumulatedDistance: number;
   readonly tipCanvas: OffscreenCanvas | null;
   readonly seed: number;
   readonly stampCount: number;
+  readonly branches?: readonly BrushBranchRenderState[];
 }
 ```
 
@@ -621,8 +658,17 @@ interface BrushRenderState {
 | `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。ストローク開始時に生成し全スタンプで再利用する。`round-pen` では `null` |
 | `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
 | `stampCount` | `number` | 配置済みスタンプの通し番号。PRNG シードの入力に使用し、incremental/replay で同一の jitter を保証する |
+| `branches` | `readonly BrushBranchRenderState[]` | Expand 分岐ごとの状態。混色有効時は分岐ごとの `colorBuffer` を保持する |
 
-**設計意図**: スタンプブラシの jitter はスタンプ通し番号ベース PRNG `hashSeed(seed, stampIndex)` で決定論的に生成される。通し番号は `accumulatedDistance` より安定しており、incremental 描画（チャンク分割）と replay（一括描画）で同一の jitter パターンを保証する。
+**BrushBranchRenderState**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `accumulatedDistance` | `number` | 分岐ごとのスタンプ配置累積距離 |
+| `stampCount` | `number` | 分岐ごとのスタンプ通し番号 |
+| `colorBuffer` | `OffscreenCanvas` | 混色有効時に使うブラシ色バッファ。`tipCanvas` と同じ最大サイズで、背景転写と復元色転写により更新される |
+
+**設計意図**: スタンプブラシの jitter はスタンプ通し番号ベース PRNG `hashSeed(seed, stampIndex)` で決定論的に生成される。混色有効時は Expand 分岐ごとに拾う背景が異なるため、`branches` に分岐別の距離・通し番号・色バッファを保持する。
 
 **使用例**:
 ```typescript

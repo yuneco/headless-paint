@@ -3,7 +3,7 @@ import type {
   BrushTipRegistry,
   StampBrushConfig,
 } from "@headless-paint/engine";
-import { generateBrushTip } from "@headless-paint/engine";
+import { DEFAULT_BRUSH_MIXING, generateBrushTip } from "@headless-paint/engine";
 import { memo, useEffect, useRef } from "react";
 import { APP_BRUSH_PRESETS } from "../brush-presets";
 
@@ -22,7 +22,10 @@ function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
   return (
     sa.tip.type === sb.tip.type &&
     sa.dynamics.spacing === sb.dynamics.spacing &&
-    sa.dynamics.flow === sb.dynamics.flow
+    sa.dynamics.flow === sb.dynamics.flow &&
+    (sa.mixing?.enabled ?? false) === (sb.mixing?.enabled ?? false) &&
+    (sa.mixing?.pickup ?? 0) === (sb.mixing?.pickup ?? 0) &&
+    (sa.mixing?.restore ?? 0) === (sb.mixing?.restore ?? 0)
   );
 }
 
@@ -93,47 +96,92 @@ function BrushPanelComponent({
   registry,
   registryReady,
 }: BrushPanelProps) {
+  const updateMixing = (field: "pickup" | "restore", value: number) => {
+    if (brush.type !== "stamp") return;
+    onBrushChange({
+      ...brush,
+      mixing: {
+        ...(brush.mixing ?? DEFAULT_BRUSH_MIXING),
+        enabled: true,
+        [field]: value,
+      },
+    });
+  };
+
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
-        gap: 4,
-      }}
-    >
-      {APP_BRUSH_PRESETS.map((preset) => {
-        const isActive = isSameBrush(brush, preset.config);
-        return (
-          <button
-            key={preset.label}
-            type="button"
-            onClick={() => onBrushChange(preset.config)}
-            style={{
-              padding: "6px 4px",
-              border: isActive ? "2px solid #007bff" : "1px solid #ccc",
-              borderRadius: 4,
-              backgroundColor: isActive ? "#007bff18" : "transparent",
-              cursor: "pointer",
-              fontSize: 10,
-              fontFamily: "monospace",
-              textAlign: "center",
-              color: isActive ? "#007bff" : "#333",
-              fontWeight: isActive ? 600 : 400,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 2,
-            }}
-          >
-            <BrushPreviewCanvas
-              config={preset.config}
-              registry={registry}
-              registryReady={registryReady}
+    <div style={{ display: "grid", gap: 10 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 4,
+        }}
+      >
+        {APP_BRUSH_PRESETS.map((preset) => {
+          const isActive = isSameBrush(brush, preset.config);
+          return (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => onBrushChange(preset.config)}
+              style={{
+                padding: "6px 4px",
+                border: isActive ? "2px solid #007bff" : "1px solid #ccc",
+                borderRadius: 4,
+                backgroundColor: isActive ? "#007bff18" : "transparent",
+                cursor: "pointer",
+                fontSize: 10,
+                fontFamily: "monospace",
+                textAlign: "center",
+                color: isActive ? "#007bff" : "#333",
+                fontWeight: isActive ? 600 : 400,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 2,
+              }}
+            >
+              <BrushPreviewCanvas
+                config={preset.config}
+                registry={registry}
+                registryReady={registryReady}
+              />
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {brush.type === "stamp" && brush.mixing?.enabled ? (
+        <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
+          <label style={{ display: "grid", gap: 2 }}>
+            <span>Pickup {brush.mixing.pickup.toFixed(2)}</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={brush.mixing.pickup}
+              onChange={(event) =>
+                updateMixing("pickup", Number(event.currentTarget.value))
+              }
             />
-            {preset.label}
-          </button>
-        );
-      })}
+          </label>
+          <label style={{ display: "grid", gap: 2 }}>
+            <span>Restore {brush.mixing.restore.toFixed(2)}</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={brush.mixing.restore}
+              onChange={(event) =>
+                updateMixing("restore", Number(event.currentTarget.value))
+              }
+            />
+          </label>
+        </div>
+      ) : null}
     </div>
   );
 }

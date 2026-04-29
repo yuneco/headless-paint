@@ -2,7 +2,7 @@ import type { BrushConfig, StampBrushConfig } from "@headless-paint/engine";
 import {
   AIRBRUSH,
   DEFAULT_BRUSH_DYNAMICS,
-  MARKER,
+  DEFAULT_BRUSH_MIXING,
   ROUND_PEN,
 } from "@headless-paint/engine";
 
@@ -38,10 +38,26 @@ const STAR_SCATTER: StampBrushConfig = {
   },
 };
 
+const ACRYLIC: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.78 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.12,
+    flow: 0.72,
+  },
+  mixing: {
+    ...DEFAULT_BRUSH_MIXING,
+    enabled: true,
+    pickup: 0.28,
+    restore: 0.08,
+  },
+};
+
 export const APP_BRUSH_PRESETS: readonly BrushPresetEntry[] = [
   { label: "Pen", config: ROUND_PEN },
   { label: "Airbrush", config: AIRBRUSH },
   { label: "Pencil", config: PENCIL_TEXTURED },
-  { label: "Marker", config: MARKER },
+  { label: "Acrylic", config: ACRYLIC },
   { label: "Star", config: STAR_SCATTER },
 ];

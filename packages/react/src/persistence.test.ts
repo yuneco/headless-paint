@@ -55,6 +55,52 @@ describe("persistence", () => {
     expect(imported?.expand.levels[0].mode).toBe("radial");
   });
 
+  it("exports and imports stamp brush mixing settings", () => {
+    const snapshot = exportPaintSettings({
+      tool: "pen",
+      transform: createViewTransform() as ViewTransform,
+      background: {
+        color: { r: 255, g: 255, b: 255, a: 255 },
+        visible: true,
+      },
+      pen: {
+        color: { r: 10, g: 20, b: 30, a: 255 },
+        lineWidth: 8,
+        pressureSensitivity: 0.8,
+        pressureCurve: { y1: 0.2, y2: 0.6 },
+        eraser: false,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 0.8 },
+          dynamics: {
+            spacing: 0.12,
+            flow: 0.7,
+            opacityJitter: 0,
+            sizeJitter: 0,
+            rotationJitter: 0,
+            scatter: 0,
+          },
+          mixing: { enabled: true, pickup: 0.3, restore: 0.08 },
+        },
+      },
+      smoothing: {
+        enabled: true,
+        windowSize: 5,
+      },
+      expand: {
+        levels: [
+          { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
+        ],
+      },
+    });
+
+    const imported = importPaintSettings(snapshot);
+    expect(imported?.pen.brush).toMatchObject({
+      type: "stamp",
+      mixing: { enabled: true, pickup: 0.3, restore: 0.08 },
+    });
+  });
+
   it("returns null for invalid settings version", () => {
     const invalid = {
       version: 999,

@@ -47,6 +47,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Color` | RGBA色 `{ r, g, b, a }` (各値 0-255) |
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
+| `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
@@ -55,7 +56,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `LayerTransformPreview` | レイヤー変換プレビュー `{ layerId, matrix }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
 | `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig`） |
-| `BrushRenderState` | ブラシレンダリング状態 `{ accumulatedDistance, tipCanvas, seed, stampCount }` |
+| `BrushRenderState` | ブラシレンダリング状態 `{ accumulatedDistance, tipCanvas, seed, stampCount, branches? }` |
 
 ### Layer 管理関数
 
@@ -90,7 +91,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `renderBrushStroke(layer, points, style, overlapCount?, state?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
+| `renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
 | `generateBrushTip(config, size, color, registry?)` | ブラシチップ画像を生成 |
 | `createBrushTipRegistry()` | 画像チップ管理用の `BrushTipRegistry` を作成 |
 | `mulberry32(seed)` | 32bit シードから PRNG を生成 |
@@ -129,8 +130,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `appendToCommittedLayer(layer, points, style, expand, overlapCount?, brushState?)` | 確定レイヤーに追加描画。`BrushRenderState` を返す |
-| `renderPendingLayer(layer, points, style, expand, brushState?)` | 作業レイヤーを再描画 |
+| `appendToCommittedLayer(layer, points, style, expand, overlapCount?, brushState?, sourceLayer?)` | 確定レイヤーに追加描画。`BrushRenderState` を返す |
+| `renderPendingLayer(layer, points, style, expand, brushState?, sourceLayer?, previewBaseLayer?)` | 作業レイヤーを再描画。混色有効時は `sourceLayer` を背景転写元にできる |
 | `composeLayers(target, layers, transform?)` | レイヤーを合成 |
 
 ### Pattern Preview
