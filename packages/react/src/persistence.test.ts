@@ -80,7 +80,12 @@ describe("persistence", () => {
             rotationJitter: 0,
             scatter: 0,
           },
-          mixing: { enabled: true, pickup: 0.3, restore: 0.08 },
+          mixing: {
+            enabled: true,
+            pickup: 0.3,
+            restore: 0.08,
+            updateDistanceRatio: 0.5,
+          },
         },
       },
       smoothing: {
@@ -97,7 +102,12 @@ describe("persistence", () => {
     const imported = importPaintSettings(snapshot);
     expect(imported?.pen.brush).toMatchObject({
       type: "stamp",
-      mixing: { enabled: true, pickup: 0.3, restore: 0.08 },
+      mixing: {
+        enabled: true,
+        pickup: 0.3,
+        restore: 0.08,
+        updateDistanceRatio: 0.5,
+      },
     });
   });
 

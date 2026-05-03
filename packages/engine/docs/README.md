@@ -47,7 +47,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Color` | RGBA色 `{ r, g, b, a }` (各値 0-255) |
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
-| `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore }` |
+| `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore, updateDistanceRatio }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |

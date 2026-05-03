@@ -20,6 +20,11 @@ const DEFAULT_BRUSH_RENDER_STATE: BrushRenderState = {
   stampCount: 0,
 };
 
+const CONTEXT_CACHE = new WeakMap<
+  OffscreenCanvas,
+  OffscreenCanvasRenderingContext2D
+>();
+
 // ============================================================
 // PRNG ユーティリティ
 // ============================================================
@@ -133,17 +138,19 @@ function renderStampBrushStroke(
 
   const ctx = layer.ctx;
   const mixing = getActiveMixing(brush.mixing);
-  const branch = getPrimaryBranchState(state, style.color, mixing);
+  const branch = getPrimaryBranchState(state);
   let totalDistance = branch.accumulatedDistance;
   let stampCount = branch.stampCount;
   let colorBuffer = branch.colorBuffer;
-  const mixedWorkCanvas = mixing
-    ? new OffscreenCanvas(state.tipCanvas.width, state.tipCanvas.height)
-    : undefined;
+  let mixedCanvas = branch.mixedCanvas;
+  let lastMixingUpdateDistance = branch.lastMixingUpdateDistance;
+  const mixingUpdateSpacing = mixing
+    ? getMixingUpdateSpacing(style.lineWidth, spacingPx, mixing)
+    : spacingPx;
 
   // ストローク開始時（distance=0, overlap なし）は最初の点にスタンプを配置
   if (totalDistance === 0 && overlapCount === 0) {
-    colorBuffer = stampAt(
+    const result = stampAt(
       ctx,
       state.tipCanvas,
       interpolated[0],
@@ -154,13 +161,26 @@ function renderStampBrushStroke(
       sourceLayer,
       mixing,
       colorBuffer,
-      mixedWorkCanvas,
+      mixedCanvas,
+      0,
+      lastMixingUpdateDistance,
+      mixingUpdateSpacing,
     );
+    colorBuffer = result.colorBuffer;
+    mixedCanvas = result.mixedCanvas;
+    lastMixingUpdateDistance = result.lastMixingUpdateDistance;
     stampCount++;
   }
 
   if (interpolated.length < 2) {
-    return buildStampRenderState(state, totalDistance, stampCount, colorBuffer);
+    return buildStampRenderState(
+      state,
+      totalDistance,
+      stampCount,
+      colorBuffer,
+      mixedCanvas,
+      lastMixingUpdateDistance,
+    );
   }
 
   // 次のスタンプ配置距離を計算
@@ -194,7 +214,7 @@ function renderStampBrushStroke(
         pressure: pr1 + (pr2 - pr1) * t,
       };
 
-      colorBuffer = stampAt(
+      const result = stampAt(
         ctx,
         state.tipCanvas,
         stampPoint,
@@ -205,8 +225,14 @@ function renderStampBrushStroke(
         sourceLayer,
         mixing,
         colorBuffer,
-        mixedWorkCanvas,
+        mixedCanvas,
+        nextStampDist,
+        lastMixingUpdateDistance,
+        mixingUpdateSpacing,
       );
+      colorBuffer = result.colorBuffer;
+      mixedCanvas = result.mixedCanvas;
+      lastMixingUpdateDistance = result.lastMixingUpdateDistance;
       stampCount++;
 
       nextStampDist += spacingPx;
@@ -215,7 +241,14 @@ function renderStampBrushStroke(
     totalDistance = segEnd;
   }
 
-  return buildStampRenderState(state, totalDistance, stampCount, colorBuffer);
+  return buildStampRenderState(
+    state,
+    totalDistance,
+    stampCount,
+    colorBuffer,
+    mixedCanvas,
+    lastMixingUpdateDistance,
+  );
 }
 
 function buildStampRenderState(
@@ -223,6 +256,8 @@ function buildStampRenderState(
   accumulatedDistance: number,
   stampCount: number,
   colorBuffer: OffscreenCanvas | undefined,
+  mixedCanvas: OffscreenCanvas | undefined,
+  lastMixingUpdateDistance: number | undefined,
 ): BrushRenderState {
   const next: BrushRenderState = {
     accumulatedDistance,
@@ -230,7 +265,7 @@ function buildStampRenderState(
     seed: previousState.seed,
     stampCount,
   };
-  if (!colorBuffer && !previousState.branches) {
+  if (!colorBuffer && !mixedCanvas && !previousState.branches) {
     return next;
   }
   return {
@@ -240,6 +275,8 @@ function buildStampRenderState(
         accumulatedDistance,
         stampCount,
         colorBuffer,
+        mixedCanvas,
+        lastMixingUpdateDistance,
       },
     ],
   };
@@ -250,31 +287,49 @@ function getActiveMixing(mixing: BrushMixing | undefined): BrushMixing | null {
   const pickup = clamp01(mixing.pickup);
   const restore = clamp01(mixing.restore);
   if (pickup <= 0 && restore <= 0) return null;
-  return { enabled: true, pickup, restore };
+  const updateDistanceRatio =
+    Number.isFinite(mixing.updateDistanceRatio) &&
+    mixing.updateDistanceRatio > 0
+      ? mixing.updateDistanceRatio
+      : 0;
+  return { enabled: true, pickup, restore, updateDistanceRatio };
 }
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function getMixingUpdateSpacing(
+  lineWidth: number,
+  stampSpacing: number,
+  mixing: BrushMixing,
+): number {
+  if (mixing.updateDistanceRatio <= 0) return stampSpacing;
+  return Math.max(stampSpacing, lineWidth * mixing.updateDistanceRatio);
+}
+
+function shouldUpdateMixedTip(
+  colorBuffer: OffscreenCanvas | undefined,
+  mixedCanvas: OffscreenCanvas | undefined,
+  stampDistance: number,
+  lastMixingUpdateDistance: number | undefined,
+  mixingUpdateSpacing: number,
+): boolean {
+  if (!colorBuffer) return true;
+  if (!mixedCanvas) return true;
+  if (lastMixingUpdateDistance === undefined) return true;
+  return stampDistance - lastMixingUpdateDistance >= mixingUpdateSpacing;
+}
+
 function getPrimaryBranchState(
   state: BrushRenderState,
-  color: Color,
-  mixing: BrushMixing | null,
 ): BrushBranchRenderState {
   const branch = state.branches?.[0];
   if (branch) return branch;
   return {
     accumulatedDistance: state.accumulatedDistance,
     stampCount: state.stampCount,
-    colorBuffer:
-      mixing && state.tipCanvas
-        ? createColorBuffer(
-            state.tipCanvas.width,
-            state.tipCanvas.height,
-            color,
-          )
-        : undefined,
+    colorBuffer: undefined,
   };
 }
 
@@ -284,16 +339,39 @@ function createColorBuffer(
   color: Color,
 ): OffscreenCanvas {
   const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Failed to get 2d context for brush color buffer");
+  const ctx = getCached2dContext(canvas, "brush color buffer");
   ctx.fillStyle = colorToStyle(color);
   ctx.fillRect(0, 0, width, height);
   return canvas;
 }
 
+function createMixedWorkCanvas(tipCanvas: OffscreenCanvas): OffscreenCanvas {
+  const canvas = new OffscreenCanvas(tipCanvas.width, tipCanvas.height);
+  getCached2dContext(canvas, "mixed brush work canvas");
+  return canvas;
+}
+
+function getCached2dContext(
+  canvas: OffscreenCanvas,
+  label: string,
+): OffscreenCanvasRenderingContext2D {
+  const cached = CONTEXT_CACHE.get(canvas);
+  if (cached) return cached;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error(`Failed to get 2d context for ${label}`);
+  CONTEXT_CACHE.set(canvas, ctx);
+  return ctx;
+}
+
 /**
  * 単一スタンプの配置。dynamics の jitter をスタンプ通し番号ベース PRNG で適用する。
  */
+interface StampAtResult {
+  readonly colorBuffer?: OffscreenCanvas;
+  readonly mixedCanvas?: OffscreenCanvas;
+  readonly lastMixingUpdateDistance?: number;
+}
+
 function stampAt(
   ctx: OffscreenCanvasRenderingContext2D,
   tipCanvas: OffscreenCanvas,
@@ -305,8 +383,11 @@ function stampAt(
   sourceLayer: Layer,
   mixing: BrushMixing | null,
   colorBuffer: OffscreenCanvas | undefined,
-  mixedWorkCanvas: OffscreenCanvas | undefined,
-): OffscreenCanvas | undefined {
+  mixedCanvas: OffscreenCanvas | undefined,
+  stampDistance: number,
+  lastMixingUpdateDistance: number | undefined,
+  mixingUpdateSpacing: number,
+): StampAtResult {
   const localSeed = hashSeed(seed, stampIndex);
   const rng = mulberry32(localSeed);
 
@@ -322,10 +403,14 @@ function stampAt(
   // dynamics 適用
   const sizeScale = 1 - dynamics.sizeJitter * rng();
   const stampSize = diameter * sizeScale;
-  if (stampSize <= 0) return colorBuffer;
+  if (stampSize <= 0) {
+    return { colorBuffer, mixedCanvas, lastMixingUpdateDistance };
+  }
 
   const opacity = dynamics.flow * (1 - dynamics.opacityJitter * rng());
-  if (opacity <= 0) return colorBuffer;
+  if (opacity <= 0) {
+    return { colorBuffer, mixedCanvas, lastMixingUpdateDistance };
+  }
 
   const rotation = dynamics.rotationJitter * (rng() * 2 - 1);
   const scatterRange = dynamics.scatter * diameter;
@@ -341,20 +426,35 @@ function stampAt(
 
   let drawCanvas = tipCanvas;
   let nextColorBuffer = colorBuffer;
-  if (mixing && mixedWorkCanvas) {
-    const mixed = renderMixedTip(
-      tipCanvas,
-      style.color,
-      x,
-      y,
-      stampSize,
-      sourceLayer,
-      mixing,
+  let nextMixedCanvas = mixedCanvas;
+  let nextLastMixingUpdateDistance = lastMixingUpdateDistance;
+  if (mixing) {
+    const shouldUpdate = shouldUpdateMixedTip(
       colorBuffer,
-      mixedWorkCanvas,
+      mixedCanvas,
+      stampDistance,
+      lastMixingUpdateDistance,
+      mixingUpdateSpacing,
     );
-    drawCanvas = mixed.canvas;
-    nextColorBuffer = mixed.colorBuffer;
+    if (shouldUpdate) {
+      const mixed = renderMixedTip(
+        tipCanvas,
+        style.color,
+        x,
+        y,
+        stampSize,
+        sourceLayer,
+        mixing,
+        colorBuffer,
+        mixedCanvas,
+      );
+      drawCanvas = mixed.canvas;
+      nextColorBuffer = mixed.colorBuffer;
+      nextMixedCanvas = mixed.mixedCanvas;
+      nextLastMixingUpdateDistance = stampDistance;
+    } else {
+      drawCanvas = mixedCanvas ?? tipCanvas;
+    }
   }
 
   if (rotation !== 0) {
@@ -378,7 +478,11 @@ function stampAt(
   }
 
   ctx.restore();
-  return nextColorBuffer;
+  return {
+    colorBuffer: nextColorBuffer,
+    mixedCanvas: nextMixedCanvas,
+    lastMixingUpdateDistance: nextLastMixingUpdateDistance,
+  };
 }
 
 function renderMixedTip(
@@ -390,18 +494,19 @@ function renderMixedTip(
   sourceLayer: Layer,
   mixing: BrushMixing,
   colorBuffer: OffscreenCanvas | undefined,
-  workCanvas: OffscreenCanvas,
-): { canvas: OffscreenCanvas; colorBuffer: OffscreenCanvas } {
+  mixedCanvas: OffscreenCanvas | undefined,
+): {
+  canvas: OffscreenCanvas;
+  colorBuffer: OffscreenCanvas;
+  mixedCanvas: OffscreenCanvas;
+} {
   const buffer =
     colorBuffer ??
     createColorBuffer(tipCanvas.width, tipCanvas.height, baseColor);
-  const bufferCtx = buffer.getContext("2d");
-  const workCtx = workCanvas.getContext("2d");
-  if (!bufferCtx || !workCtx) {
-    throw new Error("Failed to get 2d context for mixed brush");
-  }
+  const bufferCtx = getCached2dContext(buffer, "mixed brush color buffer");
+  const workCanvas = mixedCanvas ?? createMixedWorkCanvas(tipCanvas);
+  const workCtx = getCached2dContext(workCanvas, "mixed brush work canvas");
 
-  bufferCtx.save();
   bufferCtx.globalCompositeOperation = "source-over";
   if (mixing.pickup > 0) {
     bufferCtx.globalAlpha = mixing.pickup;
@@ -422,16 +527,19 @@ function renderMixedTip(
     bufferCtx.fillStyle = colorToStyle(baseColor);
     bufferCtx.fillRect(0, 0, buffer.width, buffer.height);
   }
-  bufferCtx.restore();
+  bufferCtx.globalAlpha = 1;
 
-  workCtx.save();
-  workCtx.clearRect(0, 0, workCanvas.width, workCanvas.height);
-  workCtx.globalCompositeOperation = "source-over";
+  workCtx.globalCompositeOperation = "copy";
   workCtx.globalAlpha = 1;
   workCtx.drawImage(buffer, 0, 0);
   workCtx.globalCompositeOperation = "destination-in";
   workCtx.drawImage(tipCanvas, 0, 0);
-  workCtx.restore();
+  workCtx.globalCompositeOperation = "source-over";
+  workCtx.globalAlpha = 1;
 
-  return { canvas: workCanvas, colorBuffer: buffer };
+  return {
+    canvas: workCanvas,
+    colorBuffer: buffer,
+    mixedCanvas: workCanvas,
+  };
 }

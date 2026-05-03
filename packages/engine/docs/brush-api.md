@@ -20,7 +20,7 @@ StrokeStyle.brush.type
 
 ### チップ生成の責務分離
 
-チップ画像の生成は呼び出し側（`useStrokeSession` 等）の責務。`renderBrushStroke` は事前生成された `tipCanvas` を `BrushRenderState` 経由で受け取る。混色有効時は `tipCanvas` を alpha mask として使い、分岐ごとの `colorBuffer` に背景 footprint と復元色を転写してから dab を描画する。
+チップ画像の生成は呼び出し側（`useStrokeSession` 等）の責務。`renderBrushStroke` は事前生成された `tipCanvas` を `BrushRenderState` 経由で受け取る。混色有効時は `tipCanvas` を alpha mask として使い、分岐ごとの `colorBuffer` に背景 footprint と復元色を転写してから、tip alpha が適用された dab を描画する。
 
 ---
 
@@ -46,7 +46,7 @@ function renderBrushStroke(
 | `points` | `readonly StrokePoint[]` | ○ | 描画ポイント列（展開済みの単一ストローク） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（`brush` フィールドでブラシ種別を判定） |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
-| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` ブラシでは `accumulatedDistance`、`tipCanvas`、`stampCount`、混色有効時の `branches[].colorBuffer` を含む。`round-pen` では無視される |
+| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` ブラシでは `accumulatedDistance`、`tipCanvas`、`stampCount`、混色有効時の `branches[].colorBuffer` / `mixedCanvas` / `lastMixingUpdateDistance` を含む。`round-pen` では無視される |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 
 **戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` ブラシでは `accumulatedDistance` と `stampCount` が更新される。`round-pen` では `{ accumulatedDistance: 0, tipCanvas: null, seed: 0, stampCount: 0 }` を返す。
@@ -58,19 +58,25 @@ function renderBrushStroke(
    - ポイント列を Catmull-Rom 補間
    - `accumulatedDistance` から `spacing` 間隔でパスを走査
    - 各スタンプ位置で `tipCanvas` を `drawImage` で配置
-   - 混色有効時は、描画先 footprint を分岐ごとの `colorBuffer` へ `pickup` の強さで転写し、元色を `restore` の強さで重ねた後、`tipCanvas` で mask して描画
+   - 混色有効時は、一定距離ごとに描画先 footprint を分岐ごとの `colorBuffer` へ `pickup` の強さで転写し、元色を `restore` の強さで重ねた後、`tipCanvas` の alpha を適用して描画
    - jitter パラメータはスタンプ通し番号ベース PRNG で決定
 
 ### 混色
 
-`StampBrushConfig.mixing` を指定すると、スタンプブラシは dab ごとに描画先レイヤーの色を拾う。
+`StampBrushConfig.mixing` を指定すると、スタンプブラシは一定距離ごとに描画先レイヤーの色を拾う。
 
 ```typescript
 const acrylic: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.75 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.12, flow: 0.8 },
-  mixing: { enabled: true, pickup: 0.35, restore: 0.08 },
+  mixing: {
+    ...DEFAULT_BRUSH_MIXING,
+    enabled: true,
+    pickup: 0.35,
+    restore: 0.08,
+    updateDistanceRatio: 0.5,
+  },
 };
 ```
 
@@ -78,12 +84,12 @@ const acrylic: StampBrushConfig = {
 
 動作:
 
-1. ストローク開始時に `tipCanvas` と同じ最大サイズの `colorBuffer` を分岐ごとに作成し、`style.color` で塗る
-2. dab 配置時に描画先 footprint を `pickup` の強さで `colorBuffer` へ転写する
-3. `style.color` を `restore` の強さで `colorBuffer` へ重ね、透明領域へ移動したときに元色へ戻す
-4. `colorBuffer` を `tipCanvas` で mask して dab として描画する
+1. 初回 dab 配置時に `tipCanvas` と同じ最大サイズの `colorBuffer` を分岐ごとに作成し、`style.color` で初期化する
+2. 一定距離ごとに描画先 footprint を `pickup` の強さで `colorBuffer` へ転写する
+3. 同じ混色更新タイミングで `style.color` を `restore` の強さで `colorBuffer` へ重ね、透明領域へ移動したときに元色へ戻す
+4. `colorBuffer` に `tipCanvas` の alpha を適用し、dab として描画する。混色更新を行わない stamp では直近の mixed dab を再利用する
 
-この方式では、大きいブラシが赤/青の境界をまたいだときに tip 全体を単一の紫へ平均化せず、`colorBuffer` 内に赤寄り・青寄りの局所差を保持できる。Expand 使用時は分岐ごとに `colorBuffer` を持つため、分岐ごとに異なる背景色を拾う。
+この方式では、大きいブラシが赤/青の境界をまたいだときに tip 全体を単一の紫へ平均化せず、`colorBuffer` 内に赤寄り・青寄りの局所差を保持できる。Expand 使用時は分岐ごとに `colorBuffer` を持つため、分岐ごとに異なる背景色を拾う。混色状態はスタンプごとではなく `lineWidth * mixing.updateDistanceRatio` を下限とする距離ベースで更新されるため、細かい spacing のブラシでも pickup / restore / mask の頻度が過剰になりにくい。`updateDistanceRatio: 0` を指定すると従来どおり stamp ごとに混色更新する。
 
 **使用例**:
 ```typescript

@@ -1,6 +1,7 @@
 import { createLayer } from "@headless-paint/core";
 import type { Layer, LayerMeta } from "@headless-paint/core";
 import { useCallback, useRef, useState } from "react";
+import { useRafRenderVersion } from "./useRafRenderVersion";
 
 export interface LayerEntry {
   readonly id: string;
@@ -88,11 +89,7 @@ export function useLayers(
   height: number,
   options?: UseLayersOptions,
 ): UseLayersResult {
-  const [renderVersion, setRenderVersion] = useState(0);
-  const bumpRenderVersion = useCallback(
-    () => setRenderVersion((n) => n + 1),
-    [],
-  );
+  const [renderVersion, bumpRenderVersion] = useRafRenderVersion();
 
   const [entries, setEntries] = useState<LayerEntry[]>(() =>
     createInitialEntries(width, height, options?.initialLayers),
@@ -135,29 +132,32 @@ export function useLayers(
 
     setEntries((prev) => [...prev, entry]);
     setActiveLayerId(entry.id);
-    setRenderVersion((n) => n + 1);
+    bumpRenderVersion();
 
     return { entry, insertIndex };
-  }, [width, height]);
+  }, [width, height, bumpRenderVersion]);
 
-  const removeLayer = useCallback((layerId: string) => {
-    const currentEntries = entriesRef.current;
-    const index = currentEntries.findIndex((e) => e.id === layerId);
-    if (index === -1) return;
+  const removeLayer = useCallback(
+    (layerId: string) => {
+      const currentEntries = entriesRef.current;
+      const index = currentEntries.findIndex((e) => e.id === layerId);
+      if (index === -1) return;
 
-    const newEntries = currentEntries.filter((e) => e.id !== layerId);
-    setEntries(newEntries);
+      const newEntries = currentEntries.filter((e) => e.id !== layerId);
+      setEntries(newEntries);
 
-    if (activeLayerIdRef.current === layerId) {
-      if (newEntries.length === 0) {
-        setActiveLayerId(null);
-      } else {
-        const newIndex = Math.min(index, newEntries.length - 1);
-        setActiveLayerId(newEntries[newIndex].id);
+      if (activeLayerIdRef.current === layerId) {
+        if (newEntries.length === 0) {
+          setActiveLayerId(null);
+        } else {
+          const newIndex = Math.min(index, newEntries.length - 1);
+          setActiveLayerId(newEntries[newIndex].id);
+        }
       }
-    }
-    setRenderVersion((n) => n + 1);
-  }, []);
+      bumpRenderVersion();
+    },
+    [bumpRenderVersion],
+  );
 
   const reinsertLayer = useCallback(
     (layerId: string, index: number, meta?: LayerMeta) => {
@@ -175,11 +175,11 @@ export function useLayers(
       ];
       setEntries(newEntries);
       setActiveLayerId(layerId);
-      setRenderVersion((n) => n + 1);
+      bumpRenderVersion();
 
       return entry;
     },
-    [width, height],
+    [width, height, bumpRenderVersion],
   );
 
   const renameLayer = useCallback((layerId: string, name: string) => {
@@ -189,60 +189,76 @@ export function useLayers(
     setEntries([...entriesRef.current]);
   }, []);
 
-  const toggleVisibility = useCallback((layerId: string) => {
-    // direct mutation + direct set: StrictMode で updater が2回呼ばれても冪等
-    const entry = entriesRef.current.find((e) => e.id === layerId);
-    if (!entry) return;
-    entry.committedLayer.meta.visible = !entry.committedLayer.meta.visible;
-    setEntries([...entriesRef.current]);
-    setRenderVersion((n) => n + 1);
-  }, []);
+  const toggleVisibility = useCallback(
+    (layerId: string) => {
+      // direct mutation + direct set: StrictMode で updater が2回呼ばれても冪等
+      const entry = entriesRef.current.find((e) => e.id === layerId);
+      if (!entry) return;
+      entry.committedLayer.meta.visible = !entry.committedLayer.meta.visible;
+      setEntries([...entriesRef.current]);
+      bumpRenderVersion();
+    },
+    [bumpRenderVersion],
+  );
 
-  const setLayerVisible = useCallback((layerId: string, visible: boolean) => {
-    const entry = entriesRef.current.find((e) => e.id === layerId);
-    if (entry) {
-      entry.committedLayer.meta.visible = visible;
-      setRenderVersion((n) => n + 1);
-    }
-  }, []);
+  const setLayerVisible = useCallback(
+    (layerId: string, visible: boolean) => {
+      const entry = entriesRef.current.find((e) => e.id === layerId);
+      if (entry) {
+        entry.committedLayer.meta.visible = visible;
+        bumpRenderVersion();
+      }
+    },
+    [bumpRenderVersion],
+  );
 
-  const moveLayerUp = useCallback((layerId: string) => {
-    const currentEntries = entriesRef.current;
-    const fromIndex = currentEntries.findIndex((e) => e.id === layerId);
-    if (fromIndex === -1 || fromIndex >= currentEntries.length - 1) return null;
+  const moveLayerUp = useCallback(
+    (layerId: string) => {
+      const currentEntries = entriesRef.current;
+      const fromIndex = currentEntries.findIndex((e) => e.id === layerId);
+      if (fromIndex === -1 || fromIndex >= currentEntries.length - 1)
+        return null;
 
-    const toIndex = fromIndex + 1;
-    const newEntries = [...currentEntries];
-    const [removed] = newEntries.splice(fromIndex, 1);
-    newEntries.splice(toIndex, 0, removed);
-    setEntries(newEntries);
-    setRenderVersion((n) => n + 1);
+      const toIndex = fromIndex + 1;
+      const newEntries = [...currentEntries];
+      const [removed] = newEntries.splice(fromIndex, 1);
+      newEntries.splice(toIndex, 0, removed);
+      setEntries(newEntries);
+      bumpRenderVersion();
 
-    return { fromIndex, toIndex };
-  }, []);
+      return { fromIndex, toIndex };
+    },
+    [bumpRenderVersion],
+  );
 
-  const moveLayerDown = useCallback((layerId: string) => {
-    const currentEntries = entriesRef.current;
-    const fromIndex = currentEntries.findIndex((e) => e.id === layerId);
-    if (fromIndex <= 0) return null;
+  const moveLayerDown = useCallback(
+    (layerId: string) => {
+      const currentEntries = entriesRef.current;
+      const fromIndex = currentEntries.findIndex((e) => e.id === layerId);
+      if (fromIndex <= 0) return null;
 
-    const toIndex = fromIndex - 1;
-    const newEntries = [...currentEntries];
-    const [removed] = newEntries.splice(fromIndex, 1);
-    newEntries.splice(toIndex, 0, removed);
-    setEntries(newEntries);
-    setRenderVersion((n) => n + 1);
+      const toIndex = fromIndex - 1;
+      const newEntries = [...currentEntries];
+      const [removed] = newEntries.splice(fromIndex, 1);
+      newEntries.splice(toIndex, 0, removed);
+      setEntries(newEntries);
+      bumpRenderVersion();
 
-    return { fromIndex, toIndex };
-  }, []);
+      return { fromIndex, toIndex };
+    },
+    [bumpRenderVersion],
+  );
 
-  const setLayerOpacity = useCallback((layerId: string, opacity: number) => {
-    const entry = entriesRef.current.find((e) => e.id === layerId);
-    if (!entry) return;
-    entry.committedLayer.meta.opacity = Math.max(0, Math.min(1, opacity));
-    setEntries([...entriesRef.current]);
-    setRenderVersion((n) => n + 1);
-  }, []);
+  const setLayerOpacity = useCallback(
+    (layerId: string, opacity: number) => {
+      const entry = entriesRef.current.find((e) => e.id === layerId);
+      if (!entry) return;
+      entry.committedLayer.meta.opacity = Math.max(0, Math.min(1, opacity));
+      setEntries([...entriesRef.current]);
+      bumpRenderVersion();
+    },
+    [bumpRenderVersion],
+  );
 
   const setLayerBlendMode = useCallback(
     (layerId: string, blendMode: GlobalCompositeOperation | undefined) => {
@@ -250,9 +266,9 @@ export function useLayers(
       if (!entry) return;
       entry.committedLayer.meta.compositeOperation = blendMode;
       setEntries([...entriesRef.current]);
-      setRenderVersion((n) => n + 1);
+      bumpRenderVersion();
     },
-    [],
+    [bumpRenderVersion],
   );
 
   return {

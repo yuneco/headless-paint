@@ -458,7 +458,8 @@ function isBrushConfig(value: unknown): value is BrushConfig {
     if (
       typeof value.mixing.enabled !== "boolean" ||
       !isFiniteNumber(value.mixing.pickup) ||
-      !isFiniteNumber(value.mixing.restore)
+      !isFiniteNumber(value.mixing.restore) ||
+      !isFiniteNumber(value.mixing.updateDistanceRatio)
     ) {
       return false;
     }

@@ -25,7 +25,11 @@ function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
     sa.dynamics.flow === sb.dynamics.flow &&
     (sa.mixing?.enabled ?? false) === (sb.mixing?.enabled ?? false) &&
     (sa.mixing?.pickup ?? 0) === (sb.mixing?.pickup ?? 0) &&
-    (sa.mixing?.restore ?? 0) === (sb.mixing?.restore ?? 0)
+    (sa.mixing?.restore ?? 0) === (sb.mixing?.restore ?? 0) &&
+    (sa.mixing?.updateDistanceRatio ??
+      DEFAULT_BRUSH_MIXING.updateDistanceRatio) ===
+      (sb.mixing?.updateDistanceRatio ??
+        DEFAULT_BRUSH_MIXING.updateDistanceRatio)
   );
 }
 
@@ -96,7 +100,10 @@ function BrushPanelComponent({
   registry,
   registryReady,
 }: BrushPanelProps) {
-  const updateMixing = (field: "pickup" | "restore", value: number) => {
+  const updateMixing = (
+    field: "pickup" | "restore" | "updateDistanceRatio",
+    value: number,
+  ) => {
     if (brush.type !== "stamp") return;
     onBrushChange({
       ...brush,
@@ -177,6 +184,31 @@ function BrushPanelComponent({
               value={brush.mixing.restore}
               onChange={(event) =>
                 updateMixing("restore", Number(event.currentTarget.value))
+              }
+            />
+          </label>
+          <label style={{ display: "grid", gap: 2 }}>
+            <span>
+              Mix Distance{" "}
+              {(
+                brush.mixing.updateDistanceRatio ??
+                DEFAULT_BRUSH_MIXING.updateDistanceRatio
+              ).toFixed(2)}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={
+                brush.mixing.updateDistanceRatio ??
+                DEFAULT_BRUSH_MIXING.updateDistanceRatio
+              }
+              onChange={(event) =>
+                updateMixing(
+                  "updateDistanceRatio",
+                  Number(event.currentTarget.value),
+                )
               }
             />
           </label>

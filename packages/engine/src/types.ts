@@ -159,12 +159,14 @@ export interface BrushMixing {
   readonly enabled: boolean;
   readonly pickup: number;
   readonly restore: number;
+  readonly updateDistanceRatio: number;
 }
 
 export const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
   pickup: 0,
   restore: 0.15,
+  updateDistanceRatio: 0.5,
 };
 
 /** 現在の circle+trapezoid 方式 */
@@ -211,6 +213,8 @@ export interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly stampCount: number;
   readonly colorBuffer?: OffscreenCanvas;
+  readonly mixedCanvas?: OffscreenCanvas;
+  readonly lastMixingUpdateDistance?: number;
 }
 
 export interface BrushRenderState {

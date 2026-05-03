@@ -489,13 +489,14 @@ type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
 
 ### BrushMixing
 
-スタンプブラシの混色設定。dab ごとに描画先レイヤーの footprint を分岐ごとのブラシ色バッファへ転写し、元の描画色で復元する強さを制御する。
+スタンプブラシの混色設定。一定距離ごとに描画先レイヤーの footprint を分岐ごとのブラシ色バッファへ転写し、元の描画色で復元する強さを制御する。
 
 ```typescript
 interface BrushMixing {
   readonly enabled: boolean;
   readonly pickup: number;
   readonly restore: number;
+  readonly updateDistanceRatio: number;
 }
 ```
 
@@ -504,6 +505,7 @@ interface BrushMixing {
 | `enabled` | `boolean` | 混色を有効にする |
 | `pickup` | `number` | 描画先 footprint をブラシ色バッファへ転写する強さ [0, 1] |
 | `restore` | `number` | 元の描画色をブラシ色バッファへ戻す強さ [0, 1] |
+| `updateDistanceRatio` | `number` | 混色状態を更新する距離の下限を線幅比で指定する。`0.5` は `lineWidth * 0.5` ごと、`0` は stamp ごとに更新 |
 
 **関連定数**:
 
@@ -512,6 +514,7 @@ const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
   pickup: 0,
   restore: 0.15,
+  updateDistanceRatio: 0.5,
 };
 ```
 
@@ -641,6 +644,8 @@ interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly stampCount: number;
   readonly colorBuffer?: OffscreenCanvas;
+  readonly mixedCanvas?: OffscreenCanvas;
+  readonly lastMixingUpdateDistance?: number;
 }
 
 interface BrushRenderState {
@@ -667,8 +672,10 @@ interface BrushRenderState {
 | `accumulatedDistance` | `number` | 分岐ごとのスタンプ配置累積距離 |
 | `stampCount` | `number` | 分岐ごとのスタンプ通し番号 |
 | `colorBuffer` | `OffscreenCanvas` | 混色有効時に使うブラシ色バッファ。`tipCanvas` と同じ最大サイズで、背景転写と復元色転写により更新される |
+| `mixedCanvas` | `OffscreenCanvas` | 混色更新を距離ベースで間引くときに再利用する直近の mixed dab。`colorBuffer` に `tipCanvas` の alpha を適用した結果を保持する |
+| `lastMixingUpdateDistance` | `number` | 最後に `colorBuffer` / `mixedCanvas` を更新したストローク距離。混色更新を距離ベースで制御するために使用 |
 
-**設計意図**: スタンプブラシの jitter はスタンプ通し番号ベース PRNG `hashSeed(seed, stampIndex)` で決定論的に生成される。混色有効時は Expand 分岐ごとに拾う背景が異なるため、`branches` に分岐別の距離・通し番号・色バッファを保持する。
+**設計意図**: スタンプブラシの jitter はスタンプ通し番号ベース PRNG `hashSeed(seed, stampIndex)` で決定論的に生成される。混色有効時は Expand 分岐ごとに拾う背景が異なるため、`branches` に分岐別の距離・通し番号・色バッファを保持する。混色状態の更新はスタンプ配置より低い距離頻度にできるため、最後に更新した距離と直近の mixed dab も分岐ごとに保持する。
 
 **使用例**:
 ```typescript

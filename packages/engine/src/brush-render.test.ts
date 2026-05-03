@@ -434,5 +434,62 @@ describe("renderBrushStroke", () => {
       expect(right[2]).toBeGreaterThan(right[0]);
       expect(result.branches?.[0].colorBuffer).toBeInstanceOf(OffscreenCanvas);
     });
+
+    it("混色更新はスタンプ配置より低い距離頻度にできる", () => {
+      const style = makeStyle({
+        color: { r: 0, g: 180, b: 40, a: 255 },
+        lineWidth: 10,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1.0 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 0.1,
+            flow: 1,
+          },
+          mixing: { ...DEFAULT_BRUSH_MIXING, enabled: true, pickup: 1 },
+        },
+      });
+
+      function renderEndPixel(updateDistanceRatio: number) {
+        const source = createLayer(100, 100);
+        source.ctx.fillStyle = "rgb(255, 0, 0)";
+        source.ctx.fillRect(0, 0, 50, 100);
+        source.ctx.fillStyle = "rgb(0, 0, 255)";
+        source.ctx.fillRect(50, 0, 50, 100);
+
+        const target = createLayer(100, 100);
+        const brush = style.brush;
+        if (brush.type !== "stamp") throw new Error("Expected stamp brush");
+        const nextStyle = makeStyle({
+          ...style,
+          brush: {
+            ...brush,
+            mixing: {
+              ...DEFAULT_BRUSH_MIXING,
+              enabled: true,
+              pickup: 1,
+              restore: 0,
+              updateDistanceRatio,
+            },
+          },
+        });
+        renderBrushStroke(
+          target,
+          makeLine(25, 50, 75, 50, 20),
+          nextStyle,
+          0,
+          makeInitialState(nextStyle),
+          source,
+        );
+        return target.ctx.getImageData(75, 50, 1, 1).data;
+      }
+
+      const everyStamp = renderEndPixel(0);
+      const sparse = renderEndPixel(100);
+
+      expect(everyStamp[2]).toBeGreaterThan(everyStamp[0]);
+      expect(sparse[0]).toBeGreaterThan(sparse[2]);
+    });
   });
 });

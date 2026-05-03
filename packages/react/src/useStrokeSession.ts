@@ -28,6 +28,7 @@ import type {
 import { addPointToSession, startStrokeSession } from "@headless-paint/core";
 import type { StrokeSessionState } from "@headless-paint/core";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useRafRenderVersion } from "./useRafRenderVersion";
 
 export interface StrokeCompleteData {
   readonly inputPoints: readonly InputPoint[];
@@ -147,9 +148,7 @@ function restoreLayerContent(layer: Layer, snapshot: Layer): void {
 function getPendingCompositeOperation(
   style: StrokeStyle,
 ): GlobalCompositeOperation {
-  return needsSamplingLayer(style) && style.compositeOperation === "source-over"
-    ? "copy"
-    : style.compositeOperation;
+  return style.compositeOperation;
 }
 
 export function useStrokeSession(
@@ -166,7 +165,7 @@ export function useStrokeSession(
     registry,
   } = config;
 
-  const [renderVersion, setRenderVersion] = useState(0);
+  const [renderVersion, bumpRenderVersion] = useRafRenderVersion();
   const [isDrawing, setIsDrawing] = useState(false);
 
   const sessionRef = useRef<SessionInternal | null>(null);
@@ -188,11 +187,6 @@ export function useStrokeSession(
   registryRef.current = registry;
 
   const canDraw = layer?.meta.visible ?? false;
-
-  const bumpRenderVersion = useCallback(
-    () => setRenderVersion((n) => n + 1),
-    [],
-  );
 
   const straightLinePipeline = useMemo(
     () =>
@@ -272,7 +266,6 @@ export function useStrokeSession(
         compiled,
         sessionRef.current.brushState,
         samplingLayer ?? currentLayer,
-        needsSamplingLayer(style) ? currentLayer : undefined,
       );
 
       strokePointsRef.current = [inputPoint];
@@ -335,7 +328,6 @@ export function useStrokeSession(
         sessionRef.current.compiledExpand,
         sessionRef.current.brushState,
         sessionRef.current.samplingLayer ?? currentLayer,
-        needsSamplingLayer(style) ? currentLayer : undefined,
       );
 
       bumpRenderVersion();

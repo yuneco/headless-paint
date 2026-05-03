@@ -11,6 +11,15 @@ import type {
   StrokeStyle,
 } from "./types";
 
+const PENDING_COLOR_BUFFER_CACHE = new WeakMap<
+  OffscreenCanvas,
+  OffscreenCanvas
+>();
+const CONTEXT_CACHE = new WeakMap<
+  OffscreenCanvas,
+  OffscreenCanvasRenderingContext2D
+>();
+
 /**
  * 確定レイヤーに新しく確定した点を追加描画する
  * 既存の描画は保持される（追加描画のみ）
@@ -196,6 +205,8 @@ function stateToBranch(state: BrushRenderState): BrushBranchRenderState {
       branch?.accumulatedDistance ?? state.accumulatedDistance,
     stampCount: branch?.stampCount ?? state.stampCount,
     colorBuffer: branch?.colorBuffer,
+    mixedCanvas: branch?.mixedCanvas,
+    lastMixingUpdateDistance: branch?.lastMixingUpdateDistance,
   };
 }
 
@@ -225,18 +236,44 @@ function cloneBrushRenderState(
       accumulatedDistance: branch.accumulatedDistance,
       stampCount: branch.stampCount,
       colorBuffer: branch.colorBuffer
-        ? cloneCanvas(branch.colorBuffer)
+        ? copyToPendingColorBuffer(branch.colorBuffer)
         : undefined,
+      mixedCanvas: branch.mixedCanvas
+        ? copyToPendingColorBuffer(branch.mixedCanvas)
+        : undefined,
+      lastMixingUpdateDistance: branch.lastMixingUpdateDistance,
     })),
   };
 }
 
-function cloneCanvas(canvas: OffscreenCanvas): OffscreenCanvas {
-  const next = new OffscreenCanvas(canvas.width, canvas.height);
-  const ctx = next.getContext("2d");
-  if (!ctx) throw new Error("Failed to get 2d context for canvas clone");
-  ctx.drawImage(canvas, 0, 0);
-  return next;
+function copyToPendingColorBuffer(source: OffscreenCanvas): OffscreenCanvas {
+  let buffer = PENDING_COLOR_BUFFER_CACHE.get(source);
+  if (
+    !buffer ||
+    buffer.width !== source.width ||
+    buffer.height !== source.height
+  ) {
+    buffer = new OffscreenCanvas(source.width, source.height);
+    PENDING_COLOR_BUFFER_CACHE.set(source, buffer);
+  }
+  const ctx = getCached2dContext(buffer, "pending color buffer");
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "copy";
+  ctx.drawImage(source, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  return buffer;
+}
+
+function getCached2dContext(
+  canvas: OffscreenCanvas,
+  label: string,
+): OffscreenCanvasRenderingContext2D {
+  const cached = CONTEXT_CACHE.get(canvas);
+  if (cached) return cached;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error(`Failed to get 2d context for ${label}`);
+  CONTEXT_CACHE.set(canvas, ctx);
+  return ctx;
 }
 
 /**

@@ -412,7 +412,7 @@ interface UseStrokeSessionResult {
   readonly onDrawCancel: () => void;
   /** layer が有効（非 null かつ visible）で描画可能な状態か */
   readonly canDraw: boolean;
-  /** 描画操作のたびにインクリメントされる単純カウンタ。Canvas の再描画トリガーとして使う */
+  /** 描画操作後に requestAnimationFrame 単位で合流して進むカウンタ。Canvas の再描画トリガーとして使う */
   readonly renderVersion: number;
   /** 現在のストロークで蓄積された入力ポイント列（デバッグ表示用） */
   readonly strokePoints: readonly InputPoint[];
@@ -495,7 +495,7 @@ interface CustomCommandContext {
 |---|---|
 | `entries` | 現在の全レイヤーエントリ |
 | `findEntry` | ID でエントリを検索 |
-| `bumpRenderVersion` | 再描画トリガーを発火する |
+| `bumpRenderVersion` | 再描画トリガーを次の animation frame にスケジュールする |
 
 ### PaintEngineConfig
 
@@ -832,9 +832,9 @@ interface UseLayersResult {
   readonly setLayerOpacity: (layerId: string, opacity: number) => void;
   /** レイヤーのブレンドモードを設定する（undefined で通常合成） */
   readonly setLayerBlendMode: (layerId: string, blendMode: GlobalCompositeOperation | undefined) => void;
-  /** 描画操作のたびにインクリメントされる再描画トリガー */
+  /** 描画操作後に requestAnimationFrame 単位で合流して進む再描画トリガー */
   readonly renderVersion: number;
-  /** renderVersion を手動でインクリメントする */
+  /** renderVersion の更新を次の animation frame にスケジュールする */
   readonly bumpRenderVersion: () => void;
 }
 ```
@@ -917,7 +917,7 @@ const documentSnapshot = await exportPaintDocument({
 | `StampBrushConfig` | engine | スタンプベースブラシの設定 |
 | `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
-| `BrushMixing` | engine | スタンプブラシの混色パラメータ |
+| `BrushMixing` | engine | スタンプブラシの混色パラメータ（pickup / restore / updateDistanceRatio） |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
 | `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
 | `ViewTransform` | input | ビュー変換行列 |
@@ -938,3 +938,4 @@ const documentSnapshot = await exportPaintDocument({
 | `PENCIL` | engine | 鉛筆プリセット |
 | `MARKER` | engine | マーカープリセット |
 | `DEFAULT_BRUSH_DYNAMICS` | engine | `BrushDynamics` のデフォルト値 |
+| `DEFAULT_BRUSH_MIXING` | engine | `BrushMixing` のデフォルト値 |
