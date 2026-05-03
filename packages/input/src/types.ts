@@ -228,9 +228,12 @@ export type GestureState =
       readonly secondaryPointerId: number;
       readonly layerP1: Point;
       readonly layerP2: Point;
+      readonly startScreenP1: Point;
+      readonly startScreenP2: Point;
       readonly lastScreenP1: Point;
       readonly lastScreenP2: Point;
       readonly downTimestamp: number;
+      readonly maxMovePx: number;
       readonly gestureMoved: boolean;
     }
   | {
@@ -238,9 +241,12 @@ export type GestureState =
       readonly remainingPointerId: number;
       readonly layerP1: Point;
       readonly layerP2: Point;
+      readonly startScreenP1: Point;
+      readonly startScreenP2: Point;
       readonly lastScreenP1: Point;
       readonly lastScreenP2: Point;
       readonly downTimestamp: number;
+      readonly maxMovePx: number;
       readonly gestureMoved: boolean;
     };
 

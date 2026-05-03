@@ -15,10 +15,10 @@ idle ──down──→ single_down (draw-start 発行、pending-only レンダ
                  │                   └─ up → idle (draw-end)
                  └─ up → idle (draw-end)
 
-gesture ──move──→ gesture (pinch-move: 相似変換による ViewTransform 発行)
+gesture ──move──→ gesture (移動量が Undo 閾値を超えると pinch-move 発行)
          ──1指up──→ gesture_ending
                       └─ 残り指up → idle
-                           ├─ 短時間 + 移動なし → undo 発行
+                           ├─ 短時間 + 移動量が閾値内 → undo 発行
                            └─ それ以外 → pinch-end 発行
 ```
 
@@ -143,7 +143,7 @@ const DEFAULT_GESTURE_CONFIG: GestureConfig = {
 | ------------------ | ------------ | ---------------------------------- |
 | `graceWindowMs`    | `150`        | 二本指切替の猶予期間（ms）         |
 | `confirmDistancePx` | `10`       | ストローク確定の移動閾値（px）     |
-| `undoMaxMovePx`    | `20`         | Undo判定の最大移動量（px）         |
+| `undoMaxMovePx`    | `20`         | Undo判定の最大移動量（px）。2本指開始後の最大移動量がこの値を超えるとピンチ扱い |
 | `undoMaxDurationMs` | `300`       | Undo判定の最大時間（ms）           |
 
 ---

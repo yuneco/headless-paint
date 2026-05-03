@@ -324,6 +324,30 @@ describe("gesture state machine", () => {
       expect(events4).toHaveLength(1);
       expect(events4[0].type).toBe("undo");
     });
+
+    it("should emit undo when pointermove occurs without exceeding undoMaxMovePx", () => {
+      const state = createGestureState();
+      const [s1] = process(state, touchDown(1, 100, 200, 1000));
+      const [s2] = process(s1, touchDown(2, 300, 200, 1050));
+
+      expect(s2.phase).toBe("gesture");
+
+      const [s3, events3] = process(s2, touchMove(2, 301, 200, 1060));
+
+      expect(s3.phase).toBe("gesture");
+      if (s3.phase === "gesture") {
+        expect(s3.gestureMoved).toBe(false);
+        expect(s3.maxMovePx).toBe(1);
+      }
+      expect(events3).toHaveLength(0);
+
+      const [s4] = process(s3, touchUp(1, 100, 200, 1080));
+      const [s5, events5] = process(s4, touchUp(2, 301, 200, 1150));
+
+      expect(s5.phase).toBe("idle");
+      expect(events5).toHaveLength(1);
+      expect(events5[0].type).toBe("undo");
+    });
   });
 
   describe("gesture -> gesture_ending -> idle (pinch-end)", () => {

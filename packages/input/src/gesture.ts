@@ -44,7 +44,7 @@ export function processGestureEvent(
     case "drawing":
       return handleDrawing(state, event, config, currentTransform);
     case "gesture":
-      return handleGesture(state, event);
+      return handleGesture(state, event, config);
     case "gesture_ending":
       return handleGestureEnding(state, event, config);
   }
@@ -198,6 +198,7 @@ function handleDrawing(
 function handleGesture(
   state: GestureState & { readonly phase: "gesture" },
   event: GesturePointerEvent,
+  config: GestureConfig,
 ): [GestureState, readonly GestureEvent[]] {
   // Move → update corresponding pointer, compute new transform
   if (event.eventType === "move") {
@@ -219,15 +220,21 @@ function handleGesture(
       newScreenP1,
       newScreenP2,
     );
+    const maxMovePx = Math.max(
+      state.maxMovePx,
+      distance(state.startScreenP1, newScreenP1),
+      distance(state.startScreenP2, newScreenP2),
+    );
 
     const newState: GestureState = {
       ...state,
       lastScreenP1: newScreenP1,
       lastScreenP2: newScreenP2,
-      gestureMoved: true,
+      maxMovePx,
+      gestureMoved: maxMovePx > config.undoMaxMovePx,
     };
 
-    if (transform) {
+    if (transform && newState.gestureMoved) {
       return [newState, [{ type: "pinch-move", transform }]];
     }
     // computeSimilarityTransform returned null → use previous transform
@@ -238,7 +245,7 @@ function handleGesture(
       state.lastScreenP1,
       state.lastScreenP2,
     );
-    if (fallback) {
+    if (fallback && newState.gestureMoved) {
       return [newState, [{ type: "pinch-move", transform: fallback }]];
     }
     // Both null (degenerate) → no event
@@ -262,9 +269,12 @@ function handleGesture(
         remainingPointerId,
         layerP1: state.layerP1,
         layerP2: state.layerP2,
+        startScreenP1: state.startScreenP1,
+        startScreenP2: state.startScreenP2,
         lastScreenP1: state.lastScreenP1,
         lastScreenP2: state.lastScreenP2,
         downTimestamp: state.downTimestamp,
+        maxMovePx: state.maxMovePx,
         gestureMoved: state.gestureMoved,
       },
       [],
@@ -290,7 +300,10 @@ function handleGestureEnding(
     event.pointerId === state.remainingPointerId
   ) {
     const duration = event.timestamp - state.downTimestamp;
-    if (!state.gestureMoved && duration < config.undoMaxDurationMs) {
+    if (
+      state.maxMovePx <= config.undoMaxMovePx &&
+      duration < config.undoMaxDurationMs
+    ) {
       return [{ phase: "idle" }, [{ type: "undo" }]];
     }
     return [{ phase: "idle" }, [{ type: "pinch-end" }]];
@@ -335,11 +348,20 @@ function transitionToGesture(
       secondaryPointerId,
       layerP1,
       layerP2,
+      startScreenP1: screenP1,
+      startScreenP2: screenP2,
       lastScreenP1: screenP1,
       lastScreenP2: screenP2,
       downTimestamp,
+      maxMovePx: 0,
       gestureMoved: false,
     },
     [{ type: "draw-cancel" }, { type: "pinch-start", transform }],
   ];
+}
+
+function distance(a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.hypot(dx, dy);
 }
