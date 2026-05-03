@@ -43,11 +43,11 @@ export function mulberry32(seed: number): () => number {
 }
 
 /**
- * グローバルシードとストローク上の距離から位置固有のシードを生成する。
- * 同一距離位置では常に同一シードを返すため、committed/pending を独立描画しても同一 jitter。
+ * グローバルシードとスタンプ通し番号からスタンプ固有のシードを生成する。
+ * 同一スタンプ番号では常に同一シードを返すため、committed/pending を独立描画しても同一 jitter。
  */
-export function hashSeed(globalSeed: number, distance: number): number {
-  const quantized = Math.round(distance * 100);
+export function hashSeed(globalSeed: number, stampIndex: number): number {
+  const quantized = Math.round(stampIndex * 100);
   // FNV-1a inspired hash
   let h = (globalSeed ^ quantized) | 0;
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);

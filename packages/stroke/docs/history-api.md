@@ -12,7 +12,7 @@
                                               ImageData保存
 ```
 
-- **Command**: 操作を記録（inputPoints, filterPipeline, expand, color, lineWidth）
+- **Command**: 操作を記録（layerId, inputPoints, filterPipeline, expand, style, brushSeed）
 - **Checkpoint**: N操作ごとにImageDataスナップショット保存
 - **Undo**: 直近のCheckpointまで戻り → Commandsをリプレイ
 
@@ -25,7 +25,7 @@ Commands[checkpoint.index + 1 ... current]
     ↓ 各コマンドをリプレイ
       - inputPoints を filterPipeline で処理
       - 結果を expand で展開
-      - 描画
+      - style のブラシ種別に応じて描画
 ```
 
 ---
@@ -330,8 +330,8 @@ function replayCommand(layer: Layer, command: Command): void
 
 **StrokeCommandの処理**:
 1. inputPoints を filterPipeline で処理（processAllPoints）
-2. 結果を expand で展開（expandStroke）
-3. 各ストロークを描画（drawPath）
+2. 結果を expand で展開（appendToCommittedLayer 内で expandStrokePoints）
+3. style のブラシ種別に応じて各ストロークを描画
 
 ---
 
@@ -345,22 +345,23 @@ function createStrokeCommand(
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
   expand: ExpandConfig,
-  color: StrokeStyle["color"],
-  lineWidth: number,
-  pressureSensitivity?: number,
-  pressureCurve?: PressureCurve,
-  compositeOperation?: GlobalCompositeOperation,
+  style: StrokeStyle,
+  brushSeed?: number,
 ): StrokeCommand
 ```
 
 **使用例**:
 ```typescript
 const command = createStrokeCommand(
+  layer.id,
   inputPoints,
   { filters: [{ type: "smoothing", config: { windowSize: 5 } }] },
-  { mode: "radial", origin: { x: 500, y: 500 }, angle: 0, divisions: 6 },
-  { r: 0, g: 0, b: 0, a: 255 },
-  3
+  {
+    levels: [
+      { mode: "radial", offset: { x: 500, y: 500 }, angle: 0, divisions: 6 },
+    ],
+  },
+  strokeStyle,
 );
 ```
 

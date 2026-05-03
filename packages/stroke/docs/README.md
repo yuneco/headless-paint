@@ -110,13 +110,13 @@ if (canUndo(historyState)) {
 |---|---|
 | `startStrokeSession(filterOutput, style, expand)` | セッション開始 |
 | `addPointToSession(state, filterOutput)` | 点を追加 |
-| `endStrokeSession(state, layerId, inputPoints, filterConfig)` | セッション終了（`layerId` 必須） |
+| `endStrokeSession(state, layerId, inputPoints, filterPipeline)` | セッション終了（`layerId` 必須） |
 | `createStrokeCommand(layerId, inputPoints, filterPipeline, expand, style, brushSeed?)` | ストロークコマンドを直接作成 |
 | `createClearCommand(layerId)` | クリアコマンドを作成 |
 | `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成（グローバル） |
 | `createTransformLayerCommand(layerId, matrix)` | レイヤー変換コマンドを作成 |
 | `createAddLayerCommand(layerId, insertIndex, width, height, meta)` | レイヤー追加コマンドを作成 |
-| `createRemoveLayerCommand(layerId, removedIndex)` | レイヤー削除コマンドを作成 |
+| `createRemoveLayerCommand(layerId, removedIndex, meta)` | レイヤー削除コマンドを作成 |
 | `createReorderLayerCommand(layerId, fromIndex, toIndex)` | レイヤー並び替えコマンドを作成 |
 
 ### 履歴管理

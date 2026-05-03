@@ -58,7 +58,7 @@ function onPointerDown(e: PointerEvent) {
   // ストロークセッション開始
   const result = startStrokeSession(
     filterResult.output,
-    { color, lineWidth },
+    strokeStyle,
     expandConfig
   );
   sessionRef.current = result.state;
