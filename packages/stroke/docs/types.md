@@ -360,15 +360,27 @@ function isCustomCommand<TCustom>(cmd: Command<TCustom>): cmd is TCustom;
 
 ## Checkpoint
 
-チェックポイント。N操作ごとにレイヤーのスナップショットを保存。
+チェックポイント。pre-write checkpoint としてレイヤーのスナップショットを保存する。payload は内部表現であり、通常利用では直接操作せず `beginHistoryMutation()` / `rebuildLayerFromHistory()` / `getHistoryMetrics()` を使う。
 
 ```typescript
 interface Checkpoint {
   readonly id: string;
   readonly layerId: string;
   readonly commandIndex: number;
-  readonly imageData: ImageData;
   readonly createdAt: number;
+  readonly payload: CheckpointPayload;
+}
+
+type CheckpointPayload =
+  | { readonly type: "empty" }
+  | { readonly type: "raw"; readonly imageData: ImageData }
+  | {
+      readonly type: "encoded";
+      readonly width: number;
+      readonly height: number;
+      readonly codec: "fflate";
+      readonly bytes: Uint8Array;
+    };
 }
 ```
 
@@ -376,9 +388,9 @@ interface Checkpoint {
 |---|---|---|
 | `id` | `string` | 一意な識別子 |
 | `layerId` | `string` | 対象レイヤーのID |
-| `commandIndex` | `number` | 対応するコマンドのインデックス |
-| `imageData` | `ImageData` | レイヤーのスナップショット |
+| `commandIndex` | `number` | checkpoint 作成時点の絶対 command index |
 | `createdAt` | `number` | 作成時刻（タイムスタンプ） |
+| `payload` | `CheckpointPayload` | 内部 checkpoint payload |
 
 ---
 
@@ -390,10 +402,16 @@ interface Checkpoint {
 interface HistoryState<TCustom = never> {
   readonly commands: readonly Command<TCustom>[];
   readonly checkpoints: readonly Checkpoint[];
+  readonly historyStartIndex: number;
   readonly currentIndex: number;
+  readonly undoFloorIndex: number;
+  readonly baseCumulativeOffset: {
+    readonly x: number;
+    readonly y: number;
+  };
   readonly layerWidth: number;
   readonly layerHeight: number;
-  readonly drawsSinceCheckpoint: number;
+  readonly layerCount: number;
 }
 ```
 
@@ -401,12 +419,15 @@ interface HistoryState<TCustom = never> {
 |---|---|---|
 | `commands` | `readonly Command<TCustom>[]` | 記録されたコマンド一覧 |
 | `checkpoints` | `readonly Checkpoint[]` | チェックポイント一覧 |
-| `currentIndex` | `number` | 現在位置（-1 は空の状態） |
+| `historyStartIndex` | `number` | `commands[0]` に対応する絶対 command index |
+| `currentIndex` | `number` | 現在位置の絶対 command index（-1 は空の状態） |
+| `undoFloorIndex` | `number` | Undo 不可境界。`canUndo` は `currentIndex > undoFloorIndex` |
+| `baseCumulativeOffset` | `{ readonly x: number; readonly y: number }` | pruning 済み prefix 内の wrap-shift 累積値 |
 | `layerWidth` | `number` | レイヤーの幅 |
 | `layerHeight` | `number` | レイヤーの高さ |
-| `drawsSinceCheckpoint` | `number` | 最後のチェックポイント以降の DrawCommand 数。チェックポイント作成間隔の判定に使用 |
+| `layerCount` | `number` | checkpoint 上限の実効下限に使う現在レイヤー数 |
 
-`TCustom = never` の場合、従来の `HistoryState` と等価（後方互換）。
+`HistoryState` は plain readonly object。checkpoint payload は含まれるが安定 public API として直接操作しない。
 
 ---
 
@@ -416,26 +437,88 @@ interface HistoryState<TCustom = never> {
 
 ```typescript
 interface HistoryConfig {
-  readonly maxHistorySize: number;
   readonly checkpointInterval: number;
   readonly maxCheckpoints: number;
+  readonly checkpointCompression?: "none" | "fast";
 }
 ```
 
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
-| `maxHistorySize` | `number` | 100 | 最大履歴数（DrawCommand のみカウント） |
-| `checkpointInterval` | `number` | 10 | チェックポイント作成間隔（DrawCommand のみカウント） |
-| `maxCheckpoints` | `number` | 10 | 最大チェックポイント数 |
+| `checkpointInterval` | `number` | 10 | 対象レイヤーの最後の checkpoint から現在位置までの commandIndex 距離 |
+| `maxCheckpoints` | `number` | 10 | 保持する checkpoint 数の目標上限。実効上限は `Math.max(maxCheckpoints, layerCount)` |
+| `checkpointCompression` | `"none" \| "fast"` | `"fast"` | checkpoint 圧縮プリセット |
 
-**カウント対象**: `maxHistorySize` と `checkpointInterval` は DrawCommand の数に基づいてカウントされる。StructuralCommand やカスタムコマンドはカウントに含まれない。
+`maxHistorySize` は廃止。Undo 保持範囲は checkpoint eviction によって更新される `undoFloorIndex` で決まる。
 
 ### DEFAULT_HISTORY_CONFIG
 
 ```typescript
 const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
-  maxHistorySize: 100,
   checkpointInterval: 10,
   maxCheckpoints: 10,
+  checkpointCompression: "fast",
 };
+```
+
+---
+
+## PushCommandOptions
+
+```typescript
+interface PushCommandOptions {
+  readonly afterLayer?: Layer;
+  readonly affectedLayerIds?: readonly string[];
+  readonly layerCount?: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `afterLayer` | `Layer` | layer 固有 command の対象レイヤー |
+| `affectedLayerIds` | `readonly string[]` | `wrap-shift` など全レイヤー command の検証対象 |
+| `layerCount` | `number` | checkpoint 上限の実効下限に使う現在レイヤー数 |
+
+---
+
+## RebuildLayerResult
+
+```typescript
+type RebuildLayerResult =
+  | { readonly ok: true; readonly source: "checkpoint" | "empty" }
+  | {
+      readonly ok: false;
+      readonly reason: "missing-checkpoint";
+      readonly layerId: string;
+    };
+```
+
+`ok: false` の場合、`rebuildLayerFromHistory()` は対象レイヤーを変更しない。
+
+---
+
+## HistoryMetrics
+
+```typescript
+interface HistoryMetrics {
+  readonly commandCount: number;
+  readonly historyStartIndex: number;
+  readonly currentIndex: number;
+  readonly undoFloorIndex: number;
+  readonly undoableCommandCount: number;
+  readonly redoableCommandCount: number;
+  readonly checkpointCount: number;
+  readonly effectiveMaxCheckpoints: number;
+  readonly rawCheckpointCount: number;
+  readonly encodedCheckpointCount: number;
+  readonly rawCheckpointBytes: number;
+  readonly encodedCheckpointBytes: number;
+  readonly totalCheckpointBytes: number;
+  readonly checkpointsByLayer: readonly {
+    readonly layerId: string;
+    readonly count: number;
+    readonly rawBytes: number;
+    readonly encodedBytes: number;
+  }[];
+}
 ```

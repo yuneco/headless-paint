@@ -20,7 +20,12 @@ import {
   findBestCheckpointForLayer,
   getCommandsToReplayForLayer,
 } from "./history";
-import type { Command, HistoryState, StrokeCommand } from "./types";
+import type {
+  Command,
+  HistoryState,
+  RebuildLayerResult,
+  StrokeCommand,
+} from "./types";
 import { isDrawCommand } from "./types";
 
 /**
@@ -134,13 +139,19 @@ export function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
   registry?: BrushTipRegistry,
-): void {
+): RebuildLayerResult {
   const checkpoint = findBestCheckpointForLayer(state, layer.id);
 
   if (checkpoint) {
     restoreFromCheckpoint(layer, checkpoint);
-  } else {
+  } else if (state.currentIndex < state.historyStartIndex) {
     clearLayer(layer);
+  } else {
+    return {
+      ok: false,
+      reason: "missing-checkpoint",
+      layerId: layer.id,
+    };
   }
 
   const commandsToReplay = getCommandsToReplayForLayer(
@@ -149,6 +160,7 @@ export function rebuildLayerFromHistory<TCustom = never>(
     checkpoint,
   );
   replayCommands(layer, commandsToReplay, registry);
+  return { ok: true, source: checkpoint ? "checkpoint" : "empty" };
 }
 
 /**
@@ -158,5 +170,5 @@ export function rebuildLayerState<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
 ): void {
-  rebuildLayerFromHistory(layer, state);
+  void rebuildLayerFromHistory(layer, state);
 }

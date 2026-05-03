@@ -44,10 +44,12 @@ import {
   addPointToSession,
   createStrokeCommand,
   createHistoryState,
+  beginHistoryMutation,
   pushCommand,
   undo,
   canUndo,
   rebuildLayerFromHistory,
+  getCommandAt,
   createAddLayerCommand,
   isStructuralCommand,
 } from "@yuneco/headless-paint/core";
@@ -55,22 +57,36 @@ import { createLayer } from "@yuneco/headless-paint/core";
 
 // 初期化（全コマンドに layerId が付く）
 const layer = createLayer(1920, 1080);
-let historyState = createHistoryState(1920, 1080);
+let historyState = createHistoryState(1920, 1080, { layerCount: 1 });
 
 // ストロークセッション → コマンド生成
 const command = createStrokeCommand(
   layer.id, inputPoints, filterConfig, expandConfig, strokeStyle
 );
-historyState = pushCommand(historyState, command, layer, config);
+historyState = beginHistoryMutation(
+  historyState,
+  { affectedLayers: [layer], layerCount: 1 },
+  config,
+);
+// ここで layer に実描画する
+historyState = pushCommand(
+  historyState,
+  command,
+  { afterLayer: layer, layerCount: 1 },
+  config,
+);
 
 // レイヤー追加（構造コマンド）
 const addCmd = createAddLayerCommand(layer.id, 0, 1920, 1080, layer.meta);
-historyState = pushCommand(historyState, addCmd, null, config);
+historyState = pushCommand(historyState, addCmd, { layerCount: 1 }, config);
 
 // Undo → レイヤー単位でリビルド
 if (canUndo(historyState)) {
   historyState = undo(historyState);
-  rebuildLayerFromHistory(layer, historyState, registry); // layer.id でフィルタ, registry は image tip 用
+  const result = rebuildLayerFromHistory(layer, historyState, registry);
+  if (!result.ok) {
+    // 通常フローではここに来ない。state を進めず診断する。
+  }
 }
 ```
 
@@ -100,7 +116,10 @@ if (canUndo(historyState)) {
 | `AffectedLayers` | コマンド範囲のピクセル影響集約（`"partial"` / `"all"`） |
 | `HistoryState<TCustom>` | 履歴状態（デフォルト `never`） |
 | `HistoryConfig` | 履歴設定 |
-| `Checkpoint` | チェックポイント（`layerId` 付き） |
+| `PushCommandOptions` | command 確定時の影響レイヤー情報 |
+| `HistoryMetrics` | checkpoint / command の観測情報 |
+| `RebuildLayerResult` | レイヤー再構築結果 |
+| `Checkpoint` | 内部 checkpoint（通常利用では直接操作しない） |
 
 ### セッション管理
 
@@ -125,16 +144,22 @@ if (canUndo(historyState)) {
 
 | 関数 | 説明 |
 |---|---|
-| `createHistoryState(width, height)` | 履歴状態を作成 |
-| `pushCommand(state, command, layer, config)` | コマンドを追加（`layer` は構造コマンド時 `null` 可） |
+| `createHistoryState(width, height, options?)` | 履歴状態を作成 |
+| `beginHistoryMutation(state, options, config?)` | ピクセル変更直前に pre-write checkpoint を確保 |
+| `pushCommand(state, command, options, config?)` | checkpoint coverage を検証してコマンドを追加 |
 | `undo(state)` | 1つ前に戻る |
 | `redo(state)` | 1つ先に進む |
 | `canUndo(state)` | Undo可能か |
 | `canRedo(state)` | Redo可能か |
-| `rebuildLayerFromHistory(layer, state, registry?)` | `layer.id` に基づきレイヤーを再構築。`registry` は image tip のリプレイ時に必要 |
+| `rebuildLayerFromHistory(layer, state, registry?)` | `layer.id` に基づきレイヤーを再構築し、結果を返す |
 | `replayCommands(layer, commands, registry?)` | コマンドのリストを順番にリプレイ |
 | `replayCommand(layer, command, registry?)` | 単一コマンドをレイヤーに適用 |
 | `computeCumulativeOffset(state)` | グローバルな累積オフセットを返す |
+| `getCommandOffset(state, absoluteIndex)` | 絶対 index を `commands` 配列 offset に変換 |
+| `getCommandAt(state, absoluteIndex)` | 絶対 index からコマンドを取得 |
+| `getLastCommandIndex(state)` | 保持中の最後の絶対 command index を取得 |
+| `getCommandsInRange(state, from, to)` | 絶対 index 範囲からコマンド列を取得 |
+| `getHistoryMetrics(state)` | 履歴と checkpoint の観測情報を取得 |
 | `findBestCheckpointForLayer(state, layerId)` | 指定レイヤーの最適なチェックポイントを検索 |
 | `getCommandsToReplayForLayer(state, layerId)` | 指定レイヤーのリプレイ対象コマンドを取得 |
 | `getCommandPixelScope(command)` | 単一コマンドのピクセル影響スコープを返す |
@@ -152,10 +177,14 @@ if (canUndo(historyState)) {
 type MyCmd = { readonly type: "rename"; readonly layerId: string; readonly oldName: string; readonly newName: string };
 
 let history = createHistoryState<MyCmd>(1024, 1024);
-history = pushCommand(history, { type: "rename", layerId: "a", oldName: "Layer 1", newName: "BG" }, null);
+history = pushCommand(
+  history,
+  { type: "rename", layerId: "a", oldName: "Layer 1", newName: "BG" },
+  { layerCount: 1 },
+);
 
 // 型ガードで分岐
-const cmd = history.commands[history.currentIndex];
+const cmd = getCommandAt(history, history.currentIndex);
 if (isCustomCommand(cmd)) {
   // cmd は MyCmd 型
 }

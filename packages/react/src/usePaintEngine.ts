@@ -14,6 +14,7 @@ import type {
 } from "@headless-paint/core";
 import type { CompiledFilterPipeline, InputPoint } from "@headless-paint/core";
 import {
+  beginHistoryMutation,
   canRedo as checkCanRedo,
   canUndo as checkCanUndo,
   computeCumulativeOffset,
@@ -25,12 +26,12 @@ import {
   createTransformLayerCommand,
   createWrapShiftCommand,
   getAffectedLayerIds,
+  getCommandAt,
   isCustomCommand,
   isStructuralCommand,
   pushCommand,
   rebuildLayerFromHistory,
   redo,
-  restoreFromCheckpoint,
   undo,
 } from "@headless-paint/core";
 import type {
@@ -143,9 +144,9 @@ export interface PaintEngineResult<TCustom = never> {
 }
 
 const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
-  maxHistorySize: 100,
   checkpointInterval: 10,
   maxCheckpoints: 10,
+  checkpointCompression: "fast",
 };
 
 export function usePaintEngine<TCustom = never>(
@@ -207,8 +208,17 @@ export function usePaintEngine<TCustom = never>(
 
   // ── 履歴 ──
   const [historyState, setHistoryState] = useState<HistoryState<TCustom>>(() =>
-    createHistoryState<TCustom>(layerWidth, layerHeight),
+    createHistoryState<TCustom>(layerWidth, layerHeight, {
+      layerCount: initialLayers?.length ?? 1,
+    }),
   );
+  const historyStateRef = useRef(historyState);
+  historyStateRef.current = historyState;
+
+  const commitHistoryState = useCallback((next: HistoryState<TCustom>) => {
+    historyStateRef.current = next;
+    setHistoryState(next);
+  }, []);
 
   const historyConfigRef = useRef(historyConfig);
   historyConfigRef.current = historyConfig;
@@ -220,6 +230,27 @@ export function usePaintEngine<TCustom = never>(
   );
 
   const dragShiftRef = useRef({ x: 0, y: 0 });
+  const wrapShiftBegunRef = useRef(false);
+  const wrapShiftHistoryBeforeBeginRef = useRef<HistoryState<TCustom> | null>(
+    null,
+  );
+  const strokeHistoryBeforeBeginRef = useRef<HistoryState<TCustom> | null>(
+    null,
+  );
+
+  const beginForLayers = useCallback(
+    (affectedLayers: readonly Layer[]) => {
+      if (affectedLayers.length === 0) return;
+      const before = historyStateRef.current;
+      const next = beginHistoryMutation(
+        before,
+        { affectedLayers, layerCount: entriesRef.current.length },
+        historyConfigRef.current,
+      );
+      commitHistoryState(next);
+    },
+    [commitHistoryState, entriesRef],
+  );
 
   // ── ストロークセッション ──
   const onStrokeComplete = useCallback(
@@ -237,16 +268,19 @@ export function usePaintEngine<TCustom = never>(
         data.strokeStyle,
         data.brushSeed,
       );
-      setHistoryState((prev) =>
-        pushCommand(
-          prev,
-          command,
-          currentEntry.committedLayer,
-          historyConfigRef.current,
-        ),
+      const next = pushCommand(
+        historyStateRef.current,
+        command,
+        {
+          afterLayer: currentEntry.committedLayer,
+          layerCount: entriesRef.current.length,
+        },
+        historyConfigRef.current,
       );
+      strokeHistoryBeforeBeginRef.current = null;
+      commitHistoryState(next);
     },
-    [findEntry, activeLayerId],
+    [findEntry, activeLayerId, entriesRef, commitHistoryState],
   );
 
   const session = useStrokeSession({
@@ -260,6 +294,33 @@ export function usePaintEngine<TCustom = never>(
     registry,
   });
 
+  const handleStrokeStart = useCallback(
+    (point: InputPoint, options?: StrokeStartOptions) => {
+      if (!options?.pendingOnly && activeEntry?.committedLayer) {
+        strokeHistoryBeforeBeginRef.current = historyStateRef.current;
+        beginForLayers([activeEntry.committedLayer]);
+      }
+      session.onStrokeStart(point, options);
+    },
+    [activeEntry, beginForLayers, session.onStrokeStart],
+  );
+
+  const handleDrawConfirm = useCallback(() => {
+    if (activeEntry?.committedLayer) {
+      strokeHistoryBeforeBeginRef.current = historyStateRef.current;
+      beginForLayers([activeEntry.committedLayer]);
+    }
+    session.onDrawConfirm();
+  }, [activeEntry, beginForLayers, session.onDrawConfirm]);
+
+  const handleDrawCancel = useCallback(() => {
+    session.onDrawCancel();
+    if (strokeHistoryBeforeBeginRef.current) {
+      commitHistoryState(strokeHistoryBeforeBeginRef.current);
+      strokeHistoryBeforeBeginRef.current = null;
+    }
+  }, [commitHistoryState, session.onDrawCancel]);
+
   // ── レイヤー操作（履歴付き） ──
   const handleAddLayer = useCallback(() => {
     const { entry, insertIndex } = addLayerRaw();
@@ -270,10 +331,14 @@ export function usePaintEngine<TCustom = never>(
       layerHeight,
       entry.committedLayer.meta,
     );
-    setHistoryState((prev) =>
-      pushCommand(prev, command, null, historyConfigRef.current),
+    const next = pushCommand(
+      historyStateRef.current,
+      command,
+      { layerCount: entriesRef.current.length },
+      historyConfigRef.current,
     );
-  }, [addLayerRaw, layerWidth, layerHeight]);
+    commitHistoryState(next);
+  }, [addLayerRaw, layerWidth, layerHeight, entriesRef, commitHistoryState]);
 
   const handleRemoveLayer = useCallback(
     (layerId: string) => {
@@ -285,17 +350,27 @@ export function usePaintEngine<TCustom = never>(
         removedIndex,
         entry.committedLayer.meta,
       );
-      setHistoryState((prev) =>
-        pushCommand(
-          prev,
-          command,
-          entry.committedLayer,
-          historyConfigRef.current,
-        ),
+      beginForLayers([entry.committedLayer]);
+      const next = pushCommand(
+        historyStateRef.current,
+        command,
+        {
+          afterLayer: entry.committedLayer,
+          layerCount: entriesRef.current.length,
+        },
+        historyConfigRef.current,
       );
+      commitHistoryState(next);
       removeLayerById(layerId);
     },
-    [findEntry, getLayerIndex, removeLayerById],
+    [
+      findEntry,
+      getLayerIndex,
+      entriesRef,
+      beginForLayers,
+      commitHistoryState,
+      removeLayerById,
+    ],
   );
 
   const handleMoveLayerUp = useCallback(
@@ -307,11 +382,15 @@ export function usePaintEngine<TCustom = never>(
         result.fromIndex,
         result.toIndex,
       );
-      setHistoryState((prev) =>
-        pushCommand(prev, command, null, historyConfigRef.current),
+      const next = pushCommand(
+        historyStateRef.current,
+        command,
+        { layerCount: entriesRef.current.length },
+        historyConfigRef.current,
       );
+      commitHistoryState(next);
     },
-    [moveLayerUpRaw],
+    [moveLayerUpRaw, entriesRef, commitHistoryState],
   );
 
   const handleMoveLayerDown = useCallback(
@@ -323,17 +402,26 @@ export function usePaintEngine<TCustom = never>(
         result.fromIndex,
         result.toIndex,
       );
-      setHistoryState((prev) =>
-        pushCommand(prev, command, null, historyConfigRef.current),
+      const next = pushCommand(
+        historyStateRef.current,
+        command,
+        { layerCount: entriesRef.current.length },
+        historyConfigRef.current,
       );
+      commitHistoryState(next);
     },
-    [moveLayerDownRaw],
+    [moveLayerDownRaw, entriesRef, commitHistoryState],
   );
 
   // ── Wrap shift ──
   const handleWrapShift = useCallback(
     (dx: number, dy: number) => {
       for (const entry of entriesRef.current) {
+        if (!wrapShiftBegunRef.current && (dx !== 0 || dy !== 0)) {
+          wrapShiftHistoryBeforeBeginRef.current = historyStateRef.current;
+          beginForLayers(entriesRef.current.map((e) => e.committedLayer));
+          wrapShiftBegunRef.current = true;
+        }
         wrapShiftLayer(entry.committedLayer, dx, dy, shiftTempCanvas);
       }
       dragShiftRef.current = {
@@ -342,162 +430,205 @@ export function usePaintEngine<TCustom = never>(
       };
       bumpRenderVersion();
     },
-    [entriesRef, shiftTempCanvas, bumpRenderVersion],
+    [entriesRef, shiftTempCanvas, beginForLayers, bumpRenderVersion],
   );
 
-  const handleWrapShiftEnd = useCallback((totalDx: number, totalDy: number) => {
-    dragShiftRef.current = { x: 0, y: 0 };
-    if (totalDx === 0 && totalDy === 0) return;
-    const command = createWrapShiftCommand(totalDx, totalDy);
-    setHistoryState((prev) =>
-      pushCommand(prev, command, null, historyConfigRef.current),
-    );
-  }, []);
+  const handleWrapShiftEnd = useCallback(
+    (totalDx: number, totalDy: number) => {
+      dragShiftRef.current = { x: 0, y: 0 };
+      if (totalDx === 0 && totalDy === 0) {
+        if (wrapShiftHistoryBeforeBeginRef.current) {
+          commitHistoryState(wrapShiftHistoryBeforeBeginRef.current);
+        }
+        wrapShiftBegunRef.current = false;
+        wrapShiftHistoryBeforeBeginRef.current = null;
+        return;
+      }
+      const command = createWrapShiftCommand(totalDx, totalDy);
+      const next = pushCommand(
+        historyStateRef.current,
+        command,
+        {
+          affectedLayerIds: entriesRef.current.map((e) => e.id),
+          layerCount: entriesRef.current.length,
+        },
+        historyConfigRef.current,
+      );
+      wrapShiftBegunRef.current = false;
+      wrapShiftHistoryBeforeBeginRef.current = null;
+      commitHistoryState(next);
+    },
+    [entriesRef, commitHistoryState],
+  );
 
   // ── Transform ──
   const handleCommitTransform = useCallback(
     (layerId: string, matrix: mat3) => {
       const entry = findEntry(layerId);
       if (!entry) return;
+      beginForLayers([entry.committedLayer]);
       transformLayer(entry.committedLayer, matrix, shiftTempCanvas);
       const command = createTransformLayerCommand(
         layerId,
         matrix as Float32Array,
       );
-      setHistoryState((prev) =>
-        pushCommand(
-          prev,
-          command,
-          entry.committedLayer,
-          historyConfigRef.current,
-        ),
+      const next = pushCommand(
+        historyStateRef.current,
+        command,
+        {
+          afterLayer: entry.committedLayer,
+          layerCount: entriesRef.current.length,
+        },
+        historyConfigRef.current,
       );
+      commitHistoryState(next);
       bumpRenderVersion();
     },
-    [findEntry, shiftTempCanvas, bumpRenderVersion],
+    [
+      findEntry,
+      shiftTempCanvas,
+      entriesRef,
+      beginForLayers,
+      commitHistoryState,
+      bumpRenderVersion,
+    ],
   );
 
   const handleResetOffset = useCallback(() => {
-    setHistoryState((prev) => {
-      const { x, y } = computeCumulativeOffset(prev);
-      if (x === 0 && y === 0) return prev;
-      for (const entry of entriesRef.current) {
-        wrapShiftLayer(entry.committedLayer, -x, -y, shiftTempCanvas);
-      }
-      const command = createWrapShiftCommand(-x, -y);
-      bumpRenderVersion();
-      return pushCommand(prev, command, null, historyConfigRef.current);
-    });
-  }, [entriesRef, shiftTempCanvas, bumpRenderVersion]);
+    const { x, y } = computeCumulativeOffset(historyStateRef.current);
+    if (x === 0 && y === 0) return;
+    beginForLayers(entriesRef.current.map((e) => e.committedLayer));
+    for (const entry of entriesRef.current) {
+      wrapShiftLayer(entry.committedLayer, -x, -y, shiftTempCanvas);
+    }
+    const command = createWrapShiftCommand(-x, -y);
+    const next = pushCommand(
+      historyStateRef.current,
+      command,
+      {
+        affectedLayerIds: entriesRef.current.map((e) => e.id),
+        layerCount: entriesRef.current.length,
+      },
+      historyConfigRef.current,
+    );
+    commitHistoryState(next);
+    bumpRenderVersion();
+  }, [
+    entriesRef,
+    shiftTempCanvas,
+    beginForLayers,
+    commitHistoryState,
+    bumpRenderVersion,
+  ]);
 
   // ── Custom Commands ──
   const handlePushCustomCommand = useCallback(
     (cmd: TCustom) => {
       const handler = customCommandHandlerRef.current;
       if (!handler) return;
-      setHistoryState((prev) =>
-        pushCommand(
-          prev,
-          cmd as Command<TCustom>,
-          null,
-          historyConfigRef.current,
-        ),
+      const next = pushCommand(
+        historyStateRef.current,
+        cmd as Command<TCustom>,
+        { layerCount: entriesRef.current.length },
+        historyConfigRef.current,
       );
+      commitHistoryState(next);
       handler.apply(cmd, {
         entries: entriesRef.current,
         findEntry,
         bumpRenderVersion,
       });
     },
-    [entriesRef, findEntry, bumpRenderVersion],
+    [entriesRef, findEntry, commitHistoryState, bumpRenderVersion],
   );
 
   // ── Undo/Redo ──
   const handleUndo = useCallback(() => {
-    setHistoryState((prev) => {
-      if (!checkCanUndo(prev)) return prev;
-      const undoneCommand = prev.commands[prev.currentIndex];
-      const newState = undo(prev);
+    const prev = historyStateRef.current;
+    if (!checkCanUndo(prev)) return;
+    const undoneCommand = getCommandAt(prev, prev.currentIndex);
+    if (!undoneCommand) return;
+    const newState = undo(prev);
 
-      if (isCustomCommand(undoneCommand)) {
-        // カスタムコマンド: ハンドラに委譲
-        customCommandHandlerRef.current?.undo(undoneCommand, {
-          entries: entriesRef.current,
-          findEntry,
-          bumpRenderVersion,
-        });
-      } else if (undoneCommand.type === "wrap-shift") {
-        for (const entry of entriesRef.current) {
-          wrapShiftLayer(
-            entry.committedLayer,
-            -undoneCommand.dx,
-            -undoneCommand.dy,
-            shiftTempCanvas,
-          );
-        }
-      } else if (isStructuralCommand(undoneCommand)) {
-        switch (undoneCommand.type) {
-          case "add-layer":
-            removeLayerById(undoneCommand.layerId);
-            break;
-          case "remove-layer": {
-            const entry = reinsertLayer(
-              undoneCommand.layerId,
-              undoneCommand.removedIndex,
-              undoneCommand.meta,
-            );
-            const cp = newState.checkpoints.find(
-              (c) =>
-                c.layerId === undoneCommand.layerId &&
-                c.commandIndex === prev.currentIndex,
-            );
-            if (cp) {
-              restoreFromCheckpoint(entry.committedLayer, cp);
-            } else {
-              rebuildLayerFromHistory(
-                entry.committedLayer,
-                newState,
-                registryRef.current,
-              );
-            }
-            break;
-          }
-          case "reorder-layer": {
-            if (undoneCommand.toIndex > undoneCommand.fromIndex) {
-              moveLayerDownRaw(undoneCommand.layerId);
-            } else {
-              moveLayerUpRaw(undoneCommand.layerId);
-            }
-            break;
-          }
-        }
-      } else {
-        const affected = getAffectedLayerIds(
-          prev,
-          newState.currentIndex,
-          prev.currentIndex,
+    if (isCustomCommand(undoneCommand)) {
+      customCommandHandlerRef.current?.undo(undoneCommand, {
+        entries: entriesRef.current,
+        findEntry,
+        bumpRenderVersion,
+      });
+    } else if (undoneCommand.type === "wrap-shift") {
+      for (const entry of entriesRef.current) {
+        wrapShiftLayer(
+          entry.committedLayer,
+          -undoneCommand.dx,
+          -undoneCommand.dy,
+          shiftTempCanvas,
         );
-        const ids =
-          affected.type === "all"
-            ? entriesRef.current.map((e) => e.id)
-            : affected.layerIds;
-        for (const id of ids) {
-          const e = findEntry(id);
-          if (!e) continue;
-          rebuildLayerFromHistory(
-            e.committedLayer,
+      }
+    } else if (isStructuralCommand(undoneCommand)) {
+      switch (undoneCommand.type) {
+        case "add-layer":
+          removeLayerById(undoneCommand.layerId);
+          break;
+        case "remove-layer": {
+          const entry = reinsertLayer(
+            undoneCommand.layerId,
+            undoneCommand.removedIndex,
+            undoneCommand.meta,
+          );
+          const result = rebuildLayerFromHistory(
+            entry.committedLayer,
             newState,
             registryRef.current,
           );
-          if (!e.committedLayer.meta.visible) {
-            setLayerVisible(e.id, true);
+          if (!result.ok) {
+            console.warn(
+              `[headless-paint] undo skipped remove-layer rebuild: ${result.reason} layerId=${result.layerId}`,
+            );
           }
+          break;
+        }
+        case "reorder-layer": {
+          if (undoneCommand.toIndex > undoneCommand.fromIndex) {
+            moveLayerDownRaw(undoneCommand.layerId);
+          } else {
+            moveLayerUpRaw(undoneCommand.layerId);
+          }
+          break;
         }
       }
+    } else {
+      const affected = getAffectedLayerIds(
+        prev,
+        newState.currentIndex,
+        prev.currentIndex,
+      );
+      const ids =
+        affected.type === "all"
+          ? entriesRef.current.map((e) => e.id)
+          : affected.layerIds;
+      for (const id of ids) {
+        const e = findEntry(id);
+        if (!e) continue;
+        const result = rebuildLayerFromHistory(
+          e.committedLayer,
+          newState,
+          registryRef.current,
+        );
+        if (!result.ok) {
+          console.warn(
+            `[headless-paint] undo skipped layer rebuild: ${result.reason} layerId=${result.layerId}`,
+          );
+          return;
+        }
+        if (!e.committedLayer.meta.visible) {
+          setLayerVisible(e.id, true);
+        }
+      }
+    }
 
-      bumpRenderVersion();
-      return newState;
-    });
+    bumpRenderVersion();
+    commitHistoryState(newState);
   }, [
     entriesRef,
     shiftTempCanvas,
@@ -507,79 +638,85 @@ export function usePaintEngine<TCustom = never>(
     moveLayerUpRaw,
     moveLayerDownRaw,
     setLayerVisible,
+    commitHistoryState,
     bumpRenderVersion,
   ]);
 
   const handleRedo = useCallback(() => {
-    setHistoryState((prev) => {
-      if (!checkCanRedo(prev)) return prev;
-      const newState = redo(prev);
-      const redoneCommand = newState.commands[newState.currentIndex];
+    const prev = historyStateRef.current;
+    if (!checkCanRedo(prev)) return;
+    const newState = redo(prev);
+    const redoneCommand = getCommandAt(newState, newState.currentIndex);
+    if (!redoneCommand) return;
 
-      if (isCustomCommand(redoneCommand)) {
-        // カスタムコマンド: ハンドラに委譲
-        customCommandHandlerRef.current?.apply(redoneCommand, {
-          entries: entriesRef.current,
-          findEntry,
-          bumpRenderVersion,
-        });
-      } else if (redoneCommand.type === "wrap-shift") {
-        for (const entry of entriesRef.current) {
-          wrapShiftLayer(
-            entry.committedLayer,
-            redoneCommand.dx,
-            redoneCommand.dy,
-            shiftTempCanvas,
-          );
-        }
-      } else if (isStructuralCommand(redoneCommand)) {
-        switch (redoneCommand.type) {
-          case "add-layer":
-            reinsertLayer(
-              redoneCommand.layerId,
-              redoneCommand.insertIndex,
-              redoneCommand.meta,
-            );
-            break;
-          case "remove-layer":
-            removeLayerById(redoneCommand.layerId);
-            break;
-          case "reorder-layer": {
-            if (redoneCommand.toIndex > redoneCommand.fromIndex) {
-              moveLayerUpRaw(redoneCommand.layerId);
-            } else {
-              moveLayerDownRaw(redoneCommand.layerId);
-            }
-            break;
-          }
-        }
-      } else {
-        const affected = getAffectedLayerIds(
-          newState,
-          prev.currentIndex,
-          newState.currentIndex,
+    if (isCustomCommand(redoneCommand)) {
+      customCommandHandlerRef.current?.apply(redoneCommand, {
+        entries: entriesRef.current,
+        findEntry,
+        bumpRenderVersion,
+      });
+    } else if (redoneCommand.type === "wrap-shift") {
+      for (const entry of entriesRef.current) {
+        wrapShiftLayer(
+          entry.committedLayer,
+          redoneCommand.dx,
+          redoneCommand.dy,
+          shiftTempCanvas,
         );
-        const ids =
-          affected.type === "all"
-            ? entriesRef.current.map((e) => e.id)
-            : affected.layerIds;
-        for (const id of ids) {
-          const e = findEntry(id);
-          if (!e) continue;
-          rebuildLayerFromHistory(
-            e.committedLayer,
-            newState,
-            registryRef.current,
+      }
+    } else if (isStructuralCommand(redoneCommand)) {
+      switch (redoneCommand.type) {
+        case "add-layer":
+          reinsertLayer(
+            redoneCommand.layerId,
+            redoneCommand.insertIndex,
+            redoneCommand.meta,
           );
-          if (!e.committedLayer.meta.visible) {
-            setLayerVisible(e.id, true);
+          break;
+        case "remove-layer":
+          removeLayerById(redoneCommand.layerId);
+          break;
+        case "reorder-layer": {
+          if (redoneCommand.toIndex > redoneCommand.fromIndex) {
+            moveLayerUpRaw(redoneCommand.layerId);
+          } else {
+            moveLayerDownRaw(redoneCommand.layerId);
           }
+          break;
         }
       }
+    } else {
+      const affected = getAffectedLayerIds(
+        newState,
+        prev.currentIndex,
+        newState.currentIndex,
+      );
+      const ids =
+        affected.type === "all"
+          ? entriesRef.current.map((e) => e.id)
+          : affected.layerIds;
+      for (const id of ids) {
+        const e = findEntry(id);
+        if (!e) continue;
+        const result = rebuildLayerFromHistory(
+          e.committedLayer,
+          newState,
+          registryRef.current,
+        );
+        if (!result.ok) {
+          console.warn(
+            `[headless-paint] redo skipped layer rebuild: ${result.reason} layerId=${result.layerId}`,
+          );
+          return;
+        }
+        if (!e.committedLayer.meta.visible) {
+          setLayerVisible(e.id, true);
+        }
+      }
+    }
 
-      bumpRenderVersion();
-      return newState;
-    });
+    bumpRenderVersion();
+    commitHistoryState(newState);
   }, [
     entriesRef,
     shiftTempCanvas,
@@ -589,6 +726,7 @@ export function usePaintEngine<TCustom = never>(
     moveLayerUpRaw,
     moveLayerDownRaw,
     setLayerVisible,
+    commitHistoryState,
     bumpRenderVersion,
   ]);
 
@@ -637,11 +775,11 @@ export function usePaintEngine<TCustom = never>(
     moveLayerDown: handleMoveLayerDown,
 
     // ストローク
-    onStrokeStart: session.onStrokeStart,
+    onStrokeStart: handleStrokeStart,
     onStrokeMove: session.onStrokeMove,
     onStrokeEnd: session.onStrokeEnd,
-    onDrawConfirm: session.onDrawConfirm,
-    onDrawCancel: session.onDrawCancel,
+    onDrawConfirm: handleDrawConfirm,
+    onDrawCancel: handleDrawCancel,
 
     // Transform
     commitTransform: handleCommitTransform,

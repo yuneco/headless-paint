@@ -3,13 +3,17 @@ export type {
   AddLayerCommand,
   AffectedLayers,
   Checkpoint,
+  CheckpointPayload,
   ClearCommand,
   Command,
   DrawCommand,
   HistoryConfig,
+  HistoryMetrics,
   HistoryState,
   LayerDrawCommand,
   PixelScope,
+  PushCommandOptions,
+  RebuildLayerResult,
   RemoveLayerCommand,
   RenderUpdate,
   ReorderLayerCommand,
@@ -47,21 +51,24 @@ export {
 export {
   canRedo,
   canUndo,
+  beginHistoryMutation,
   computeCumulativeOffset,
   createHistoryState,
   findBestCheckpoint,
   findBestCheckpointForLayer,
   getAffectedLayerIds,
+  getCommandAt,
+  getCommandOffset,
   getCommandPixelScope,
   getCommandsToReplay,
   getCommandsToReplayForLayer,
+  getCommandsInRange,
+  getHistoryMetrics,
+  getLastCommandIndex,
   pushCommand,
   redo,
   undo,
 } from "./history";
-
-// Checkpoint
-export { createCheckpoint, restoreFromCheckpoint } from "./checkpoint";
 
 // Replay
 export {

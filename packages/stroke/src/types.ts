@@ -179,27 +179,82 @@ export interface Checkpoint {
   readonly id: string;
   readonly layerId: string;
   readonly commandIndex: number;
-  readonly imageData: ImageData;
   readonly createdAt: number;
+  /** @internal */
+  readonly payload: CheckpointPayload;
 }
+
+/** @internal */
+export type CheckpointPayload =
+  | { readonly type: "empty" }
+  | { readonly type: "raw"; readonly imageData: ImageData }
+  | {
+      readonly type: "encoded";
+      readonly width: number;
+      readonly height: number;
+      readonly codec: "fflate";
+      readonly bytes: Uint8Array;
+    };
 
 export interface HistoryState<TCustom = never> {
   readonly commands: readonly Command<TCustom>[];
   readonly checkpoints: readonly Checkpoint[];
+  readonly historyStartIndex: number;
   readonly currentIndex: number;
+  readonly undoFloorIndex: number;
+  readonly baseCumulativeOffset: {
+    readonly x: number;
+    readonly y: number;
+  };
   readonly layerWidth: number;
   readonly layerHeight: number;
-  readonly drawsSinceCheckpoint: number;
+  readonly layerCount: number;
 }
 
 export interface HistoryConfig {
-  readonly maxHistorySize: number;
   readonly checkpointInterval: number;
   readonly maxCheckpoints: number;
+  readonly checkpointCompression?: "none" | "fast";
 }
 
 export const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
-  maxHistorySize: 100,
   checkpointInterval: 10,
   maxCheckpoints: 10,
+  checkpointCompression: "fast",
 };
+
+export interface PushCommandOptions {
+  readonly afterLayer?: import("@headless-paint/engine").Layer;
+  readonly affectedLayerIds?: readonly string[];
+  readonly layerCount?: number;
+}
+
+export interface HistoryMetrics {
+  readonly commandCount: number;
+  readonly historyStartIndex: number;
+  readonly currentIndex: number;
+  readonly undoFloorIndex: number;
+  readonly undoableCommandCount: number;
+  readonly redoableCommandCount: number;
+  readonly checkpointCount: number;
+  readonly effectiveMaxCheckpoints: number;
+  readonly rawCheckpointCount: number;
+  readonly encodedCheckpointCount: number;
+  readonly rawCheckpointBytes: number;
+  readonly encodedCheckpointBytes: number;
+  readonly totalCheckpointBytes: number;
+  readonly checkpointsByLayer: readonly {
+    readonly layerId: string;
+    readonly count: number;
+    readonly rawBytes: number;
+    readonly encodedBytes: number;
+  }[];
+}
+
+export type RebuildLayerResult =
+  | { readonly ok: true; readonly source: "checkpoint" | "empty" }
+  | {
+      readonly ok: false;
+      readonly reason: "missing-checkpoint";
+      readonly layerId: string;
+    };

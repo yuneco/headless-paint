@@ -534,13 +534,13 @@ interface PaintEngineInitialDocument {
 }
 ```
 
-`historyConfig` のデフォルト値:
+`historyConfig` のデフォルト値。`usePaintEngine` は stroke / clear / transform / wrap-shift / remove-layer の実ピクセル変更直前に `beginHistoryMutation()` を同期実行し、command 確定時に `pushCommand()` を呼ぶ。
 
 | フィールド | デフォルト | 説明 |
 |-----------|-----------|------|
-| `maxHistorySize` | `100` | 履歴に保持するコマンドの最大数 |
-| `checkpointInterval` | `10` | チェックポイント（ImageData スナップショット）を取る間隔 |
-| `maxCheckpoints` | `10` | 保持するチェックポイントの最大数 |
+| `checkpointInterval` | `10` | 対象レイヤーの最後の checkpoint から現在位置までの commandIndex 距離 |
+| `maxCheckpoints` | `10` | 保持する checkpoint 数の目標上限。実効上限は `Math.max(maxCheckpoints, layerCount)` |
+| `checkpointCompression` | `"fast"` | checkpoint 圧縮プリセット |
 
 ### PaintEngineResult
 

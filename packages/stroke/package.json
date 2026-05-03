@@ -22,6 +22,9 @@
     "@headless-paint/engine": "workspace:*",
     "@headless-paint/input": "workspace:*"
   },
+  "dependencies": {
+    "fflate": "^0.8.2"
+  },
   "devDependencies": {
     "@headless-paint/engine": "workspace:*",
     "@headless-paint/input": "workspace:*",

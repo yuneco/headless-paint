@@ -169,9 +169,14 @@ function onPointerUp() {
   sessionRef.current = null;
   pipelineState = null;
 
-  // 履歴に追加
+  // committed layer への初回書き込み直前に beginHistoryMutation 済みであること
   if (command) {
-    historyState = pushCommand(historyState, command, layer, historyConfig);
+    historyState = pushCommand(
+      historyState,
+      command,
+      { afterLayer: layer, layerCount },
+      historyConfig,
+    );
   }
 }
 ```
@@ -204,7 +209,18 @@ import { mat3 } from "gl-matrix";
 
 const m = mat3.fromTranslation(mat3.create(), [100, -50]);
 const command = createTransformLayerCommand(layer.id, m);
-historyState = pushCommand(historyState, command, layer, config);
+historyState = beginHistoryMutation(
+  historyState,
+  { affectedLayers: [layer], layerCount },
+  config,
+);
+transformLayer(layer, m);
+historyState = pushCommand(
+  historyState,
+  command,
+  { afterLayer: layer, layerCount },
+  config,
+);
 ```
 
 ---
@@ -300,9 +316,14 @@ function onPointerUp() {
   pipelineState = null;
   clearLayer(pendingLayer);
 
-  // 履歴に追加
+  // committed layer への初回書き込み直前に beginHistoryMutation 済みであること
   if (command) {
-    historyState = pushCommand(historyState, command, layer, historyConfig);
+    historyState = pushCommand(
+      historyState,
+      command,
+      { afterLayer: layer, layerCount },
+      historyConfig,
+    );
   }
 }
 ```

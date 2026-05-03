@@ -1,586 +1,141 @@
 # History API
 
-履歴管理（Undo/Redo）を行う関数群。チェックポイント + コマンド ハイブリッド方式。
+履歴管理（Undo/Redo）を行う関数群。履歴は checkpoint を起点に command を replay する。復元済みドキュメントや checkpoint eviction 後の非 undo 対象ピクセルを失わないため、ピクセルを書き換える直前に `beginHistoryMutation()` で pre-write checkpoint を確保する。
 
-## 概要
+## 基本フロー
 
-### アーキテクチャ
+```typescript
+let history = createHistoryState(width, height, { layerCount: layers.length });
 
-```
-[Command 1] ─ [Command 2] ─ ... ─ [Command N] ─ [Checkpoint] ─ [Command N+1] ...
-                                                     │
-                                              ImageData保存
-```
+history = beginHistoryMutation(
+  history,
+  { affectedLayers: [layer], layerCount: layers.length },
+  historyConfig,
+);
 
-- **Command**: 操作を記録（layerId, inputPoints, filterPipeline, expand, style, brushSeed）
-- **Checkpoint**: N操作ごとにImageDataスナップショット保存
-- **Undo**: 直近のCheckpointまで戻り → Commandsをリプレイ
+applyPixels(layer);
 
-### リプレイの流れ
-
-```
-Checkpoint (imageData)
-    ↓ レイヤーに復元
-Commands[checkpoint.index + 1 ... current]
-    ↓ 各コマンドをリプレイ
-      - inputPoints を filterPipeline で処理
-      - 結果を expand で展開
-      - style のブラシ種別に応じて描画
+history = pushCommand(
+  history,
+  command,
+  { afterLayer: layer, layerCount: layers.length },
+  historyConfig,
+);
 ```
 
----
+`beginHistoryMutation()` は操作開始ではなく、実際に対象レイヤーのピクセルまたは削除対象レイヤーが不可逆に変わる直前に呼ぶ。`pushCommand()` は checkpoint coverage がない undoable command を検出すると `console.warn` を出し、その command を undoable 履歴へ追加しない。
 
 ## createHistoryState
 
-空の履歴状態を作成する。
-
 ```typescript
-function createHistoryState<TCustom = never>(width: number, height: number): HistoryState<TCustom>
+function createHistoryState<TCustom = never>(
+  width: number,
+  height: number,
+  options?: { readonly layerCount?: number },
+): HistoryState<TCustom>;
 ```
 
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `width` | `number` | ○ | レイヤーの幅 |
-| `height` | `number` | ○ | レイヤーの高さ |
+`historyStartIndex = 0`、`currentIndex = -1`、`undoFloorIndex = -1` の空履歴を作成する。`layerCount` は `maxCheckpoints` の実効下限に使われる。
 
-**戻り値**: `HistoryState<TCustom>` - 初期状態（`drawsSinceCheckpoint: 0`）
+## beginHistoryMutation
 
-**使用例**:
 ```typescript
-const historyState = createHistoryState(1920, 1080);
+function beginHistoryMutation<TCustom = never>(
+  state: HistoryState<TCustom>,
+  options: {
+    readonly affectedLayers: readonly Layer[];
+    readonly layerCount?: number;
+  },
+  config?: HistoryConfig,
+): HistoryState<TCustom>;
 ```
 
----
+対象レイヤーに有効 checkpoint がない、または最後の checkpoint から `checkpointInterval` 以上 commandIndex が進んでいる場合、現在のピクセルを `commandIndex = currentIndex` の checkpoint として保存する。`wrap-shift` は全レイヤーへの書き込みなので、実行直前に全レイヤーを渡す。
+
+`beginHistoryMutation()` 単体では redo branch を破棄しない。cancel / abort でピクセルを元に戻す可能性がある場合、呼び出し前の `HistoryState` を保持しておき、command を push しないならその state に戻す。
 
 ## pushCommand
-
-コマンドを履歴に追加する。
 
 ```typescript
 function pushCommand<TCustom = never>(
   state: HistoryState<TCustom>,
   command: Command<TCustom>,
-  layer: Layer | null,
-  config?: HistoryConfig
-): HistoryState<TCustom>
+  options: PushCommandOptions,
+  config?: HistoryConfig,
+): HistoryState<TCustom>;
 ```
 
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
-| `command` | `Command<TCustom>` | ○ | 追加するコマンド |
-| `layer` | `Layer \| null` | ○ | 現在のレイヤー（チェックポイント作成用）。wrap-shift や構造コマンド、カスタムコマンドでは `null` を渡す |
-| `config` | `HistoryConfig` | - | 履歴設定（省略時は `DEFAULT_HISTORY_CONFIG`） |
+`options.afterLayer` は layer 固有の draw/remove 系 command の診断文脈として渡す。`wrap-shift` のような全レイヤー操作では `affectedLayerIds` を渡し、全対象レイヤーに checkpoint coverage があることを検証する。`layerCount` は checkpoint eviction の実効上限に使う。
 
-**戻り値**: `HistoryState<TCustom>` - 更新された履歴状態
+Redo branch の破棄、checkpoint 圧縮、checkpoint eviction、`undoFloorIndex` 更新、不要 command prefix の pruning は command 確定時に行われる。
 
-**動作**:
-1. currentIndex より後のコマンドを削除（Redo履歴のクリア）
-2. コマンドを追加
-3. DrawCommand の場合: `drawsSinceCheckpoint` をインクリメントし、`checkpointInterval` に達したらチェックポイント作成 & カウンタリセット
-4. `remove-layer` の場合: 強制チェックポイント作成 & カウンタリセット
-5. DrawCommand の総数が `maxHistorySize` を超えたら、最も古い DrawCommand のみを除去（それ以前の構造コマンドやカスタムコマンドは保持）
-6. maxCheckpoints を超えたら古いチェックポイントを削除
+## undo / redo / canUndo / canRedo
 
-**チェックポイント間隔**: `drawsSinceCheckpoint` カウンタに基づく。StructuralCommand やカスタムコマンドはカウントに含まれないため、コマンド種別の比率に依存せず一定間隔でチェックポイントが作成される。
-
-**最大履歴数**: DrawCommand の数でカウント。StructuralCommand やカスタムコマンドは軽量であり、カウントに含めない。
-
-**使用例**:
 ```typescript
-historyState = pushCommand(historyState, command, layer, {
-  maxHistorySize: 100,
-  checkpointInterval: 10,
-  maxCheckpoints: 10,
-});
+function canUndo<TCustom = never>(state: HistoryState<TCustom>): boolean;
+function canRedo<TCustom = never>(state: HistoryState<TCustom>): boolean;
+function undo<TCustom = never>(state: HistoryState<TCustom>): HistoryState<TCustom>;
+function redo<TCustom = never>(state: HistoryState<TCustom>): HistoryState<TCustom>;
 ```
 
----
+`canUndo(state)` は `state.currentIndex > state.undoFloorIndex` で判定する。`undoFloorIndex` 以前の command は replay-only prefix として残る場合があるが、ユーザーがそこへ Undo することはできない。
 
-## undo
-
-1つ前の状態に戻る。
+## command index helpers
 
 ```typescript
-function undo<TCustom = never>(state: HistoryState<TCustom>): HistoryState<TCustom>
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
-
-**戻り値**: `HistoryState<TCustom>` - currentIndex が1減った状態
-
-**注意**: この関数は currentIndex を更新するだけ。レイヤーの再構築は `rebuildLayerFromHistory` で行う。
-
-**使用例**:
-```typescript
-if (canUndo(historyState)) {
-  historyState = undo(historyState);
-  clearLayer(layer);
-  rebuildLayerFromHistory(layer, historyState);
-}
-```
-
----
-
-## redo
-
-1つ先の状態に進む。
-
-```typescript
-function redo<TCustom = never>(state: HistoryState<TCustom>): HistoryState<TCustom>
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
-
-**戻り値**: `HistoryState<TCustom>` - currentIndex が1増えた状態
-
-**使用例**:
-```typescript
-if (canRedo(historyState)) {
-  historyState = redo(historyState);
-  clearLayer(layer);
-  rebuildLayerFromHistory(layer, historyState);
-}
-```
-
----
-
-## canUndo
-
-Undoが可能かどうかを判定する。
-
-```typescript
-function canUndo<TCustom = never>(state: HistoryState<TCustom>): boolean
-```
-
-**戻り値**: `boolean` - currentIndex >= 0 の場合 true
-
----
-
-## canRedo
-
-Redoが可能かどうかを判定する。
-
-```typescript
-function canRedo<TCustom = never>(state: HistoryState<TCustom>): boolean
-```
-
-**戻り値**: `boolean` - currentIndex < commands.length - 1 の場合 true
-
----
-
-## findBestCheckpointForLayer
-
-指定レイヤーに対する最適なチェックポイントを取得する。`currentIndex` 以前のチェックポイントのうち、最も新しいものを返す。
-
-```typescript
-function findBestCheckpointForLayer<TCustom = never>(
+function getCommandOffset<TCustom = never>(
   state: HistoryState<TCustom>,
-  layerId: string,
-): Checkpoint | undefined
-```
+  absoluteIndex: number,
+): number;
 
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
-| `layerId` | `string` | ○ | 対象レイヤーのID |
-
-**戻り値**: `Checkpoint | undefined` - 見つかった場合はチェックポイント、なければ `undefined`
-
----
-
-## getCommandsToReplayForLayer
-
-指定レイヤーのリプレイ対象コマンドを取得する（描画コマンドのみ）。`wrap-shift` はグローバル操作のため全レイヤーのリプレイに含まれる。
-
-```typescript
-function getCommandsToReplayForLayer<TCustom = never>(
+function getCommandAt<TCustom = never>(
   state: HistoryState<TCustom>,
-  layerId: string,
-  fromCheckpoint?: Checkpoint,
-): readonly DrawCommand[]
+  absoluteIndex: number,
+): Command<TCustom> | undefined;
+
+function getLastCommandIndex<TCustom = never>(
+  state: HistoryState<TCustom>,
+): number;
+
+function getCommandsInRange<TCustom = never>(
+  state: HistoryState<TCustom>,
+  fromAbsoluteIndex: number,
+  toAbsoluteIndex: number,
+): readonly Command<TCustom>[];
 ```
 
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
-| `layerId` | `string` | ○ | 対象レイヤーのID |
-| `fromCheckpoint` | `Checkpoint` | - | 起点チェックポイント（省略時は先頭から） |
-
-**戻り値**: `readonly DrawCommand[]` - リプレイ対象の描画コマンド列
-
----
+`currentIndex`、checkpoint の `commandIndex`、範囲指定はすべて絶対 index。`commands[absoluteIndex]` のような直接アクセスはしない。
 
 ## rebuildLayerFromHistory
-
-履歴状態から指定レイヤーを再構築する。レイヤー ID に基づいてチェックポイントとコマンドをフィルタリングし、該当レイヤーの描画のみをリプレイする。
 
 ```typescript
 function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
   registry?: BrushTipRegistry,
-): void
+): RebuildLayerResult;
 ```
 
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `layer` | `Layer` | ○ | 再構築するレイヤー |
-| `state` | `HistoryState<TCustom>` | ○ | 履歴状態 |
-| `registry` | `BrushTipRegistry` | - | ブラシチップレジストリ（スタンプブラシのリプレイに必要） |
+対象レイヤーの `currentIndex` 以下で最も新しい checkpoint を復元し、そこから `currentIndex` まで該当レイヤーの draw command と `wrap-shift` を replay する。checkpoint がなく安全に rebuild できない場合はレイヤーを変更せず、`{ ok: false, reason: "missing-checkpoint", layerId }` を返す。通常の `beginHistoryMutation()` / `pushCommand()` フローではこの結果に到達しない。
 
-**動作**:
-1. `layer.id` に対応する最適なチェックポイントを探す
-2. チェックポイントがあれば imageData をレイヤーに復元、なければクリア
-3. チェックポイント以降の該当レイヤーのコマンドをリプレイ
-
-**使用例**:
-```typescript
-rebuildLayerFromHistory(layer, historyState);
-```
-
----
-
-## replayCommands
-
-コマンド列をレイヤーに順次適用する。
+## getHistoryMetrics
 
 ```typescript
-function replayCommands(layer: Layer, commands: readonly Command[]): void
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `layer` | `Layer` | ○ | 描画先レイヤー |
-| `commands` | `readonly Command[]` | ○ | 適用するコマンドの配列 |
-
----
-
-## createCheckpoint
-
-レイヤーの現在の ImageData をスナップショットとして保存する。
-
-```typescript
-function createCheckpoint(layer: Layer, commandIndex: number): Checkpoint
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `layer` | `Layer` | ○ | スナップショット元のレイヤー |
-| `commandIndex` | `number` | ○ | このチェックポイントが対応するコマンドインデックス |
-
-**戻り値**: `Checkpoint` — レイヤー ID、ImageData、コマンドインデックスを含む
-
----
-
-## restoreFromCheckpoint
-
-チェックポイントの ImageData をレイヤーに復元する。
-
-```typescript
-function restoreFromCheckpoint(layer: Layer, checkpoint: Checkpoint): void
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `layer` | `Layer` | ○ | 復元先のレイヤー |
-| `checkpoint` | `Checkpoint` | ○ | 復元するチェックポイント |
-
----
-
-## rebuildLayerState
-
-> **@deprecated** — `rebuildLayerFromHistory` を使用してください。
-
-履歴状態からレイヤーを再構築する。内部で `rebuildLayerFromHistory` を呼び出す。
-
-```typescript
-function rebuildLayerState(layer: Layer, state: HistoryState): void
-```
-
----
-
-## replayCommand
-
-単一のコマンドをレイヤーに適用する。
-
-```typescript
-function replayCommand(layer: Layer, command: Command): void
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `layer` | `Layer` | ○ | 描画先レイヤー |
-| `command` | `Command` | ○ | 適用するコマンド |
-
-**StrokeCommandの処理**:
-1. inputPoints を filterPipeline で処理（processAllPoints）
-2. 結果を expand で展開（appendToCommittedLayer 内で expandStrokePoints）
-3. style のブラシ種別に応じて各ストロークを描画
-
----
-
-## createStrokeCommand
-
-ストロークコマンドを作成する（ヘルパー関数）。
-
-```typescript
-function createStrokeCommand(
-  layerId: string,
-  inputPoints: readonly InputPoint[],
-  filterPipeline: FilterPipelineConfig,
-  expand: ExpandConfig,
-  style: StrokeStyle,
-  brushSeed?: number,
-): StrokeCommand
-```
-
-**使用例**:
-```typescript
-const command = createStrokeCommand(
-  layer.id,
-  inputPoints,
-  { filters: [{ type: "smoothing", config: { windowSize: 5 } }] },
-  {
-    levels: [
-      { mode: "radial", offset: { x: 500, y: 500 }, angle: 0, divisions: 6 },
-    ],
-  },
-  strokeStyle,
-);
-```
-
----
-
-## createClearCommand
-
-クリアコマンドを作成する（ヘルパー関数）。
-
-```typescript
-function createClearCommand(layerId: string): ClearCommand
-```
-
----
-
-## createAddLayerCommand
-
-レイヤー追加コマンドを作成する。
-
-```typescript
-function createAddLayerCommand(
-  layerId: string,
-  insertIndex: number,
-  width: number,
-  height: number,
-  meta: LayerMeta,
-): AddLayerCommand
-```
-
----
-
-## createRemoveLayerCommand
-
-レイヤー削除コマンドを作成する。削除時のメタデータをスナップショットとして保存し、Undo時の復元に使用する。
-
-```typescript
-function createRemoveLayerCommand(
-  layerId: string,
-  removedIndex: number,
-  meta: LayerMeta,
-): RemoveLayerCommand
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `layerId` | `string` | ○ | 削除するレイヤーのID |
-| `removedIndex` | `number` | ○ | 削除前のスタック位置 |
-| `meta` | `LayerMeta` | ○ | 削除時のメタデータ（name, visible, opacity等） |
-
----
-
-## createReorderLayerCommand
-
-レイヤー並べ替えコマンドを作成する。
-
-```typescript
-function createReorderLayerCommand(
-  layerId: string,
-  fromIndex: number,
-  toIndex: number,
-): ReorderLayerCommand
-```
-
----
-
-## getCommandPixelScope
-
-単一コマンドのピクセル影響スコープを返す。コマンドがどの範囲のピクセルに影響するかを分類する。
-
-```typescript
-function getCommandPixelScope<TCustom = never>(
-  cmd: Command<TCustom>,
-): PixelScope<TCustom>
-```
-
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `cmd` | `Command<TCustom>` | ○ | 分類するコマンド |
-
-**戻り値**: `PixelScope<TCustom>` - コマンドのピクセル影響スコープ
-
-| コマンド | 戻り値 |
-|---------|--------|
-| `stroke` / `clear` / `transform-layer` | `{ type: "layer", layerId }` |
-| `wrap-shift` | `{ type: "all" }` |
-| `add-layer` / `remove-layer` / `reorder-layer` | `{ type: "structural" }` |
-| TCustom | `{ type: "custom", command }` |
-
-**使用例**（pushCommand 時の dirty tracking）:
-```typescript
-const scope = getCommandPixelScope(command);
-switch (scope.type) {
-  case "layer": markDirty(scope.layerId); break;
-  case "all": markAllDirty(); break;
-  case "structural": break;
-  case "custom": handleCustomDirty(scope.command); break;
-}
-```
-
----
-
-## getAffectedLayerIds
-
-指定範囲で影響を受けるレイヤーのピクセル影響を集約して返す。範囲内に `wrap-shift` が含まれる場合は全レイヤー影響を示す。
-
-```typescript
-function getAffectedLayerIds<TCustom = never>(
+function getHistoryMetrics<TCustom = never>(
   state: HistoryState<TCustom>,
-  fromIndex: number,
-  toIndex: number,
-): AffectedLayers
+): HistoryMetrics;
 ```
 
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `state` | `HistoryState<TCustom>` | ○ | 履歴状態 |
-| `fromIndex` | `number` | ○ | 範囲の開始インデックス |
-| `toIndex` | `number` | ○ | 範囲の終了インデックス |
+command 数、Undo/Redo 可能数、checkpoint 数、raw/encoded checkpoint byte 数、layer 別 checkpoint 集計を返す。checkpoint payload は内部表現なので、通常利用ではこの API で観測する。
 
-**戻り値**: `AffectedLayers` - ピクセル影響の集約結果
-
-- 範囲内に `wrap-shift` があれば `{ type: "all" }` を返す
-- それ以外は `{ type: "partial", layerIds }` を返す（`LayerDrawCommand` の `layerId` を集約）
-- `StructuralCommand` とカスタムコマンドはピクセル影響なしとして無視される
-
-**使用例**（undo/redo 時の dirty tracking）:
-```typescript
-const affected = getAffectedLayerIds(state, from, to);
-if (affected.type === "all") {
-  for (const entry of entries) { rebuildLayer(entry.id); }
-} else {
-  for (const id of affected.layerIds) { rebuildLayer(id); }
-}
-```
-
----
-
-## computeCumulativeOffset
-
-wrap-shift の累積オフセットを算出する（グローバル、全レイヤー共通）。
+## HistoryConfig
 
 ```typescript
-function computeCumulativeOffset<TCustom = never>(state: HistoryState<TCustom>): { readonly x: number; readonly y: number }
+interface HistoryConfig {
+  readonly checkpointInterval: number;
+  readonly maxCheckpoints: number;
+  readonly checkpointCompression?: "none" | "fast";
+}
 ```
 
-**引数**:
-| 名前 | 型 | 必須 | 説明 |
-|------|-----|------|------|
-| `state` | `HistoryState<TCustom>` | ○ | 現在の履歴状態 |
-
-**戻り値**: `{ x, y }` - 正規化された累積オフセット（`[0, width)`, `[0, height)` の範囲）
-
----
-
-## 典型的な使用パターン
-
-```typescript
-import {
-  createHistoryState,
-  pushCommand,
-  undo,
-  redo,
-  canUndo,
-  canRedo,
-  rebuildLayerFromHistory,
-} from "@yuneco/headless-paint/core";
-import { createLayer, clearLayer } from "@yuneco/headless-paint/core";
-
-// 初期化
-const layer = createLayer(1920, 1080);
-let historyState = createHistoryState(1920, 1080);
-
-const historyConfig: HistoryConfig = {
-  maxHistorySize: 100,
-  checkpointInterval: 10,
-  maxCheckpoints: 10,
-};
-
-// ストローク完了時
-function onStrokeComplete(command: StrokeCommand) {
-  historyState = pushCommand(historyState, command, layer, historyConfig);
-}
-
-// Undo
-function handleUndo() {
-  if (!canUndo(historyState)) return;
-
-  historyState = undo(historyState);
-  clearLayer(layer);
-  rebuildLayerFromHistory(layer, historyState);
-  redraw(); // 画面を再描画
-}
-
-// Redo
-function handleRedo() {
-  if (!canRedo(historyState)) return;
-
-  historyState = redo(historyState);
-  clearLayer(layer);
-  rebuildLayerFromHistory(layer, historyState);
-  redraw();
-}
-
-// キーボードショートカット
-window.addEventListener("keydown", (e) => {
-  if (e.ctrlKey || e.metaKey) {
-    if (e.key === "z" && !e.shiftKey) {
-      e.preventDefault();
-      handleUndo();
-    } else if (e.key === "z" && e.shiftKey) {
-      e.preventDefault();
-      handleRedo();
-    } else if (e.key === "y") {
-      e.preventDefault();
-      handleRedo();
-    }
-  }
-});
-```
+`maxHistorySize` は廃止。Undo 保持範囲は checkpoint の保持状況により決まる。`maxCheckpoints` は全体上限の目標値だが、実効上限は `Math.max(maxCheckpoints, layerCount)`。`checkpointCompression` のデフォルトは `"fast"` で、内部 codec として `fflate` を使う。
