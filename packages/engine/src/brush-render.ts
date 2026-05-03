@@ -1,4 +1,8 @@
-import { calculateRadius, drawVariableWidthPath } from "./draw";
+import {
+  applyPressureCurve,
+  calculateRadius,
+  drawVariableWidthPath,
+} from "./draw";
 import { colorToStyle } from "./layer";
 import { interpolateStrokePointsCentripetal } from "./stroke-interpolation";
 import type {
@@ -77,7 +81,7 @@ export function renderBrushStroke(
         points,
         style.color,
         style.lineWidth,
-        style.pressureSensitivity,
+        style.brush.pressureDynamics.size,
         style.pressureCurve,
         style.compositeOperation,
         overlapCount,
@@ -395,7 +399,7 @@ function stampAt(
   const radius = calculateRadius(
     point.pressure,
     style.lineWidth,
-    style.pressureSensitivity,
+    style.brush.pressureDynamics.size,
     style.pressureCurve,
   );
   const diameter = radius * 2;
@@ -407,7 +411,13 @@ function stampAt(
     return { colorBuffer, mixedCanvas, lastMixingUpdateDistance };
   }
 
-  const opacity = dynamics.flow * (1 - dynamics.opacityJitter * rng());
+  const pressureFlow = calculatePressureFlow(
+    point.pressure,
+    dynamics.flow,
+    style.brush.pressureDynamics.flow,
+    style.pressureCurve,
+  );
+  const opacity = pressureFlow * (1 - dynamics.opacityJitter * rng());
   if (opacity <= 0) {
     return { colorBuffer, mixedCanvas, lastMixingUpdateDistance };
   }
@@ -483,6 +493,19 @@ function stampAt(
     mixedCanvas: nextMixedCanvas,
     lastMixingUpdateDistance: nextLastMixingUpdateDistance,
   };
+}
+
+function calculatePressureFlow(
+  pressure: number | undefined,
+  baseFlow: number,
+  pressureFlow: number,
+  pressureCurve: StrokeStyle["pressureCurve"],
+): number {
+  let p = pressure ?? 0.5;
+  p = applyPressureCurve(p, pressureCurve);
+  const uniformFlow = baseFlow;
+  const variableFlow = baseFlow * p;
+  return uniformFlow * (1 - pressureFlow) + variableFlow * pressureFlow;
 }
 
 function renderMixedTip(

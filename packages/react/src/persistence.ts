@@ -7,7 +7,9 @@ import type {
   Layer,
   LayerMeta,
   PressureCurve,
+  PressureDynamics,
 } from "@headless-paint/core";
+import { DEFAULT_PRESSURE_DYNAMICS } from "@headless-paint/core";
 import type { ViewTransform } from "@headless-paint/core";
 import type { ToolType } from "./usePointerHandler";
 
@@ -28,7 +30,6 @@ type Mat3Tuple = readonly [
 export interface PaintPenSettingsSnapshot {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity: number;
   readonly pressureCurve: PressureCurve;
   readonly eraser: boolean;
   readonly brush: BrushConfig;
@@ -119,7 +120,6 @@ export function exportPaintSettings(
     pen: {
       color: { ...input.pen.color },
       lineWidth: input.pen.lineWidth,
-      pressureSensitivity: input.pen.pressureSensitivity,
       pressureCurve: { ...input.pen.pressureCurve },
       eraser: input.pen.eraser,
       brush: cloneBrushConfig(input.pen.brush),
@@ -143,10 +143,13 @@ export function importPaintSettings(
   if (!isRecord(value.pen)) return null;
   if (!isColor(value.pen.color)) return null;
   if (!isFiniteNumber(value.pen.lineWidth)) return null;
-  if (!isFiniteNumber(value.pen.pressureSensitivity)) return null;
   if (!isPressureCurve(value.pen.pressureCurve)) return null;
   if (typeof value.pen.eraser !== "boolean") return null;
-  if (!isBrushConfig(value.pen.brush)) return null;
+  const pressureSizeFallback = isFiniteNumber(value.pen.pressureSensitivity)
+    ? value.pen.pressureSensitivity
+    : DEFAULT_PRESSURE_DYNAMICS.size;
+  const brush = parseBrushConfig(value.pen.brush, pressureSizeFallback);
+  if (!brush) return null;
   if (!isRecord(value.smoothing)) return null;
   if (typeof value.smoothing.enabled !== "boolean") return null;
   if (!isFiniteNumber(value.smoothing.windowSize)) return null;
@@ -173,10 +176,9 @@ export function importPaintSettings(
     pen: {
       color: { ...value.pen.color },
       lineWidth: value.pen.lineWidth,
-      pressureSensitivity: value.pen.pressureSensitivity,
       pressureCurve: { ...value.pen.pressureCurve },
       eraser: value.pen.eraser,
-      brush: cloneBrushConfig(value.pen.brush),
+      brush,
     },
     smoothing: {
       enabled: value.smoothing.enabled,
@@ -327,7 +329,10 @@ function cloneLayerMeta(meta: LayerMeta): LayerMeta {
 
 function cloneBrushConfig(brush: BrushConfig): BrushConfig {
   if (brush.type === "round-pen") {
-    return { type: "round-pen" };
+    return {
+      type: "round-pen",
+      pressureDynamics: clonePressureDynamics(brush.pressureDynamics),
+    };
   }
   const mixing = brush.mixing ? { ...brush.mixing } : undefined;
   if (brush.tip.type === "circle") {
@@ -335,6 +340,7 @@ function cloneBrushConfig(brush: BrushConfig): BrushConfig {
       type: "stamp",
       tip: { type: "circle", hardness: brush.tip.hardness },
       dynamics: { ...brush.dynamics },
+      pressureDynamics: clonePressureDynamics(brush.pressureDynamics),
       mixing,
     };
   }
@@ -342,7 +348,15 @@ function cloneBrushConfig(brush: BrushConfig): BrushConfig {
     type: "stamp",
     tip: { type: "image", imageId: brush.tip.imageId },
     dynamics: { ...brush.dynamics },
+    pressureDynamics: clonePressureDynamics(brush.pressureDynamics),
     mixing,
+  };
+}
+
+function clonePressureDynamics(dynamics: PressureDynamics): PressureDynamics {
+  return {
+    size: dynamics.size,
+    flow: dynamics.flow,
   };
 }
 
@@ -422,22 +436,48 @@ function isBackgroundSettings(value: unknown): value is BackgroundSettings {
   );
 }
 
-function isBrushConfig(value: unknown): value is BrushConfig {
-  if (!isRecord(value) || typeof value.type !== "string") return false;
-  if (value.type === "round-pen") return true;
+function parsePressureDynamics(
+  value: unknown,
+  sizeFallback: number,
+): PressureDynamics | null {
+  if (value === undefined) {
+    return { size: sizeFallback, flow: DEFAULT_PRESSURE_DYNAMICS.flow };
+  }
+  if (!isRecord(value)) return null;
+  return {
+    size: isFiniteNumber(value.size) ? value.size : sizeFallback,
+    flow: isFiniteNumber(value.flow)
+      ? value.flow
+      : DEFAULT_PRESSURE_DYNAMICS.flow,
+  };
+}
+
+function parseBrushConfig(
+  value: unknown,
+  pressureSizeFallback: number,
+): BrushConfig | null {
+  if (!isRecord(value) || typeof value.type !== "string") return null;
+  const pressureDynamics = parsePressureDynamics(
+    value.pressureDynamics,
+    pressureSizeFallback,
+  );
+  if (!pressureDynamics) return null;
+  if (value.type === "round-pen") {
+    return { type: "round-pen", pressureDynamics };
+  }
   if (
     value.type !== "stamp" ||
     !isRecord(value.tip) ||
     !isRecord(value.dynamics)
   ) {
-    return false;
+    return null;
   }
 
-  const tip = value.tip;
+  const tipValue = value.tip;
   const tipValid =
-    (tip.type === "circle" && isFiniteNumber(tip.hardness)) ||
-    (tip.type === "image" && typeof tip.imageId === "string");
-  if (!tipValid) return false;
+    (tipValue.type === "circle" && isFiniteNumber(tipValue.hardness)) ||
+    (tipValue.type === "image" && typeof tipValue.imageId === "string");
+  if (!tipValid) return null;
 
   const dynamics = value.dynamics;
   if (
@@ -450,22 +490,47 @@ function isBrushConfig(value: unknown): value is BrushConfig {
       isFiniteNumber(dynamics.scatter)
     )
   ) {
-    return false;
+    return null;
   }
 
   if (value.mixing !== undefined) {
-    if (!isRecord(value.mixing)) return false;
+    if (!isRecord(value.mixing)) return null;
     if (
       typeof value.mixing.enabled !== "boolean" ||
       !isFiniteNumber(value.mixing.pickup) ||
       !isFiniteNumber(value.mixing.restore) ||
       !isFiniteNumber(value.mixing.updateDistanceRatio)
     ) {
-      return false;
+      return null;
     }
   }
 
-  return true;
+  const tip =
+    tipValue.type === "circle"
+      ? { type: "circle" as const, hardness: tipValue.hardness as number }
+      : { type: "image" as const, imageId: tipValue.imageId as string };
+  const mixing = value.mixing
+    ? {
+        enabled: value.mixing.enabled as boolean,
+        pickup: value.mixing.pickup as number,
+        restore: value.mixing.restore as number,
+        updateDistanceRatio: value.mixing.updateDistanceRatio as number,
+      }
+    : undefined;
+  return {
+    type: "stamp",
+    tip,
+    dynamics: {
+      spacing: dynamics.spacing as number,
+      flow: dynamics.flow as number,
+      opacityJitter: dynamics.opacityJitter as number,
+      sizeJitter: dynamics.sizeJitter as number,
+      rotationJitter: dynamics.rotationJitter as number,
+      scatter: dynamics.scatter as number,
+    },
+    pressureDynamics,
+    mixing,
+  };
 }
 
 function isExpandConfig(value: unknown): value is ExpandConfig {

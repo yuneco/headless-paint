@@ -46,6 +46,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Point` | 2D座標 `{ x, y }` |
 | `Color` | RGBA色 `{ r, g, b, a }` (各値 0-255) |
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
+| `PressureDynamics` | 筆圧をブラシサイズ/flowへ反映する強さ `{ size, flow }` |
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
 | `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore, updateDistanceRatio }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
@@ -80,8 +81,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `drawLine(layer, from, to, color, lineWidth?)` | 直線を描画 |
 | `drawCircle(layer, center, radius, color)` | 塗りつぶし円を描画 |
 | `drawPath(layer, points, color, lineWidth?)` | パス（連続線）を描画 |
-| `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSensitivity, pressureCurve?, compositeOperation?, overlapCount?)` | 可変太さパス描画（筆圧対応） |
-| `calculateRadius(pressure, baseLineWidth, pressureSensitivity, pressureCurve?)` | 筆圧から描画半径を計算 |
+| `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSize, pressureCurve?, compositeOperation?, overlapCount?)` | 可変太さパス描画（筆圧対応） |
+| `calculateRadius(pressure, baseLineWidth, pressureSize, pressureCurve?)` | 筆圧から描画半径を計算 |
 | `applyPressureCurve(pressure, curve)` | 筆圧カーブを適用 |
 | `interpolateStrokePoints(points, overlapCount?)` | Catmull-Romスプライン補間 |
 
@@ -100,6 +101,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `AIRBRUSH` | エアブラシプリセット（ソフト円、密間隔・低フロー） |
 | `PENCIL` | 鉛筆プリセット（ほぼハード円、微小 jitter） |
 | `MARKER` | マーカープリセット（やや柔らか、中間フロー） |
+| `DEFAULT_PRESSURE_DYNAMICS` | `PressureDynamics` のデフォルト値 |
 
 ### レンダリング関数
 

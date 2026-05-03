@@ -127,9 +127,6 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
       restoredSettings?.pen.color ?? DEFAULT_PEN_CONFIG.initialColor,
     initialLineWidth:
       restoredSettings?.pen.lineWidth ?? DEFAULT_PEN_CONFIG.initialLineWidth,
-    initialPressureSensitivity:
-      restoredSettings?.pen.pressureSensitivity ??
-      DEFAULT_PEN_CONFIG.initialPressureSensitivity,
     initialPressureCurve:
       restoredSettings?.pen.pressureCurve ??
       DEFAULT_PEN_CONFIG.initialPressureCurve,
@@ -254,7 +251,6 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         pen: {
           color: penSettings.color,
           lineWidth: penSettings.lineWidth,
-          pressureSensitivity: penSettings.pressureSensitivity,
           pressureCurve: penSettings.pressureCurve,
           eraser: penSettings.eraser,
           brush: penSettings.brush,
@@ -275,7 +271,6 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     background,
     penSettings.color,
     penSettings.lineWidth,
-    penSettings.pressureSensitivity,
     penSettings.pressureCurve,
     penSettings.eraser,
     penSettings.brush,

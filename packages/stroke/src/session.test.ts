@@ -17,7 +17,6 @@ describe("session", () => {
   const style: StrokeStyle = {
     color: { r: 0, g: 0, b: 0, a: 255 },
     lineWidth: 3,
-    pressureSensitivity: 0,
     pressureCurve: DEFAULT_PRESSURE_CURVE,
     compositeOperation: "source-over",
     brush: ROUND_PEN,

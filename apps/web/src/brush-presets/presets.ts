@@ -3,6 +3,7 @@ import {
   AIRBRUSH,
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
+  DEFAULT_PRESSURE_DYNAMICS,
   ROUND_PEN,
 } from "@headless-paint/engine";
 
@@ -22,6 +23,7 @@ const PENCIL_TEXTURED: StampBrushConfig = {
     scatter: 0.025,
     rotationJitter: Math.PI * 0.2,
   },
+  pressureDynamics: { size: 1, flow: 0 },
 };
 
 const STAR_SCATTER: StampBrushConfig = {
@@ -36,6 +38,7 @@ const STAR_SCATTER: StampBrushConfig = {
     scatter: 1.5,
     flow: 0.9,
   },
+  pressureDynamics: { ...DEFAULT_PRESSURE_DYNAMICS, flow: 0.4 },
 };
 
 const ACRYLIC: StampBrushConfig = {
@@ -46,6 +49,7 @@ const ACRYLIC: StampBrushConfig = {
     spacing: 0.12,
     flow: 0.72,
   },
+  pressureDynamics: { size: 0.3, flow: 0.4 },
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
     enabled: true,

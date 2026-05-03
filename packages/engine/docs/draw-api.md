@@ -153,7 +153,7 @@ function applyPressureCurve(
 function calculateRadius(
   pressure: number | undefined,
   baseLineWidth: number,
-  pressureSensitivity: number,
+  pressureSize: number,
   pressureCurve?: PressureCurve,
 ): number
 ```
@@ -163,15 +163,15 @@ function calculateRadius(
 |---|---|---|---|
 | `pressure` | `number \| undefined` | ○ | 筆圧値（0.0〜1.0、undefinedはデフォルト0.5） |
 | `baseLineWidth` | `number` | ○ | 基準線幅 |
-| `pressureSensitivity` | `number` | ○ | 筆圧感度（0.0〜1.0） |
+| `pressureSize` | `number` | ○ | 筆圧をサイズへ反映する強さ（0.0〜1.0） |
 | `pressureCurve` | `PressureCurve` | - | 筆圧カーブ（undefinedは変換なし） |
 
 **戻り値**: `number` - 描画半径（ピクセル）
 
 **計算ロジック**:
 1. `pressureCurve` がある場合、`applyPressureCurve` で筆圧を変換
-2. `sensitivity=0`: `baseLineWidth / 2`（均一）
-3. `sensitivity=1`: `baseLineWidth * pressure`（筆圧比例）
+2. `pressureSize=0`: `baseLineWidth / 2`（均一）
+3. `pressureSize=1`: `baseLineWidth * pressure`（筆圧比例）
 4. 中間値: 均一と筆圧の線形補間
 
 ---
@@ -214,7 +214,7 @@ function drawVariableWidthPath(
   points: readonly StrokePoint[],
   color: Color,
   baseLineWidth: number,
-  pressureSensitivity: number,
+  pressureSize: number,
   pressureCurve?: PressureCurve,
   compositeOperation?: GlobalCompositeOperation,
   overlapCount?: number,
@@ -228,7 +228,7 @@ function drawVariableWidthPath(
 | `points` | `readonly StrokePoint[]` | ○ | ポイント列（pressure含む） |
 | `color` | `Color` | ○ | 描画色 |
 | `baseLineWidth` | `number` | ○ | 基準線幅 |
-| `pressureSensitivity` | `number` | ○ | 筆圧感度（0.0〜1.0） |
+| `pressureSize` | `number` | ○ | 筆圧をサイズへ反映する強さ（0.0〜1.0） |
 | `pressureCurve` | `PressureCurve` | - | 筆圧カーブ（undefinedは変換なし） |
 | `compositeOperation` | `GlobalCompositeOperation` | - | Canvas合成モード（undefinedは `"source-over"`） |
 | `overlapCount` | `number` | - | `interpolateStrokePoints` にパススルーされる。先頭のオーバーラップ点数を指定し、曲率計算精度を向上させる |
@@ -242,6 +242,6 @@ function drawVariableWidthPath(
 6. `compositeOperation` を元の値に復元
 
 **特記事項**:
-- `pressureSensitivity=0` でも正常動作（均一太さの円+台形描画）
+- `pressureSize=0` でも正常動作（均一太さの円+台形描画）
 - committed/pending差分描画と互換性あり
 - 消しゴムモード: `compositeOperation="destination-out"` で既存ピクセルを消去

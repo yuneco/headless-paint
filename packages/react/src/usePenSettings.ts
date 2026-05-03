@@ -2,15 +2,19 @@ import type {
   BrushConfig,
   Color,
   PressureCurve,
+  PressureDynamics,
   StrokeStyle,
 } from "@headless-paint/core";
-import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "@headless-paint/core";
+import {
+  DEFAULT_PRESSURE_CURVE,
+  DEFAULT_PRESSURE_DYNAMICS,
+  ROUND_PEN,
+} from "@headless-paint/core";
 import { useCallback, useMemo, useState } from "react";
 
 export interface PenSettingsConfig {
   readonly initialColor?: Color;
   readonly initialLineWidth?: number;
-  readonly initialPressureSensitivity?: number;
   readonly initialPressureCurve?: PressureCurve;
   readonly initialBrush?: BrushConfig;
 }
@@ -18,22 +22,42 @@ export interface PenSettingsConfig {
 export interface UsePenSettingsResult {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity: number;
   readonly pressureCurve: PressureCurve;
   readonly eraser: boolean;
   readonly brush: BrushConfig;
   readonly strokeStyle: StrokeStyle;
   readonly setColor: (color: Color) => void;
   readonly setLineWidth: (width: number) => void;
-  readonly setPressureSensitivity: (sensitivity: number) => void;
   readonly setPressureCurve: (curve: PressureCurve) => void;
   readonly setEraser: (eraser: boolean) => void;
   readonly setBrush: (brush: BrushConfig) => void;
+  readonly setBrushPressureDynamics: (dynamics: PressureDynamics) => void;
 }
 
 const DEFAULT_COLOR: Color = { r: 0, g: 0, b: 0, a: 255 };
 const DEFAULT_LINE_WIDTH = 8;
-const DEFAULT_PRESSURE_SENSITIVITY = 1.0;
+
+function normalizePressureDynamics(
+  value: PressureDynamics | undefined,
+): PressureDynamics {
+  return {
+    size: value?.size ?? DEFAULT_PRESSURE_DYNAMICS.size,
+    flow: value?.flow ?? DEFAULT_PRESSURE_DYNAMICS.flow,
+  };
+}
+
+function normalizeBrushConfig(brush: BrushConfig): BrushConfig {
+  if (brush.type === "round-pen") {
+    return {
+      type: "round-pen",
+      pressureDynamics: normalizePressureDynamics(brush.pressureDynamics),
+    };
+  }
+  return {
+    ...brush,
+    pressureDynamics: normalizePressureDynamics(brush.pressureDynamics),
+  };
+}
 
 export function usePenSettings(
   config?: PenSettingsConfig,
@@ -44,27 +68,23 @@ export function usePenSettings(
   const [lineWidth, setLineWidth] = useState(
     () => config?.initialLineWidth ?? DEFAULT_LINE_WIDTH,
   );
-  const [pressureSensitivity, setPressureSensitivity] = useState(
-    () => config?.initialPressureSensitivity ?? DEFAULT_PRESSURE_SENSITIVITY,
-  );
   const [pressureCurve, setPressureCurve] = useState<PressureCurve>(
     () => config?.initialPressureCurve ?? DEFAULT_PRESSURE_CURVE,
   );
   const [eraser, setEraser] = useState(false);
-  const [brush, setBrush] = useState<BrushConfig>(
-    () => config?.initialBrush ?? ROUND_PEN,
+  const [brush, setBrush] = useState<BrushConfig>(() =>
+    normalizeBrushConfig(config?.initialBrush ?? ROUND_PEN),
   );
 
   const strokeStyle = useMemo<StrokeStyle>(
     () => ({
       color,
       lineWidth,
-      pressureSensitivity,
       pressureCurve,
       compositeOperation: eraser ? "destination-out" : "source-over",
       brush,
     }),
-    [color, lineWidth, pressureSensitivity, pressureCurve, eraser, brush],
+    [color, lineWidth, pressureCurve, eraser, brush],
   );
 
   const handleSetColor = useCallback((c: Color) => {
@@ -73,10 +93,6 @@ export function usePenSettings(
 
   const handleSetLineWidth = useCallback((width: number) => {
     setLineWidth(width);
-  }, []);
-
-  const handleSetPressureSensitivity = useCallback((sensitivity: number) => {
-    setPressureSensitivity(sensitivity);
   }, []);
 
   const handleSetPressureCurve = useCallback((curve: PressureCurve) => {
@@ -88,39 +104,46 @@ export function usePenSettings(
   }, []);
 
   const handleSetBrush = useCallback((b: BrushConfig) => {
-    setBrush(b);
+    setBrush(normalizeBrushConfig(b));
   }, []);
+
+  const handleSetBrushPressureDynamics = useCallback(
+    (dynamics: PressureDynamics) => {
+      setBrush((current) =>
+        normalizeBrushConfig({ ...current, pressureDynamics: dynamics }),
+      );
+    },
+    [],
+  );
 
   return useMemo(
     () => ({
       color,
       lineWidth,
-      pressureSensitivity,
       pressureCurve,
       eraser,
       brush,
       strokeStyle,
       setColor: handleSetColor,
       setLineWidth: handleSetLineWidth,
-      setPressureSensitivity: handleSetPressureSensitivity,
       setPressureCurve: handleSetPressureCurve,
       setEraser: handleSetEraser,
       setBrush: handleSetBrush,
+      setBrushPressureDynamics: handleSetBrushPressureDynamics,
     }),
     [
       color,
       lineWidth,
-      pressureSensitivity,
       pressureCurve,
       eraser,
       brush,
       strokeStyle,
       handleSetColor,
       handleSetLineWidth,
-      handleSetPressureSensitivity,
       handleSetPressureCurve,
       handleSetEraser,
       handleSetBrush,
+      handleSetBrushPressureDynamics,
     ],
   );
 }

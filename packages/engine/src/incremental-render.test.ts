@@ -12,7 +12,6 @@ import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "./types";
 const createTestStyle = (): StrokeStyle => ({
   color: { r: 255, g: 0, b: 0, a: 255 },
   lineWidth: 2,
-  pressureSensitivity: 0,
   pressureCurve: DEFAULT_PRESSURE_CURVE,
   compositeOperation: "source-over",
   brush: ROUND_PEN,
@@ -171,7 +170,6 @@ describe("composeLayers", () => {
     const blueStyle: StrokeStyle = {
       color: { r: 0, g: 0, b: 255, a: 255 },
       lineWidth: 2,
-      pressureSensitivity: 0,
       pressureCurve: DEFAULT_PRESSURE_CURVE,
       compositeOperation: "source-over",
       brush: ROUND_PEN,

@@ -26,10 +26,12 @@ describe("persistence", () => {
       pen: {
         color: { r: 10, g: 20, b: 30, a: 255 },
         lineWidth: 8,
-        pressureSensitivity: 0.8,
         pressureCurve: { y1: 0.2, y2: 0.6 },
         eraser: false,
-        brush: { type: "round-pen" },
+        brush: {
+          type: "round-pen",
+          pressureDynamics: { size: 0.8, flow: 0 },
+        },
       },
       smoothing: {
         enabled: true,
@@ -66,7 +68,6 @@ describe("persistence", () => {
       pen: {
         color: { r: 10, g: 20, b: 30, a: 255 },
         lineWidth: 8,
-        pressureSensitivity: 0.8,
         pressureCurve: { y1: 0.2, y2: 0.6 },
         eraser: false,
         brush: {
@@ -80,6 +81,7 @@ describe("persistence", () => {
             rotationJitter: 0,
             scatter: 0,
           },
+          pressureDynamics: { size: 0.4, flow: 0.7 },
           mixing: {
             enabled: true,
             pickup: 0.3,
@@ -108,6 +110,41 @@ describe("persistence", () => {
         restore: 0.08,
         updateDistanceRatio: 0.5,
       },
+    });
+  });
+
+  it("imports legacy pressure settings by filling brush pressure dynamics", () => {
+    const legacy = {
+      version: 1,
+      tool: "pen",
+      transform: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      background: {
+        color: { r: 255, g: 255, b: 255, a: 255 },
+        visible: true,
+      },
+      pen: {
+        color: { r: 10, g: 20, b: 30, a: 255 },
+        lineWidth: 8,
+        pressureSensitivity: 0.35,
+        pressureCurve: { y1: 0.2, y2: 0.6 },
+        eraser: false,
+        brush: { type: "round-pen" },
+      },
+      smoothing: {
+        enabled: true,
+        windowSize: 5,
+      },
+      expand: {
+        levels: [
+          { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
+        ],
+      },
+    };
+
+    const imported = importPaintSettings(legacy);
+    expect(imported?.pen.brush).toEqual({
+      type: "round-pen",
+      pressureDynamics: { size: 0.35, flow: 0 },
     });
   });
 

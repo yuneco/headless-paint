@@ -53,7 +53,7 @@ useExpand ─────────── 対称展開（使う場合のみ）
 
 ### `usePenSettings`
 
-ペンの色・線幅・筆圧感度・筆圧カーブ・消しゴムモードを管理する。
+ペンの色・線幅・筆圧カーブ・消しゴムモード・ブラシ設定を管理する。
 これらの値から描画に必要な `StrokeStyle` を自動的に構築して返す。
 
 ```typescript
@@ -66,7 +66,6 @@ function usePenSettings(config?: PenSettingsConfig): UsePenSettingsResult;
 |-----------|---|-----------|------|
 | `initialColor` | `Color` | `{ r: 0, g: 0, b: 0, a: 255 }` | ペンの初期色（RGBA 0-255） |
 | `initialLineWidth` | `number` | `8` | 初期線幅（px） |
-| `initialPressureSensitivity` | `number` | `1.0` | 筆圧感度。0 で無効、1 で最大 |
 | `initialPressureCurve` | `PressureCurve` | `DEFAULT_PRESSURE_CURVE` | 筆圧の入出力カーブ |
 | `initialBrush` | `BrushConfig` | `ROUND_PEN` | 初期ブラシ設定。`StampBrushConfig.mixing` を含む場合もそのまま保持する |
 
@@ -78,8 +77,6 @@ interface UsePenSettingsResult {
   readonly color: Color;
   /** 現在の線幅（px） */
   readonly lineWidth: number;
-  /** 筆圧感度（0: 無効, 1: 最大） */
-  readonly pressureSensitivity: number;
   /** 筆圧の入出力カーブ */
   readonly pressureCurve: PressureCurve;
   /** 消しゴムモードが有効か */
@@ -90,13 +87,15 @@ interface UsePenSettingsResult {
   readonly strokeStyle: StrokeStyle;
   readonly setColor: (color: Color) => void;
   readonly setLineWidth: (width: number) => void;
-  readonly setPressureSensitivity: (sensitivity: number) => void;
   readonly setPressureCurve: (curve: PressureCurve) => void;
   /** true にすると compositeOperation が "destination-out" に設定される */
   readonly setEraser: (eraser: boolean) => void;
   readonly setBrush: (brush: BrushConfig) => void;
+  readonly setBrushPressureDynamics: (dynamics: PressureDynamics) => void;
 }
 ```
+
+筆圧の反映先は `brush.pressureDynamics` で管理する。`round-pen` では `pressureDynamics.size` のみ描画に使い、`pressureDynamics.flow` は無視する。UIは `round-pen` 選択時に flow 筆圧コントロールを表示しない。
 
 ### `useSmoothing`
 
@@ -861,6 +860,8 @@ function importPaintDocument(value: unknown): Promise<PaintInitialDocument | nul
 - スナップショットには `version` を含める
 - 未知の `version` は非互換として `null` を返す
 - zod 等のスキーマライブラリは使わず、手書きの軽量チェックで安全に失敗させる
+- 旧設定の `pen.pressureSensitivity` は `pen.brush.pressureDynamics.size` に補完する。`pressureDynamics.flow` は `0` として扱う
+- 旧 `BrushConfig` に `pressureDynamics` がない場合は `DEFAULT_PRESSURE_DYNAMICS` で補完する
 
 ### 使い方（保存先はアプリ側で選択）
 
@@ -872,7 +873,6 @@ const settingsSnapshot = exportPaintSettings({
   pen: {
     color: penSettings.color,
     lineWidth: penSettings.lineWidth,
-    pressureSensitivity: penSettings.pressureSensitivity,
     pressureCurve: penSettings.pressureCurve,
     eraser: penSettings.eraser,
     brush: penSettings.brush,
@@ -909,6 +909,7 @@ const documentSnapshot = await exportPaintDocument({
 | `PendingOverlay` | engine | pending レイヤーのプレ合成情報 |
 | `StrokeStyle` | engine | 描画スタイル |
 | `PressureCurve` | engine | 筆圧カーブ |
+| `PressureDynamics` | engine | 筆圧をブラシサイズ/flowへ反映する強さ |
 | `Point` | engine | 2D 座標 |
 | `ExpandConfig` | engine | 対称展開の設定 |
 | `CompiledExpand` | engine | 構築済み対称展開変換 |
@@ -939,3 +940,4 @@ const documentSnapshot = await exportPaintDocument({
 | `MARKER` | engine | マーカープリセット |
 | `DEFAULT_BRUSH_DYNAMICS` | engine | `BrushDynamics` のデフォルト値 |
 | `DEFAULT_BRUSH_MIXING` | engine | `BrushMixing` のデフォルト値 |
+| `DEFAULT_PRESSURE_DYNAMICS` | engine | `PressureDynamics` のデフォルト値 |

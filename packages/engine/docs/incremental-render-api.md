@@ -75,7 +75,7 @@ function appendToCommittedLayer(
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 確定レイヤー |
 | `points` | `readonly StrokePoint[]` | ○ | 新しく確定した点（pressure含む）。先頭に `overlapCount` 個のオーバーラップ点を含む |
-| `style` | `StrokeStyle` | ○ | 描画スタイル（pressureSensitivity含む） |
+| `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
 | `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。スタンプブラシの `accumulatedDistance` と `tipCanvas`、混色有効時の分岐別 `colorBuffer` / `mixedCanvas` を含む。`round-pen` では省略可 |
@@ -131,7 +131,7 @@ function renderPendingLayer(
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 作業レイヤー |
 | `points` | `readonly StrokePoint[]` | ○ | 未確定点全体（pressure含む） |
-| `style` | `StrokeStyle` | ○ | 描画スタイル（pressureSensitivity含む） |
+| `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。スタンプブラシでは committed 描画から引き継いだ `accumulatedDistance` と混色更新状態を使用し、境界でのスタンプと混色の連続性を保つ |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |

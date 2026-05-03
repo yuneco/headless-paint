@@ -77,7 +77,7 @@ export function applyPressureCurve(
 export function calculateRadius(
   pressure: number | undefined,
   baseLineWidth: number,
-  pressureSensitivity: number,
+  pressureSize: number,
   pressureCurve?: PressureCurve,
 ): number {
   let p = pressure ?? DEFAULT_PRESSURE;
@@ -86,10 +86,7 @@ export function calculateRadius(
   }
   const uniformRadius = baseLineWidth / 2;
   const pressureRadius = baseLineWidth * p;
-  return (
-    uniformRadius * (1 - pressureSensitivity) +
-    pressureRadius * pressureSensitivity
-  );
+  return uniformRadius * (1 - pressureSize) + pressureRadius * pressureSize;
 }
 
 /**
@@ -110,7 +107,7 @@ export function drawVariableWidthPath(
   points: readonly StrokePoint[],
   color: Color,
   baseLineWidth: number,
-  pressureSensitivity: number,
+  pressureSize: number,
   pressureCurve?: PressureCurve,
   compositeOperation?: GlobalCompositeOperation,
   overlapCount?: number,
@@ -131,7 +128,7 @@ export function drawVariableWidthPath(
     const r = calculateRadius(
       interpolated[0].pressure,
       baseLineWidth,
-      pressureSensitivity,
+      pressureSize,
       pressureCurve,
     );
     ctx.beginPath();
@@ -148,7 +145,7 @@ export function drawVariableWidthPath(
     const r = calculateRadius(
       p.pressure,
       baseLineWidth,
-      pressureSensitivity,
+      pressureSize,
       pressureCurve,
     );
 
@@ -163,7 +160,7 @@ export function drawVariableWidthPath(
       const rNext = calculateRadius(
         next.pressure,
         baseLineWidth,
-        pressureSensitivity,
+        pressureSize,
         pressureCurve,
       );
 

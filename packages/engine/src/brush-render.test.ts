@@ -21,7 +21,6 @@ function makeStyle(overrides?: Partial<StrokeStyle>): StrokeStyle {
   return {
     color: BLACK,
     lineWidth: 8,
-    pressureSensitivity: 0,
     pressureCurve: DEFAULT_PRESSURE_CURVE,
     compositeOperation: "source-over",
     brush: ROUND_PEN,
@@ -142,6 +141,7 @@ describe("renderBrushStroke", () => {
             ...DEFAULT_BRUSH_DYNAMICS,
             spacing: 0.25,
           },
+          pressureDynamics: { size: 0, flow: 0 },
         },
       });
     }
@@ -298,6 +298,7 @@ describe("renderBrushStroke", () => {
           type: "stamp",
           tip: { type: "circle", hardness: 1.0 },
           dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.25 },
+          pressureDynamics: { size: 0, flow: 0 },
         },
       });
       const layer1 = createLayer(200, 200);
@@ -324,6 +325,7 @@ describe("renderBrushStroke", () => {
             opacityJitter: 0.3,
             scatter: 0.5,
           },
+          pressureDynamics: { size: 0, flow: 0 },
         },
       });
       const layer2 = createLayer(200, 200);
@@ -341,6 +343,55 @@ describe("renderBrushStroke", () => {
       const pixels1 = layer1.ctx.getImageData(0, 0, 200, 200).data;
       const pixels2 = layer2.ctx.getImageData(0, 0, 200, 200).data;
       expect(pixels1).not.toEqual(pixels2);
+    });
+
+    it("pressureDynamics.flow でスタンプの不透明度が変わる", () => {
+      const points: StrokePoint[] = [{ x: 50, y: 50, pressure: 0.5 }];
+      const baseBrush = {
+        type: "stamp" as const,
+        tip: { type: "circle" as const, hardness: 1.0 },
+        dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 1, flow: 1 },
+      };
+
+      const uniformStyle = makeStyle({
+        lineWidth: 20,
+        brush: {
+          ...baseBrush,
+          pressureDynamics: { size: 0, flow: 0 },
+        },
+      });
+      const pressureFlowStyle = makeStyle({
+        lineWidth: 20,
+        brush: {
+          ...baseBrush,
+          pressureDynamics: { size: 0, flow: 1 },
+        },
+      });
+
+      const uniformLayer = createLayer(100, 100);
+      renderBrushStroke(
+        uniformLayer,
+        points,
+        uniformStyle,
+        0,
+        makeInitialState(uniformStyle),
+      );
+
+      const pressureFlowLayer = createLayer(100, 100);
+      renderBrushStroke(
+        pressureFlowLayer,
+        points,
+        pressureFlowStyle,
+        0,
+        makeInitialState(pressureFlowStyle),
+      );
+
+      const uniformAlpha = uniformLayer.ctx.getImageData(50, 50, 1, 1).data[3];
+      const pressureFlowAlpha = pressureFlowLayer.ctx.getImageData(50, 50, 1, 1)
+        .data[3];
+
+      expect(pressureFlowAlpha).toBeLessThan(uniformAlpha);
+      expect(pressureFlowAlpha).toBeGreaterThan(0);
     });
 
     it("incremental（overlap 付き）と replay で stampCount が一致する", () => {
@@ -415,6 +466,7 @@ describe("renderBrushStroke", () => {
             pickup: 1,
             restore: 0,
           },
+          pressureDynamics: { size: 0, flow: 0 },
         },
       });
       const state = makeInitialState(style);
@@ -448,6 +500,7 @@ describe("renderBrushStroke", () => {
             flow: 1,
           },
           mixing: { ...DEFAULT_BRUSH_MIXING, enabled: true, pickup: 1 },
+          pressureDynamics: { size: 0, flow: 0 },
         },
       });
 

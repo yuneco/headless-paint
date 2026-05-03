@@ -76,10 +76,9 @@ function createTestCommand(
     style: {
       color: { r: 0, g: 0, b: 0, a: 255 },
       lineWidth: 3,
-      pressureSensitivity: 0,
       pressureCurve: { y1: 1 / 3, y2: 2 / 3 },
       compositeOperation: "source-over",
-      brush: { type: "round-pen" },
+      brush: { type: "round-pen", pressureDynamics: { size: 0, flow: 0 } },
     },
     brushSeed: 0,
     timestamp,

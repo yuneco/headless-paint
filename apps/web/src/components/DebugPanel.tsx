@@ -1,5 +1,6 @@
 import {
   DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_PRESSURE_DYNAMICS,
   type ExpandMode,
   type PatternMode,
   type Point,
@@ -77,7 +78,7 @@ function DebugPanelComponent({
 
   const penDataRef = useRef({
     lineWidth: penSettings.lineWidth,
-    pressureSensitivity: penSettings.pressureSensitivity,
+    sizePressure: penSettings.brush.pressureDynamics.size,
   });
 
   const brushDynamics =
@@ -91,6 +92,7 @@ function DebugPanelComponent({
     sizeJitter: brushDynamics.sizeJitter,
     rotationJitter: brushDynamics.rotationJitter,
     scatter: brushDynamics.scatter,
+    flowPressure: penSettings.brush.pressureDynamics.flow,
   });
 
   const dynamicsFolderRef = useRef<ReturnType<GUI["addFolder"]> | null>(null);
@@ -285,11 +287,15 @@ function DebugPanelComponent({
         });
 
       penFolder
-        .add(penDataRef.current, "pressureSensitivity", 0, 1, 0.05)
-        .name("Pressure")
+        .add(penDataRef.current, "sizePressure", 0, 1, 0.05)
+        .name("Size Pressure")
         .listen()
         .onChange((value: number) => {
-          penSettingsRef.current.setPressureSensitivity(value);
+          const ps = penSettingsRef.current;
+          ps.setBrushPressureDynamics({
+            ...ps.brush.pressureDynamics,
+            size: value,
+          });
         });
 
       penFolder.open();
@@ -317,6 +323,19 @@ function DebugPanelComponent({
         .name("Flow")
         .listen()
         .onChange((v: number) => updateDynamics("flow", v));
+
+      dynamicsFolder
+        .add(brushDynamicsDataRef.current, "flowPressure", 0, 1, 0.05)
+        .name("Flow Pressure")
+        .listen()
+        .onChange((value: number) => {
+          const ps = penSettingsRef.current;
+          if (ps.brush.type !== "stamp") return;
+          ps.setBrushPressureDynamics({
+            ...ps.brush.pressureDynamics,
+            flow: value,
+          });
+        });
 
       dynamicsFolder
         .add(brushDynamicsDataRef.current, "opacityJitter", 0, 1, 0.05)
@@ -470,8 +489,8 @@ function DebugPanelComponent({
 
   useEffect(() => {
     penDataRef.current.lineWidth = penSettings.lineWidth;
-    penDataRef.current.pressureSensitivity = penSettings.pressureSensitivity;
-  }, [penSettings.lineWidth, penSettings.pressureSensitivity]);
+    penDataRef.current.sizePressure = penSettings.brush.pressureDynamics.size;
+  }, [penSettings.lineWidth, penSettings.brush.pressureDynamics.size]);
 
   useEffect(() => {
     const d =
@@ -484,6 +503,10 @@ function DebugPanelComponent({
     brushDynamicsDataRef.current.sizeJitter = d.sizeJitter;
     brushDynamicsDataRef.current.rotationJitter = d.rotationJitter;
     brushDynamicsDataRef.current.scatter = d.scatter;
+    brushDynamicsDataRef.current.flowPressure =
+      penSettings.brush.type === "stamp"
+        ? penSettings.brush.pressureDynamics.flow
+        : DEFAULT_PRESSURE_DYNAMICS.flow;
 
     if (penSettings.brush.type === "stamp") {
       dynamicsFolderRef.current?.show();

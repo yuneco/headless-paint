@@ -58,8 +58,32 @@ function renderBrushStroke(
    - ポイント列を Catmull-Rom 補間
    - `accumulatedDistance` から `spacing` 間隔でパスを走査
    - 各スタンプ位置で `tipCanvas` を `drawImage` で配置
+   - `brush.pressureDynamics.size` でスタンプサイズを決める
+   - `brush.pressureDynamics.flow` でスタンプごとの flow を筆圧変化させる
    - 混色有効時は、一定距離ごとに描画先 footprint を分岐ごとの `colorBuffer` へ `pickup` の強さで転写し、元色を `restore` の強さで重ねた後、`tipCanvas` の alpha を適用して描画
    - jitter パラメータはスタンプ通し番号ベース PRNG で決定
+
+### 筆圧の反映先
+
+`brush.pressureDynamics` で、ブラシごとに筆圧の反映先を指定する。
+
+```typescript
+const pencil: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "image", imageId: "pencil-grain" },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.2, flow: 0.45 },
+  pressureDynamics: { size: 1, flow: 0 },
+};
+
+const airbrush: StampBrushConfig = {
+  type: "stamp",
+  tip: { type: "circle", hardness: 0.0 },
+  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  pressureDynamics: { size: 0, flow: 1 },
+};
+```
+
+`round-pen` は `pressureDynamics.size` のみを使う。`pressureDynamics.flow` は設定値として保持できるが描画には反映しない。UIでは `round-pen` 選択時に flow 筆圧コントロールを表示しない。
 
 ### 混色
 
@@ -70,6 +94,7 @@ const acrylic: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.75 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.12, flow: 0.8 },
+  pressureDynamics: { size: 0.3, flow: 0.4 },
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
     enabled: true,
@@ -265,18 +290,21 @@ const AIRBRUSH: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  pressureDynamics: { size: 0, flow: 1 },
 };
 
 const PENCIL: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.95 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.1, sizeJitter: 0.05, scatter: 0.02 },
+  pressureDynamics: { size: 1, flow: 0 },
 };
 
 const MARKER: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.7 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.15, flow: 0.8 },
+  pressureDynamics: { size: 0.2, flow: 0.5 },
 };
 
 ```

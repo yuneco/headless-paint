@@ -320,7 +320,6 @@ const DEFAULT_PRESSURE_CURVE: PressureCurve = { y1: 1/3, y2: 2/3 };
 interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity: number;
   readonly pressureCurve: PressureCurve;
   readonly compositeOperation: GlobalCompositeOperation;
   readonly brush: BrushConfig;
@@ -331,26 +330,59 @@ interface StrokeStyle {
 |---|---|---|
 | `color` | `Color` | 描画色 |
 | `lineWidth` | `number` | 線の基準太さ |
-| `pressureSensitivity` | `number` | 筆圧感度（0.0=均一太さ、1.0=最大感度） |
 | `pressureCurve` | `PressureCurve` | 筆圧カーブ（`DEFAULT_PRESSURE_CURVE` で線形） |
 | `compositeOperation` | `GlobalCompositeOperation` | Canvas合成モード。通常は `"source-over"`。消しゴムでは `"destination-out"` を指定 |
-| `brush` | `BrushConfig` | ブラシ設定。`{ type: "round-pen" }` で従来の circle+trapezoid 方式 |
+| `brush` | `BrushConfig` | ブラシ設定。筆圧をサイズ/flowへどう反映するかは `brush.pressureDynamics` で指定 |
 
 全フィールドが required。暗黙のデフォルト値に依存せず、常に明示的に指定する。
 
-**筆圧感度の動作**:
-- `0`: 全ポイントが `lineWidth` で均一描画
-- `1`: 筆圧に完全比例（`lineWidth * pressure` が直径）
-- `0〜1`: 均一太さと筆圧太さの線形補間
-
 **筆圧カーブの動作**:
-- 筆圧感度の計算前に入力筆圧をカーブで変換する
+- `brush.pressureDynamics` の計算前に入力筆圧をカーブで変換する
 - `DEFAULT_PRESSURE_CURVE`（`{ y1: 1/3, y2: 2/3 }`）は線形（変換なし相当）
 
 **合成モードの動作**:
 - `"source-over"`: 通常の加算描画
 - `"destination-out"`: 消しゴムモード（描画した箇所を透明にする）
 - その他の `GlobalCompositeOperation` 値も将来的にサポート可能
+
+---
+
+## PressureDynamics
+
+筆圧をブラシの動的パラメータへ反映する強さ。ブラシごとに設定する。
+
+```typescript
+interface PressureDynamics {
+  readonly size: number;
+  readonly flow: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `size` | `number` | 筆圧を描画サイズへ反映する強さ。`0` は均一サイズ、`1` は筆圧比例 |
+| `flow` | `number` | 筆圧をスタンプブラシの flow へ反映する強さ。`0` は均一 flow、`1` は筆圧比例 |
+
+**関連定数**:
+
+```typescript
+const DEFAULT_PRESSURE_DYNAMICS: PressureDynamics = {
+  size: 1,
+  flow: 0,
+};
+```
+
+**動作**:
+
+- `size` は `round-pen` と `stamp` の両方で使う
+- `flow` は `stamp` のみで使う。`round-pen` では型として値を保持しても描画には反映しない
+- `0〜1` の中間値は、均一値と筆圧比例値の線形補間
+- 入力筆圧が `undefined` の場合は `0.5` を使う
+- `pressureCurve` がある場合は、`size` と `flow` の両方に同じ変換済み筆圧を使う
+
+**設計意図**:
+
+`pressureSensitivity` はサイズ専用のグローバル設定だった。`PressureDynamics` はブラシごとの設定として、鉛筆は `size`、エアブラシは `flow`、アクリルは両方、という使い分けを可能にする。
 
 ---
 
@@ -465,6 +497,7 @@ const pastelDynamics: BrushDynamics = {
 /** 現在の circle+trapezoid 方式（デフォルト） */
 interface RoundPenBrushConfig {
   readonly type: "round-pen";
+  readonly pressureDynamics: PressureDynamics;
 }
 
 /** スタンプベースブラシ（汎用拡張型） */
@@ -472,6 +505,7 @@ interface StampBrushConfig {
   readonly type: "stamp";
   readonly tip: BrushTipConfig;
   readonly dynamics: BrushDynamics;
+  readonly pressureDynamics: PressureDynamics;
   readonly mixing?: BrushMixing;
 }
 
@@ -485,7 +519,17 @@ type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
 | `type` | `"stamp"` | ブラシ種別 |
 | `tip` | `BrushTipConfig` | チップ形状の設定 |
 | `dynamics` | `BrushDynamics` | 動的パラメータ |
+| `pressureDynamics` | `PressureDynamics` | 筆圧をサイズ/flowへ反映する強さ |
 | `mixing` | `BrushMixing` | 混色設定。未指定または `enabled: false` で混色なし |
+
+**RoundPenBrushConfig**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"round-pen"` | ブラシ種別 |
+| `pressureDynamics` | `PressureDynamics` | `size` のみ描画に使う。`flow` は無視される |
+
+`round-pen` は連続パス描画（circle + trapezoid fill）のため、スタンプごとの flow という概念を持たない。UIでは `round-pen` 選択時に `pressureDynamics.flow` を表示しない。
 
 ### BrushMixing
 
@@ -521,24 +565,30 @@ const DEFAULT_BRUSH_MIXING: BrushMixing = {
 **関連定数**:
 
 ```typescript
-const ROUND_PEN: RoundPenBrushConfig = { type: "round-pen" };
+const ROUND_PEN: RoundPenBrushConfig = {
+  type: "round-pen",
+  pressureDynamics: DEFAULT_PRESSURE_DYNAMICS,
+};
 
 const AIRBRUSH: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  pressureDynamics: { size: 0, flow: 1 },
 };
 
 const PENCIL: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.95 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.1, sizeJitter: 0.05, scatter: 0.02 },
+  pressureDynamics: { size: 1, flow: 0 },
 };
 
 const MARKER: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.7 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.15, flow: 0.8 },
+  pressureDynamics: { size: 0.2, flow: 0.5 },
 };
 ```
 
@@ -556,6 +606,7 @@ const airbrush: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  pressureDynamics: { size: 0, flow: 1 },
 };
 
 // 鉛筆
@@ -563,13 +614,13 @@ const pencil: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.95 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.1, sizeJitter: 0.05, scatter: 0.02 },
+  pressureDynamics: { size: 1, flow: 0 },
 };
 
 // round-pen
 const style: StrokeStyle = {
   color: { r: 0, g: 0, b: 0, a: 255 },
   lineWidth: 8,
-  pressureSensitivity: 0,
   pressureCurve: DEFAULT_PRESSURE_CURVE,
   compositeOperation: "source-over",
   brush: ROUND_PEN,

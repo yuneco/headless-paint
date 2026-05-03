@@ -337,6 +337,6 @@ const strokePoints: StrokePoint[] = [
 
 const strokes = expandStrokePoints(strokePoints, compiled);
 for (const stroke of strokes) {
-  drawVariableWidthPath(layer, stroke, color, lineWidth, pressureSensitivity);
+  drawVariableWidthPath(layer, stroke, color, lineWidth, brush.pressureDynamics.size);
 }
 ```

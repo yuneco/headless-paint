@@ -24,10 +24,9 @@ export type { StrokeStyle } from "@yuneco/headless-paint/core";
 interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity: number;           // 0.0=均一, 1.0=最大感度
   readonly pressureCurve: PressureCurve;          // 筆圧カーブ（DEFAULT_PRESSURE_CURVE=線形）
   readonly compositeOperation: GlobalCompositeOperation; // 合成モード（"source-over" が通常）
-  readonly brush: BrushConfig;                    // ブラシ設定（ROUND_PEN が従来方式）
+  readonly brush: BrushConfig;                    // ブラシ設定（pressureDynamics含む）
 }
 ```
 
@@ -140,7 +139,7 @@ interface StrokeCommand {
 | `inputPoints` | `readonly InputPoint[]` | 変換前の入力点列 |
 | `filterPipeline` | `FilterPipelineConfig` | フィルタパイプライン設定 |
 | `expand` | `ExpandConfig` | 展開設定 |
-| `style` | `StrokeStyle` | 描画スタイル（色、線幅、筆圧、合成モード、ブラシ設定を含む）。全フィールド required のため replay 時の解釈不一致がない |
+| `style` | `StrokeStyle` | 描画スタイル（色、線幅、筆圧カーブ、合成モード、ブラシ設定を含む）。筆圧のサイズ/flow反映は `style.brush.pressureDynamics` に保存する |
 | `brushSeed` | `number` | ブラシの PRNG シード。スタンプブラシの jitter を決定論的にリプレイするために使用。`round-pen` では `0` |
 | `timestamp` | `number` | 作成時刻 |
 
@@ -148,6 +147,7 @@ interface StrokeCommand {
 - 入力点（フィルタ前）のみを保存
 - リプレイ時にフィルタ→展開を再適用
 - `style: StrokeStyle` に集約することで、従来の個別フィールド展開（`color`, `lineWidth`, `pressureSensitivity?` 等）を廃止。command 保存と replay で optional の解釈不一致を構造的に排除
+- 新形式では `pressureSensitivity` を保存せず、ブラシごとの `pressureDynamics` を保存する。旧コマンドや旧設定を読み込む場合は、`pressureSensitivity` を `pressureDynamics.size` に補完してよい。旧形式との replay 等価性は保証しない
 
 ---
 

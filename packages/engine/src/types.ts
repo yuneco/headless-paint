@@ -119,6 +119,16 @@ export const DEFAULT_PRESSURE_CURVE: PressureCurve = {
   y2: 2 / 3,
 };
 
+export interface PressureDynamics {
+  readonly size: number;
+  readonly flow: number;
+}
+
+export const DEFAULT_PRESSURE_DYNAMICS: PressureDynamics = {
+  size: 1,
+  flow: 0,
+};
+
 // ============================================================
 // Brush
 // ============================================================
@@ -172,6 +182,7 @@ export const DEFAULT_BRUSH_MIXING: BrushMixing = {
 /** 現在の circle+trapezoid 方式 */
 export interface RoundPenBrushConfig {
   readonly type: "round-pen";
+  readonly pressureDynamics: PressureDynamics;
 }
 
 /** スタンプベースブラシ（汎用拡張型） */
@@ -179,17 +190,22 @@ export interface StampBrushConfig {
   readonly type: "stamp";
   readonly tip: BrushTipConfig;
   readonly dynamics: BrushDynamics;
+  readonly pressureDynamics: PressureDynamics;
   readonly mixing?: BrushMixing;
 }
 
 export type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
 
-export const ROUND_PEN: RoundPenBrushConfig = { type: "round-pen" };
+export const ROUND_PEN: RoundPenBrushConfig = {
+  type: "round-pen",
+  pressureDynamics: DEFAULT_PRESSURE_DYNAMICS,
+};
 
 export const AIRBRUSH: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  pressureDynamics: { size: 0, flow: 1 },
 };
 
 export const PENCIL: StampBrushConfig = {
@@ -201,12 +217,14 @@ export const PENCIL: StampBrushConfig = {
     sizeJitter: 0.05,
     scatter: 0.02,
   },
+  pressureDynamics: { size: 1, flow: 0 },
 };
 
 export const MARKER: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.7 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.15, flow: 0.8 },
+  pressureDynamics: { size: 0.2, flow: 0.5 },
 };
 
 export interface BrushBranchRenderState {
@@ -232,7 +250,6 @@ export interface BrushRenderState {
 export interface StrokeStyle {
   readonly color: Color;
   readonly lineWidth: number;
-  readonly pressureSensitivity: number;
   readonly pressureCurve: PressureCurve;
   readonly compositeOperation: GlobalCompositeOperation;
   readonly brush: BrushConfig;

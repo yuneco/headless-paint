@@ -16,13 +16,20 @@ interface BrushPanelProps {
 
 function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
   if (a.type !== b.type) return false;
-  if (a.type === "round-pen") return true;
+  if (a.type === "round-pen" && b.type === "round-pen") {
+    return (
+      a.pressureDynamics.size === b.pressureDynamics.size &&
+      a.pressureDynamics.flow === b.pressureDynamics.flow
+    );
+  }
   const sa = a as StampBrushConfig;
   const sb = b as StampBrushConfig;
   return (
     sa.tip.type === sb.tip.type &&
     sa.dynamics.spacing === sb.dynamics.spacing &&
     sa.dynamics.flow === sb.dynamics.flow &&
+    sa.pressureDynamics.size === sb.pressureDynamics.size &&
+    sa.pressureDynamics.flow === sb.pressureDynamics.flow &&
     (sa.mixing?.enabled ?? false) === (sb.mixing?.enabled ?? false) &&
     (sa.mixing?.pickup ?? 0) === (sb.mixing?.pickup ?? 0) &&
     (sa.mixing?.restore ?? 0) === (sb.mixing?.restore ?? 0) &&

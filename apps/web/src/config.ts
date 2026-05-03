@@ -18,7 +18,6 @@ import type { PenSettingsConfig, SmoothingConfig } from "@headless-paint/react";
 export const DEFAULT_PEN_CONFIG: Required<PenSettingsConfig> = {
   initialColor: { r: 50, g: 50, b: 50, a: 255 },
   initialLineWidth: 12,
-  initialPressureSensitivity: 1.0,
   initialPressureCurve: { y1: 0, y2: 0.4 },
   initialBrush: ROUND_PEN,
 };
