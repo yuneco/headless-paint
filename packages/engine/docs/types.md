@@ -101,6 +101,25 @@ interface Layer {
 
 ---
 
+## レイヤー複製・統合時の LayerMeta
+
+`cloneLayer()` は source の `LayerMeta` を複製し、`options.meta` が指定された場合はその値を上書きする。アプリが複製名を採番する場合は `meta.name` を渡す。
+
+`mergeLayerDown()` は source / target の `opacity` と `compositeOperation` を target pixels に焼き込んだ上で、target meta を次の既定値に正規化する。
+
+```typescript
+const mergedMeta: LayerMeta = {
+  name: target.meta.name,
+  visible: target.meta.visible,
+  opacity: 1,
+  compositeOperation: "source-over",
+};
+```
+
+`options.resultMeta` が指定された場合は、この既定値に上書き適用する。`visible` は統合対象 pixels を選別しないため、非表示レイヤーの pixel buffer も決定的に統合される。
+
+---
+
 ## PendingOverlay
 
 pending レイヤーのプレ合成情報。`renderLayers` / `composeLayers` に渡すことで、committed + pending の合成を正しく行う。

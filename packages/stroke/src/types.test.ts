@@ -86,6 +86,16 @@ describe("isStructuralCommand", () => {
     expect(isStructuralCommand(cmd)).toBe(true);
   });
 
+  it("should return true for duplicate-layer", () => {
+    const cmd = { type: "duplicate-layer" } as Command;
+    expect(isStructuralCommand(cmd)).toBe(true);
+  });
+
+  it("should return true for merge-layer-down", () => {
+    const cmd = { type: "merge-layer-down" } as Command;
+    expect(isStructuralCommand(cmd)).toBe(true);
+  });
+
   it("should return false for stroke", () => {
     const cmd = { type: "stroke" } as Command;
     expect(isStructuralCommand(cmd)).toBe(false);

@@ -442,6 +442,8 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         onToggleBackground={handleToggleBackground}
         onMoveUp={engine.moveLayerUp}
         onMoveDown={engine.moveLayerDown}
+        onDuplicateLayer={engine.duplicateLayer}
+        onMergeLayerDown={engine.mergeLayerDown}
         onSetOpacity={engine.setLayerOpacity}
         onSetBlendMode={engine.setLayerBlendMode}
         onTransform={!isTransformLocked ? handleStartTransform : undefined}

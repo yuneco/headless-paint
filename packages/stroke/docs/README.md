@@ -20,7 +20,7 @@ pnpm add @yuneco/headless-paint
 1. **セッション管理**: 1本のストロークの進捗を管理
 2. **差分計算**: 前回からの変更点（newlyCommitted）を計算
 3. **履歴管理**: マルチレイヤー対応のUndo/Redo機能の提供
-4. **コマンド生成**: 描画コマンドおよび構造コマンド（レイヤー追加/削除/並び替え）の生成
+4. **コマンド生成**: 描画コマンドおよび構造コマンド（レイヤー追加/削除/並び替え/複製/下統合）の生成
 
 ### やってはいけないこと
 
@@ -110,7 +110,9 @@ if (canUndo(historyState)) {
 | `AddLayerCommand` | レイヤー追加コマンド |
 | `RemoveLayerCommand` | レイヤー削除コマンド |
 | `ReorderLayerCommand` | レイヤー並び替えコマンド |
-| `StructuralCommand` | `AddLayerCommand \| RemoveLayerCommand \| ReorderLayerCommand` |
+| `DuplicateLayerCommand` | レイヤー複製コマンド |
+| `MergeLayerDownCommand` | レイヤー下統合コマンド |
+| `StructuralCommand` | `AddLayerCommand \| RemoveLayerCommand \| ReorderLayerCommand \| DuplicateLayerCommand \| MergeLayerDownCommand` |
 | `Command<TCustom>` | `DrawCommand \| StructuralCommand \| TCustom`（デフォルト `never`） |
 | `PixelScope<TCustom>` | 単一コマンドのピクセル影響スコープ（`"layer"` / `"all"` / `"structural"` / `"custom"`） |
 | `AffectedLayers` | コマンド範囲のピクセル影響集約（`"partial"` / `"all"`） |
@@ -137,6 +139,19 @@ if (canUndo(historyState)) {
 | `createAddLayerCommand(layerId, insertIndex, width, height, meta)` | レイヤー追加コマンドを作成 |
 | `createRemoveLayerCommand(layerId, removedIndex, meta)` | レイヤー削除コマンドを作成 |
 | `createReorderLayerCommand(layerId, fromIndex, toIndex)` | レイヤー並び替えコマンドを作成 |
+| `createDuplicateLayerCommand(sourceLayerId, layerId, insertIndex, width, height, meta)` | レイヤー複製コマンドを作成 |
+| `createMergeLayerDownCommand(sourceLayerId, targetLayerId, sourceIndex, targetIndex, sourceMeta, targetMetaBefore, targetMetaAfter)` | レイヤー下統合コマンドを作成 |
+
+### Atomic Layer Operations
+
+低レベル API 利用者向けに、レイヤー配列更新と履歴 command 作成を1つの結果として返す atomic operation を提供する。React 利用者は `@yuneco/headless-paint/react` の `usePaintEngine().duplicateLayer` / `mergeLayerDown` を使うと同等機能を利用できる。
+
+| 関数 | 説明 |
+|---|---|
+| `duplicateLayerAtomic(layers, options)` | source layer を複製し、更新後 layers と `DuplicateLayerCommand` を返す |
+| `mergeLayerDownAtomic(layers, options)` | source layer を直下 target に焼き込み、source を削除した layers と `MergeLayerDownCommand` を返す |
+| `applyDuplicateLayerCommand(layers, command)` | recorded topology に従って duplicate command を redo/replay 適用 |
+| `applyMergeLayerDownCommand(layers, command)` | recorded topology に従って merge-down command を redo/replay 適用 |
 
 ### 履歴管理
 

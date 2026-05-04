@@ -4,7 +4,6 @@ import type {
   AffectedLayers,
   Checkpoint,
   Command,
-  DrawCommand,
   HistoryConfig,
   HistoryMetrics,
   HistoryState,
@@ -121,9 +120,19 @@ function commandDependsOnLayer<TCustom>(
 ): boolean {
   if (isLayerDrawCommand(command)) return command.layerId === layerId;
   if (isDrawCommand(command)) return command.type === "wrap-shift";
-  return isStructuralCommand(command) && command.type === "remove-layer"
-    ? command.layerId === layerId
-    : false;
+  if (!isStructuralCommand(command)) return false;
+  switch (command.type) {
+    case "remove-layer":
+      return command.layerId === layerId;
+    case "duplicate-layer":
+      return command.sourceLayerId === layerId || command.layerId === layerId;
+    case "merge-layer-down":
+      return (
+        command.sourceLayerId === layerId || command.targetLayerId === layerId
+      );
+    default:
+      return false;
+  }
 }
 
 function containsWrapShift<TCustom>(
@@ -293,6 +302,12 @@ function getCommandAffectedLayerIds<TCustom>(
   if (isStructuralCommand(command) && command.type === "remove-layer") {
     return [command.layerId];
   }
+  if (isStructuralCommand(command) && command.type === "duplicate-layer") {
+    return [command.sourceLayerId];
+  }
+  if (isStructuralCommand(command) && command.type === "merge-layer-down") {
+    return [command.sourceLayerId, command.targetLayerId];
+  }
   return [];
 }
 
@@ -423,17 +438,29 @@ export function getCommandsToReplayForLayer<TCustom = never>(
   state: HistoryState<TCustom>,
   layerId: string,
   fromCheckpoint?: Checkpoint,
-): readonly DrawCommand[] {
+): readonly Command<TCustom>[] {
   const startIndex = fromCheckpoint
     ? fromCheckpoint.commandIndex + 1
     : state.historyStartIndex;
-  const commands: DrawCommand[] = [];
+  const commands: Command<TCustom>[] = [];
   for (let i = startIndex; i <= state.currentIndex; i++) {
     const command = getCommandAt(state, i);
     if (!command) continue;
     if (isDrawCommand(command) && command.type === "wrap-shift") {
       commands.push(command);
     } else if (isLayerDrawCommand(command) && command.layerId === layerId) {
+      commands.push(command);
+    } else if (
+      isStructuralCommand(command) &&
+      command.type === "duplicate-layer" &&
+      command.layerId === layerId
+    ) {
+      commands.push(command);
+    } else if (
+      isStructuralCommand(command) &&
+      command.type === "merge-layer-down" &&
+      (command.sourceLayerId === layerId || command.targetLayerId === layerId)
+    ) {
       commands.push(command);
     }
   }
@@ -464,6 +491,17 @@ export function getAffectedLayerIds<TCustom = never>(
       return { type: "all" };
     }
     if (isLayerDrawCommand(command)) ids.add(command.layerId);
+    if (isStructuralCommand(command)) {
+      switch (command.type) {
+        case "duplicate-layer":
+          ids.add(command.layerId);
+          break;
+        case "merge-layer-down":
+          ids.add(command.sourceLayerId);
+          ids.add(command.targetLayerId);
+          break;
+      }
+    }
   }
   return { type: "partial", layerIds: ids };
 }

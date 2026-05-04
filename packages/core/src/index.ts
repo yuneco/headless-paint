@@ -51,11 +51,14 @@ export {
 } from "@headless-paint/engine";
 export {
   clearLayer,
+  cloneLayer,
   colorToStyle,
+  copyLayerPixels,
   createLayer,
   getImageData,
   getPixel,
   setPixel,
+  type CloneLayerOptions,
 } from "@headless-paint/engine";
 export {
   applyPressureCurve,
@@ -96,6 +99,10 @@ export {
 export { getContentBounds } from "@headless-paint/engine";
 export { transformLayer } from "@headless-paint/engine";
 export { wrapShiftLayer } from "@headless-paint/engine";
+export {
+  mergeLayerDown,
+  type MergeLayerDownOptions,
+} from "@headless-paint/engine";
 export {
   addLayer,
   findLayerById,
@@ -164,11 +171,17 @@ export type {
   CheckpointPayload,
   ClearCommand,
   Command,
+  DuplicateLayerCommand,
+  DuplicateLayerOptions,
+  DuplicateLayerResult,
   DrawCommand,
   HistoryConfig,
   HistoryMetrics,
   HistoryState,
   LayerDrawCommand,
+  MergeLayerDownAtomicOptions,
+  MergeLayerDownCommand,
+  MergeLayerDownResult,
   PixelScope,
   PushCommandOptions,
   RebuildLayerResult,
@@ -191,14 +204,20 @@ export {
 } from "@headless-paint/stroke";
 export {
   addPointToSession,
+  applyDuplicateLayerCommand,
+  applyMergeLayerDownCommand,
   createAddLayerCommand,
   createClearCommand,
+  createDuplicateLayerCommand,
+  createMergeLayerDownCommand,
   createRemoveLayerCommand,
   createReorderLayerCommand,
   createStrokeCommand,
   createTransformLayerCommand,
   createWrapShiftCommand,
+  duplicateLayerAtomic,
   endStrokeSession,
+  mergeLayerDownAtomic,
   startStrokeSession,
 } from "@headless-paint/stroke";
 export {

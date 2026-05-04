@@ -1,5 +1,6 @@
 import type {
   ExpandConfig,
+  Layer,
   LayerMeta,
   StrokePoint,
   StrokeStyle,
@@ -105,10 +106,63 @@ export interface ReorderLayerCommand {
   readonly timestamp: number;
 }
 
+export interface DuplicateLayerCommand {
+  readonly type: "duplicate-layer";
+  readonly sourceLayerId: string;
+  readonly layerId: string;
+  readonly insertIndex: number;
+  readonly width: number;
+  readonly height: number;
+  readonly meta: LayerMeta;
+  readonly timestamp: number;
+}
+
+export interface MergeLayerDownCommand {
+  readonly type: "merge-layer-down";
+  readonly sourceLayerId: string;
+  readonly targetLayerId: string;
+  readonly sourceIndex: number;
+  readonly targetIndex: number;
+  readonly sourceMeta: LayerMeta;
+  readonly targetMetaBefore: LayerMeta;
+  readonly targetMetaAfter: LayerMeta;
+  readonly timestamp: number;
+}
+
 export type StructuralCommand =
   | AddLayerCommand
   | RemoveLayerCommand
-  | ReorderLayerCommand;
+  | ReorderLayerCommand
+  | DuplicateLayerCommand
+  | MergeLayerDownCommand;
+
+export interface DuplicateLayerOptions {
+  readonly sourceLayerId: string;
+  readonly insertIndex?: number;
+  readonly layerId?: string;
+  readonly meta?: Partial<LayerMeta>;
+}
+
+export interface DuplicateLayerResult {
+  readonly layers: readonly Layer[];
+  readonly layer: Layer;
+  readonly insertIndex: number;
+  readonly command: DuplicateLayerCommand;
+}
+
+export interface MergeLayerDownAtomicOptions {
+  readonly sourceLayerId: string;
+  readonly resultMeta?: Partial<LayerMeta>;
+}
+
+export interface MergeLayerDownResult {
+  readonly layers: readonly Layer[];
+  readonly sourceLayerId: string;
+  readonly targetLayerId: string;
+  readonly sourceIndex: number;
+  readonly targetIndex: number;
+  readonly command: MergeLayerDownCommand;
+}
 
 // ============================================================
 // Pixel Scope (ピクセル影響スコープ)
@@ -161,7 +215,9 @@ export function isStructuralCommand<TCustom>(
   return (
     c.type === "add-layer" ||
     c.type === "remove-layer" ||
-    c.type === "reorder-layer"
+    c.type === "reorder-layer" ||
+    c.type === "duplicate-layer" ||
+    c.type === "merge-layer-down"
   );
 }
 

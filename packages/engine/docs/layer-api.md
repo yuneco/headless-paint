@@ -60,6 +60,95 @@ clearLayer(layer);
 
 ---
 
+## cloneLayer
+
+レイヤーのサイズ・メタデータ・pixels を複製した新しいレイヤーを作成する。
+
+```typescript
+interface CloneLayerOptions {
+  readonly id?: string;
+  readonly meta?: Partial<LayerMeta>;
+  readonly copyPixels?: boolean;
+}
+
+function cloneLayer(source: Layer, options?: CloneLayerOptions): Layer
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `source` | `Layer` | ○ | 複製元レイヤー |
+| `options.id` | `string` | - | 復元・redo 用に指定する複製先 ID |
+| `options.meta` | `Partial<LayerMeta>` | - | 複製先メタデータの上書き |
+| `options.copyPixels` | `boolean` | - | pixels をコピーするか。既定値は `true` |
+
+**戻り値**: `Layer`
+
+**特記事項**:
+- `source.width` / `source.height` と同じサイズの新規レイヤーを作成する。
+- `options.meta` は source の `meta` に上書き適用される。
+- `options.id` は履歴 replay / redo で決定的な ID を使うための指定。
+
+**使用例**:
+```typescript
+const duplicate = cloneLayer(sourceLayer, {
+  meta: { name: "Layer copy" },
+});
+```
+
+---
+
+## copyLayerPixels
+
+target を透明にクリアしてから、source の pixels を `source-over` でコピーする。
+
+```typescript
+function copyLayerPixels(source: Layer, target: Layer): void
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `source` | `Layer` | ○ | コピー元レイヤー |
+| `target` | `Layer` | ○ | コピー先レイヤー |
+
+**特記事項**:
+- `target` の既存 pixels はコピー前に消去される。
+- `LayerMeta` は変更しない。
+
+---
+
+## mergeLayerDown
+
+source layer を target layer に焼き込み、target の pixels と meta を統合後の状態に更新する。
+
+```typescript
+interface MergeLayerDownOptions {
+  readonly resultMeta?: Partial<LayerMeta>;
+}
+
+function mergeLayerDown(
+  targetLayer: Layer,
+  sourceLayer: Layer,
+  options?: MergeLayerDownOptions,
+): void
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `targetLayer` | `Layer` | ○ | 焼き込み先。レイヤースタック上の直下レイヤー |
+| `sourceLayer` | `Layer` | ○ | 焼き込むレイヤー |
+| `options.resultMeta` | `Partial<LayerMeta>` | - | 統合後 target meta の上書き |
+
+**特記事項**:
+- target / source の `opacity` と `compositeOperation` を考慮して target pixels に焼き込む。
+- 統合後 target meta は既定で target の `name` / `visible` を維持し、`opacity: 1`, `compositeOperation: "source-over"` に正規化される。
+- `visible` は pixel burning を gate しない。非表示レイヤーの pixel buffer も統合対象になる。
+- non-normal blend mode や backdrop 依存の見た目を含む場合、全スタック表示結果の完全維持は保証しない。これは2レイヤーの破壊的統合として扱う。
+
+---
+
 ## getPixel
 
 指定座標のピクセル色を取得する。

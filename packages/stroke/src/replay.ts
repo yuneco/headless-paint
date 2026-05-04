@@ -8,25 +8,24 @@ import {
   appendToCommittedLayer,
   clearLayer,
   compileExpand,
+  copyLayerPixels,
   createLayer,
   generateBrushTip,
+  mergeLayerDown,
   transformLayer,
   wrapShiftLayer,
 } from "@headless-paint/engine";
 import { compileFilterPipeline, processAllPoints } from "@headless-paint/input";
 import type { mat3 } from "gl-matrix";
 import { restoreFromCheckpoint } from "./checkpoint";
-import {
-  findBestCheckpointForLayer,
-  getCommandsToReplayForLayer,
-} from "./history";
+import { findBestCheckpointForLayer, getCommandAt } from "./history";
 import type {
   Command,
   HistoryState,
   RebuildLayerResult,
   StrokeCommand,
 } from "./types";
-import { isDrawCommand } from "./types";
+import { isDrawCommand, isStructuralCommand } from "./types";
 
 /**
  * ストロークコマンドをリプレイする
@@ -90,6 +89,42 @@ function cloneLayerForSampling(layer: Layer): Layer {
   return clone;
 }
 
+function setLayerId(layer: Layer, layerId: string): void {
+  (layer as { id: string }).id = layerId;
+}
+
+function setLayerMeta(
+  layer: Layer,
+  meta: {
+    readonly name: string;
+    readonly visible: boolean;
+    readonly opacity: number;
+    readonly compositeOperation?: GlobalCompositeOperation;
+  },
+): void {
+  layer.meta.name = meta.name;
+  layer.meta.visible = meta.visible;
+  layer.meta.opacity = meta.opacity;
+  layer.meta.compositeOperation = meta.compositeOperation;
+}
+
+function hasLayerCreationCommand<TCustom>(
+  state: HistoryState<TCustom>,
+  layerId: string,
+): boolean {
+  for (let i = state.historyStartIndex; i <= state.currentIndex; i++) {
+    const command = getCommandAt(state, i);
+    if (!command || !isStructuralCommand(command)) continue;
+    if (command.type === "add-layer" && command.layerId === layerId) {
+      return true;
+    }
+    if (command.type === "duplicate-layer" && command.layerId === layerId) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 単一のコマンドをレイヤーに適用
  * 構造コマンドはピクセルを変更しないため無視する
@@ -144,7 +179,10 @@ export function rebuildLayerFromHistory<TCustom = never>(
 
   if (checkpoint) {
     restoreFromCheckpoint(layer, checkpoint);
-  } else if (state.currentIndex < state.historyStartIndex) {
+  } else if (
+    state.currentIndex < state.historyStartIndex ||
+    hasLayerCreationCommand(state, layer.id)
+  ) {
     clearLayer(layer);
   } else {
     return {
@@ -154,12 +192,54 @@ export function rebuildLayerFromHistory<TCustom = never>(
     };
   }
 
-  const commandsToReplay = getCommandsToReplayForLayer(
-    state,
-    layer.id,
-    checkpoint,
-  );
-  replayCommands(layer, commandsToReplay, registry);
+  const startIndex = checkpoint
+    ? checkpoint.commandIndex + 1
+    : state.historyStartIndex;
+  for (let i = startIndex; i <= state.currentIndex; i++) {
+    const command = getCommandAt(state, i);
+    if (!command) continue;
+    if (isDrawCommand(command)) {
+      replayCommand(layer, command, registry);
+      continue;
+    }
+    if (!isStructuralCommand(command)) continue;
+
+    if (command.type === "duplicate-layer" && command.layerId === layer.id) {
+      const sourceLayer = createLayer(command.width, command.height);
+      setLayerId(sourceLayer, command.sourceLayerId);
+      const result = rebuildLayerFromHistory(
+        sourceLayer,
+        { ...state, currentIndex: i - 1 },
+        registry,
+      );
+      if (!result.ok) return result;
+      copyLayerPixels(sourceLayer, layer);
+      setLayerMeta(layer, command.meta);
+      continue;
+    }
+
+    if (
+      command.type === "merge-layer-down" &&
+      command.targetLayerId === layer.id
+    ) {
+      setLayerMeta(layer, command.targetMetaBefore);
+      const sourceLayer = createLayer(
+        state.layerWidth,
+        state.layerHeight,
+        command.sourceMeta,
+      );
+      setLayerId(sourceLayer, command.sourceLayerId);
+      const result = rebuildLayerFromHistory(
+        sourceLayer,
+        { ...state, currentIndex: i - 1 },
+        registry,
+      );
+      if (!result.ok) return result;
+      mergeLayerDown(layer, sourceLayer, {
+        resultMeta: command.targetMetaAfter,
+      });
+    }
+  }
   return { ok: true, source: checkpoint ? "checkpoint" : "empty" };
 }
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   clearLayer,
+  cloneLayer,
+  copyLayerPixels,
   createLayer,
   getImageData,
   getPixel,
@@ -92,5 +94,33 @@ describe("clearLayer", () => {
     setPixel(layer, 5, 5, { r: 255, g: 255, b: 255, a: 255 });
     clearLayer(layer);
     expect(getPixel(layer, 5, 5)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+});
+
+describe("cloneLayer / copyLayerPixels", () => {
+  it("should copy pixels and meta with overrides", () => {
+    const source = createLayer(4, 4, { name: "Source", opacity: 0.5 });
+    setPixel(source, 1, 1, { r: 255, g: 0, b: 0, a: 255 });
+
+    const clone = cloneLayer(source, { id: "copy", meta: { name: "Copy" } });
+
+    expect(clone.id).toBe("copy");
+    expect(clone.width).toBe(source.width);
+    expect(clone.height).toBe(source.height);
+    expect(clone.meta.name).toBe("Copy");
+    expect(clone.meta.opacity).toBe(0.5);
+    expect(getPixel(clone, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  });
+
+  it("should clear target before copying pixels", () => {
+    const source = createLayer(4, 4);
+    const target = createLayer(4, 4);
+    setPixel(source, 1, 1, { r: 255, g: 0, b: 0, a: 255 });
+    setPixel(target, 2, 2, { r: 0, g: 0, b: 255, a: 255 });
+
+    copyLayerPixels(source, target);
+
+    expect(getPixel(target, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+    expect(getPixel(target, 2, 2)).toEqual({ r: 0, g: 0, b: 0, a: 0 });
   });
 });

@@ -41,6 +41,8 @@ interface SidebarPanelProps {
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onDuplicateLayer: (id: string) => void;
+  onMergeLayerDown: (id: string) => void;
   onSetOpacity: (layerId: string, opacity: number) => void;
   onSetBlendMode: (
     layerId: string,
@@ -121,6 +123,8 @@ interface LayersSectionProps {
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onDuplicateLayer: (id: string) => void;
+  onMergeLayerDown: (id: string) => void;
   onSetOpacity: (layerId: string, opacity: number) => void;
   onSetBlendMode: (
     layerId: string,
@@ -140,6 +144,8 @@ const LayersSection = memo(function LayersSection({
   onToggleBackground,
   onMoveUp,
   onMoveDown,
+  onDuplicateLayer,
+  onMergeLayerDown,
   onSetOpacity,
   onSetBlendMode,
   onTransform,
@@ -163,6 +169,8 @@ const LayersSection = memo(function LayersSection({
         onToggleBackground={onToggleBackground}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}
+        onDuplicateLayer={onDuplicateLayer}
+        onMergeLayerDown={onMergeLayerDown}
         onSetOpacity={onSetOpacity}
         onSetBlendMode={onSetBlendMode}
         onTransform={onTransform}
@@ -234,6 +242,8 @@ function SidebarPanelComponent({
   onToggleBackground,
   onMoveUp,
   onMoveDown,
+  onDuplicateLayer,
+  onMergeLayerDown,
   onSetOpacity,
   onSetBlendMode,
   onTransform,
@@ -272,6 +282,8 @@ function SidebarPanelComponent({
         onToggleBackground={onToggleBackground}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}
+        onDuplicateLayer={onDuplicateLayer}
+        onMergeLayerDown={onMergeLayerDown}
         onSetOpacity={onSetOpacity}
         onSetBlendMode={onSetBlendMode}
         onTransform={onTransform}

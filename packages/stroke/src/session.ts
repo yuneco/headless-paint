@@ -10,6 +10,8 @@ import type {
 } from "@headless-paint/input";
 import type {
   AddLayerCommand,
+  DuplicateLayerCommand,
+  MergeLayerDownCommand,
   RemoveLayerCommand,
   RenderUpdate,
   ReorderLayerCommand,
@@ -304,6 +306,48 @@ export function createReorderLayerCommand(
     layerId,
     fromIndex,
     toIndex,
+    timestamp: Date.now(),
+  };
+}
+
+export function createDuplicateLayerCommand(
+  sourceLayerId: string,
+  layerId: string,
+  insertIndex: number,
+  width: number,
+  height: number,
+  meta: LayerMeta,
+): DuplicateLayerCommand {
+  return {
+    type: "duplicate-layer",
+    sourceLayerId,
+    layerId,
+    insertIndex,
+    width,
+    height,
+    meta: { ...meta },
+    timestamp: Date.now(),
+  };
+}
+
+export function createMergeLayerDownCommand(
+  sourceLayerId: string,
+  targetLayerId: string,
+  sourceIndex: number,
+  targetIndex: number,
+  sourceMeta: LayerMeta,
+  targetMetaBefore: LayerMeta,
+  targetMetaAfter: LayerMeta,
+): MergeLayerDownCommand {
+  return {
+    type: "merge-layer-down",
+    sourceLayerId,
+    targetLayerId,
+    sourceIndex,
+    targetIndex,
+    sourceMeta: { ...sourceMeta },
+    targetMetaBefore: { ...targetMetaBefore },
+    targetMetaAfter: { ...targetMetaAfter },
     timestamp: Date.now(),
   };
 }

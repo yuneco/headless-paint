@@ -6,11 +6,17 @@ export type {
   CheckpointPayload,
   ClearCommand,
   Command,
+  DuplicateLayerCommand,
+  DuplicateLayerOptions,
+  DuplicateLayerResult,
   DrawCommand,
   HistoryConfig,
   HistoryMetrics,
   HistoryState,
   LayerDrawCommand,
+  MergeLayerDownAtomicOptions,
+  MergeLayerDownCommand,
+  MergeLayerDownResult,
   PixelScope,
   PushCommandOptions,
   RebuildLayerResult,
@@ -37,7 +43,9 @@ export {
 export {
   addPointToSession,
   createAddLayerCommand,
+  createDuplicateLayerCommand,
   createClearCommand,
+  createMergeLayerDownCommand,
   createRemoveLayerCommand,
   createReorderLayerCommand,
   createStrokeCommand,
@@ -46,6 +54,14 @@ export {
   endStrokeSession,
   startStrokeSession,
 } from "./session";
+
+// Layer operations
+export {
+  applyDuplicateLayerCommand,
+  applyMergeLayerDownCommand,
+  duplicateLayerAtomic,
+  mergeLayerDownAtomic,
+} from "./layer-operations";
 
 // History
 export {

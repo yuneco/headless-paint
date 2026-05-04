@@ -534,7 +534,7 @@ interface PaintEngineInitialDocument {
 }
 ```
 
-`historyConfig` のデフォルト値。`usePaintEngine` は stroke / clear / transform / wrap-shift / remove-layer の実ピクセル変更直前に `beginHistoryMutation()` を同期実行し、command 確定時に `pushCommand()` を呼ぶ。
+`historyConfig` のデフォルト値。`usePaintEngine` は stroke / clear / transform / wrap-shift / remove-layer / duplicate-layer / merge-layer-down の実ピクセル変更または pixel 依存構造変更の直前に `beginHistoryMutation()` を同期実行し、command 確定時に `pushCommand()` を呼ぶ。
 
 | フィールド | デフォルト | 説明 |
 |-----------|-----------|------|
@@ -575,6 +575,10 @@ interface PaintEngineResult<TCustom = never> {
   readonly moveLayerUp: (layerId: string) => void;
   /** レイヤーを1つ下（背面方向）に移動する */
   readonly moveLayerDown: (layerId: string) => void;
+  /** レイヤーを直上に複製する。複製先が active layer になり、1 command として履歴に記録される */
+  readonly duplicateLayer: (layerId: string) => void;
+  /** レイヤーを直下へ統合する。統合先が active layer になり、1 command として履歴に記録される */
+  readonly mergeLayerDown: (layerId: string) => void;
 
   // ── ストローク ──
 
@@ -668,6 +672,28 @@ const pointerHandlers = usePointerHandler(tool, {
 
 // Canvas に engine.layers と engine.renderVersion を渡して描画する
 ```
+
+### レイヤー複製・下統合
+
+`usePaintEngine` は低レベル API の `duplicateLayerAtomic()` / `mergeLayerDownAtomic()` と同等の機能を hook action として提供する。React 利用者は checkpoint coverage や Canvas 合成を直接実装せずに、1 action = 1 command の Undo / Redo 対応操作として利用できる。
+
+```typescript
+// 選択中レイヤーを複製
+if (engine.activeLayerId) {
+  engine.duplicateLayer(engine.activeLayerId);
+}
+
+// 選択中レイヤーを直下へ統合
+if (engine.activeLayerId) {
+  engine.mergeLayerDown(engine.activeLayerId);
+}
+```
+
+- `duplicateLayer()` は対象レイヤーの直上（前面方向、`sourceIndex + 1`）に複製し、複製先を active layer にする。
+- 複製名は hook 内で既存レイヤー名から採番する。
+- `mergeLayerDown()` は対象レイヤーを直下（背面方向、`sourceIndex - 1`）へ統合し、統合先を active layer にする。
+- 対象が最背面、またはレイヤー数が1以下の場合、`mergeLayerDown()` は no-op。
+- 統合後 target meta は core API と同じく `opacity: 1`, `compositeOperation: "source-over"` に正規化される。
 
 ### カスタムコマンドの使い方
 
@@ -811,6 +837,8 @@ interface UseLayersResult {
   readonly removeLayer: (layerId: string) => void;
   /** 指定位置にレイヤーを再挿入する（Undo 時のレイヤー復元用） */
   readonly reinsertLayer: (layerId: string, index: number, meta?: LayerMeta) => LayerEntry;
+  /** entries 全体を差し替える（atomic layer operation の反映用） */
+  readonly replaceEntries: (layers: readonly Layer[], activeLayerId?: string | null) => void;
   /** レイヤーを選択する */
   readonly setActiveLayerId: (id: string | null) => void;
   /** レイヤー名を変更する */

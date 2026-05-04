@@ -14,6 +14,8 @@ import type {
 } from "@headless-paint/core";
 import type { CompiledFilterPipeline, InputPoint } from "@headless-paint/core";
 import {
+  applyDuplicateLayerCommand,
+  applyMergeLayerDownCommand,
   beginHistoryMutation,
   canRedo as checkCanRedo,
   canUndo as checkCanUndo,
@@ -25,10 +27,12 @@ import {
   createStrokeCommand,
   createTransformLayerCommand,
   createWrapShiftCommand,
+  duplicateLayerAtomic,
   getAffectedLayerIds,
   getCommandAt,
   isCustomCommand,
   isStructuralCommand,
+  mergeLayerDownAtomic,
   pushCommand,
   rebuildLayerFromHistory,
   redo,
@@ -103,6 +107,8 @@ export interface PaintEngineResult<TCustom = never> {
   readonly removeLayer: (layerId: string) => void;
   readonly moveLayerUp: (layerId: string) => void;
   readonly moveLayerDown: (layerId: string) => void;
+  readonly duplicateLayer: (layerId: string) => void;
+  readonly mergeLayerDown: (layerId: string) => void;
 
   // ── ストローク ──
   readonly onStrokeStart: (
@@ -149,6 +155,22 @@ const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
   checkpointCompression: "fast",
 };
 
+function createDuplicateLayerName(
+  sourceName: string,
+  entries: readonly LayerEntry[],
+): string {
+  const existing = new Set(
+    entries.map((entry) => entry.committedLayer.meta.name),
+  );
+  const baseName = `${sourceName} copy`;
+  if (!existing.has(baseName)) return baseName;
+  let index = 2;
+  while (existing.has(`${baseName} ${index}`)) {
+    index += 1;
+  }
+  return `${baseName} ${index}`;
+}
+
 export function usePaintEngine<TCustom = never>(
   config: PaintEngineConfig<TCustom>,
 ): PaintEngineResult<TCustom> {
@@ -186,6 +208,7 @@ export function usePaintEngine<TCustom = never>(
     addLayer: addLayerRaw,
     removeLayer: removeLayerById,
     reinsertLayer,
+    replaceEntries,
     setActiveLayerId,
     toggleVisibility,
     renameLayer,
@@ -413,6 +436,61 @@ export function usePaintEngine<TCustom = never>(
     [moveLayerDownRaw, entriesRef, commitHistoryState],
   );
 
+  const handleDuplicateLayer = useCallback(
+    (layerId: string) => {
+      const entry = findEntry(layerId);
+      if (!entry) return;
+      const name = createDuplicateLayerName(
+        entry.committedLayer.meta.name,
+        entriesRef.current,
+      );
+      beginForLayers([entry.committedLayer]);
+      const result = duplicateLayerAtomic(
+        entriesRef.current.map((e) => e.committedLayer),
+        {
+          sourceLayerId: layerId,
+          meta: { name },
+        },
+      );
+      if (!result) return;
+      const next = pushCommand(
+        historyStateRef.current,
+        result.command,
+        { layerCount: result.layers.length },
+        historyConfigRef.current,
+      );
+      commitHistoryState(next);
+      replaceEntries(result.layers, result.layer.id);
+    },
+    [findEntry, entriesRef, beginForLayers, commitHistoryState, replaceEntries],
+  );
+
+  const handleMergeLayerDown = useCallback(
+    (layerId: string) => {
+      const currentEntries = entriesRef.current;
+      const sourceIndex = currentEntries.findIndex((e) => e.id === layerId);
+      const targetIndex = sourceIndex - 1;
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const sourceEntry = currentEntries[sourceIndex];
+      const targetEntry = currentEntries[targetIndex];
+      beginForLayers([sourceEntry.committedLayer, targetEntry.committedLayer]);
+      const result = mergeLayerDownAtomic(
+        currentEntries.map((e) => e.committedLayer),
+        { sourceLayerId: layerId },
+      );
+      if (!result) return;
+      const next = pushCommand(
+        historyStateRef.current,
+        result.command,
+        { layerCount: result.layers.length },
+        historyConfigRef.current,
+      );
+      commitHistoryState(next);
+      replaceEntries(result.layers, result.targetLayerId);
+    },
+    [entriesRef, beginForLayers, commitHistoryState, replaceEntries],
+  );
+
   // ── Wrap shift ──
   const handleWrapShift = useCallback(
     (dx: number, dy: number) => {
@@ -596,6 +674,44 @@ export function usePaintEngine<TCustom = never>(
           }
           break;
         }
+        case "duplicate-layer":
+          removeLayerById(undoneCommand.layerId);
+          setActiveLayerId(undoneCommand.sourceLayerId);
+          break;
+        case "merge-layer-down": {
+          const sourceEntry = reinsertLayer(
+            undoneCommand.sourceLayerId,
+            undoneCommand.sourceIndex,
+            undoneCommand.sourceMeta,
+          );
+          const targetEntry = findEntry(undoneCommand.targetLayerId);
+          if (targetEntry) {
+            targetEntry.committedLayer.meta.name =
+              undoneCommand.targetMetaBefore.name;
+            targetEntry.committedLayer.meta.visible =
+              undoneCommand.targetMetaBefore.visible;
+            targetEntry.committedLayer.meta.opacity =
+              undoneCommand.targetMetaBefore.opacity;
+            targetEntry.committedLayer.meta.compositeOperation =
+              undoneCommand.targetMetaBefore.compositeOperation;
+          }
+          for (const entry of [sourceEntry, targetEntry]) {
+            if (!entry) continue;
+            const result = rebuildLayerFromHistory(
+              entry.committedLayer,
+              newState,
+              registryRef.current,
+            );
+            if (!result.ok) {
+              console.warn(
+                `[headless-paint] undo skipped merge-layer-down rebuild: ${result.reason} layerId=${result.layerId}`,
+              );
+              return;
+            }
+          }
+          setActiveLayerId(undoneCommand.sourceLayerId);
+          break;
+        }
       }
     } else {
       const affected = getAffectedLayerIds(
@@ -638,6 +754,7 @@ export function usePaintEngine<TCustom = never>(
     moveLayerUpRaw,
     moveLayerDownRaw,
     setLayerVisible,
+    setActiveLayerId,
     commitHistoryState,
     bumpRenderVersion,
   ]);
@@ -684,6 +801,34 @@ export function usePaintEngine<TCustom = never>(
           }
           break;
         }
+        case "duplicate-layer": {
+          const result = applyDuplicateLayerCommand(
+            entriesRef.current.map((e) => e.committedLayer),
+            redoneCommand,
+          );
+          if (!result) {
+            console.warn(
+              `[headless-paint] redo skipped duplicate-layer apply: layerId=${redoneCommand.layerId}`,
+            );
+            return;
+          }
+          replaceEntries(result.layers, redoneCommand.layerId);
+          break;
+        }
+        case "merge-layer-down": {
+          const result = applyMergeLayerDownCommand(
+            entriesRef.current.map((e) => e.committedLayer),
+            redoneCommand,
+          );
+          if (!result) {
+            console.warn(
+              `[headless-paint] redo skipped merge-layer-down apply: sourceLayerId=${redoneCommand.sourceLayerId}`,
+            );
+            return;
+          }
+          replaceEntries(result.layers, redoneCommand.targetLayerId);
+          break;
+        }
       }
     } else {
       const affected = getAffectedLayerIds(
@@ -723,6 +868,7 @@ export function usePaintEngine<TCustom = never>(
     findEntry,
     removeLayerById,
     reinsertLayer,
+    replaceEntries,
     moveLayerUpRaw,
     moveLayerDownRaw,
     setLayerVisible,
@@ -773,6 +919,8 @@ export function usePaintEngine<TCustom = never>(
     removeLayer: handleRemoveLayer,
     moveLayerUp: handleMoveLayerUp,
     moveLayerDown: handleMoveLayerDown,
+    duplicateLayer: handleDuplicateLayer,
+    mergeLayerDown: handleMergeLayerDown,
 
     // ストローク
     onStrokeStart: handleStrokeStart,

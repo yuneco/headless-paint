@@ -225,6 +225,156 @@ historyState = pushCommand(
 
 ---
 
+## createDuplicateLayerCommand
+
+レイヤー複製コマンドを作成する。通常は `duplicateLayerAtomic()` の返却 `command` を使い、アプリが直接呼ぶ必要はない。
+
+```typescript
+function createDuplicateLayerCommand(
+  sourceLayerId: string,
+  layerId: string,
+  insertIndex: number,
+  width: number,
+  height: number,
+  meta: LayerMeta,
+): DuplicateLayerCommand
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `sourceLayerId` | `string` | ○ | 複製元レイヤー ID |
+| `layerId` | `string` | ○ | 複製先レイヤー ID |
+| `insertIndex` | `number` | ○ | 複製先の挿入位置 |
+| `width` / `height` | `number` | ○ | 複製先レイヤーサイズ |
+| `meta` | `LayerMeta` | ○ | 複製先メタデータ |
+
+---
+
+## createMergeLayerDownCommand
+
+レイヤー下統合コマンドを作成する。通常は `mergeLayerDownAtomic()` の返却 `command` を使う。
+
+```typescript
+function createMergeLayerDownCommand(
+  sourceLayerId: string,
+  targetLayerId: string,
+  sourceIndex: number,
+  targetIndex: number,
+  sourceMeta: LayerMeta,
+  targetMetaBefore: LayerMeta,
+  targetMetaAfter: LayerMeta,
+): MergeLayerDownCommand
+```
+
+**引数**:
+| 名前 | 型 | 必須 | 説明 |
+|------|-----|------|------|
+| `sourceLayerId` | `string` | ○ | 統合元レイヤー ID |
+| `targetLayerId` | `string` | ○ | 統合先レイヤー ID |
+| `sourceIndex` | `number` | ○ | 統合前の source 位置 |
+| `targetIndex` | `number` | ○ | 統合前の target 位置 |
+| `sourceMeta` | `LayerMeta` | ○ | Undo 復元用 source meta |
+| `targetMetaBefore` | `LayerMeta` | ○ | Undo 復元用 target meta |
+| `targetMetaAfter` | `LayerMeta` | ○ | Redo / replay 用 target meta |
+
+---
+
+## duplicateLayerAtomic
+
+source layer の検索、insertIndex の正規化、pixel/meta copy、new layer 作成、updated layers 作成、`DuplicateLayerCommand` 作成を1つの結果として返す。
+
+```typescript
+function duplicateLayerAtomic(
+  layers: readonly Layer[],
+  options: DuplicateLayerOptions,
+): DuplicateLayerResult | null
+```
+
+**使用例**:
+```typescript
+historyState = beginHistoryMutation(
+  historyState,
+  { affectedLayers: [sourceLayer], layerCount: layers.length },
+  historyConfig,
+);
+
+const result = duplicateLayerAtomic(layers, {
+  sourceLayerId: sourceLayer.id,
+  meta: { name: "Layer copy" },
+});
+
+if (result) {
+  layers = result.layers;
+  historyState = pushCommand(
+    historyState,
+    result.command,
+    { layerCount: layers.length },
+    historyConfig,
+  );
+}
+```
+
+---
+
+## mergeLayerDownAtomic
+
+source layer と直下 target layer の検索、merge 可否判定、target への焼き込み、source 削除、updated layers 作成、`MergeLayerDownCommand` 作成を1つの結果として返す。
+
+```typescript
+function mergeLayerDownAtomic(
+  layers: readonly Layer[],
+  options: MergeLayerDownAtomicOptions,
+): MergeLayerDownResult | null
+```
+
+source が存在しない、または source が最背面で直下 target が存在しない場合は `null` を返す。
+
+**使用例**:
+```typescript
+historyState = beginHistoryMutation(
+  historyState,
+  { affectedLayers: [sourceLayer, targetLayer], layerCount: layers.length },
+  historyConfig,
+);
+
+const result = mergeLayerDownAtomic(layers, {
+  sourceLayerId: sourceLayer.id,
+});
+
+if (result) {
+  layers = result.layers;
+  historyState = pushCommand(
+    historyState,
+    result.command,
+    { layerCount: layers.length },
+    historyConfig,
+  );
+}
+```
+
+---
+
+## applyDuplicateLayerCommand / applyMergeLayerDownCommand
+
+Redo / replay 用に recorded command の ID・index・meta を使って決定的に適用する。現在の UI 状態から「直上」「直下」を再解釈しない。
+
+```typescript
+function applyDuplicateLayerCommand(
+  layers: readonly Layer[],
+  command: DuplicateLayerCommand,
+): DuplicateLayerResult | null
+
+function applyMergeLayerDownCommand(
+  layers: readonly Layer[],
+  command: MergeLayerDownCommand,
+): MergeLayerDownResult | null
+```
+
+command に記録された topology と現在の layers が一致しない場合は `null` を返す。
+
+---
+
 ## 典型的な使用パターン
 
 ```typescript

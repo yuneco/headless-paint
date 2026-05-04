@@ -1,6 +1,15 @@
 import type { BackgroundSettings } from "@headless-paint/engine";
 import type { LayerEntry } from "@headless-paint/react";
-import { ArrowDown, ArrowUp, Circle, Eye, EyeOff, Trash2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Circle,
+  Copy,
+  Eye,
+  EyeOff,
+  Merge,
+  Trash2,
+} from "lucide-react";
 import { memo } from "react";
 
 const BLEND_MODES: readonly {
@@ -36,6 +45,8 @@ interface LayerPanelProps {
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onDuplicateLayer: (id: string) => void;
+  onMergeLayerDown: (id: string) => void;
   onSetOpacity: (layerId: string, opacity: number) => void;
   onSetBlendMode: (
     layerId: string,
@@ -55,6 +66,8 @@ function LayerPanelComponent({
   onToggleBackground,
   onMoveUp,
   onMoveDown,
+  onDuplicateLayer,
+  onMergeLayerDown,
   onSetOpacity,
   onSetBlendMode,
   onTransform,
@@ -166,6 +179,7 @@ function LayerPanelComponent({
           const isLast = i === reversedEntries.length - 1 && !background;
           const canMoveUp = entries.indexOf(entry) < entries.length - 1;
           const canMoveDown = entries.indexOf(entry) > 0;
+          const canMergeDown = entries.indexOf(entry) > 0;
 
           return (
             <div
@@ -257,6 +271,48 @@ function LayerPanelComponent({
                 title="Move up"
               >
                 <ArrowUp size={12} />
+              </button>
+
+              {/* Duplicate */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDuplicateLayer(entry.id);
+                }}
+                style={{
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  padding: 2,
+                  display: "flex",
+                  alignItems: "center",
+                }}
+                title="Duplicate layer"
+              >
+                <Copy size={12} />
+              </button>
+
+              {/* Merge Down */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMergeLayerDown(entry.id);
+                }}
+                disabled={!canMergeDown}
+                style={{
+                  border: "none",
+                  background: "none",
+                  cursor: canMergeDown ? "pointer" : "default",
+                  padding: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  opacity: canMergeDown ? 1 : 0.3,
+                }}
+                title="Merge down"
+              >
+                <Merge size={12} />
               </button>
 
               {/* Move Down */}

@@ -15,8 +15,11 @@ import {
 } from "./history";
 import type {
   ClearCommand,
+  Command,
+  DuplicateLayerCommand,
   HistoryConfig,
   HistoryState,
+  MergeLayerDownCommand,
   StrokeCommand,
   WrapShiftCommand,
 } from "./types";
@@ -227,6 +230,71 @@ describe("history", () => {
     if (affected.type === "partial") {
       expect([...affected.layerIds].sort()).toEqual(["a", "b"]);
     }
+  });
+
+  it("tracks duplicate-layer checkpoint coverage and affected layer", () => {
+    const source = createMockLayer("source");
+    let state = createHistoryState(800, 600, { layerCount: 1 });
+    state = beginHistoryMutation(state, {
+      affectedLayers: [source],
+      layerCount: 1,
+    });
+    state = pushCommand(
+      state,
+      {
+        type: "duplicate-layer",
+        sourceLayerId: "source",
+        layerId: "copy",
+        insertIndex: 1,
+        width: 800,
+        height: 600,
+        meta: { name: "Copy", visible: true, opacity: 1 },
+        timestamp: 1000,
+      } satisfies DuplicateLayerCommand as Command,
+      { layerCount: 2 },
+    );
+
+    expect(state.commands).toHaveLength(1);
+    const affected = getAffectedLayerIds(state, 0, 0);
+    expect(affected.type).toBe("partial");
+    if (affected.type === "partial") {
+      expect([...affected.layerIds]).toEqual(["copy"]);
+    }
+  });
+
+  it("requires source and target coverage for merge-layer-down", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const source = createMockLayer("source");
+    const target = createMockLayer("target");
+    let state = createHistoryState(800, 600, { layerCount: 2 });
+    state = beginHistoryMutation(state, {
+      affectedLayers: [source],
+      layerCount: 2,
+    });
+    state = pushCommand(
+      state,
+      {
+        type: "merge-layer-down",
+        sourceLayerId: "source",
+        targetLayerId: "target",
+        sourceIndex: 1,
+        targetIndex: 0,
+        sourceMeta: source.meta,
+        targetMetaBefore: target.meta,
+        targetMetaAfter: {
+          name: "target",
+          visible: true,
+          opacity: 1,
+          compositeOperation: "source-over",
+        },
+        timestamp: 1000,
+      } satisfies MergeLayerDownCommand as Command,
+      { layerCount: 1 },
+    );
+
+    expect(state.commands).toHaveLength(0);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 
   it("returns all affected when range contains wrap-shift", () => {

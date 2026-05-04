@@ -228,7 +228,7 @@ type DrawCommand = StrokeCommand | ClearCommand | WrapShiftCommand | TransformLa
 
 ## Structural Commands（構造コマンド）
 
-レイヤーの構造（追加・削除・並び替え）を操作するコマンド。描画コマンドと同じ履歴に記録される。
+レイヤーの構造（追加・削除・並び替え・複製・下統合）を操作するコマンド。描画コマンドと同じ履歴に記録される。
 
 ### AddLayerCommand
 
@@ -283,10 +283,70 @@ interface ReorderLayerCommand {
 }
 ```
 
+### DuplicateLayerCommand
+
+レイヤー複製を記録する構造コマンド。複製先 pixels は source layer の duplicate 時点の pixels に依存するため、`pushCommand()` 前に source layer の checkpoint coverage が必要。
+
+```typescript
+interface DuplicateLayerCommand {
+  readonly type: "duplicate-layer";
+  readonly sourceLayerId: string;
+  readonly layerId: string;
+  readonly insertIndex: number;
+  readonly width: number;
+  readonly height: number;
+  readonly meta: LayerMeta;
+  readonly timestamp: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `sourceLayerId` | `string` | 複製元レイヤーの ID |
+| `layerId` | `string` | 複製先レイヤーの ID |
+| `insertIndex` | `number` | 複製先の挿入位置 |
+| `width` / `height` | `number` | 複製先レイヤーサイズ |
+| `meta` | `LayerMeta` | 複製先のメタデータ |
+
+### MergeLayerDownCommand
+
+レイヤー下統合を記録する構造コマンド。source / target の pixels を target に焼き込み、source layer を削除する。統合後 target は `targetMetaAfter` に更新される。
+
+```typescript
+interface MergeLayerDownCommand {
+  readonly type: "merge-layer-down";
+  readonly sourceLayerId: string;
+  readonly targetLayerId: string;
+  readonly sourceIndex: number;
+  readonly targetIndex: number;
+  readonly sourceMeta: LayerMeta;
+  readonly targetMetaBefore: LayerMeta;
+  readonly targetMetaAfter: LayerMeta;
+  readonly timestamp: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `sourceLayerId` | `string` | 統合元レイヤーの ID |
+| `targetLayerId` | `string` | 統合先レイヤーの ID |
+| `sourceIndex` | `number` | 統合前の source 位置 |
+| `targetIndex` | `number` | 統合前の target 位置 |
+| `sourceMeta` | `LayerMeta` | Undo 復元用の source meta |
+| `targetMetaBefore` | `LayerMeta` | Undo 復元用の target meta |
+| `targetMetaAfter` | `LayerMeta` | Redo / replay 用の統合後 target meta |
+
+`merge-layer-down` は source / target 両方の checkpoint coverage が必要。target pixels は source / target 両方の merge 時点の pixels に依存する。
+
 ### StructuralCommand
 
 ```typescript
-type StructuralCommand = AddLayerCommand | RemoveLayerCommand | ReorderLayerCommand;
+type StructuralCommand =
+  | AddLayerCommand
+  | RemoveLayerCommand
+  | ReorderLayerCommand
+  | DuplicateLayerCommand
+  | MergeLayerDownCommand;
 ```
 
 ---
@@ -307,7 +367,7 @@ type PixelScope<TCustom = never> =
 |---|---|---|
 | `layer` | `stroke`, `clear`, `transform-layer` | 特定レイヤーのピクセルのみ影響 |
 | `all` | `wrap-shift` | 全レイヤーのピクセルに影響 |
-| `structural` | `add-layer`, `remove-layer`, `reorder-layer` | ピクセル変更なし（レイヤー構造の変更） |
+| `structural` | `add-layer`, `remove-layer`, `reorder-layer`, `duplicate-layer`, `merge-layer-down` | レイヤー構造の変更。duplicate / merge は checkpoint 依存の pixel effect も持つ |
 | `custom` | `TCustom` | アプリ定義。影響判定はアプリ側で行う |
 
 ---
@@ -355,6 +415,44 @@ function isCustomCommand<TCustom>(cmd: Command<TCustom>): cmd is TCustom;
 `isDrawCommand` と `isLayerDrawCommand` は `"transform-layer"` を含む。
 
 `isCustomCommand` は `isDrawCommand` と `isStructuralCommand` のどちらにも該当しないコマンドを `TCustom` と判定する。
+
+---
+
+## Atomic Layer Operation Types
+
+レイヤー複製・下統合の低レベル API が返す型。アプリは UI 都合の active layer 更新や名前採番を行い、atomic API の結果として返る `layers` と `command` を同じ操作として反映する。
+
+```typescript
+interface DuplicateLayerOptions {
+  readonly sourceLayerId: string;
+  readonly insertIndex?: number;
+  readonly layerId?: string;
+  readonly meta?: Partial<LayerMeta>;
+}
+
+interface DuplicateLayerResult {
+  readonly layers: readonly Layer[];
+  readonly layer: Layer;
+  readonly insertIndex: number;
+  readonly command: DuplicateLayerCommand;
+}
+
+interface MergeLayerDownAtomicOptions {
+  readonly sourceLayerId: string;
+  readonly resultMeta?: Partial<LayerMeta>;
+}
+
+interface MergeLayerDownResult {
+  readonly layers: readonly Layer[];
+  readonly sourceLayerId: string;
+  readonly targetLayerId: string;
+  readonly sourceIndex: number;
+  readonly targetIndex: number;
+  readonly command: MergeLayerDownCommand;
+}
+```
+
+`duplicateLayerAtomic()` は既定で source の直上（`sourceIndex + 1`）に複製する。`mergeLayerDownAtomic()` は source の直下（`sourceIndex - 1`）を target とし、source が最背面の場合は `null` を返す。
 
 ---
 

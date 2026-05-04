@@ -25,6 +25,8 @@ history = pushCommand(
 
 `beginHistoryMutation()` は操作開始ではなく、実際に対象レイヤーのピクセルまたは削除対象レイヤーが不可逆に変わる直前に呼ぶ。`pushCommand()` は checkpoint coverage がない undoable command を検出すると `console.warn` を出し、その command を undoable 履歴へ追加しない。
 
+レイヤー複製・下統合は structural command だが pixels の復元に checkpoint coverage が必要。`duplicate-layer` は source layer、`merge-layer-down` は source / target 両方を、atomic operation の直前に `beginHistoryMutation()` へ渡す。
+
 ## createHistoryState
 
 ```typescript
@@ -69,6 +71,16 @@ function pushCommand<TCustom = never>(
 
 Redo branch の破棄、checkpoint 圧縮、checkpoint eviction、`undoFloorIndex` 更新、不要 command prefix の pruning は command 確定時に行われる。
 
+checkpoint coverage 判定は command 種別ごとに次のレイヤーを対象にする。
+
+| command | coverage 対象 |
+|---|---|
+| layer draw command | `command.layerId` |
+| `wrap-shift` | `options.affectedLayerIds` |
+| `remove-layer` | `command.layerId` |
+| `duplicate-layer` | `command.sourceLayerId` |
+| `merge-layer-down` | `command.sourceLayerId`, `command.targetLayerId` |
+
 ## undo / redo / canUndo / canRedo
 
 ```typescript
@@ -105,6 +117,15 @@ function getCommandsInRange<TCustom = never>(
 ```
 
 `currentIndex`、checkpoint の `commandIndex`、範囲指定はすべて絶対 index。`commands[absoluteIndex]` のような直接アクセスはしない。
+
+## structural command と rebuild
+
+`duplicate-layer` と `merge-layer-down` は layer topology と pixels の両方に影響する。`getCommandPixelScope()` は構造変更として `{ type: "structural" }` を返すが、checkpoint eviction と `getAffectedLayerIds()` は pixel dependency を考慮する。
+
+- `duplicate-layer`: 複製先 layer は source layer の duplicate 時点の pixels に依存する。影響集約では複製先 layer id を partial affected に含める。
+- `merge-layer-down`: target layer は source / target 両方の merge 時点の pixels に依存する。影響集約では source / target の両方を partial affected に含める。
+
+依存 checkpoint が eviction される場合、`undoFloorIndex` は unrebuildable な duplicate / merge を跨がない位置まで進む。
 
 ## rebuildLayerFromHistory
 

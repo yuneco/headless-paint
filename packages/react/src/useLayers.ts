@@ -31,6 +31,10 @@ export interface UseLayersResult {
     index: number,
     meta?: LayerMeta,
   ) => LayerEntry;
+  readonly replaceEntries: (
+    layers: readonly Layer[],
+    activeLayerId?: string | null,
+  ) => void;
   readonly setActiveLayerId: (id: string | null) => void;
   readonly renameLayer: (layerId: string, name: string) => void;
   readonly toggleVisibility: (layerId: string) => void;
@@ -182,6 +186,26 @@ export function useLayers(
     [width, height, bumpRenderVersion],
   );
 
+  const replaceEntries = useCallback(
+    (layers: readonly Layer[], nextActiveLayerId?: string | null) => {
+      const newEntries = layers.map((layer) => ({
+        id: layer.id,
+        committedLayer: layer,
+      }));
+      setEntries(newEntries);
+      if (nextActiveLayerId !== undefined) {
+        setActiveLayerId(
+          nextActiveLayerId &&
+            newEntries.some((entry) => entry.id === nextActiveLayerId)
+            ? nextActiveLayerId
+            : (newEntries[0]?.id ?? null),
+        );
+      }
+      bumpRenderVersion();
+    },
+    [bumpRenderVersion],
+  );
+
   const renameLayer = useCallback((layerId: string, name: string) => {
     const entry = entriesRef.current.find((e) => e.id === layerId);
     if (!entry) return;
@@ -279,6 +303,7 @@ export function useLayers(
     addLayer,
     removeLayer,
     reinsertLayer,
+    replaceEntries,
     setActiveLayerId,
     renameLayer,
     toggleVisibility,

@@ -4,6 +4,8 @@ import {
   addPointToSession,
   createAddLayerCommand,
   createClearCommand,
+  createDuplicateLayerCommand,
+  createMergeLayerDownCommand,
   createRemoveLayerCommand,
   createReorderLayerCommand,
   createStrokeCommand,
@@ -354,6 +356,61 @@ describe("session", () => {
       expect(command.layerId).toBe("layer_1");
       expect(command.fromIndex).toBe(0);
       expect(command.toIndex).toBe(2);
+      expect(typeof command.timestamp).toBe("number");
+    });
+  });
+
+  describe("createDuplicateLayerCommand", () => {
+    it("should create duplicate-layer command with recorded layer id", () => {
+      const meta = { name: "Copy", visible: true, opacity: 1 };
+      const command = createDuplicateLayerCommand(
+        "source",
+        "copy",
+        1,
+        800,
+        600,
+        meta,
+      );
+
+      expect(command.type).toBe("duplicate-layer");
+      expect(command.sourceLayerId).toBe("source");
+      expect(command.layerId).toBe("copy");
+      expect(command.insertIndex).toBe(1);
+      expect(command.width).toBe(800);
+      expect(command.height).toBe(600);
+      expect(command.meta).toEqual(meta);
+      expect(typeof command.timestamp).toBe("number");
+    });
+  });
+
+  describe("createMergeLayerDownCommand", () => {
+    it("should create merge-layer-down command with meta snapshots", () => {
+      const sourceMeta = { name: "Source", visible: true, opacity: 0.8 };
+      const targetMetaBefore = { name: "Target", visible: true, opacity: 0.5 };
+      const targetMetaAfter = {
+        name: "Target",
+        visible: true,
+        opacity: 1,
+        compositeOperation: "source-over" as GlobalCompositeOperation,
+      };
+      const command = createMergeLayerDownCommand(
+        "source",
+        "target",
+        1,
+        0,
+        sourceMeta,
+        targetMetaBefore,
+        targetMetaAfter,
+      );
+
+      expect(command.type).toBe("merge-layer-down");
+      expect(command.sourceLayerId).toBe("source");
+      expect(command.targetLayerId).toBe("target");
+      expect(command.sourceIndex).toBe(1);
+      expect(command.targetIndex).toBe(0);
+      expect(command.sourceMeta).toEqual(sourceMeta);
+      expect(command.targetMetaBefore).toEqual(targetMetaBefore);
+      expect(command.targetMetaAfter).toEqual(targetMetaAfter);
       expect(typeof command.timestamp).toBe("number");
     });
   });

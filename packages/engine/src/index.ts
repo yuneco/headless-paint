@@ -48,11 +48,14 @@ export {
 } from "./brush-tip";
 export {
   clearLayer,
+  cloneLayer,
   colorToStyle,
+  copyLayerPixels,
   createLayer,
   getImageData,
   getPixel,
   setPixel,
+  type CloneLayerOptions,
 } from "./layer";
 export {
   applyPressureCurve,
@@ -93,6 +96,10 @@ export {
 export { getContentBounds } from "./content-bounds";
 export { transformLayer } from "./transform-layer";
 export { wrapShiftLayer } from "./wrap-shift";
+export {
+  mergeLayerDown,
+  type MergeLayerDownOptions,
+} from "./layer-merge";
 export {
   addLayer,
   findLayerById,

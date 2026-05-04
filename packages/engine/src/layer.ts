@@ -37,6 +37,35 @@ export function clearLayer(layer: Layer): void {
   layer.ctx.clearRect(0, 0, layer.width, layer.height);
 }
 
+export interface CloneLayerOptions {
+  readonly id?: string;
+  readonly meta?: Partial<LayerMeta>;
+  readonly copyPixels?: boolean;
+}
+
+export function cloneLayer(source: Layer, options?: CloneLayerOptions): Layer {
+  const layer = createLayer(source.width, source.height, {
+    ...source.meta,
+    ...options?.meta,
+  });
+  if (options?.id) {
+    (layer as { id: string }).id = options.id;
+  }
+  if (options?.copyPixels !== false) {
+    copyLayerPixels(source, layer);
+  }
+  return layer;
+}
+
+export function copyLayerPixels(source: Layer, target: Layer): void {
+  clearLayer(target);
+  target.ctx.save();
+  target.ctx.globalAlpha = 1;
+  target.ctx.globalCompositeOperation = "source-over";
+  target.ctx.drawImage(source.canvas, 0, 0);
+  target.ctx.restore();
+}
+
 export function getImageData(layer: Layer): ImageData {
   return layer.ctx.getImageData(0, 0, layer.width, layer.height);
 }

@@ -66,6 +66,9 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `createLayer(width, height, meta?)` | 新規レイヤー作成（一意の `id` を自動付与） |
+| `cloneLayer(source, options?)` | レイヤーサイズ・メタデータ・pixels を複製した新規レイヤーを作成 |
+| `copyLayerPixels(source, target)` | target をクリアして source の pixels をコピー |
+| `mergeLayerDown(targetLayer, sourceLayer, options?)` | source を target に焼き込み、target meta を統合後の状態に正規化 |
 | `clearLayer(layer)` | レイヤーをクリア |
 | `getPixel(layer, x, y)` | ピクセル色を取得 |
 | `setPixel(layer, x, y, color)` | ピクセル色を設定 |
