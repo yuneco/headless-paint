@@ -946,7 +946,7 @@ const documentSnapshot = await exportPaintDocument({
 | `StampBrushConfig` | engine | スタンプベースブラシの設定 |
 | `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
-| `BrushMixing` | engine | スタンプブラシの混色パラメータ（pickup / restore / updateDistanceRatio） |
+| `BrushMixing` | engine | スタンプブラシの混色パラメータ（pickup / restore / updateDistancePx） |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
 | `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
 | `ViewTransform` | input | ビュー変換行列 |

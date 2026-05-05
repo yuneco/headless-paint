@@ -33,10 +33,8 @@ function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
     (sa.mixing?.enabled ?? false) === (sb.mixing?.enabled ?? false) &&
     (sa.mixing?.pickup ?? 0) === (sb.mixing?.pickup ?? 0) &&
     (sa.mixing?.restore ?? 0) === (sb.mixing?.restore ?? 0) &&
-    (sa.mixing?.updateDistanceRatio ??
-      DEFAULT_BRUSH_MIXING.updateDistanceRatio) ===
-      (sb.mixing?.updateDistanceRatio ??
-        DEFAULT_BRUSH_MIXING.updateDistanceRatio)
+    (sa.mixing?.updateDistancePx ?? DEFAULT_BRUSH_MIXING.updateDistancePx) ===
+      (sb.mixing?.updateDistancePx ?? DEFAULT_BRUSH_MIXING.updateDistancePx)
   );
 }
 
@@ -108,7 +106,7 @@ function BrushPanelComponent({
   registryReady,
 }: BrushPanelProps) {
   const updateMixing = (
-    field: "pickup" | "restore" | "updateDistanceRatio",
+    field: "pickup" | "restore" | "updateDistancePx",
     value: number,
   ) => {
     if (brush.type !== "stamp") return;
@@ -198,22 +196,23 @@ function BrushPanelComponent({
             <span>
               Mix Distance{" "}
               {(
-                brush.mixing.updateDistanceRatio ??
-                DEFAULT_BRUSH_MIXING.updateDistanceRatio
-              ).toFixed(2)}
+                brush.mixing.updateDistancePx ??
+                DEFAULT_BRUSH_MIXING.updateDistancePx
+              ).toFixed(0)}
+              px
             </span>
             <input
               type="range"
-              min={0}
-              max={2}
-              step={0.05}
+              min={1}
+              max={32}
+              step={1}
               value={
-                brush.mixing.updateDistanceRatio ??
-                DEFAULT_BRUSH_MIXING.updateDistanceRatio
+                brush.mixing.updateDistancePx ??
+                DEFAULT_BRUSH_MIXING.updateDistancePx
               }
               onChange={(event) =>
                 updateMixing(
-                  "updateDistanceRatio",
+                  "updateDistancePx",
                   Number(event.currentTarget.value),
                 )
               }

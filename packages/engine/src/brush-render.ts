@@ -5,6 +5,7 @@ import {
 } from "./draw";
 import { colorToStyle } from "./layer";
 import { interpolateStrokePointsCentripetal } from "./stroke-interpolation";
+import { DEFAULT_BRUSH_MIXING } from "./types";
 import type {
   BrushBranchRenderState,
   BrushDynamics,
@@ -149,7 +150,7 @@ function renderStampBrushStroke(
   let mixedCanvas = branch.mixedCanvas;
   let lastMixingUpdateDistance = branch.lastMixingUpdateDistance;
   const mixingUpdateSpacing = mixing
-    ? getMixingUpdateSpacing(style.lineWidth, spacingPx, mixing)
+    ? getMixingUpdateSpacing(spacingPx, mixing)
     : spacingPx;
 
   // ストローク開始時（distance=0, overlap なし）は最初の点にスタンプを配置
@@ -291,12 +292,11 @@ function getActiveMixing(mixing: BrushMixing | undefined): BrushMixing | null {
   const pickup = clamp01(mixing.pickup);
   const restore = clamp01(mixing.restore);
   if (pickup <= 0 && restore <= 0) return null;
-  const updateDistanceRatio =
-    Number.isFinite(mixing.updateDistanceRatio) &&
-    mixing.updateDistanceRatio > 0
-      ? mixing.updateDistanceRatio
-      : 0;
-  return { enabled: true, pickup, restore, updateDistanceRatio };
+  const updateDistancePx =
+    Number.isFinite(mixing.updateDistancePx) && mixing.updateDistancePx > 0
+      ? mixing.updateDistancePx
+      : DEFAULT_BRUSH_MIXING.updateDistancePx;
+  return { enabled: true, pickup, restore, updateDistancePx };
 }
 
 function clamp01(value: number): number {
@@ -304,12 +304,10 @@ function clamp01(value: number): number {
 }
 
 function getMixingUpdateSpacing(
-  lineWidth: number,
   stampSpacing: number,
   mixing: BrushMixing,
 ): number {
-  if (mixing.updateDistanceRatio <= 0) return stampSpacing;
-  return Math.max(stampSpacing, lineWidth * mixing.updateDistanceRatio);
+  return Math.max(stampSpacing, mixing.updateDistancePx);
 }
 
 function shouldUpdateMixedTip(

@@ -487,7 +487,7 @@ describe("renderBrushStroke", () => {
       expect(result.branches?.[0].colorBuffer).toBeInstanceOf(OffscreenCanvas);
     });
 
-    it("混色更新はスタンプ配置より低い距離頻度にできる", () => {
+    it("混色更新はpx指定でスタンプ配置より低い距離頻度にできる", () => {
       const style = makeStyle({
         color: { r: 0, g: 180, b: 40, a: 255 },
         lineWidth: 10,
@@ -504,7 +504,7 @@ describe("renderBrushStroke", () => {
         },
       });
 
-      function renderEndPixel(updateDistanceRatio: number) {
+      function renderEndPixel(updateDistancePx: number) {
         const source = createLayer(100, 100);
         source.ctx.fillStyle = "rgb(255, 0, 0)";
         source.ctx.fillRect(0, 0, 50, 100);
@@ -523,7 +523,7 @@ describe("renderBrushStroke", () => {
               enabled: true,
               pickup: 1,
               restore: 0,
-              updateDistanceRatio,
+              updateDistancePx,
             },
           },
         });
@@ -538,10 +538,15 @@ describe("renderBrushStroke", () => {
         return target.ctx.getImageData(75, 50, 1, 1).data;
       }
 
-      const everyStamp = renderEndPixel(0);
+      const everyStamp = renderEndPixel(1);
+      const defaultDistance = renderEndPixel(
+        DEFAULT_BRUSH_MIXING.updateDistancePx,
+      );
+      const missingDistance = renderEndPixel(undefined as unknown as number);
       const sparse = renderEndPixel(100);
 
       expect(everyStamp[2]).toBeGreaterThan(everyStamp[0]);
+      expect(Array.from(missingDistance)).toEqual(Array.from(defaultDistance));
       expect(sparse[0]).toBeGreaterThan(sparse[2]);
     });
   });

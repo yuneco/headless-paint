@@ -559,7 +559,7 @@ interface BrushMixing {
   readonly enabled: boolean;
   readonly pickup: number;
   readonly restore: number;
-  readonly updateDistanceRatio: number;
+  readonly updateDistancePx: number;
 }
 ```
 
@@ -568,7 +568,7 @@ interface BrushMixing {
 | `enabled` | `boolean` | 混色を有効にする |
 | `pickup` | `number` | 描画先 footprint をブラシ色バッファへ転写する強さ [0, 1] |
 | `restore` | `number` | 元の描画色をブラシ色バッファへ戻す強さ [0, 1] |
-| `updateDistanceRatio` | `number` | 混色状態を更新する距離の下限を線幅比で指定する。`0.5` は `lineWidth * 0.5` ごと、`0` は stamp ごとに更新 |
+| `updateDistancePx` | `number` | 混色状態を更新する距離の下限をpxで指定する。実際の更新間隔は `max(stampSpacing, updateDistancePx)`。型上は必須で、不正値や型を無視した未指定入力は描画時にデフォルト値へフォールバック |
 
 **関連定数**:
 
@@ -577,7 +577,7 @@ const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
   pickup: 0,
   restore: 0.15,
-  updateDistanceRatio: 0.5,
+  updateDistancePx: 8,
 };
 ```
 

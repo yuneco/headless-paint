@@ -100,7 +100,7 @@ const acrylic: StampBrushConfig = {
     enabled: true,
     pickup: 0.35,
     restore: 0.08,
-    updateDistanceRatio: 0.5,
+    updateDistancePx: 8,
   },
 };
 ```
@@ -114,7 +114,7 @@ const acrylic: StampBrushConfig = {
 3. 同じ混色更新タイミングで `style.color` を `restore` の強さで `colorBuffer` へ重ね、透明領域へ移動したときに元色へ戻す
 4. `colorBuffer` に `tipCanvas` の alpha を適用し、dab として描画する。混色更新を行わない stamp では直近の mixed dab を再利用する
 
-この方式では、大きいブラシが赤/青の境界をまたいだときに tip 全体を単一の紫へ平均化せず、`colorBuffer` 内に赤寄り・青寄りの局所差を保持できる。Expand 使用時は分岐ごとに `colorBuffer` を持つため、分岐ごとに異なる背景色を拾う。混色状態はスタンプごとではなく `lineWidth * mixing.updateDistanceRatio` を下限とする距離ベースで更新されるため、細かい spacing のブラシでも pickup / restore / mask の頻度が過剰になりにくい。`updateDistanceRatio: 0` を指定すると従来どおり stamp ごとに混色更新する。
+この方式では、大きいブラシが赤/青の境界をまたいだときに tip 全体を単一の紫へ平均化せず、`colorBuffer` 内に赤寄り・青寄りの局所差を保持できる。Expand 使用時は分岐ごとに `colorBuffer` を持つため、分岐ごとに異なる背景色を拾う。混色状態はスタンプごとではなく `mixing.updateDistancePx` を下限とする距離ベースで更新されるため、ブラシサイズに依存せず pickup / restore / mask の頻度を制御できる。実際の更新間隔は `max(stampSpacing, mixing.updateDistancePx)` で、スタンプ配置より高頻度にはならない。
 
 **使用例**:
 ```typescript

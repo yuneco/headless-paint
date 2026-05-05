@@ -499,7 +499,7 @@ function parseBrushConfig(
       typeof value.mixing.enabled !== "boolean" ||
       !isFiniteNumber(value.mixing.pickup) ||
       !isFiniteNumber(value.mixing.restore) ||
-      !isFiniteNumber(value.mixing.updateDistanceRatio)
+      !isFiniteNumber(value.mixing.updateDistancePx)
     ) {
       return null;
     }
@@ -514,7 +514,7 @@ function parseBrushConfig(
         enabled: value.mixing.enabled as boolean,
         pickup: value.mixing.pickup as number,
         restore: value.mixing.restore as number,
-        updateDistanceRatio: value.mixing.updateDistanceRatio as number,
+        updateDistancePx: value.mixing.updateDistancePx as number,
       }
     : undefined;
   return {

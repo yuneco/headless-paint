@@ -169,14 +169,14 @@ export interface BrushMixing {
   readonly enabled: boolean;
   readonly pickup: number;
   readonly restore: number;
-  readonly updateDistanceRatio: number;
+  readonly updateDistancePx: number;
 }
 
 export const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
   pickup: 0,
   restore: 0.15,
-  updateDistanceRatio: 0.5,
+  updateDistancePx: 8,
 };
 
 /** 現在の circle+trapezoid 方式 */
