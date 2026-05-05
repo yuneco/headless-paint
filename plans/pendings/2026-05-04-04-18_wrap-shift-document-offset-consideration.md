@@ -1,93 +1,199 @@
-# wrap-shift をドキュメント設定値化する検討
+# wrap-shift を document offset + layer offset で遅延 materialize する検討
 
 ## 位置づけ
 
 このファイルは検討結果の記録であり、実装計画ではない。Doc-First の Phase 1 以降、API ドキュメント更新、コード変更はまだ行わない。
 
+実装へ進める場合は planning-flow に従い、まず `packages/*/docs/` へ外部IFを設計してから利用イメージレビューに進む。
+
 ## 背景
 
 現状の wrap-shift は `wrapShiftLayer()` で全 committed layer のピクセルを物理的にラップ移動している。
 
-この方式は表示上は単純だが、以下の負担がある。
+この方式は描画器から見ると単純だが、以下の負担がある。
 
 - ドラッグ中に全レイヤーへ `drawImage` ベースのコピーが走るため、レイヤー数・キャンバスサイズに比例して重い
 - `wrap-shift` が全レイヤー影響の DrawCommand になり、Undo/Redo、replay、checkpoint、history pruning で特別扱いが必要になる
 - checkpoint ベース Undo の設計でも、wrap-shift のために全レイヤー pre-write checkpoint、`baseCumulativeOffset`、all-scope coverage 検証などが必要になる
 - 操作の意味は「表示上のタイル原点をずらす」に近いのに、実装上は「全ピクセルを書き換える破壊的操作」として扱われている
 
+一方で、wrapOffset を完全に document-level 設定値へ寄せ、ストローク描画直前に visual -> physical 変換と wrap 境界分割を行う案にも難所がある。
+
+- visual では連続する線分が physical canvas 端でジャンプするため、stroke segment の境界分割が必要になる
+- スタンプブラシでは、1つの stamp footprint が wrap 境界を跨ぐ場合に同一 stamp を最大4位置へ複製描画する必要がある
+- Expand / pending / stamp jitter / mixing と境界分割を同時に扱うため、描画APIの責務が重くなる
+
 ## 結論
 
-wrap-shift は物理ピクセルの移動ではなく、ドキュメントのグローバルな `wrapOffset` 設定値として扱う方向が妥当。
+中間案として、document-level の `wrapOffset` を正規概念として追加しつつ、各 layer に「その layer.canvas のピクセルがどの offset 状態で materialize されているか」を示す `pixelOffset` を持たせる方向が有力。
 
-最も透過的に吸収できる場所は、履歴やレイヤー書き換えではなく、次の2つの境界である。
+wrap-shift 実行時は document の `wrapOffset` だけを更新し、レイヤーのピクセルは移動しない。表示や読み取りでは `wrapOffset - pixelOffset` の差分を透過的に反映する。レイヤーへ書き込む直前だけ、対象レイヤーのピクセルを document の現在 offset に一致させる。
 
-1. 表示境界: `renderLayers` / パターンプレビューなど、Layer を画面・タイルへ描画する箇所
-2. ストローク描画境界: 入力点を FilterPipeline に通した後、committed / pending layer へ焼く直前
-
-`screenToLayer()` 直後の raw input を即座に物理座標へ変換する案は避けるべき。smoothing や straight-line が物理座標の wrap ジャンプを見てしまい、中央に移動したシームを跨ぐ自然なストロークが不連続になるため。
+これにより、ストローク、スタンプ、消しゴム、Expand の描画自体は現行の座標系のまま維持できる。wrap 境界分割や stamp 複製描画を通常の stroke renderer に持ち込まない。
 
 ## 推奨モデル
 
-レイヤーのピクセルは常に canonical / physical 座標に保存する。`wrapOffset` は「physical 座標のピクセルを visual 座標へどれだけ表示シフトするか」を表すドキュメント設定にする。
+概念的には次の2つの offset を持つ。
 
-既存の `wrapShiftLayer(layer, dx, dy)` と同じ見え方に合わせるなら、符号は以下が自然。
+```ts
+interface DocumentWrapState {
+  readonly wrapOffset: { readonly x: number; readonly y: number };
+}
 
-- physical -> visual: `visual = physical + wrapOffset`
-- visual -> physical: `physical = visual - wrapOffset`
+interface LayerOffsetState {
+  readonly pixelOffset: { readonly x: number; readonly y: number };
+}
+```
 
-つまり、現在の物理シフト `dx = +100` と同じ表示にしたい場合、`wrapOffset.x = 100` とし、表示時は layer canvas を `(+100, ...)` 側へ4コピー描画する。ユーザーが visual 座標 `v` に描いた点は、canonical には `v - wrapOffset` で保存される。
+`Document.wrapOffset` は、現在ユーザーが見ているタイル原点を表す。
 
-## どこで吸収するか
+`Layer.pixelOffset` は、`layer.canvas` のピクセルがどの document offset に一致した状態で保存されているかを表す。初期値は `{ x: 0, y: 0 }`。
 
-### 1. 表示
+読み取り時の差分は以下。
 
-`renderLayers()` に現在の `wrapOffset` を渡し、各 layer を4コピーで描画する。
+```text
+delta = document.wrapOffset - layer.pixelOffset
+```
 
-これにより offset 変更は state 更新 + 再描画だけになり、Layer の canvas は書き換えない。
+`delta` が 0 なら、その layer は現在の document offset に materialize 済みであり、通常通り読める。`delta` が非0なら、読み取り側が必要に応じて wrap 付きで `delta` 分シフトした結果を見る。
 
-対象は committed layer だけではなく、pending overlay と transform preview も同じ visual 空間に見える必要がある。pending はそのストローク開始時に捕捉した offset で physical に描かれているため、通常表示では現在の document offset に従って committed と同じように表示すればよい。
+書き込み前には対象レイヤーだけ materialize する。
 
-パターンプレビューは「現在の表示 offset を反映したタイル」と「canonical タイル」のどちらを見せたいかを仕様として決める必要がある。ユーザーがシーム確認中に見るプレビューとしては、現在の表示 offset を反映した方が直感的。
+```text
+ensureLayerMaterialized(layer, document.wrapOffset):
+  delta = document.wrapOffset - layer.pixelOffset
+  if delta == 0:
+    return
+  wrapShiftLayer(layer, delta.x, delta.y)
+  layer.pixelOffset = document.wrapOffset
+```
 
-### 2. 入力から描画まで
+この materialize はユーザー操作として独立した履歴には見せず、後続の stroke / clear / transform / merge などの書き込み操作に内包する。
 
-pointer handler はこれまで通り `screenToLayer()` で visual layer coordinate を返すだけにする。ここに wrapOffset を混ぜない方が責務が薄い。
+## データフロー
 
-`useStrokeSession` もしくはその直下の描画関数で、ストローク開始時の `wrapOffset` をキャプチャする。
+### wrap-shift 操作
 
-推奨フロー:
+```text
+onWrapShift(dx, dy)
+  -> document.wrapOffset += { dx, dy }
+  -> layer.canvas は変更しない
+  -> renderVersion を進める
+```
+
+wrap-shift 中に全レイヤーの `wrapShiftLayer()` は呼ばない。全レイヤー pre-write checkpoint も作らない。
+
+wrap-shift を Undo 対象にする場合も、ピクセル影響を持たない settings command として扱う。ピクセル履歴上は「まだどの layer にも書き込んでいない表示設定変更」である。
+
+### 表示
+
+`renderLayers()` は document の `wrapOffset` と各 layer の `pixelOffset` を受け取り、差分がある layer を wrap 付きで表示する。
+
+```text
+for each visible layer:
+  delta = document.wrapOffset - layer.pixelOffset
+  draw layer.canvas at delta, delta - width/height copies as needed
+```
+
+pending overlay や transform preview も、対象 committed layer と同じ visual 空間に見える必要がある。書き込み開始時に対象レイヤーを materialize するなら、通常の stroke pending は `pixelOffset == document.wrapOffset` の座標系で描かれるため、現行の pending 合成に近い扱いを維持できる。
+
+### 入力からストローク描画まで
+
+pointer handler はこれまで通り `screenToLayer()` で visual layer coordinate を返す。`screenToLayer()` と FilterPipeline は wrapOffset 非依存のまま維持する。
+
+ストロークで最初に committed layer へ書き込む直前に、対象レイヤーを現在の document offset へ materialize する。
 
 ```text
 PointerEvent
   -> screenToLayer = visual point
   -> FilterPipeline / StrokeSession は visual point として処理
-  -> committed/pending へ描画する直前に visual -> physical 変換
-  -> physical wrap 境界で stroke segment を分割
-  -> appendToCommittedLayer / renderPendingLayer
+  -> 初回 committed 書き込み直前に ensureLayerMaterialized(activeLayer)
+  -> appendToCommittedLayer / renderPendingLayer は現行通り
 ```
 
-この位置で吸収すると、FilterPipeline はユーザーが見ている連続した座標を扱える。一方、Layer に焼かれるピクセルは常に canonical 座標になる。
+この方式では、描画器から見ると「現在見えている座標系の canvas に通常通り描く」だけになる。visual -> physical 変換、wrap 境界分割、stamp 複製描画は不要。
 
-### 3. 履歴
+### stamp mixing
 
-`wrapOffset` 変更を DrawCommand として扱わない。
+現行仕様では、stamp mixing は描画対象レイヤーの色を source として参照する設計である。React 統合ではストローク開始時点の committed layer snapshot を `sourceLayer` として渡し、同一ストローク内で描いた dab を再度拾い続けないようにしている。
+
+この仕様を維持する限り、mixing のリスクは比較的低い。
+
+- ストローク開始前に対象レイヤーを document offset へ materialize する
+- その materialize 後の対象レイヤーを snapshot して `sourceLayer` にする
+- mixing は対象レイヤー内の現在表示座標系だけを参照する
+
+他レイヤーを参照する混色や、表示合成後の色を拾う混色を将来追加する場合は、読み取り facade 側の offset 透過が必要になる。その機能は今回の前提に含めない。
+
+## 履歴モデル
+
+### wrap-shift はピクセル履歴から外す
+
+`wrap-shift` は document offset の変更として扱い、全レイヤーの DrawCommand にはしない。
 
 選択肢は2つある。
 
-- offset 変更は履歴対象外のドキュメント表示設定にする
-- offset 変更を Undo 可能にする場合も、ピクセル影響を持たない settings command として扱う
+- Undo 対象外の document 表示設定にする
+- Undo 対象にする場合も settings command として扱う
 
-少なくとも stroke / clear / transform-layer の replay に `wrap-shift` を挟む必要はなくなる。
+いずれにしても、wrap-shift 実行時に全レイヤーの pre-write checkpoint は作らない。
 
-ただし、ストロークコマンドには「描画時の wrapOffset」を保存する必要がある。後から document offset が変わっても、replay 時に当時と同じ physical 位置へ焼くため。
+### materialize は後続の書き込み操作に内包する
 
-`StrokeCommand` は概念的に以下を持つ。
+レイヤーへ書き込む command は、実行時に必要なら materialize を含む複合操作として扱う。
 
-```ts
-readonly wrapOffset: { readonly x: number; readonly y: number };
+概念的には次のような内部opになる。
+
+```text
+stroke(layer A):
+  materialize-layer-offset(A, oldPixelOffset -> document.wrapOffset)
+  draw-stroke(A)
 ```
 
-保存する input points は visual 座標のままにするのがよい。replay では FilterPipeline を visual 座標で再実行し、その後に保存済み `wrapOffset` で physical 変換する。
+アプリ末端の履歴では、これは1つの stroke として扱う。ユーザーに materialize command は見せない。
+
+### checkpoint coverage
+
+強制CPはやめる。ただし、ピクセルを書き換える command には従来通り対象レイヤーの checkpoint coverage が必要。
+
+materialize はピクセル破壊なので、CP は materialize 前の状態を起点にする必要がある。
+
+```text
+beginHistoryMutation(activeLayer)
+ensureLayerMaterialized(activeLayer)
+draw stroke
+pushCommand(stroke with offset metadata)
+```
+
+wrap-shift 時ではなく、そのレイヤーへ次に実書き込みする直前に CP を作る。これにより、wrap-shift だけを何度行っても全レイヤーの checkpoint を消費しない。
+
+### command に保存すべき offset
+
+replay で同じ結果を得るには、各書き込み command が少なくとも次を知る必要がある。
+
+- 書き込み時の document offset
+- 必要なら書き込み前の layer pixelOffset
+
+候補は2つ。
+
+1. `StrokeCommand` / `ClearCommand` / `TransformLayerCommand` などに `documentOffset` を持たせる
+2. 書き込み command の前に内部専用の `materialize-layer-offset` op を replay stream に展開する
+
+外部履歴をシンプルに保つなら、ユーザーに見える command は現行に近い形を維持し、replay 内部で materialize を補う設計が望ましい。ただし replay の決定性を保つため、どの offset へ materialize してから描いたかは command または周辺の settings timeline から必ず復元できる必要がある。
+
+### replay
+
+rebuild は checkpoint の `pixelOffset` から開始し、以降の command を時系列に replay する。
+
+```text
+restore checkpoint pixels and checkpoint.pixelOffset
+for command in replay range:
+  if command writes layer:
+    ensureLayerMaterialized(layer, command.documentOffset)
+    replay command pixels
+```
+
+checkpoint payload には、その時点の layer pixelOffset も含める必要がある。ImageData だけでは、復元した layer.canvas がどの offset に materialize 済みなのか分からない。
 
 ## 既存ピクセルシフト方式との差分
 
@@ -95,7 +201,9 @@ readonly wrapOffset: { readonly x: number; readonly y: number };
 
 現行方式は offset ドラッグ中に全レイヤーのピクセルを毎回コピーする。
 
-設定値方式では offset ドラッグ中は `wrapOffset` の更新だけになり、実コストは画面再描画時の4コピーに寄る。レイヤーの実データを書き換えないため、Undo/Redo や checkpoint のための追加コピーも不要になる。
+遅延 materialize 方式では、offset ドラッグ中は document offset 更新だけになる。表示コストは各 layer の `delta` に応じた wrap 付き draw に寄る。
+
+実際の `wrapShiftLayer()` は、次にそのレイヤーへ書き込む直前だけ発生する。編集されないレイヤーはピクセル移動を遅延し続けられる。
 
 ### 履歴
 
@@ -106,112 +214,116 @@ readonly wrapOffset: { readonly x: number; readonly y: number };
 - Undo/Redo が wrap-shift だけ高速パスで逆方向/順方向シフトする
 - checkpoint pruning では wrap-shift prefix の累積値を別管理する必要が出る
 
-設定値方式では、wrapOffset 変更そのものはピクセル履歴から外せる。履歴で残すべきなのは、各 stroke がどの offset 表示下で描かれたかだけ。
+遅延 materialize 方式では、wrap-shift 自体はピクセル履歴から外れる。ピクセル履歴で管理するのは、各レイヤーの `pixelOffset` と、書き込み command がどの document offset で実行されたかである。
 
-### 概念
+### 描画API
 
-現行方式では「タイル原点を移動して編集する」という UI 操作が、「全レイヤーのピクセルを変更する」というデータ操作になる。
+完全な document offset 方式では、描画直前に visual -> physical 変換、境界分割、stamp 複製描画が必要になる。
 
-設定値方式では UI 操作とデータ操作を分離できる。wrapOffset は viewport / document presentation に近い値であり、Layer canvas は canonical storage として安定する。
-
-## 境界分割の必要性
-
-visual 座標では連続した線でも、`visual -> physical` 変換後に canvas の端でジャンプする場合がある。
-
-例:
-
-```text
-layerWidth = 1024
-wrapOffset.x = 512
-visual x = 510 -> physical x = 1022
-visual x = 514 -> physical x = 2
-```
-
-この2点をそのまま描画すると、canvas 全幅を横切る線になる。したがって、描画直前に wrap 境界を検出し、stroke segment を分割する必要がある。
-
-分割判定は、変換後 physical の距離閾値だけに頼るより、visual 座標に offset を適用した unwrapped 値が `width` / `height` の倍数を跨いだかで判定する方が安全。直線ツールなど長い線分でも誤判定しにくい。
-
-Expand 後のコピーについても、canonical 範囲外へ出た点を modulo で戻すなら境界分割が必要になる。Expand は現状ほぼ等距離変換なので閾値分割でも成立しやすいが、将来スケール付き Expand を入れるなら前提が崩れるため、可能なら同じ unwrapped 情報を持って分割できる設計が望ましい。
+遅延 materialize 方式では、書き込み前に対象 layer canvas を現在の document offset に揃えるため、`appendToCommittedLayer()` / `renderPendingLayer()` / `renderBrushStroke()` は現行の座標系を維持できる。
 
 ## パッケージ責務の候補
 
 ### engine
 
-担当すべきもの:
+担当候補:
 
 - `WrapOffset` 型
-- visual / physical 変換ヘルパー
-- wrap 境界分割
-- `renderLayers()` の wrapOffset 表示
-- `appendToCommittedLayer()` / `renderPendingLayer()` での wrap-aware 描画、またはそのための小さな下位ヘルパー
+- offset 差分の正規化ヘルパー
+- `materializeLayerOffset(layer, fromOffset, toOffset)` または `ensureLayerOffset(...)`
+- offset 差分付きで layer canvas を表示・読み取り用 canvas へ描画する helper
+- `renderLayers()` の offset-aware 表示
 
-engine に寄せる理由は、最終的な問題が「Layer canvas へどの座標で焼くか」「canvas をどう表示するか」だから。
+engine に寄せる理由は、最終的な問題が「Layer canvas をどの offset 状態として扱うか」「canvas をどう表示するか」だから。
 
 ### input
 
-`screenToLayer()` は wrapOffset 非依存のまま維持するのがよい。
+`screenToLayer()` は wrapOffset 非依存のまま維持する。
 
-input package に visual -> physical 変換を置く案もあり得るが、FilterPipeline 前に使われやすくなり、不連続座標を smoothing に渡す誤用を誘発する。置くとしても名前で `visualToPhysicalAfterFiltering` のような利用タイミングを強く示す必要がある。
+input package に document offset や layer pixelOffset を入れない。FilterPipeline はユーザーが見ている visual 座標を扱う。
 
 ### stroke
 
-`StrokeCommand` に描画時の `wrapOffset` を保存する責務がある。
+stroke は replay 決定性のため、書き込み command と offset metadata の関係を持つ必要がある。
 
-replay では、保存済み input points を FilterPipeline に通し、保存済み wrapOffset で physical 描画する。これにより、document の現在 offset と過去 stroke の描画結果が分離される。
+候補:
+
+- 各 pixel-writing command に `documentOffset` を追加する
+- `Checkpoint` に `pixelOffset` を追加する
+- rebuild 時に command の `documentOffset` へ対象 layer を materialize してから replay する
+
+外部APIでは materialize をユーザー操作として露出しない。内部的には compound operation として扱う。
 
 ### react
 
-`usePaintEngine` が document-level `wrapOffset` state を持つのが自然。
+`usePaintEngine` が document-level `wrapOffset` state と layer-level `pixelOffset` state を管理するのが自然。
 
-`onWrapShift(dx, dy)` は全レイヤーを書き換えず、`wrapOffset` を更新して renderVersion を進めるだけにする。`onResetOffset()` も物理逆シフトではなく `{ x: 0, y: 0 }` への設定変更になる。
+`onWrapShift(dx, dy)` は全レイヤーを書き換えず、document `wrapOffset` を更新して renderVersion を進めるだけにする。
 
-ストローク開始時には現在の `wrapOffset` を session にキャプチャする。ストローク中に offset が変わっても、その stroke の描画 offset は固定する。
+stroke / clear / transform / merge などの書き込み前に、対象 layer だけ `beginHistoryMutation()` -> materialize -> 書き込みの順で処理する。
 
-## 注意点
+## 読み取り系の注意点
 
-### 1. 既存ドキュメントとの過去案
+読み取り系は `document.wrapOffset - layer.pixelOffset` を見て、必要な場合だけ透過的に offset を反映する。
 
-`plans/2026-02-07-16-21_wrap-offset.md` に「表示オフセット + 入力変換 + 分割」案が残っている。過去には visual / physical 二重化の波及が大きいことを理由にピクセルシフト方式が採用された。
+対象候補:
 
-今回の検討では、履歴管理の複雑化が顕在化しているため、当時のトレードオフは再評価に値する。
+- `renderLayers`
+- pattern preview / visual export
+- color pick
+- duplicate-layer
+- merge-layer-down
+- transform-layer preview / commit
+- content bounds
 
-ただし、過去案の「screenToLayer 後に applyWrapOffset して FilterPipeline へ渡す」流れは見直した方がよい。FilterPipeline は visual 座標で動かし、描画直前に physical 変換する方がシーム跨ぎに強い。
+ただし、すべてを同時に offset-aware にする必要はない。Phase 1 では「どのAPIが visual 読み取りで、どのAPIが raw pixel 読み取りか」を明確に分ける。
 
-### 2. PNG / ドキュメント保存
+例:
 
-Layer canvas は canonical storage なので、document export は基本的に physical canvas をそのまま保存すればよい。
+- visual 表示・ユーザーが見る結果を扱う API は offset-aware
+- low-level pixel API は raw canvas を扱い、呼び出し側が事前に materialize する
 
-ただし、ユーザーが見ている offset 済み表示をそのまま画像として export する機能がある場合は、export API に「canonical export」か「current visual export」かの区別が必要になる。
-
-### 3. reset offset の意味
+## reset offset の意味
 
 現行の `onResetOffset()` は全レイヤーを逆シフトして cumulative offset を0に戻す。
 
-設定値方式では reset は単に表示 offset を0に戻すだけになる。見た目は変わるが、ピクセルは動かない。これは本来の「表示原点を戻す」に近い。
+遅延 materialize 方式では reset は document `wrapOffset` を `{ x: 0, y: 0 }` に戻すだけでよい。各 layer の `pixelOffset` はそのまま残り、表示時に差分が反映される。
 
-もし「現在の見た目を canonical に焼き込む」操作が必要なら、それは wrapOffset reset ではなく別名の destructive command として残すべき。
+もし「現在の見た目を全レイヤーへ焼き込んで offset 0 に揃える」操作が必要なら、それは reset ではなく別名の destructive normalize / bake 操作として扱う。
 
-### 4. 既存 `wrapShiftLayer`
+## PNG / ドキュメント保存
 
-`wrapShiftLayer()` は完全に不要になるとは限らない。
+保存形式には document `wrapOffset` と各 layer の `pixelOffset` を含める必要がある。
 
-用途を分けるのがよい。
+PNG など単一画像 export は仕様を分ける。
 
-- destructive pixel operation: `wrapShiftLayer`
-- non-destructive document presentation: `wrapOffset`
+- raw export: layer canvas の実ピクセルをそのまま出す
+- visual export: document `wrapOffset` を反映した見た目を出す
 
-ただし、UI の wrap-shift ツールは後者へ移行し、履歴の DrawCommand からは外す。
+ユーザーが通常期待する export は visual export と考えられる。
+
+## 未決事項
+
+- `pixelOffset` を `LayerMeta` に入れるか、react 側の layer entry state に持たせるか
+- `Checkpoint` に `pixelOffset` をどう保存するか
+- pixel-writing command に `documentOffset` を直接持たせるか、settings timeline から復元するか
+- wrap-shift の document offset 変更を Undo 対象にするか
+- `renderLayers()` に offset を渡す外部IF
+- duplicate / merge / transform / content bounds を raw API と visual API にどう分けるか
+- 保存済みドキュメントの import 時、既存ファイルを `{ wrapOffset: 0, pixelOffset: 0 }` として扱う migration 方針
 
 ## 暫定推奨
 
 実装へ進めるなら、次の方針が最も筋がよい。
 
-1. document-level `wrapOffset` を正規概念として追加する
-2. UI の wrap-shift ツールは `wrapOffset` 更新だけにする
+1. document-level `wrapOffset` と layer-level `pixelOffset` を正規概念として追加する
+2. UI の wrap-shift ツールは document `wrapOffset` 更新だけにする
 3. `screenToLayer()` と FilterPipeline は visual 座標のまま維持する
-4. committed / pending layer に焼く直前だけ、ストローク開始時にキャプチャした `wrapOffset` で visual -> physical 変換する
-5. physical wrap 境界を描画直前に分割する
-6. `StrokeCommand` には描画時の `wrapOffset` を保存する
-7. `wrap-shift` DrawCommand は新仕様では廃止し、必要なら settings command として別扱いにする
+4. `renderLayers()` は `wrapOffset - pixelOffset` の差分で layer を表示する
+5. pixel-writing operation の直前に対象 layer だけ document `wrapOffset` へ materialize する
+6. materialize は独立したユーザー履歴にせず、後続の書き込み command に内包する
+7. 強制的な全レイヤー pre-write checkpoint は廃止し、実書き込み対象レイヤーだけ checkpoint coverage を要求する
+8. checkpoint には layer の `pixelOffset` も保存する
+9. replay は checkpoint の `pixelOffset` から開始し、各書き込み command の document offset へ materialize してから描画する
 
-この方針なら、wrap-shift の負荷と履歴仕様の複雑さを同時に下げられる。難所は境界分割と pending / Expand / パターンプレビューの整合性であり、ここを Phase 1 の API 設計で明確化する必要がある。
+この方針なら、wrap-shift の負荷と全レイヤー checkpoint の重さを下げつつ、ストローク・スタンプ・Expand の描画器は現行の単純さを保てる。難所は描画器ではなく、offset metadata、読み取り facade、replay の責務分離に移る。
