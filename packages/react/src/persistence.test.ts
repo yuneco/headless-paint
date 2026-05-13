@@ -206,7 +206,11 @@ describe("persistence", () => {
   });
 
   it("exports and imports document snapshot", async () => {
-    const layer = createLayer(8, 8, { name: "Layer 1", visible: true });
+    const layer = createLayer(8, 8, {
+      name: "Layer 1",
+      visible: true,
+      alphaLocked: true,
+    });
     layer.ctx.fillStyle = "rgba(255,0,0,1)";
     layer.ctx.fillRect(2, 2, 2, 2);
 
@@ -222,6 +226,7 @@ describe("persistence", () => {
     const imported = await importPaintDocument(snapshot);
     expect(imported).not.toBeNull();
     expect(imported?.layers).toHaveLength(1);
+    expect(imported?.layers[0]?.meta.alphaLocked).toBe(true);
 
     const imageData = imported?.layers[0]?.imageData;
     expect(imageData).toBeDefined();

@@ -38,6 +38,7 @@ interface SidebarPanelProps {
   onAddLayer: () => void;
   onRemoveLayer: (id: string) => void;
   onToggleVisibility: (id: string) => void;
+  onToggleAlphaLock: (id: string) => void;
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
@@ -120,6 +121,7 @@ interface LayersSectionProps {
   onAddLayer: () => void;
   onRemoveLayer: (id: string) => void;
   onToggleVisibility: (id: string) => void;
+  onToggleAlphaLock: (id: string) => void;
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
@@ -141,6 +143,7 @@ const LayersSection = memo(function LayersSection({
   onAddLayer,
   onRemoveLayer,
   onToggleVisibility,
+  onToggleAlphaLock,
   onToggleBackground,
   onMoveUp,
   onMoveDown,
@@ -166,6 +169,7 @@ const LayersSection = memo(function LayersSection({
         onAddLayer={onAddLayer}
         onRemoveLayer={onRemoveLayer}
         onToggleVisibility={onToggleVisibility}
+        onToggleAlphaLock={onToggleAlphaLock}
         onToggleBackground={onToggleBackground}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}
@@ -239,6 +243,7 @@ function SidebarPanelComponent({
   onAddLayer,
   onRemoveLayer,
   onToggleVisibility,
+  onToggleAlphaLock,
   onToggleBackground,
   onMoveUp,
   onMoveDown,
@@ -279,6 +284,7 @@ function SidebarPanelComponent({
         onAddLayer={onAddLayer}
         onRemoveLayer={onRemoveLayer}
         onToggleVisibility={onToggleVisibility}
+        onToggleAlphaLock={onToggleAlphaLock}
         onToggleBackground={onToggleBackground}
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}

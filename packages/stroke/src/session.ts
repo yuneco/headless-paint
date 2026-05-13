@@ -163,6 +163,7 @@ export function endStrokeSession(
   layerId: string,
   inputPoints: readonly InputPoint[],
   filterPipeline: FilterPipelineConfig,
+  alphaLocked = false,
 ): StrokeCommand | null {
   // 有効なストローク（1点以上）の場合のみコマンドを生成
   const totalPoints = state.allCommitted.length + state.currentPending.length;
@@ -178,6 +179,7 @@ export function endStrokeSession(
     expand: state.expand,
     style: state.style,
     brushSeed: 0,
+    alphaLocked,
     timestamp: Date.now(),
   };
 }
@@ -192,6 +194,7 @@ export function createStrokeCommand(
   expand: ExpandConfig,
   style: StrokeStyle,
   brushSeed = 0,
+  alphaLocked = false,
 ): StrokeCommand {
   return {
     type: "stroke",
@@ -201,6 +204,7 @@ export function createStrokeCommand(
     expand,
     style,
     brushSeed,
+    alphaLocked,
     timestamp: Date.now(),
   };
 }

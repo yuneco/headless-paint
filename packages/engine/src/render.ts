@@ -91,13 +91,18 @@ export function renderLayers(
     const hasPending = overlay && layer.id === overlay.targetLayerId;
     const hasTransformPreview =
       transformPreview && layer.id === transformPreview.layerId;
+    const shouldMaskPending =
+      !!hasPending &&
+      layer.meta.alphaLocked &&
+      isSourceOverComposite(overlay.layer.meta.compositeOperation);
     const needsPreComposite =
       hasPending &&
       (layer.meta.opacity < 1 ||
         (layer.meta.compositeOperation !== undefined &&
           layer.meta.compositeOperation !== "source-over") ||
         (overlay.layer.meta.compositeOperation !== undefined &&
-          overlay.layer.meta.compositeOperation !== "source-over"));
+          overlay.layer.meta.compositeOperation !== "source-over") ||
+        shouldMaskPending);
 
     // ビュー変換にレイヤーローカル変換を合成: viewTransform * layerTransform
     let effectiveTransform: mat3;
@@ -134,7 +139,9 @@ export function renderLayers(
       }
 
       workLayer.ctx.globalAlpha = 1;
-      if (overlay.layer.meta.compositeOperation) {
+      if (shouldMaskPending) {
+        workLayer.ctx.globalCompositeOperation = "source-atop";
+      } else if (overlay.layer.meta.compositeOperation) {
         workLayer.ctx.globalCompositeOperation =
           overlay.layer.meta.compositeOperation;
       }
@@ -214,4 +221,12 @@ export function renderLayers(
       }
     }
   }
+}
+
+function isSourceOverComposite(
+  compositeOperation: GlobalCompositeOperation | undefined,
+): boolean {
+  return (
+    compositeOperation === undefined || compositeOperation === "source-over"
+  );
 }

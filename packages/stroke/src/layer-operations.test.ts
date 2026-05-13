@@ -27,6 +27,8 @@ vi.mock("@headless-paint/engine", () => ({
       target.meta.name = options?.resultMeta?.name ?? target.meta.name;
       target.meta.visible = options?.resultMeta?.visible ?? target.meta.visible;
       target.meta.opacity = options?.resultMeta?.opacity ?? 1;
+      target.meta.alphaLocked =
+        options?.resultMeta?.alphaLocked ?? target.meta.alphaLocked;
       target.meta.compositeOperation =
         options?.resultMeta?.compositeOperation ?? "source-over";
     },
@@ -40,7 +42,7 @@ function createMockLayer(id: string, meta?: Partial<LayerMeta>): Layer {
     height: 4,
     canvas: {} as OffscreenCanvas,
     ctx: {} as OffscreenCanvasRenderingContext2D,
-    meta: { name: id, visible: true, opacity: 1, ...meta },
+    meta: { name: id, visible: true, opacity: 1, alphaLocked: false, ...meta },
   };
 }
 
@@ -78,7 +80,12 @@ describe("layer operations", () => {
       insertIndex: 1,
       width: 4,
       height: 4,
-      meta: { name: "Recorded", visible: true, opacity: 1 },
+      meta: {
+        name: "Recorded",
+        visible: true,
+        opacity: 1,
+        alphaLocked: false,
+      },
       timestamp: 1000,
     };
 
@@ -106,8 +113,18 @@ describe("layer operations", () => {
       targetLayerId: target.id,
       sourceIndex: 1,
       targetIndex: 0,
-      sourceMeta: { name: "Source", visible: true, opacity: 0.8 },
-      targetMetaBefore: { name: "Target", visible: true, opacity: 0.5 },
+      sourceMeta: {
+        name: "Source",
+        visible: true,
+        opacity: 0.8,
+        alphaLocked: false,
+      },
+      targetMetaBefore: {
+        name: "Target",
+        visible: true,
+        opacity: 0.5,
+        alphaLocked: false,
+      },
     });
   });
 

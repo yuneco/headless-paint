@@ -4,6 +4,7 @@ const DEFAULT_META: LayerMeta = {
   name: "Layer",
   visible: true,
   opacity: 1,
+  alphaLocked: false,
 };
 
 let layerIdCounter = 0;

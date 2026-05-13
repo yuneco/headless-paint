@@ -36,6 +36,7 @@ export interface StrokeCompleteData {
   readonly expandConfig: ExpandConfig;
   readonly strokeStyle: StrokeStyle;
   readonly brushSeed: number;
+  readonly alphaLocked: boolean;
   readonly totalPoints: number;
 }
 
@@ -77,6 +78,7 @@ interface SessionInternal {
   compiledExpand: CompiledExpand;
   compiledFilterPipeline: CompiledFilterPipeline;
   layerId: string;
+  alphaLocked: boolean;
   brushState?: BrushRenderState;
   brushSeed: number;
   samplingLayer?: Layer;
@@ -236,6 +238,7 @@ export function useStrokeSession(
         compiledExpand: compiled,
         compiledFilterPipeline: activePipeline,
         layerId: currentLayer.id,
+        alphaLocked: currentLayer.meta.alphaLocked,
         brushState: initialBrushState,
         brushSeed,
         samplingLayer,
@@ -251,6 +254,7 @@ export function useStrokeSession(
           strokeResult.renderUpdate.committedOverlapCount,
           initialBrushState,
           samplingLayer,
+          sessionRef.current.alphaLocked,
         );
         sessionRef.current.brushState = brushState;
       }
@@ -315,6 +319,7 @@ export function useStrokeSession(
           strokeResult.renderUpdate.committedOverlapCount,
           sessionRef.current.brushState,
           sessionRef.current.samplingLayer,
+          sessionRef.current.alphaLocked,
         );
         sessionRef.current.brushState = brushState;
       }
@@ -362,6 +367,7 @@ export function useStrokeSession(
       compiledExpand: sessionExpand,
       brushSeed,
       samplingLayer,
+      alphaLocked,
     } = sessionRef.current;
 
     const currentLayer = layerRef.current;
@@ -383,6 +389,7 @@ export function useStrokeSession(
       finalStrokeResult.renderUpdate.committedOverlapCount,
       sessionRef.current.brushState,
       samplingLayer,
+      alphaLocked,
     );
     sessionRef.current.brushState = brushState;
 
@@ -395,6 +402,7 @@ export function useStrokeSession(
         expandConfig: strokeSession.expand,
         strokeStyle: style,
         brushSeed,
+        alphaLocked,
         totalPoints,
       });
     }
@@ -431,6 +439,7 @@ export function useStrokeSession(
       0,
       sessionRef.current.brushState,
       sessionRef.current.samplingLayer,
+      sessionRef.current.alphaLocked,
     );
     sessionRef.current.brushState = brushState;
 

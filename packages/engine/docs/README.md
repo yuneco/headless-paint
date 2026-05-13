@@ -49,7 +49,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `PressureDynamics` | 筆圧をブラシサイズ/flowへ反映する強さ `{ size, flow }` |
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
 | `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore, updateDistancePx }` |
-| `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, compositeOperation? }` |
+| `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, alphaLocked, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
@@ -135,7 +135,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `appendToCommittedLayer(layer, points, style, expand, overlapCount?, brushState?, sourceLayer?)` | 確定レイヤーに追加描画。`BrushRenderState` を返す |
+| `appendToCommittedLayer(layer, points, style, expand, overlapCount?, brushState?, sourceLayer?, alphaLocked?)` | 確定レイヤーに追加描画。`alphaLocked` 有効時の通常描画は既存 alpha に制限する。`BrushRenderState` を返す |
 | `renderPendingLayer(layer, points, style, expand, brushState?, sourceLayer?, previewBaseLayer?)` | 作業レイヤーを再描画。混色有効時は `sourceLayer` を背景転写元にできる |
 | `composeLayers(target, layers, transform?)` | レイヤーを合成 |
 

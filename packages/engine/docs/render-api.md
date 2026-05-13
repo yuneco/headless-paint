@@ -107,9 +107,13 @@ function renderLayers(
 3. 各レイヤーの `meta.visible` が false のものはスキップ
 4. `pendingOverlay` が指定されており、対象レイヤーにプレ合成が必要な場合:
    - workLayer に committed + pending をプレ合成（pending は `meta.compositeOperation` で合成）
+   - target committed レイヤーの `meta.alphaLocked` が `true` かつ pending が通常描画の場合、pending を committed の alpha でマスクしてから合成
    - workLayer を committed の `meta.opacity` / `meta.compositeOperation` で描画
 5. プレ合成不要な場合は committed → pending の順でフラット描画（従来と同等）
 6. 各レイヤーの `meta.opacity` を `globalAlpha` に、`meta.compositeOperation` を `globalCompositeOperation` に適用
+
+**alpha lock preview**:
+`renderPendingLayer` は alpha lock を評価せず pending pixels を作る。`renderLayers` は `pendingOverlay.targetLayerId` の committed レイヤーが `meta.alphaLocked` の場合、通常描画の pending preview を committed alpha でマスクして表示する。消しゴム preview は従来通り pending の `meta.compositeOperation = "destination-out"` によるプレ合成で表示される。
 
 **使用例**:
 ```typescript

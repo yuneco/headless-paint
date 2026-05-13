@@ -7,8 +7,10 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Lock,
   Merge,
   Trash2,
+  Unlock,
 } from "lucide-react";
 import { memo } from "react";
 
@@ -42,6 +44,7 @@ interface LayerPanelProps {
   onAddLayer: () => void;
   onRemoveLayer: (id: string) => void;
   onToggleVisibility: (id: string) => void;
+  onToggleAlphaLock: (id: string) => void;
   onToggleBackground: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
@@ -63,6 +66,7 @@ function LayerPanelComponent({
   onAddLayer,
   onRemoveLayer,
   onToggleVisibility,
+  onToggleAlphaLock,
   onToggleBackground,
   onMoveUp,
   onMoveDown,
@@ -248,6 +252,35 @@ function LayerPanelComponent({
                   <Eye size={14} />
                 ) : (
                   <EyeOff size={14} />
+                )}
+              </button>
+
+              {/* Alpha lock toggle */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleAlphaLock(entry.id);
+                }}
+                style={{
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  padding: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  opacity: entry.committedLayer.meta.alphaLocked ? 1 : 0.35,
+                }}
+                title={
+                  entry.committedLayer.meta.alphaLocked
+                    ? "Unlock transparent pixels"
+                    : "Lock transparent pixels"
+                }
+              >
+                {entry.committedLayer.meta.alphaLocked ? (
+                  <Lock size={12} />
+                ) : (
+                  <Unlock size={12} />
                 )}
               </button>
 

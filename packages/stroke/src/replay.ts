@@ -80,6 +80,7 @@ function replayStrokeCommand(
     0,
     brushState,
     sourceLayer,
+    command.alphaLocked,
   );
 }
 
@@ -99,12 +100,14 @@ function setLayerMeta(
     readonly name: string;
     readonly visible: boolean;
     readonly opacity: number;
+    readonly alphaLocked: boolean;
     readonly compositeOperation?: GlobalCompositeOperation;
   },
 ): void {
   layer.meta.name = meta.name;
   layer.meta.visible = meta.visible;
   layer.meta.opacity = meta.opacity;
+  layer.meta.alphaLocked = meta.alphaLocked;
   layer.meta.compositeOperation = meta.compositeOperation;
 }
 

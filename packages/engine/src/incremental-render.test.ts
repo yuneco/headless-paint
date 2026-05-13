@@ -1,3 +1,4 @@
+import { mat3 } from "gl-matrix";
 import { describe, expect, it } from "vitest";
 import { compileExpand } from "./expand";
 import {
@@ -6,6 +7,7 @@ import {
   renderPendingLayer,
 } from "./incremental-render";
 import { clearLayer, createLayer, getPixel } from "./layer";
+import { renderLayers } from "./render";
 import type { ExpandConfig, PendingOverlay, Point, StrokeStyle } from "./types";
 import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "./types";
 
@@ -107,6 +109,69 @@ describe("appendToCommittedLayer", () => {
     appendToCommittedLayer(layer2, points, style, compiled, 0);
 
     expect(getPixel(layer1, 50, 50)).toEqual(getPixel(layer2, 50, 50));
+  });
+
+  it("should constrain normal drawing to existing alpha when alpha locked", () => {
+    const layer = createLayer(100, 100, { alphaLocked: true });
+    layer.ctx.fillStyle = "rgba(0, 0, 255, 0.5)";
+    layer.ctx.fillRect(50, 50, 1, 1);
+
+    const style: StrokeStyle = {
+      ...createTestStyle(),
+      color: { r: 255, g: 0, b: 0, a: 255 },
+      lineWidth: 6,
+    };
+    const compiled = createNoneExpand();
+
+    appendToCommittedLayer(
+      layer,
+      [
+        { x: 50, y: 45 },
+        { x: 50, y: 65 },
+      ],
+      style,
+      compiled,
+      0,
+      undefined,
+      undefined,
+      true,
+    );
+
+    const existing = getPixel(layer, 50, 50);
+    const transparent = getPixel(layer, 50, 60);
+    expect(existing.r).toBe(255);
+    expect(existing.a).toBeGreaterThanOrEqual(127);
+    expect(existing.a).toBeLessThanOrEqual(128);
+    expect(transparent.a).toBe(0);
+  });
+
+  it("should erase normally when alpha locked", () => {
+    const layer = createLayer(100, 100, { alphaLocked: true });
+    layer.ctx.fillStyle = "rgba(0, 0, 255, 1)";
+    layer.ctx.fillRect(45, 45, 10, 10);
+
+    const style: StrokeStyle = {
+      ...createTestStyle(),
+      compositeOperation: "destination-out",
+      lineWidth: 6,
+    };
+    const compiled = createNoneExpand();
+
+    appendToCommittedLayer(
+      layer,
+      [
+        { x: 50, y: 45 },
+        { x: 50, y: 55 },
+      ],
+      style,
+      compiled,
+      0,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(getPixel(layer, 50, 50).a).toBeLessThan(255);
   });
 });
 
@@ -375,6 +440,51 @@ describe("composeLayers", () => {
     expect(erasedData[3]).toBeLessThan(unerasedData[3]);
   });
 
+  it("should mask pendingOverlay with committed alpha when alpha locked", () => {
+    const committed = createLayer(100, 100, {
+      name: "Committed",
+      alphaLocked: true,
+    });
+    const pending = createLayer(100, 100, { name: "Pending" });
+    const workLayer = createLayer(100, 100, { name: "Work" });
+    committed.ctx.fillStyle = "rgba(0, 0, 255, 1)";
+    committed.ctx.fillRect(50, 50, 1, 1);
+
+    const style = { ...createTestStyle(), lineWidth: 6 };
+    const compiled = createNoneExpand();
+    appendToCommittedLayer(
+      pending,
+      [
+        { x: 40, y: 50 },
+        { x: 80, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    const overlay: PendingOverlay = {
+      layer: pending,
+      targetLayerId: committed.id,
+      workLayer,
+    };
+    const targetCanvas = new OffscreenCanvas(100, 100);
+    const targetCtx = targetCanvas.getContext("2d");
+    if (!targetCtx) throw new Error("Failed to get context");
+
+    composeLayers(
+      targetCtx as unknown as CanvasRenderingContext2D,
+      [committed],
+      undefined,
+      overlay,
+    );
+
+    const maskedIn = targetCtx.getImageData(50, 50, 1, 1).data;
+    const maskedOut = targetCtx.getImageData(70, 50, 1, 1).data;
+    expect(maskedIn[0]).toBe(255);
+    expect(maskedIn[3]).toBe(255);
+    expect(maskedOut[3]).toBe(0);
+  });
+
   it("should skip pre-composite when all settings are normal", () => {
     // opacity=1, compositeOperation=undefined, pending compositeOperation=undefined
     const committed = createLayer(100, 100, { name: "Committed" });
@@ -478,5 +588,46 @@ describe("composeLayers", () => {
 
     const data = targetCtx.getImageData(50, 50, 1, 1).data;
     expect(data[3]).toBeGreaterThan(0);
+  });
+
+  it("renderLayers should mask pendingOverlay with committed alpha when alpha locked", () => {
+    const committed = createLayer(100, 100, {
+      name: "Committed",
+      alphaLocked: true,
+    });
+    const pending = createLayer(100, 100, { name: "Pending" });
+    const workLayer = createLayer(100, 100, { name: "Work" });
+    committed.ctx.fillStyle = "rgba(0, 0, 255, 1)";
+    committed.ctx.fillRect(50, 50, 1, 1);
+
+    const style = { ...createTestStyle(), lineWidth: 6 };
+    const compiled = createNoneExpand();
+    appendToCommittedLayer(
+      pending,
+      [
+        { x: 40, y: 50 },
+        { x: 80, y: 50 },
+      ],
+      style,
+      compiled,
+    );
+
+    const targetCanvas = new OffscreenCanvas(100, 100);
+    const targetCtx = targetCanvas.getContext("2d");
+    if (!targetCtx) throw new Error("Failed to get context");
+
+    renderLayers([committed], targetCtx, mat3.create(), {
+      pendingOverlay: {
+        layer: pending,
+        targetLayerId: committed.id,
+        workLayer,
+      },
+    });
+
+    const maskedIn = targetCtx.getImageData(50, 50, 1, 1).data;
+    const maskedOut = targetCtx.getImageData(70, 50, 1, 1).data;
+    expect(maskedIn[0]).toBe(255);
+    expect(maskedIn[3]).toBe(255);
+    expect(maskedOut[3]).toBe(0);
   });
 });

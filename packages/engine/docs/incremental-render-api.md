@@ -67,6 +67,7 @@ function appendToCommittedLayer(
   overlapCount?: number,
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
+  alphaLocked?: boolean,
 ): BrushRenderState
 ```
 
@@ -80,17 +81,23 @@ function appendToCommittedLayer(
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
 | `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。スタンプブラシの `accumulatedDistance` と `tipCanvas`、混色有効時の分岐別 `colorBuffer` / `mixedCanvas` を含む。`round-pen` では省略可 |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
+| `alphaLocked` | `boolean` | - | 通常描画を既存 alpha に制限するか。省略時は `layer.meta.alphaLocked` を使用する |
 
 **動作**:
 1. pointsを`expandStrokePoints`で展開（pressure保持）
 2. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画。混色有効時は展開ストロークごとに独立した `colorBuffer` / `mixedCanvas` を距離ベースで更新し、`sourceLayer` を指定した場合はストローク開始時のレイヤー状態から背景色を拾う
-3. 既存の描画は保持される（追加描画のみ）
-4. 更新された `BrushRenderState` を返す（`accumulatedDistance` が進む）
+3. `alphaLocked` が `true` かつ通常描画の場合は `source-atop` で描画し、既存 alpha のある範囲にだけ反映する
+4. 既存の描画は保持される（追加描画のみ）
+5. 更新された `BrushRenderState` を返す（`accumulatedDistance` が進む）
 
 **戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。スタンプブラシでは `accumulatedDistance` と `stampCount` が更新されている。`round-pen` では `{ accumulatedDistance: 0, tipCanvas: null, seed: 0, stampCount: 0 }` を返す。
 
 **消しゴムモードの動作**:
 `style.compositeOperation` が `"destination-out"` の場合、committedレイヤーの既存ピクセルが直接消去される。
+`alphaLocked` が `true` の場合も消しゴムは alpha lock の制約対象外で、従来通り `destination-out` として動作する。
+
+**履歴 replay との関係**:
+ライブ描画では `alphaLocked` 省略時に `layer.meta.alphaLocked` を参照する。履歴 replay では現在の `LayerMeta` ではなく、`StrokeCommand.alphaLocked` に保存された値を明示的に渡す。これにより、後からレイヤーの alpha lock 設定を変更しても過去ストロークの replay 結果は変わらない。
 
 **使用例**:
 ```typescript
@@ -141,6 +148,8 @@ function renderPendingLayer(
 1. レイヤーをクリア
 2. pointsを`expandStrokePoints`で展開（pressure保持）
 3. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画（`compositeOperation` は適用しない、常に `source-over`）。混色有効時は `brushState` の `colorBuffer` / `mixedCanvas` を直接汚さないよう、pending 描画用に複製した状態を使う
+
+`renderPendingLayer` は alpha lock を評価しない。alpha lock 有効時の live preview は `renderLayers` / `composeLayers` の pending overlay 合成で committed レイヤーの alpha を使ってマスクする。pending レイヤー自体は従来通り、未確定点の pixels だけを保持する。
 
 **混色プレビュー**:
 混色ブラシでは、ストローク開始時点の committed レイヤーをコピーした `sourceLayer` を渡す。これにより、透明領域へ移動した後に同一ストローク内で描いた dab を背景として拾い続けることを避け、`restore` による元色への復元を安定させる。React 統合では pending レイヤーに pending 差分のみを描画し、通常の `source-over` 合成で committed レイヤーと重ねる。`previewBaseLayer` によるフルレイヤーコピーは Safari で極端に遅くなるため、通常のライブ描画では使用しない。
@@ -200,6 +209,8 @@ interface ViewTransform {
 4. `meta.opacity` を `globalAlpha` に適用
 5. `meta.compositeOperation` が設定されていれば `globalCompositeOperation` に適用
 6. `drawImage` でレイヤーの内容を転写
+
+pending overlay の target レイヤーで `meta.alphaLocked` が `true` かつ pending が通常描画の場合、プレ合成時に pending を target committed レイヤーの alpha でマスクする。初回実装では `PendingOverlay.workLayer` 全体を使う。dirty rect などの転写範囲最適化は、性能測定後に必要性を判断する。
 
 **使用例**:
 ```typescript

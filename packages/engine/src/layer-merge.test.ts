@@ -8,6 +8,7 @@ describe("mergeLayerDown", () => {
       name: "Target",
       visible: false,
       opacity: 1,
+      alphaLocked: true,
       compositeOperation: "source-over",
     });
     const source = createLayer(4, 4, {
@@ -27,6 +28,7 @@ describe("mergeLayerDown", () => {
       name: "Target",
       visible: false,
       opacity: 1,
+      alphaLocked: true,
       compositeOperation: "source-over",
     });
   });

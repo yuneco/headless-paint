@@ -139,6 +139,8 @@ function rebuildLayerFromHistory<TCustom = never>(
 
 対象レイヤーの `currentIndex` 以下で最も新しい checkpoint を復元し、そこから `currentIndex` まで該当レイヤーの draw command と `wrap-shift` を replay する。checkpoint がなく安全に rebuild できない場合はレイヤーを変更せず、`{ ok: false, reason: "missing-checkpoint", layerId }` を返す。通常の `beginHistoryMutation()` / `pushCommand()` フローではこの結果に到達しない。
 
+stroke replay では `StrokeCommand.alphaLocked` を使って描画し、現在の `LayerMeta.alphaLocked` は参照しない。`LayerMeta.alphaLocked` を後から切り替えても、過去 stroke の rebuild 結果は変わらない。
+
 ## getHistoryMetrics
 
 ```typescript

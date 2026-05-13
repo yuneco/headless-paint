@@ -232,6 +232,25 @@ describe("session", () => {
       expect(command?.inputPoints).toEqual(inputPoints);
       expect(command?.style).toEqual(style);
       expect(command?.brushSeed).toBe(0);
+      expect(command?.alphaLocked).toBe(false);
+    });
+
+    it("should store alpha lock state", () => {
+      const filterOutput = {
+        committed: [{ x: 10, y: 20, timestamp: 1000 }],
+        pending: [],
+      };
+      const result = startStrokeSession(filterOutput, style, expandConfig);
+
+      const command = endStrokeSession(
+        result.state,
+        "layer_1",
+        [{ x: 10, y: 20, timestamp: 1000 }],
+        filterPipeline,
+        true,
+      );
+
+      expect(command?.alphaLocked).toBe(true);
     });
 
     it("should return StrokeCommand for single-point stroke (1 point)", () => {
@@ -295,7 +314,23 @@ describe("session", () => {
       expect(command.expand).toEqual(expandConfig);
       expect(command.style).toEqual(style);
       expect(command.brushSeed).toBe(0);
+      expect(command.alphaLocked).toBe(false);
       expect(typeof command.timestamp).toBe("number");
+    });
+
+    it("should create stroke command with alpha lock state", () => {
+      const command = createStrokeCommand(
+        "layer_1",
+        [{ x: 10, y: 20, timestamp: 1000 }],
+        filterPipeline,
+        expandConfig,
+        style,
+        123,
+        true,
+      );
+
+      expect(command.brushSeed).toBe(123);
+      expect(command.alphaLocked).toBe(true);
     });
   });
 
@@ -322,7 +357,12 @@ describe("session", () => {
 
   describe("createAddLayerCommand", () => {
     it("should create add-layer command with all fields", () => {
-      const meta = { name: "Layer 2", visible: true, opacity: 1 };
+      const meta = {
+        name: "Layer 2",
+        visible: true,
+        opacity: 1,
+        alphaLocked: false,
+      };
       const command = createAddLayerCommand("layer_2", 1, 800, 600, meta);
 
       expect(command.type).toBe("add-layer");
@@ -337,7 +377,12 @@ describe("session", () => {
 
   describe("createRemoveLayerCommand", () => {
     it("should create remove-layer command with layerId, removedIndex, and meta", () => {
-      const meta = { name: "My Layer", visible: true, opacity: 0.8 };
+      const meta = {
+        name: "My Layer",
+        visible: true,
+        opacity: 0.8,
+        alphaLocked: true,
+      };
       const command = createRemoveLayerCommand("layer_1", 0, meta);
 
       expect(command.type).toBe("remove-layer");
@@ -362,7 +407,12 @@ describe("session", () => {
 
   describe("createDuplicateLayerCommand", () => {
     it("should create duplicate-layer command with recorded layer id", () => {
-      const meta = { name: "Copy", visible: true, opacity: 1 };
+      const meta = {
+        name: "Copy",
+        visible: true,
+        opacity: 1,
+        alphaLocked: false,
+      };
       const command = createDuplicateLayerCommand(
         "source",
         "copy",
@@ -385,12 +435,23 @@ describe("session", () => {
 
   describe("createMergeLayerDownCommand", () => {
     it("should create merge-layer-down command with meta snapshots", () => {
-      const sourceMeta = { name: "Source", visible: true, opacity: 0.8 };
-      const targetMetaBefore = { name: "Target", visible: true, opacity: 0.5 };
+      const sourceMeta = {
+        name: "Source",
+        visible: true,
+        opacity: 0.8,
+        alphaLocked: false,
+      };
+      const targetMetaBefore = {
+        name: "Target",
+        visible: true,
+        opacity: 0.5,
+        alphaLocked: true,
+      };
       const targetMetaAfter = {
         name: "Target",
         visible: true,
         opacity: 1,
+        alphaLocked: true,
         compositeOperation: "source-over" as GlobalCompositeOperation,
       };
       const command = createMergeLayerDownCommand(

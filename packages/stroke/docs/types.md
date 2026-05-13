@@ -128,6 +128,7 @@ interface StrokeCommand {
   readonly expand: ExpandConfig;
   readonly style: StrokeStyle;
   readonly brushSeed: number;
+  readonly alphaLocked: boolean;
   readonly timestamp: number;
 }
 ```
@@ -141,6 +142,7 @@ interface StrokeCommand {
 | `expand` | `ExpandConfig` | 展開設定 |
 | `style` | `StrokeStyle` | 描画スタイル（色、線幅、筆圧カーブ、合成モード、ブラシ設定を含む）。筆圧のサイズ/flow反映は `style.brush.pressureDynamics` に保存する |
 | `brushSeed` | `number` | ブラシの PRNG シード。スタンプブラシの jitter を決定論的にリプレイするために使用。`round-pen` では `0` |
+| `alphaLocked` | `boolean` | ストローク実行時点の対象レイヤー alpha lock 設定。replay 時の通常描画を既存 alpha に制限するかを決める |
 | `timestamp` | `number` | 作成時刻 |
 
 **特徴**:
@@ -148,6 +150,7 @@ interface StrokeCommand {
 - リプレイ時にフィルタ→展開を再適用
 - `style: StrokeStyle` に集約することで、従来の個別フィールド展開（`color`, `lineWidth`, `pressureSensitivity?` 等）を廃止。command 保存と replay で optional の解釈不一致を構造的に排除
 - 新形式では `pressureSensitivity` を保存せず、ブラシごとの `pressureDynamics` を保存する。旧コマンドや旧設定を読み込む場合は、`pressureSensitivity` を `pressureDynamics.size` に補完してよい。旧形式との replay 等価性は保証しない
+- `alphaLocked` は replay の決定性を保つために保存する。replay / undo / redo / rebuild では現在の `LayerMeta.alphaLocked` ではなく、常に `StrokeCommand.alphaLocked` を使って描画する。現在の `LayerMeta.alphaLocked` は次に作成される stroke command の元値であり、過去 stroke の再描画結果は変えない
 
 ---
 
@@ -249,7 +252,7 @@ interface AddLayerCommand {
 | `layerId` | `string` | 新しいレイヤーのID |
 | `insertIndex` | `number` | レイヤースタックへの挿入位置 |
 | `width` / `height` | `number` | レイヤーサイズ |
-| `meta` | `LayerMeta` | 作成時のメタデータ（name, visible, opacity等） |
+| `meta` | `LayerMeta` | 作成時のメタデータ（name, visible, opacity, alphaLocked等） |
 
 ### RemoveLayerCommand
 
@@ -269,7 +272,7 @@ interface RemoveLayerCommand {
 | `removedIndex` | `number` | 削除前のスタック位置（Undo復元用） |
 | `meta` | `LayerMeta` | 削除時のメタデータスナップショット（Undo復元用） |
 
-**設計意図**: 削除時の `meta`（name, visible, opacity, compositeOperation）をスナップショットすることで、Undo時にメタデータを含めて完全復元できる。メタデータ変更（リネーム、表示切替等）はコマンド化されないため、削除コマンドでの保存が復元の唯一の手段となる。
+**設計意図**: 削除時の `meta`（name, visible, opacity, alphaLocked, compositeOperation）をスナップショットすることで、Undo時にメタデータを含めて完全復元できる。メタデータ変更（リネーム、表示切替等）はコマンド化されないため、削除コマンドでの保存が復元の唯一の手段となる。
 
 ### ReorderLayerCommand
 
@@ -306,7 +309,7 @@ interface DuplicateLayerCommand {
 | `layerId` | `string` | 複製先レイヤーの ID |
 | `insertIndex` | `number` | 複製先の挿入位置 |
 | `width` / `height` | `number` | 複製先レイヤーサイズ |
-| `meta` | `LayerMeta` | 複製先のメタデータ |
+| `meta` | `LayerMeta` | 複製先のメタデータ。`alphaLocked` も含む |
 
 ### MergeLayerDownCommand
 
@@ -332,9 +335,9 @@ interface MergeLayerDownCommand {
 | `targetLayerId` | `string` | 統合先レイヤーの ID |
 | `sourceIndex` | `number` | 統合前の source 位置 |
 | `targetIndex` | `number` | 統合前の target 位置 |
-| `sourceMeta` | `LayerMeta` | Undo 復元用の source meta |
-| `targetMetaBefore` | `LayerMeta` | Undo 復元用の target meta |
-| `targetMetaAfter` | `LayerMeta` | Redo / replay 用の統合後 target meta |
+| `sourceMeta` | `LayerMeta` | Undo 復元用の source meta。`alphaLocked` も含む |
+| `targetMetaBefore` | `LayerMeta` | Undo 復元用の target meta。`alphaLocked` も含む |
+| `targetMetaAfter` | `LayerMeta` | Redo / replay 用の統合後 target meta。既定では target 側の `alphaLocked` を引き継ぐ |
 
 `merge-layer-down` は source / target 両方の checkpoint coverage が必要。target pixels は source / target 両方の merge 時点の pixels に依存する。
 

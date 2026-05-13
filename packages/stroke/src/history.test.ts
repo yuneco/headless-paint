@@ -47,7 +47,7 @@ function createMockLayer(id = "layer_1") {
     ctx: {
       putImageData: vi.fn(),
     } as unknown as OffscreenCanvasRenderingContext2D,
-    meta: { name: "test", visible: true, opacity: 1 },
+    meta: { name: "test", visible: true, opacity: 1, alphaLocked: false },
   };
 }
 
@@ -76,6 +76,7 @@ function createStrokeCommand(
       brush: { type: "round-pen", pressureDynamics: { size: 0, flow: 0 } },
     },
     brushSeed: 0,
+    alphaLocked: false,
     timestamp,
   };
 }
@@ -248,7 +249,7 @@ describe("history", () => {
         insertIndex: 1,
         width: 800,
         height: 600,
-        meta: { name: "Copy", visible: true, opacity: 1 },
+        meta: { name: "Copy", visible: true, opacity: 1, alphaLocked: false },
         timestamp: 1000,
       } satisfies DuplicateLayerCommand as Command,
       { layerCount: 2 },
@@ -285,6 +286,7 @@ describe("history", () => {
           name: "target",
           visible: true,
           opacity: 1,
+          alphaLocked: false,
           compositeOperation: "source-over",
         },
         timestamp: 1000,

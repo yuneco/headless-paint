@@ -101,6 +101,8 @@ export interface PaintEngineResult<TCustom = never> {
     layerId: string,
     blendMode: GlobalCompositeOperation | undefined,
   ) => void;
+  readonly setLayerAlphaLocked: (layerId: string, alphaLocked: boolean) => void;
+  readonly toggleAlphaLock: (layerId: string) => void;
 
   // ── レイヤー操作（履歴に自動記録される） ──
   readonly addLayer: () => void;
@@ -217,6 +219,8 @@ export function usePaintEngine<TCustom = never>(
     moveLayerDown: moveLayerDownRaw,
     setLayerOpacity,
     setLayerBlendMode,
+    setLayerAlphaLocked,
+    toggleAlphaLock,
     findEntry,
     getLayerIndex,
     renderVersion: layerRenderVersion,
@@ -290,6 +294,7 @@ export function usePaintEngine<TCustom = never>(
         data.expandConfig,
         data.strokeStyle,
         data.brushSeed,
+        data.alphaLocked,
       );
       const next = pushCommand(
         historyStateRef.current,
@@ -692,6 +697,8 @@ export function usePaintEngine<TCustom = never>(
               undoneCommand.targetMetaBefore.visible;
             targetEntry.committedLayer.meta.opacity =
               undoneCommand.targetMetaBefore.opacity;
+            targetEntry.committedLayer.meta.alphaLocked =
+              undoneCommand.targetMetaBefore.alphaLocked;
             targetEntry.committedLayer.meta.compositeOperation =
               undoneCommand.targetMetaBefore.compositeOperation;
           }
@@ -913,6 +920,8 @@ export function usePaintEngine<TCustom = never>(
     renameLayer,
     setLayerOpacity,
     setLayerBlendMode,
+    setLayerAlphaLocked,
+    toggleAlphaLock,
 
     // レイヤー操作（履歴付き）
     addLayer: handleAddLayer,

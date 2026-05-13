@@ -56,9 +56,10 @@ const strokePoint: StrokePoint = { x: 50, y: 50, pressure: 0.8 };
 
 ```typescript
 interface LayerMeta {
-  name: string;      // レイヤー名
-  visible: boolean;  // 表示/非表示
-  opacity: number;   // 不透明度 (0.0-1.0)
+  name: string;        // レイヤー名
+  visible: boolean;    // 表示/非表示
+  opacity: number;     // 不透明度 (0.0-1.0)
+  alphaLocked: boolean; // 通常描画を既存 alpha に制限する
   compositeOperation?: GlobalCompositeOperation;  // 合成モード
 }
 ```
@@ -68,7 +69,15 @@ interface LayerMeta {
 | `name` | `string` | `"Layer"` | レイヤー名 |
 | `visible` | `boolean` | `true` | 表示/非表示 |
 | `opacity` | `number` | `1` | 不透明度（0.0〜1.0） |
+| `alphaLocked` | `boolean` | `false` | 通常描画を既存の非透明領域に制限する。描画後の alpha は描画前と同じになる |
 | `compositeOperation` | `GlobalCompositeOperation` | `undefined` | レイヤー合成時の合成モード。`undefined` は `"source-over"`（通常合成）。消しゴムのpendingレイヤープレビューでは `"destination-out"` を設定する |
+
+**alpha lock の動作**:
+- `alphaLocked: true` の通常描画は、既存 alpha があるピクセルにだけ反映される。透明領域には新規描画されない。
+- 通常描画では既存 alpha を保持し、RGB だけを更新する。
+- `compositeOperation: "destination-out"` の消しゴム描画は alpha lock の制約対象外で、従来通り alpha を削る。
+- pending レイヤー自体は alpha lock を知らない。live preview は `renderLayers` の pending overlay 合成時に committed レイヤーの alpha を使ってマスクされる。
+- alpha lock は `appendToCommittedLayer` による stroke rendering と、その pending preview に適用される。`setPixel` などの低レベル pixel 操作は `LayerMeta` を参照しない。
 
 **使用例**:
 ```typescript
@@ -76,6 +85,7 @@ const meta: LayerMeta = {
   name: "Background",
   visible: true,
   opacity: 0.8,
+  alphaLocked: false,
 };
 
 // 消しゴムプレビュー用に合成モードを設定
@@ -112,11 +122,12 @@ const mergedMeta: LayerMeta = {
   name: target.meta.name,
   visible: target.meta.visible,
   opacity: 1,
+  alphaLocked: target.meta.alphaLocked,
   compositeOperation: "source-over",
 };
 ```
 
-`options.resultMeta` が指定された場合は、この既定値に上書き適用する。`visible` は統合対象 pixels を選別しないため、非表示レイヤーの pixel buffer も決定的に統合される。
+`options.resultMeta` が指定された場合は、この既定値に上書き適用する。`visible` は統合対象 pixels を選別しないため、非表示レイヤーの pixel buffer も決定的に統合される。`alphaLocked` は統合後の描画制約として target 側の設定を引き継ぎ、merge 処理自体の pixel burning は gate しない。
 
 ---
 
@@ -145,6 +156,7 @@ interface PendingOverlay {
 - レイヤーの `opacity < 1`
 - レイヤーの `compositeOperation` が `"source-over"` 以外（ブレンドモード設定時）
 - pending の `compositeOperation` が `"source-over"` 以外（消しゴム使用時）
+- target レイヤーの `alphaLocked` が `true` かつ pending が通常描画のとき（committed alpha による preview マスク）
 
 上記の条件をすべて満たさない場合（通常ペン描画）はプレ合成がスキップされ、パフォーマンスへの影響はない。
 

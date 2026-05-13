@@ -536,6 +536,10 @@ interface PaintEngineInitialDocument {
 
 `historyConfig` のデフォルト値。`usePaintEngine` は stroke / clear / transform / wrap-shift / remove-layer / duplicate-layer / merge-layer-down の実ピクセル変更または pixel 依存構造変更の直前に `beginHistoryMutation()` を同期実行し、command 確定時に `pushCommand()` を呼ぶ。
 
+`toggleVisibility` / `setLayerOpacity` / `setLayerBlendMode` / `setLayerAlphaLocked` / `toggleAlphaLock` はレイヤーメタデータの直接更新であり、標準では Undo/Redo 履歴に自動記録されない。アプリがこれらを同じ履歴に含めたい場合は `pushCustomCommand` と `customCommandHandler` で明示的に管理する。
+
+ストローク履歴の replay では、stroke 作成時に command へ保存された `alphaLocked` が使われる。後から `LayerMeta.alphaLocked` を切り替えても、過去 stroke の rebuild 結果は変わらない。
+
 | フィールド | デフォルト | 説明 |
 |-----------|-----------|------|
 | `checkpointInterval` | `10` | 対象レイヤーの最後の checkpoint から現在位置までの commandIndex 距離 |
@@ -564,6 +568,10 @@ interface PaintEngineResult<TCustom = never> {
   readonly setLayerOpacity: (layerId: string, opacity: number) => void;
   /** レイヤーのブレンドモードを設定する（undefined で通常合成） */
   readonly setLayerBlendMode: (layerId: string, blendMode: GlobalCompositeOperation | undefined) => void;
+  /** レイヤーの alpha lock を設定する。通常描画を既存 alpha に制限する */
+  readonly setLayerAlphaLocked: (layerId: string, alphaLocked: boolean) => void;
+  /** レイヤーの alpha lock を切り替える */
+  readonly toggleAlphaLock: (layerId: string) => void;
 
   // ── レイヤー操作（履歴に自動記録される） ──
 
@@ -693,7 +701,7 @@ if (engine.activeLayerId) {
 - 複製名は hook 内で既存レイヤー名から採番する。
 - `mergeLayerDown()` は対象レイヤーを直下（背面方向、`sourceIndex - 1`）へ統合し、統合先を active layer にする。
 - 対象が最背面、またはレイヤー数が1以下の場合、`mergeLayerDown()` は no-op。
-- 統合後 target meta は core API と同じく `opacity: 1`, `compositeOperation: "source-over"` に正規化される。
+- 統合後 target meta は core API と同じく target 側の `name` / `visible` / `alphaLocked` を維持し、`opacity: 1`, `compositeOperation: "source-over"` に正規化される。
 
 ### カスタムコマンドの使い方
 
@@ -859,6 +867,10 @@ interface UseLayersResult {
   readonly setLayerOpacity: (layerId: string, opacity: number) => void;
   /** レイヤーのブレンドモードを設定する（undefined で通常合成） */
   readonly setLayerBlendMode: (layerId: string, blendMode: GlobalCompositeOperation | undefined) => void;
+  /** レイヤーの alpha lock を設定する */
+  readonly setLayerAlphaLocked: (layerId: string, alphaLocked: boolean) => void;
+  /** レイヤーの alpha lock を切り替える */
+  readonly toggleAlphaLock: (layerId: string) => void;
   /** 描画操作後に requestAnimationFrame 単位で合流して進む再描画トリガー */
   readonly renderVersion: number;
   /** renderVersion の更新を次の animation frame にスケジュールする */
@@ -933,7 +945,7 @@ const documentSnapshot = await exportPaintDocument({
 |----|-------------|------|
 | `Color` | engine | RGBA カラー値 |
 | `Layer` | engine | 描画レイヤー |
-| `LayerMeta` | engine | レイヤーのメタデータ（name, visible 等） |
+| `LayerMeta` | engine | レイヤーのメタデータ（name, visible, opacity, alphaLocked 等） |
 | `PendingOverlay` | engine | pending レイヤーのプレ合成情報 |
 | `StrokeStyle` | engine | 描画スタイル |
 | `PressureCurve` | engine | 筆圧カーブ |

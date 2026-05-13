@@ -439,6 +439,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         onAddLayer={engine.addLayer}
         onRemoveLayer={engine.removeLayer}
         onToggleVisibility={engine.toggleVisibility}
+        onToggleAlphaLock={engine.toggleAlphaLock}
         onToggleBackground={handleToggleBackground}
         onMoveUp={engine.moveLayerUp}
         onMoveDown={engine.moveLayerDown}

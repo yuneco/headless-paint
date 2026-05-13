@@ -18,6 +18,7 @@ export interface LayerMeta {
   name: string;
   visible: boolean;
   opacity: number;
+  alphaLocked: boolean;
   compositeOperation?: GlobalCompositeOperation;
 }
 

@@ -23,7 +23,7 @@ function createLayer(
 
 **デフォルトメタデータ**:
 ```typescript
-{ name: "Layer", visible: true, opacity: 1 }
+{ name: "Layer", visible: true, opacity: 1, alphaLocked: false }
 ```
 
 **使用例**:
@@ -35,6 +35,7 @@ const layer = createLayer(640, 480);
 const background = createLayer(1920, 1080, {
   name: "Background",
   opacity: 0.5,
+  alphaLocked: true,
 });
 ```
 
@@ -86,7 +87,7 @@ function cloneLayer(source: Layer, options?: CloneLayerOptions): Layer
 
 **特記事項**:
 - `source.width` / `source.height` と同じサイズの新規レイヤーを作成する。
-- `options.meta` は source の `meta` に上書き適用される。
+- `options.meta` は source の `meta` に上書き適用される。`alphaLocked` も source から複製され、`options.meta.alphaLocked` で上書きできる。
 - `options.id` は履歴 replay / redo で決定的な ID を使うための指定。
 
 **使用例**:
@@ -143,7 +144,8 @@ function mergeLayerDown(
 
 **特記事項**:
 - target / source の `opacity` と `compositeOperation` を考慮して target pixels に焼き込む。
-- 統合後 target meta は既定で target の `name` / `visible` を維持し、`opacity: 1`, `compositeOperation: "source-over"` に正規化される。
+- 統合後 target meta は既定で target の `name` / `visible` / `alphaLocked` を維持し、`opacity: 1`, `compositeOperation: "source-over"` に正規化される。
+- `alphaLocked` は統合後のレイヤー設定として target 側を引き継ぐ。merge 処理中の pixel burning は alpha lock によって制限されない。
 - `visible` は pixel burning を gate しない。非表示レイヤーの pixel buffer も統合対象になる。
 - non-normal blend mode や backdrop 依存の見た目を含む場合、全スタック表示結果の完全維持は保証しない。これは2レイヤーの破壊的統合として扱う。
 

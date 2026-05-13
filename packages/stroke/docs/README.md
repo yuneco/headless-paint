@@ -61,7 +61,13 @@ let historyState = createHistoryState(1920, 1080, { layerCount: 1 });
 
 // ストロークセッション → コマンド生成
 const command = createStrokeCommand(
-  layer.id, inputPoints, filterConfig, expandConfig, strokeStyle
+  layer.id,
+  inputPoints,
+  filterConfig,
+  expandConfig,
+  strokeStyle,
+  0,
+  layer.meta.alphaLocked,
 );
 historyState = beginHistoryMutation(
   historyState,
@@ -131,8 +137,8 @@ if (canUndo(historyState)) {
 |---|---|
 | `startStrokeSession(filterOutput, style, expand)` | セッション開始 |
 | `addPointToSession(state, filterOutput)` | 点を追加 |
-| `endStrokeSession(state, layerId, inputPoints, filterPipeline)` | セッション終了（`layerId` 必須） |
-| `createStrokeCommand(layerId, inputPoints, filterPipeline, expand, style, brushSeed?)` | ストロークコマンドを直接作成 |
+| `endStrokeSession(state, layerId, inputPoints, filterPipeline, alphaLocked?)` | セッション終了（`layerId` 必須）。`alphaLocked` は command に保存され replay に使われる |
+| `createStrokeCommand(layerId, inputPoints, filterPipeline, expand, style, brushSeed?, alphaLocked?)` | ストロークコマンドを直接作成。`alphaLocked` 省略時は `false` |
 | `createClearCommand(layerId)` | クリアコマンドを作成 |
 | `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成（グローバル） |
 | `createTransformLayerCommand(layerId, matrix)` | レイヤー変換コマンドを作成 |

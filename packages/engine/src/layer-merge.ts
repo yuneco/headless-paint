@@ -42,11 +42,13 @@ export function mergeLayerDown(
     name: targetLayer.meta.name,
     visible: targetLayer.meta.visible,
     opacity: 1,
+    alphaLocked: targetLayer.meta.alphaLocked,
     compositeOperation: "source-over",
     ...options?.resultMeta,
   };
   targetLayer.meta.name = resultMeta.name;
   targetLayer.meta.visible = resultMeta.visible;
   targetLayer.meta.opacity = resultMeta.opacity;
+  targetLayer.meta.alphaLocked = resultMeta.alphaLocked;
   targetLayer.meta.compositeOperation = resultMeta.compositeOperation;
 }

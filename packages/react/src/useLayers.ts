@@ -52,6 +52,8 @@ export interface UseLayersResult {
     layerId: string,
     blendMode: GlobalCompositeOperation | undefined,
   ) => void;
+  readonly setLayerAlphaLocked: (layerId: string, alphaLocked: boolean) => void;
+  readonly toggleAlphaLock: (layerId: string) => void;
   readonly renderVersion: number;
   readonly bumpRenderVersion: () => void;
 }
@@ -295,6 +297,29 @@ export function useLayers(
     [bumpRenderVersion],
   );
 
+  const setLayerAlphaLocked = useCallback(
+    (layerId: string, alphaLocked: boolean) => {
+      const entry = entriesRef.current.find((e) => e.id === layerId);
+      if (!entry) return;
+      entry.committedLayer.meta.alphaLocked = alphaLocked;
+      setEntries([...entriesRef.current]);
+      bumpRenderVersion();
+    },
+    [bumpRenderVersion],
+  );
+
+  const toggleAlphaLock = useCallback(
+    (layerId: string) => {
+      const entry = entriesRef.current.find((e) => e.id === layerId);
+      if (!entry) return;
+      entry.committedLayer.meta.alphaLocked =
+        !entry.committedLayer.meta.alphaLocked;
+      setEntries([...entriesRef.current]);
+      bumpRenderVersion();
+    },
+    [bumpRenderVersion],
+  );
+
   return {
     entries,
     entriesRef,
@@ -312,6 +337,8 @@ export function useLayers(
     moveLayerDown,
     setLayerOpacity,
     setLayerBlendMode,
+    setLayerAlphaLocked,
+    toggleAlphaLock,
     findEntry,
     getLayerIndex,
     renderVersion,

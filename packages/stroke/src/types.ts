@@ -46,6 +46,7 @@ export interface StrokeCommand {
   readonly expand: ExpandConfig;
   readonly style: StrokeStyle;
   readonly brushSeed: number;
+  readonly alphaLocked: boolean;
   readonly timestamp: number;
 }
 

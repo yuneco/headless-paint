@@ -125,7 +125,8 @@ function endStrokeSession(
   state: StrokeSessionState,
   layerId: string,
   inputPoints: readonly InputPoint[],
-  filterPipeline: FilterPipelineConfig
+  filterPipeline: FilterPipelineConfig,
+  alphaLocked?: boolean
 ): StrokeCommand | null
 ```
 
@@ -136,10 +137,13 @@ function endStrokeSession(
 | `layerId` | `string` | ○ | 描画先レイヤーの ID（コマンドに記録される） |
 | `inputPoints` | `readonly InputPoint[]` | ○ | フィルタ前の入力点列（履歴保存用） |
 | `filterPipeline` | `FilterPipelineConfig` | ○ | 使用したフィルタパイプライン設定 |
+| `alphaLocked` | `boolean` | - | ストローク実行時点の対象レイヤー alpha lock 設定。省略時は `false` |
 
 **戻り値**: `StrokeCommand | null`
 - 有効なストローク（1点以上）の場合: `StrokeCommand`（`style.compositeOperation` も含む）
 - 無効なストローク（0点）の場合: `null`
+
+`alphaLocked` は replay の決定性を保つため command に保存される。履歴 replay では現在の `LayerMeta.alphaLocked` ではなく、この command に保存された値で通常描画を既存 alpha に制限するかを決める。
 
 **使用例**:
 ```typescript
@@ -163,7 +167,8 @@ function onPointerUp() {
     finalResult.state,
     layerId,           // 描画先レイヤーのID
     allInputPoints,    // フィルタ前の全入力点
-    filterPipelineConfig
+    filterPipelineConfig,
+    layer.meta.alphaLocked
   );
 
   sessionRef.current = null;
@@ -247,7 +252,7 @@ function createDuplicateLayerCommand(
 | `layerId` | `string` | ○ | 複製先レイヤー ID |
 | `insertIndex` | `number` | ○ | 複製先の挿入位置 |
 | `width` / `height` | `number` | ○ | 複製先レイヤーサイズ |
-| `meta` | `LayerMeta` | ○ | 複製先メタデータ |
+| `meta` | `LayerMeta` | ○ | 複製先メタデータ。`alphaLocked` も含む |
 
 ---
 
@@ -274,9 +279,9 @@ function createMergeLayerDownCommand(
 | `targetLayerId` | `string` | ○ | 統合先レイヤー ID |
 | `sourceIndex` | `number` | ○ | 統合前の source 位置 |
 | `targetIndex` | `number` | ○ | 統合前の target 位置 |
-| `sourceMeta` | `LayerMeta` | ○ | Undo 復元用 source meta |
-| `targetMetaBefore` | `LayerMeta` | ○ | Undo 復元用 target meta |
-| `targetMetaAfter` | `LayerMeta` | ○ | Redo / replay 用 target meta |
+| `sourceMeta` | `LayerMeta` | ○ | Undo 復元用 source meta。`alphaLocked` も含む |
+| `targetMetaBefore` | `LayerMeta` | ○ | Undo 復元用 target meta。`alphaLocked` も含む |
+| `targetMetaAfter` | `LayerMeta` | ○ | Redo / replay 用 target meta。既定では target 側の `alphaLocked` を引き継ぐ |
 
 ---
 
@@ -408,8 +413,14 @@ const inputPoints: InputPoint[] = [];
 function onRenderUpdate(update: RenderUpdate) {
   if (update.newlyCommitted.length > update.committedOverlapCount) {
     appendToCommittedLayer(
-      committedLayer, update.newlyCommitted, update.style, compiledExpand,
+      committedLayer,
+      update.newlyCommitted,
+      update.style,
+      compiledExpand,
       update.committedOverlapCount,
+      undefined,
+      undefined,
+      committedLayer.meta.alphaLocked,
     );
   }
   renderPendingLayer(pendingLayer, update.currentPending, update.style, compiledExpand);
@@ -459,7 +470,13 @@ function onPointerUp() {
   onRenderUpdate(finalResult.renderUpdate);
 
   // コマンド生成
-  const command = endStrokeSession(finalResult.state, layer.id, inputPoints, filterConfig);
+  const command = endStrokeSession(
+    finalResult.state,
+    layer.id,
+    inputPoints,
+    filterConfig,
+    layer.meta.alphaLocked,
+  );
 
   // クリーンアップ
   sessionState = null;

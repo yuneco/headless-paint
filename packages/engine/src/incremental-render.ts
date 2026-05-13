@@ -32,6 +32,7 @@ export function appendToCommittedLayer(
   overlapCount = 0,
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
+  alphaLocked = layer.meta.alphaLocked,
 ): BrushRenderState {
   if (points.length === 0) {
     return (
@@ -45,6 +46,7 @@ export function appendToCommittedLayer(
   }
 
   let currentState = brushState;
+  const committedStyle = resolveAlphaLockStyle(style, alphaLocked);
   const strokes = expandStrokePoints(points, compiledExpand);
   if (!usesBranchBrushState(style)) {
     for (const stroke of strokes) {
@@ -52,7 +54,7 @@ export function appendToCommittedLayer(
         currentState = renderBrushStroke(
           layer,
           stroke,
-          style,
+          committedStyle,
           overlapCount,
           currentState,
           sourceLayer ?? layer,
@@ -72,7 +74,7 @@ export function appendToCommittedLayer(
       const renderedState = renderBrushStroke(
         layer,
         stroke,
-        style,
+        committedStyle,
         overlapCount,
         branchState,
         sourceLayer ?? layer,
@@ -90,6 +92,27 @@ export function appendToCommittedLayer(
       stampCount: 0,
     }
   );
+}
+
+function resolveAlphaLockStyle(
+  style: StrokeStyle,
+  alphaLocked: boolean,
+): StrokeStyle {
+  const compositeOperation = resolveAlphaLockCompositeOperation(
+    style.compositeOperation,
+    alphaLocked,
+  );
+  if (compositeOperation === style.compositeOperation) return style;
+  return { ...style, compositeOperation };
+}
+
+function resolveAlphaLockCompositeOperation(
+  compositeOperation: GlobalCompositeOperation,
+  alphaLocked: boolean,
+): GlobalCompositeOperation {
+  if (!alphaLocked) return compositeOperation;
+  if (compositeOperation === "source-over") return "source-atop";
+  return compositeOperation;
 }
 
 /**
@@ -309,20 +332,27 @@ export function composeLayers(
 
     const hasPending =
       pendingOverlay && layer.id === pendingOverlay.targetLayerId;
+    const shouldMaskPending =
+      !!hasPending &&
+      layer.meta.alphaLocked &&
+      isSourceOverComposite(pendingOverlay.layer.meta.compositeOperation);
     const needsPreComposite =
       hasPending &&
       (layer.meta.opacity < 1 ||
         (layer.meta.compositeOperation !== undefined &&
           layer.meta.compositeOperation !== "source-over") ||
         (pendingOverlay.layer.meta.compositeOperation !== undefined &&
-          pendingOverlay.layer.meta.compositeOperation !== "source-over"));
+          pendingOverlay.layer.meta.compositeOperation !== "source-over") ||
+        shouldMaskPending);
 
     if (needsPreComposite) {
       const { workLayer } = pendingOverlay;
       clearLayer(workLayer);
       workLayer.ctx.drawImage(layer.canvas, 0, 0);
       workLayer.ctx.globalAlpha = 1;
-      if (pendingOverlay.layer.meta.compositeOperation) {
+      if (shouldMaskPending) {
+        workLayer.ctx.globalCompositeOperation = "source-atop";
+      } else if (pendingOverlay.layer.meta.compositeOperation) {
         workLayer.ctx.globalCompositeOperation =
           pendingOverlay.layer.meta.compositeOperation;
       }
@@ -357,4 +387,12 @@ export function composeLayers(
   }
 
   target.restore();
+}
+
+function isSourceOverComposite(
+  compositeOperation: GlobalCompositeOperation | undefined,
+): boolean {
+  return (
+    compositeOperation === undefined || compositeOperation === "source-over"
+  );
 }

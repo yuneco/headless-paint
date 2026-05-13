@@ -150,6 +150,7 @@ describe("updateLayerMeta", () => {
     expect(updated[0].meta.visible).toBe(false);
     expect(updated[0].meta.name).toBe("L1");
     expect(updated[0].meta.opacity).toBe(1);
+    expect(updated[0].meta.alphaLocked).toBe(false);
   });
 
   it("should return new array (immutable)", () => {

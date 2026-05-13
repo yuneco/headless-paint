@@ -323,6 +323,7 @@ function cloneLayerMeta(meta: LayerMeta): LayerMeta {
     name: meta.name,
     visible: meta.visible,
     opacity: meta.opacity,
+    alphaLocked: meta.alphaLocked,
     compositeOperation: meta.compositeOperation,
   };
 }
@@ -555,6 +556,7 @@ function isLayerMeta(value: unknown): value is LayerMeta {
     isRecord(value) &&
     typeof value.name === "string" &&
     typeof value.visible === "boolean" &&
+    typeof value.alphaLocked === "boolean" &&
     isFiniteNumber(value.opacity) &&
     (value.compositeOperation === undefined ||
       typeof value.compositeOperation === "string")

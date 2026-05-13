@@ -21,12 +21,18 @@ describe("createLayer", () => {
     expect(layer.meta.name).toBe("Layer");
     expect(layer.meta.visible).toBe(true);
     expect(layer.meta.opacity).toBe(1);
+    expect(layer.meta.alphaLocked).toBe(false);
   });
 
   it("should accept custom meta values", () => {
-    const layer = createLayer(10, 10, { name: "Background", opacity: 0.5 });
+    const layer = createLayer(10, 10, {
+      name: "Background",
+      opacity: 0.5,
+      alphaLocked: true,
+    });
     expect(layer.meta.name).toBe("Background");
     expect(layer.meta.opacity).toBe(0.5);
+    expect(layer.meta.alphaLocked).toBe(true);
     expect(layer.meta.visible).toBe(true);
   });
 
@@ -99,7 +105,11 @@ describe("clearLayer", () => {
 
 describe("cloneLayer / copyLayerPixels", () => {
   it("should copy pixels and meta with overrides", () => {
-    const source = createLayer(4, 4, { name: "Source", opacity: 0.5 });
+    const source = createLayer(4, 4, {
+      name: "Source",
+      opacity: 0.5,
+      alphaLocked: true,
+    });
     setPixel(source, 1, 1, { r: 255, g: 0, b: 0, a: 255 });
 
     const clone = cloneLayer(source, { id: "copy", meta: { name: "Copy" } });
@@ -109,6 +119,7 @@ describe("cloneLayer / copyLayerPixels", () => {
     expect(clone.height).toBe(source.height);
     expect(clone.meta.name).toBe("Copy");
     expect(clone.meta.opacity).toBe(0.5);
+    expect(clone.meta.alphaLocked).toBe(true);
     expect(getPixel(clone, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
   });
 
