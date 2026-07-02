@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { hashSeed, mulberry32, renderBrushStroke } from "./brush-render";
-import { generateBrushTip } from "./brush-tip";
-import { createLayer } from "./layer";
+import { renderBrushStroke } from ".";
+import { createLayer } from "../layer";
 import type {
   BrushRenderState,
   Color,
   StrokePoint,
   StrokeStyle,
-} from "./types";
+} from "../types";
 import {
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
   ROUND_PEN,
-} from "./types";
+} from "../types";
+import { generateBrushTip } from "./tip";
 
 const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };
 
@@ -47,55 +47,9 @@ function makeLine(
   return points;
 }
 
-// ============================================================
-// PRNG tests
-// ============================================================
-
-describe("mulberry32", () => {
-  it("同じシードから同じ乱数列を生成する", () => {
-    const rng1 = mulberry32(12345);
-    const rng2 = mulberry32(12345);
-    for (let i = 0; i < 10; i++) {
-      expect(rng1()).toBe(rng2());
-    }
-  });
-
-  it("異なるシードから異なる乱数列を生成する", () => {
-    const rng1 = mulberry32(12345);
-    const rng2 = mulberry32(54321);
-    const values1 = Array.from({ length: 5 }, () => rng1());
-    const values2 = Array.from({ length: 5 }, () => rng2());
-    expect(values1).not.toEqual(values2);
-  });
-
-  it("[0, 1) の範囲の値を返す", () => {
-    const rng = mulberry32(42);
-    for (let i = 0; i < 100; i++) {
-      const v = rng();
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(1);
-    }
-  });
-});
-
-describe("hashSeed", () => {
-  it("同じ入力から同じシードを生成する", () => {
-    expect(hashSeed(100, 50.0)).toBe(hashSeed(100, 50.0));
-  });
-
-  it("距離の量子化: 近い距離値は同じシードを返す", () => {
-    // round(50.004 * 100) = 5000, round(50.006 * 100) = 5001
-    expect(hashSeed(100, 50.004)).toBe(hashSeed(100, 50.004));
-  });
-
-  it("異なる距離は異なるシードを返す", () => {
-    expect(hashSeed(100, 10.0)).not.toBe(hashSeed(100, 20.0));
-  });
-
-  it("異なるグローバルシードは異なるシードを返す", () => {
-    expect(hashSeed(100, 50.0)).not.toBe(hashSeed(200, 50.0));
-  });
-});
+function primaryBranch(state: BrushRenderState) {
+  return state.branches[0];
+}
 
 // ============================================================
 // renderBrushStroke tests
@@ -109,10 +63,9 @@ describe("renderBrushStroke", () => {
       const style = makeStyle();
       const result = renderBrushStroke(layer, points, style);
       expect(result).toEqual({
-        accumulatedDistance: 0,
         tipCanvas: null,
         seed: 0,
-        stampCount: 0,
+        branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
       });
     });
 
@@ -121,10 +74,9 @@ describe("renderBrushStroke", () => {
       const points = makeLine(10, 50, 90, 50, 5);
       const style = makeStyle();
       const inputState: BrushRenderState = {
-        accumulatedDistance: 42,
         tipCanvas: null,
         seed: 123,
-        stampCount: 0,
+        branches: [{ accumulatedDistance: 42, emissionCount: 0 }],
       };
       const result = renderBrushStroke(layer, points, style, 0, inputState);
       expect(result).toBe(inputState);
@@ -152,14 +104,13 @@ describe("renderBrushStroke", () => {
         tip: { type: "circle"; hardness: number };
       };
       return {
-        accumulatedDistance: 0,
         tipCanvas: generateBrushTip(
           brush.tip,
           Math.ceil(style.lineWidth * 2),
           style.color,
         ),
         seed: 42,
-        stampCount: 0,
+        branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
       };
     }
 
@@ -170,7 +121,7 @@ describe("renderBrushStroke", () => {
       const state = makeInitialState(style);
 
       const result = renderBrushStroke(layer, points, style, 0, state);
-      expect(result.accumulatedDistance).toBeGreaterThan(0);
+      expect(primaryBranch(result).accumulatedDistance).toBeGreaterThan(0);
       expect(result.tipCanvas).toBe(state.tipCanvas);
       expect(result.seed).toBe(42);
     });
@@ -180,14 +131,13 @@ describe("renderBrushStroke", () => {
       const points = makeLine(10, 50, 90, 50, 5);
       const style = makeStampStyle();
       const state: BrushRenderState = {
-        accumulatedDistance: 0,
         tipCanvas: null,
         seed: 0,
-        stampCount: 0,
+        branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
       };
 
       const result = renderBrushStroke(layer, points, style, 0, state);
-      expect(result.accumulatedDistance).toBe(0); // unchanged
+      expect(primaryBranch(result).accumulatedDistance).toBe(0); // unchanged
     });
 
     it("連続呼び出しで accumulatedDistance が累積する", () => {
@@ -203,8 +153,8 @@ describe("renderBrushStroke", () => {
       const points2 = makeLine(50, 100, 100, 100, 5);
       const state2 = renderBrushStroke(layer, points2, style, 0, state1);
 
-      expect(state2.accumulatedDistance).toBeGreaterThan(
-        state1.accumulatedDistance,
+      expect(primaryBranch(state2).accumulatedDistance).toBeGreaterThan(
+        primaryBranch(state1).accumulatedDistance,
       );
     });
 
@@ -224,7 +174,9 @@ describe("renderBrushStroke", () => {
       const result2 = renderBrushStroke(layer2, points, style, 0, state2);
       const pixels2 = layer2.ctx.getImageData(0, 0, 200, 200).data;
 
-      expect(result1.accumulatedDistance).toBe(result2.accumulatedDistance);
+      expect(primaryBranch(result1).accumulatedDistance).toBe(
+        primaryBranch(result2).accumulatedDistance,
+      );
       expect(pixels1).toEqual(pixels2);
     });
 
@@ -263,8 +215,8 @@ describe("renderBrushStroke", () => {
 
       const pixel = layer.ctx.getImageData(50, 50, 1, 1).data;
       expect(pixel[3]).toBeGreaterThan(0);
-      expect(result.stampCount).toBe(1);
-      expect(result.accumulatedDistance).toBe(0);
+      expect(primaryBranch(result).emissionCount).toBe(1);
+      expect(primaryBranch(result).accumulatedDistance).toBe(0);
     });
 
     it("overlap 文脈だけの単一点では重複スタンプを打たない", () => {
@@ -272,8 +224,7 @@ describe("renderBrushStroke", () => {
       const style = makeStampStyle();
       const state = {
         ...makeInitialState(style),
-        accumulatedDistance: 10,
-        stampCount: 4,
+        branches: [{ accumulatedDistance: 10, emissionCount: 4 }],
       };
 
       const result = renderBrushStroke(
@@ -303,14 +254,13 @@ describe("renderBrushStroke", () => {
       });
       const layer1 = createLayer(200, 200);
       renderBrushStroke(layer1, points, style1, 0, {
-        accumulatedDistance: 0,
         tipCanvas: generateBrushTip(
           { type: "circle", hardness: 1.0 },
           16,
           BLACK,
         ),
         seed: 42,
-        stampCount: 0,
+        branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
       });
 
       // jitter あり
@@ -330,14 +280,13 @@ describe("renderBrushStroke", () => {
       });
       const layer2 = createLayer(200, 200);
       renderBrushStroke(layer2, points, style2, 0, {
-        accumulatedDistance: 0,
         tipCanvas: generateBrushTip(
           { type: "circle", hardness: 1.0 },
           16,
           BLACK,
         ),
         seed: 42,
-        stampCount: 0,
+        branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
       });
 
       const pixels1 = layer1.ctx.getImageData(0, 0, 200, 200).data;
@@ -394,7 +343,7 @@ describe("renderBrushStroke", () => {
       expect(pressureFlowAlpha).toBeGreaterThan(0);
     });
 
-    it("incremental（overlap 付き）と replay で stampCount が一致する", () => {
+    it("incremental（overlap 付き）と replay で emissionCount が一致する", () => {
       const style = makeStampStyle();
       // 曲線的なポイント列（直線より差が出やすい）
       const allPoints: StrokePoint[] = [];
@@ -429,15 +378,19 @@ describe("renderBrushStroke", () => {
         initialState,
       );
 
-      // stampCount が一致すること（= stamp index PRNG の jitter が一致）
-      expect(state3.stampCount).toBe(replayResult.stampCount);
+      // emissionCount が一致すること（= emission index PRNG の jitter が一致）
+      expect(primaryBranch(state3).emissionCount).toBe(
+        primaryBranch(replayResult).emissionCount,
+      );
 
       // accumulatedDistance は Catmull-Rom のチャンク境界クランプにより
       // 微小な差が生じる（round-pen も同じ）。誤差 1% 以内を確認
       const distDiff = Math.abs(
-        state3.accumulatedDistance - replayResult.accumulatedDistance,
+        primaryBranch(state3).accumulatedDistance -
+          primaryBranch(replayResult).accumulatedDistance,
       );
-      const relError = distDiff / replayResult.accumulatedDistance;
+      const relError =
+        distDiff / primaryBranch(replayResult).accumulatedDistance;
       expect(relError).toBeLessThan(0.01);
     });
 
@@ -484,7 +437,9 @@ describe("renderBrushStroke", () => {
       const right = target.ctx.getImageData(56, 50, 1, 1).data;
       expect(left[0]).toBeGreaterThan(left[2]);
       expect(right[2]).toBeGreaterThan(right[0]);
-      expect(result.branches?.[0].colorBuffer).toBeInstanceOf(OffscreenCanvas);
+      expect(result.branches[0].mixing?.colorBuffer).toBeInstanceOf(
+        OffscreenCanvas,
+      );
     });
 
     it("混色更新はpx指定でスタンプ配置より低い距離頻度にできる", () => {

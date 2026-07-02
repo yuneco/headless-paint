@@ -4,12 +4,14 @@ export type {
   BrushBranchRenderState,
   BrushDynamics,
   BrushMixing,
+  BrushMixingState,
   BrushRenderState,
   BrushTipConfig,
   CircleTipConfig,
   Color,
   CompiledExpand,
   ContentBounds,
+  DensityProfileCurve,
   ExpandConfig,
   ExpandLevel,
   ExpandMode,
@@ -18,10 +20,15 @@ export type {
   LayerMeta,
   LayerTransformPreview,
   PendingOverlay,
+  ParametricCurve,
   Point as EnginePoint,
   PressureCurve,
   PressureDynamics,
   RoundPenBrushConfig,
+  SprayBrushConfig,
+  SprayDynamics,
+  SprayPressureDynamics,
+  SpraySizeJitterMode,
   StampBrushConfig,
   StrokePoint,
   StrokeStyle,
@@ -34,15 +41,22 @@ export {
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
   DEFAULT_PRESSURE_DYNAMICS,
+  DEFAULT_RADIAL_DISTRIBUTION,
+  DEFAULT_SPRAY_DYNAMICS,
+  DEFAULT_SPRAY_PRESSURE_DYNAMICS,
   MARKER,
   PENCIL,
   ROUND_PEN,
+  SPRAY_AIRBRUSH,
+  SPRAY_MAX_PARTICLES_PER_EMISSION,
 } from "@headless-paint/engine";
 
 export {
   hashSeed,
   mulberry32,
   renderBrushStroke,
+  walkEmissions,
+  type EmissionPoint,
 } from "@headless-paint/engine";
 export {
   createBrushTipRegistry,
@@ -61,12 +75,12 @@ export {
   type CloneLayerOptions,
 } from "@headless-paint/engine";
 export {
-  applyPressureCurve,
   calculateRadius,
   drawCircle,
   drawLine,
   drawPath,
   drawVariableWidthPath,
+  evaluateParametricCurve,
   interpolateStrokePoints,
 } from "@headless-paint/engine";
 export {

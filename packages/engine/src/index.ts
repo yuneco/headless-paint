@@ -7,12 +7,14 @@ export type {
   BrushBranchRenderState,
   BrushDynamics,
   BrushMixing,
+  BrushMixingState,
   BrushRenderState,
   BrushTipConfig,
   CircleTipConfig,
   Color,
   CompiledExpand,
   ContentBounds,
+  DensityProfileCurve,
   ExpandConfig,
   ExpandLevel,
   ExpandMode,
@@ -21,10 +23,15 @@ export type {
   LayerMeta,
   LayerTransformPreview,
   PendingOverlay,
+  ParametricCurve,
   Point,
   PressureCurve,
   PressureDynamics,
   RoundPenBrushConfig,
+  SprayBrushConfig,
+  SprayDynamics,
+  SprayPressureDynamics,
+  SpraySizeJitterMode,
   StampBrushConfig,
   StrokePoint,
   StrokeStyle,
@@ -36,16 +43,25 @@ export {
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
   DEFAULT_PRESSURE_DYNAMICS,
+  DEFAULT_RADIAL_DISTRIBUTION,
+  DEFAULT_SPRAY_DYNAMICS,
+  DEFAULT_SPRAY_PRESSURE_DYNAMICS,
   MARKER,
   PENCIL,
   ROUND_PEN,
+  SPRAY_AIRBRUSH,
+  SPRAY_MAX_PARTICLES_PER_EMISSION,
 } from "./types";
-export { hashSeed, mulberry32, renderBrushStroke } from "./brush-render";
 export {
   createBrushTipRegistry,
   generateBrushTip,
+  hashSeed,
+  mulberry32,
+  renderBrushStroke,
+  walkEmissions,
   type BrushTipRegistry,
-} from "./brush-tip";
+  type EmissionPoint,
+} from "./brush";
 export {
   clearLayer,
   cloneLayer,
@@ -58,12 +74,12 @@ export {
   type CloneLayerOptions,
 } from "./layer";
 export {
-  applyPressureCurve,
   calculateRadius,
   drawCircle,
   drawLine,
   drawPath,
   drawVariableWidthPath,
+  evaluateParametricCurve,
   interpolateStrokePoints,
 } from "./draw";
 export {

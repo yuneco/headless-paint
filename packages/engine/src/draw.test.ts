@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyPressureCurve,
   calculateRadius,
   drawCircle,
   drawLine,
   drawPath,
+  evaluateParametricCurve,
   interpolateStrokePoints,
 } from "./draw";
 import { createLayer, getImageData, getPixel } from "./layer";
@@ -111,40 +111,40 @@ describe("drawPath", () => {
   });
 });
 
-describe("applyPressureCurve", () => {
+describe("evaluateParametricCurve", () => {
   it("should be linear with default curve (y1=1/3, y2=2/3)", () => {
     const curve = DEFAULT_PRESSURE_CURVE;
-    expect(applyPressureCurve(0, curve)).toBeCloseTo(0);
-    expect(applyPressureCurve(0.25, curve)).toBeCloseTo(0.25);
-    expect(applyPressureCurve(0.5, curve)).toBeCloseTo(0.5);
-    expect(applyPressureCurve(0.75, curve)).toBeCloseTo(0.75);
-    expect(applyPressureCurve(1, curve)).toBeCloseTo(1);
+    expect(evaluateParametricCurve(0, curve)).toBeCloseTo(0);
+    expect(evaluateParametricCurve(0.25, curve)).toBeCloseTo(0.25);
+    expect(evaluateParametricCurve(0.5, curve)).toBeCloseTo(0.5);
+    expect(evaluateParametricCurve(0.75, curve)).toBeCloseTo(0.75);
+    expect(evaluateParametricCurve(1, curve)).toBeCloseTo(1);
   });
 
   it("should produce soft curve with y1=1, y2=1", () => {
     const soft: PressureCurve = { y1: 1, y2: 1 };
     // 低い入力でも高い出力になる
-    const result = applyPressureCurve(0.3, soft);
+    const result = evaluateParametricCurve(0.3, soft);
     expect(result).toBeGreaterThan(0.5);
   });
 
   it("should produce hard curve with y1=0, y2=1/3", () => {
     const hard: PressureCurve = { y1: 0, y2: 1 / 3 };
     // 低い入力は更に低い出力になる
-    const result = applyPressureCurve(0.3, hard);
+    const result = evaluateParametricCurve(0.3, hard);
     expect(result).toBeLessThan(0.15);
   });
 
   it("should always return 0 for input 0", () => {
-    expect(applyPressureCurve(0, { y1: 0, y2: 0 })).toBe(0);
-    expect(applyPressureCurve(0, { y1: 1, y2: 1 })).toBe(0);
-    expect(applyPressureCurve(0, { y1: 0.5, y2: 0.8 })).toBe(0);
+    expect(evaluateParametricCurve(0, { y1: 0, y2: 0 })).toBe(0);
+    expect(evaluateParametricCurve(0, { y1: 1, y2: 1 })).toBe(0);
+    expect(evaluateParametricCurve(0, { y1: 0.5, y2: 0.8 })).toBe(0);
   });
 
   it("should always return 1 for input 1", () => {
-    expect(applyPressureCurve(1, { y1: 0, y2: 0 })).toBe(1);
-    expect(applyPressureCurve(1, { y1: 1, y2: 1 })).toBe(1);
-    expect(applyPressureCurve(1, { y1: 0.5, y2: 0.8 })).toBe(1);
+    expect(evaluateParametricCurve(1, { y1: 0, y2: 0 })).toBe(1);
+    expect(evaluateParametricCurve(1, { y1: 1, y2: 1 })).toBe(1);
+    expect(evaluateParametricCurve(1, { y1: 0.5, y2: 0.8 })).toBe(1);
   });
 });
 

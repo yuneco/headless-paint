@@ -6,8 +6,8 @@
 
 ```typescript
 interface Point {
-  x: number;
-  y: number;
+  readonly x: number;
+  readonly y: number;
 }
 ```
 
@@ -22,10 +22,10 @@ RGBA色を表す型。各成分は 0-255 の整数値。
 
 ```typescript
 interface Color {
-  r: number;  // 赤 (0-255)
-  g: number;  // 緑 (0-255)
-  b: number;  // 青 (0-255)
-  a: number;  // アルファ (0=透明, 255=不透明)
+  readonly r: number;  // 赤 (0-255)
+  readonly g: number;  // 緑 (0-255)
+  readonly b: number;  // 青 (0-255)
+  readonly a: number;  // アルファ (0=透明, 255=不透明)
 }
 ```
 
@@ -41,7 +41,7 @@ Point を拡張し、筆圧情報を含む型。ペンタブレット入力な�
 
 ```typescript
 interface StrokePoint extends Point {
-  pressure?: number;  // 筆圧 (オプション)
+  readonly pressure?: number;  // 筆圧 (オプション)
 }
 ```
 
@@ -56,11 +56,11 @@ const strokePoint: StrokePoint = { x: 50, y: 50, pressure: 0.8 };
 
 ```typescript
 interface LayerMeta {
-  name: string;        // レイヤー名
-  visible: boolean;    // 表示/非表示
-  opacity: number;     // 不透明度 (0.0-1.0)
-  alphaLocked: boolean; // 通常描画を既存 alpha に制限する
-  compositeOperation?: GlobalCompositeOperation;  // 合成モード
+  readonly name: string;        // レイヤー名
+  readonly visible: boolean;    // 表示/非表示
+  readonly opacity: number;     // 不透明度 (0.0-1.0)
+  readonly alphaLocked: boolean; // 通常描画を既存 alpha に制限する
+  readonly compositeOperation?: GlobalCompositeOperation;  // 合成モード
 }
 ```
 
@@ -310,15 +310,17 @@ const DEFAULT_BACKGROUND_COLOR: Color = { r: 255, g: 255, b: 255, a: 255 };
 
 ---
 
-## PressureCurve
+## ParametricCurve / PressureCurve
 
-入力筆圧(0-1)→出力筆圧(0-1)のマッピングを制御する cubic-bezier カーブの制御点。
+入力値(0-1)→出力値(0-1)のマッピングを制御する cubic-bezier カーブの制御点。筆圧変換で使う。
 
 ```typescript
-interface PressureCurve {
+interface ParametricCurve {
   readonly y1: number;  // 第1制御点のy座標 (0-1)
   readonly y2: number;  // 第2制御点のy座標 (0-1)
 }
+
+type PressureCurve = ParametricCurve;
 ```
 
 端点 `(0,0)→(1,1)` は固定。制御点の x 座標は `1/3`, `2/3` で固定され、y 座標のみ調整可能。
@@ -336,10 +338,47 @@ const DEFAULT_PRESSURE_CURVE: PressureCurve = { y1: 1/3, y2: 2/3 };
 
 デフォルト値 `{ y1: 1/3, y2: 2/3 }` は数学的に線形（output = input）。
 
+`PressureCurve` は筆圧用途を示すためのエイリアスとして残る。評価関数は用途に依存しない `evaluateParametricCurve(value, curve)` を使い、旧 `applyPressureCurve` 名の互換エイリアスは持たない。
+
 **カーブの例**:
 - `{ y1: 1/3, y2: 2/3 }` — 線形（デフォルト）
 - `{ y1: 1, y2: 1 }` — 柔らかい（軽いタッチでも太くなる）
 - `{ y1: 0, y2: 1/3 }` — 硬い（強く押さないと太くならない）
+
+---
+
+## DensityProfileCurve
+
+spray ブラシの半径方向密度プロファイル。x は `0=中央`, `1=辺縁`、y は相対密度を表す。端点の x は固定で、端点 y と2つの制御点を持つ cubic-bezier カーブ。
+
+```typescript
+interface DensityProfileCurve {
+  readonly startY: number;
+  readonly control1: Point;
+  readonly control2: Point;
+  readonly endY: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `startY` | `number` | 中央（x=0）の相対密度 |
+| `control1` | `Point` | 第1制御点。`x`/`y` ともに 0-1 |
+| `control2` | `Point` | 第2制御点。`x`/`y` ともに 0-1 |
+| `endY` | `number` | 辺縁（x=1）の相対密度 |
+
+**関連定数**:
+
+```typescript
+const DEFAULT_RADIAL_DISTRIBUTION: DensityProfileCurve = {
+  startY: 1,
+  control1: { x: 1 / 3, y: 1 },
+  control2: { x: 2 / 3, y: 1 },
+  endY: 1,
+};
+```
+
+デフォルトは全半径で密度 `1` の一様密度カーブ。一様密度では半径サンプリングが一様円盤分布と一致する。
 
 ---
 
@@ -520,6 +559,95 @@ const pastelDynamics: BrushDynamics = {
 
 ---
 
+## SprayDynamics
+
+spray ブラシの動的パラメータ。`lineWidth` は散布領域の直径を表し、粒子径は `particleSize` で独立に指定する。
+
+```typescript
+interface SprayDynamics {
+  readonly spacing: number;
+  readonly density: number;
+  readonly particleSize: number;
+  readonly particleSizeJitter: number;
+  readonly sizeJitterMode: SpraySizeJitterMode;
+  readonly opacityJitter: number;
+  readonly flow: number;
+  readonly radialDistribution: DensityProfileCurve;
+}
+
+type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
+```
+
+全フィールドが required。`DEFAULT_SPRAY_DYNAMICS` からの spread で差分のみ指定できる。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `spacing` | `number` | 散布直径に対する emission 間隔の比率（0.1 = 直径の10%間隔） |
+| `density` | `number` | 基準粒子密度。emission 1回あたり、1000px² に配置する粒子数 |
+| `particleSize` | `number` | 粒子チップの最大径 px。散布径とは独立した絶対値 |
+| `particleSizeJitter` | `number` | 粒子径の縮小方向ランダム変動 [0, 1] |
+| `sizeJitterMode` | `SpraySizeJitterMode` | 粒子径ジッタの分布モード。実験的フィールドで、最終的に1つの挙動へ固定する予定 |
+| `opacityJitter` | `number` | 粒子不透明度の縮小方向ランダム変動 [0, 1] |
+| `flow` | `number` | 粒子ごとの基準塗料量 [0, 1] |
+| `radialDistribution` | `DensityProfileCurve` | 半径方向の密度プロファイル。x は中央→辺縁、y は相対密度 |
+
+**関連定数**:
+
+```typescript
+const SPRAY_MAX_PARTICLES_PER_EMISSION = 512;
+
+const DEFAULT_SPRAY_DYNAMICS: SprayDynamics = {
+  spacing: 0.1,
+  density: 5,
+  particleSize: 2,
+  particleSizeJitter: 0,
+  sizeJitterMode: "uniform",
+  opacityJitter: 0,
+  flow: 0.35,
+  radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+};
+```
+
+**描画上の意味**:
+- emission 1回の基準粒子数は `density * Math.PI * R * R / 1000` で、散布半径 `R` の面積に比例する。
+- `radialDistribution` は相対密度 `d(x)` として評価され、半径 pdf は `pdf(x) ∝ d(x) * x` になる。デフォルトの一様密度では一様円盤、中央高・辺縁低のカーブでは中心が厚くなる。
+- `sizeJitterMode` は `particleSizeJitter` の乱数分布を切り替える実験用フィールド。`uniform` は従来の一様縮小、`power` は小粒を増やす分布、`lognormal` は 0.25-4 倍の対数正規近似、`bimodal` は基準粒と微小粒の二峰分布。
+- 1 emission あたりの粒子数は `SPRAY_MAX_PARTICLES_PER_EMISSION` で上限クランプされる。
+
+---
+
+## SprayPressureDynamics
+
+筆圧を spray ブラシの動的パラメータへ反映する強さ。`PressureDynamics` に density 軸を加えた spray 専用型。
+
+```typescript
+interface SprayPressureDynamics {
+  readonly size: number;
+  readonly flow: number;
+  readonly density: number;
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `size` | `number` | 筆圧を散布径へ反映する強さ。`0` は均一サイズ、`1` は筆圧比例 |
+| `flow` | `number` | 筆圧を粒子不透明度へ反映する強さ。`0` は均一 flow、`1` は筆圧比例 |
+| `density` | `number` | 筆圧を粒子密度へ反映する強さ。`0` は均一密度、`1` は筆圧比例 |
+
+**関連定数**:
+
+```typescript
+const DEFAULT_SPRAY_PRESSURE_DYNAMICS: SprayPressureDynamics = {
+  size: 1,
+  flow: 0,
+  density: 0,
+};
+```
+
+`density` のデフォルトは `0`。`DEFAULT_PRESSURE_DYNAMICS.flow` と同じく、標準設定では均一値を保ち、筆圧連動が必要なプリセット側で明示的に有効化する。
+
+---
+
 ## BrushConfig
 
 ブラシの設定。判別共用体でブラシ種別を切り替える。
@@ -540,7 +668,15 @@ interface StampBrushConfig {
   readonly mixing?: BrushMixing;
 }
 
-type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
+/** 散布ブラシ。lineWidth は散布領域の直径を意味する */
+interface SprayBrushConfig {
+  readonly type: "spray";
+  readonly particle: BrushTipConfig;
+  readonly dynamics: SprayDynamics;
+  readonly pressureDynamics: SprayPressureDynamics;
+}
+
+type BrushConfig = RoundPenBrushConfig | StampBrushConfig | SprayBrushConfig;
 ```
 
 **StampBrushConfig**:
@@ -552,6 +688,17 @@ type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
 | `dynamics` | `BrushDynamics` | 動的パラメータ |
 | `pressureDynamics` | `PressureDynamics` | 筆圧をサイズ/flowへ反映する強さ |
 | `mixing` | `BrushMixing` | 混色設定。未指定または `enabled: false` で混色なし |
+
+**SprayBrushConfig**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"spray"` | ブラシ種別 |
+| `particle` | `BrushTipConfig` | 粒子チップ形状の設定。`circle` / `image` を stamp と同じ仕組みで解決する |
+| `dynamics` | `SprayDynamics` | 散布間隔・密度・粒子径・半径方向分布などの動的パラメータ |
+| `pressureDynamics` | `SprayPressureDynamics` | 筆圧を散布径/flow/密度へ反映する強さ |
+
+spray ブラシは混色非対応。`mixing` フィールドは持たず、pickup 経路を通らない。
 
 **RoundPenBrushConfig**:
 
@@ -608,6 +755,23 @@ const AIRBRUSH: StampBrushConfig = {
   pressureDynamics: { size: 0, flow: 1 },
 };
 
+const SPRAY_AIRBRUSH: SprayBrushConfig = {
+  type: "spray",
+  particle: { type: "circle", hardness: 1.0 },
+  dynamics: {
+    ...DEFAULT_SPRAY_DYNAMICS,
+    spacing: 0.1,
+    density: 5,
+    particleSize: 2,
+    particleSizeJitter: 0.35,
+    sizeJitterMode: "uniform",
+    opacityJitter: 0.3,
+    flow: 0.35,
+    radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+  },
+  pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
+};
+
 const PENCIL: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.95 },
@@ -627,6 +791,7 @@ const MARKER: StampBrushConfig = {
 |------|--------|------|
 | `ROUND_PEN` | — | 従来の circle+trapezoid 方式（デフォルト） |
 | `AIRBRUSH` | ソフト円 (hardness=0.0) | 密間隔・低フロー。滑らかな噴射効果 |
+| `SPRAY_AIRBRUSH` | ハード小粒子 (hardness=1.0) | 散布領域内に小粒子を確率配置する粒子感エアブラシ |
 | `PENCIL` | ほぼハード円 (hardness=0.95) | 微小なサイズ・位置のゆらぎ |
 | `MARKER` | やや柔らか (hardness=0.7) | 中間フロー。マーカー的な塗り |
 
@@ -638,6 +803,22 @@ const airbrush: StampBrushConfig = {
   tip: { type: "circle", hardness: 0.0 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
   pressureDynamics: { size: 0, flow: 1 },
+};
+
+// 粒子感エアブラシ
+const sprayAirbrush: SprayBrushConfig = {
+  type: "spray",
+  particle: { type: "circle", hardness: 1.0 },
+  dynamics: {
+    ...DEFAULT_SPRAY_DYNAMICS,
+    density: 5,
+    particleSize: 2,
+    particleSizeJitter: 0.35,
+    sizeJitterMode: "uniform",
+    opacityJitter: 0.3,
+    flow: 0.35,
+  },
+  pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
 };
 
 // 鉛筆
@@ -719,57 +900,67 @@ renderLayers(layers, ctx, transform, {
 
 ## BrushRenderState
 
-ブラシレンダリングの状態。committed→pending 間の状態受け渡しに使用する。
+ブラシレンダリングの状態。committed→pending 間の状態受け渡しに使用する。ストローク共有リソースと、Expand 分岐ごとの進行状態を分けて保持する。
 
 ```typescript
-interface BrushBranchRenderState {
-  readonly accumulatedDistance: number;
-  readonly stampCount: number;
+interface BrushMixingState {
   readonly colorBuffer?: OffscreenCanvas;
   readonly mixedCanvas?: OffscreenCanvas;
   readonly lastMixingUpdateDistance?: number;
 }
 
-interface BrushRenderState {
+interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
-  readonly tipCanvas: OffscreenCanvas | null;
+  readonly emissionCount: number;
+  readonly mixing?: BrushMixingState;
+}
+
+interface BrushRenderState {
   readonly seed: number;
-  readonly stampCount: number;
-  readonly branches?: readonly BrushBranchRenderState[];
+  readonly tipCanvas: OffscreenCanvas | null;
+  readonly branches: readonly BrushBranchRenderState[];
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `accumulatedDistance` | `number` | スタンプ配置の累積距離。committed→pending 間で引き継ぎ、ギャップや二重配置を防ぐ |
-| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。ストローク開始時に生成し全スタンプで再利用する。`round-pen` では `null` |
 | `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
-| `stampCount` | `number` | 配置済みスタンプの通し番号。PRNG シードの入力に使用し、incremental/replay で同一の jitter を保証する |
-| `branches` | `readonly BrushBranchRenderState[]` | Expand 分岐ごとの状態。混色有効時は分岐ごとの `colorBuffer` を保持する |
+| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。`round-pen` では `null` |
+| `branches` | `readonly BrushBranchRenderState[]` | Expand 分岐ごとの状態。非 Expand でも長さ 1 の配列を持つ |
 
 **BrushBranchRenderState**:
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `accumulatedDistance` | `number` | 分岐ごとのスタンプ配置累積距離 |
-| `stampCount` | `number` | 分岐ごとのスタンプ通し番号 |
+| `accumulatedDistance` | `number` | 分岐ごとの emission 配置累積距離。committed→pending 間で引き継ぎ、ギャップや二重配置を防ぐ |
+| `emissionCount` | `number` | 分岐ごとの emission 通し番号。stamp の dab と spray の粒子バーストで共通に使う |
+| `mixing` | `BrushMixingState` | stamp + mixing 有効時のみ保持する混色状態 |
+
+**BrushMixingState**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
 | `colorBuffer` | `OffscreenCanvas` | 混色有効時に使うブラシ色バッファ。`tipCanvas` と同じ最大サイズで、背景転写と復元色転写により更新される |
 | `mixedCanvas` | `OffscreenCanvas` | 混色更新を距離ベースで間引くときに再利用する直近の mixed dab。`colorBuffer` に `tipCanvas` の alpha を適用した結果を保持する |
 | `lastMixingUpdateDistance` | `number` | 最後に `colorBuffer` / `mixedCanvas` を更新したストローク距離。混色更新を距離ベースで制御するために使用 |
 
-**設計意図**: スタンプブラシの jitter はスタンプ通し番号ベース PRNG `hashSeed(seed, stampIndex)` で決定論的に生成される。混色有効時は Expand 分岐ごとに拾う背景が異なるため、`branches` に分岐別の距離・通し番号・色バッファを保持する。混色状態の更新はスタンプ配置より低い距離頻度にできるため、最後に更新した距離と直近の mixed dab も分岐ごとに保持する。
+**設計意図**:
+
+- `branches` は常に存在し、Expand の出力 branch 数と一致する。非 Expand は長さ 1。
+- branch ごとに独立した `accumulatedDistance` / `emissionCount` を持つため、stamp / spray とも branch 間で spacing 位相が揃う。
+- branch の実効 seed は `hashSeed(seed, branchIndex)` で導出する。emission 序数は branch ごとに 0 から数え、各 emission の局所 seed は `hashSeed(branchSeed, emissionIndex)` で導出する。
+- 混色有効時は Expand 分岐ごとに拾う背景が異なるため、`mixing` に分岐別の色バッファを保持する。spray は混色非対応のため `mixing` を持たない。
 
 **使用例**:
 ```typescript
 // ストローク開始時に初期状態を作成
 const initialState: BrushRenderState = {
-  accumulatedDistance: 0,
-  tipCanvas: generateBrushTip(brush.tip, size, color),
   seed: Math.random() * 0xffffffff | 0,
-  stampCount: 0,
+  tipCanvas: generateBrushTip(brush.tip, size, color),
+  branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
 };
 
 // committed 描画後に状態を引き継ぎ
 const nextState = renderBrushStroke(layer, points, style, 0, initialState);
-// nextState.accumulatedDistance, nextState.stampCount を pending 描画に使う
+// nextState.branches[branchIndex] を pending 描画に使う
 ```

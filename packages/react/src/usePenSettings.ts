@@ -3,11 +3,13 @@ import type {
   Color,
   PressureCurve,
   PressureDynamics,
+  SprayPressureDynamics,
   StrokeStyle,
 } from "@headless-paint/core";
 import {
   DEFAULT_PRESSURE_CURVE,
   DEFAULT_PRESSURE_DYNAMICS,
+  DEFAULT_SPRAY_PRESSURE_DYNAMICS,
   ROUND_PEN,
 } from "@headless-paint/core";
 import { useCallback, useMemo, useState } from "react";
@@ -31,7 +33,9 @@ export interface UsePenSettingsResult {
   readonly setPressureCurve: (curve: PressureCurve) => void;
   readonly setEraser: (eraser: boolean) => void;
   readonly setBrush: (brush: BrushConfig) => void;
-  readonly setBrushPressureDynamics: (dynamics: PressureDynamics) => void;
+  readonly setBrushPressureDynamics: (
+    dynamics: PressureDynamics | SprayPressureDynamics,
+  ) => void;
 }
 
 const DEFAULT_COLOR: Color = { r: 0, g: 0, b: 0, a: 255 };
@@ -46,11 +50,27 @@ function normalizePressureDynamics(
   };
 }
 
+function normalizeSprayPressureDynamics(
+  value: SprayPressureDynamics | undefined,
+): SprayPressureDynamics {
+  return {
+    size: value?.size ?? DEFAULT_SPRAY_PRESSURE_DYNAMICS.size,
+    flow: value?.flow ?? DEFAULT_SPRAY_PRESSURE_DYNAMICS.flow,
+    density: value?.density ?? DEFAULT_SPRAY_PRESSURE_DYNAMICS.density,
+  };
+}
+
 function normalizeBrushConfig(brush: BrushConfig): BrushConfig {
   if (brush.type === "round-pen") {
     return {
       type: "round-pen",
       pressureDynamics: normalizePressureDynamics(brush.pressureDynamics),
+    };
+  }
+  if (brush.type === "spray") {
+    return {
+      ...brush,
+      pressureDynamics: normalizeSprayPressureDynamics(brush.pressureDynamics),
     };
   }
   return {
@@ -108,10 +128,29 @@ export function usePenSettings(
   }, []);
 
   const handleSetBrushPressureDynamics = useCallback(
-    (dynamics: PressureDynamics) => {
-      setBrush((current) =>
-        normalizeBrushConfig({ ...current, pressureDynamics: dynamics }),
-      );
+    (dynamics: PressureDynamics | SprayPressureDynamics) => {
+      setBrush((current) => {
+        if (current.type === "spray") {
+          return normalizeBrushConfig({
+            ...current,
+            pressureDynamics: {
+              size: dynamics.size,
+              flow: dynamics.flow,
+              density:
+                "density" in dynamics
+                  ? dynamics.density
+                  : current.pressureDynamics.density,
+            },
+          });
+        }
+        return normalizeBrushConfig({
+          ...current,
+          pressureDynamics: {
+            size: dynamics.size,
+            flow: dynamics.flow,
+          },
+        });
+      });
     },
     [],
   );

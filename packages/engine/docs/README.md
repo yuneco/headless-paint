@@ -47,17 +47,22 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Color` | RGBA色 `{ r, g, b, a }` (各値 0-255) |
 | `StrokePoint` | Point + 筆圧 `{ x, y, pressure? }` |
 | `PressureDynamics` | 筆圧をブラシサイズ/flowへ反映する強さ `{ size, flow }` |
+| `SprayPressureDynamics` | 筆圧を spray の散布径/flow/密度へ反映する強さ `{ size, flow, density }` |
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
+| `SprayDynamics` | spray ブラシの動的パラメータ（spacing, density, particleSize など） |
 | `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore, updateDistancePx }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, alphaLocked, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
+| `ParametricCurve` | 0-1 パラメータ変換カーブ制御点 `{ y1, y2 }` |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
+| `DensityProfileCurve` | spray の半径方向密度プロファイル `{ startY, control1, control2, endY }` |
+| `SpraySizeJitterMode` | spray 粒子径ジッタの実験的分布モード |
 | `ContentBounds` | レイヤー内容の非透明ピクセル境界矩形 `{ x, y, width, height }` |
 | `LayerTransformPreview` | レイヤー変換プレビュー `{ layerId, matrix }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
-| `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig`） |
-| `BrushRenderState` | ブラシレンダリング状態 `{ accumulatedDistance, tipCanvas, seed, stampCount, branches? }` |
+| `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig`） |
+| `BrushRenderState` | ブラシレンダリング状態 `{ seed, tipCanvas, branches }` |
 
 ### Layer 管理関数
 
@@ -86,7 +91,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `drawPath(layer, points, color, lineWidth?)` | パス（連続線）を描画 |
 | `drawVariableWidthPath(layer, points, color, baseLineWidth, pressureSize, pressureCurve?, compositeOperation?, overlapCount?)` | 可変太さパス描画（筆圧対応） |
 | `calculateRadius(pressure, baseLineWidth, pressureSize, pressureCurve?)` | 筆圧から描画半径を計算 |
-| `applyPressureCurve(pressure, curve)` | 筆圧カーブを適用 |
+| `evaluateParametricCurve(value, curve)` | 0-1 パラメータ変換カーブを評価 |
 | `interpolateStrokePoints(points, overlapCount?)` | Catmull-Romスプライン補間 |
 
 ### Brush API
@@ -96,15 +101,21 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
+| `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit)` | 距離ベース emission を走査（stamp / spray 共有） |
 | `generateBrushTip(config, size, color, registry?)` | ブラシチップ画像を生成 |
 | `createBrushTipRegistry()` | 画像チップ管理用の `BrushTipRegistry` を作成 |
 | `mulberry32(seed)` | 32bit シードから PRNG を生成 |
-| `hashSeed(globalSeed, distance)` | 位置固有のシードを生成 |
+| `hashSeed(globalSeed, index)` | branch / emission 固有のシードを生成 |
 | `ROUND_PEN` | デフォルトの round-pen ブラシ定数 |
 | `AIRBRUSH` | エアブラシプリセット（ソフト円、密間隔・低フロー） |
+| `SPRAY_AIRBRUSH` | 粒子感エアブラシプリセット（spray、小粒子散布） |
 | `PENCIL` | 鉛筆プリセット（ほぼハード円、微小 jitter） |
 | `MARKER` | マーカープリセット（やや柔らか、中間フロー） |
 | `DEFAULT_PRESSURE_DYNAMICS` | `PressureDynamics` のデフォルト値 |
+| `DEFAULT_SPRAY_DYNAMICS` | `SprayDynamics` のデフォルト値 |
+| `DEFAULT_SPRAY_PRESSURE_DYNAMICS` | `SprayPressureDynamics` のデフォルト値 |
+| `DEFAULT_RADIAL_DISTRIBUTION` | spray の半径方向密度プロファイルのデフォルト値 |
+| `SPRAY_MAX_PARTICLES_PER_EMISSION` | spray の emission あたり粒子数上限 |
 
 ### レンダリング関数
 

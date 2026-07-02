@@ -100,8 +100,14 @@ function buildLiveStrokePoints(session: StrokeSessionState) {
   ];
 }
 
+function calculateSprayTipSize(style: StrokeStyle): number {
+  if (style.brush.type !== "spray") return 0;
+  const maxScale = style.brush.dynamics.sizeJitterMode === "lognormal" ? 4 : 1;
+  return Math.ceil(style.brush.dynamics.particleSize * maxScale);
+}
+
 /**
- * スタンプブラシ用の初期 BrushRenderState を生成する。
+ * スタンプ/spray ブラシ用の初期 BrushRenderState を生成する。
  * round-pen では undefined を返す（brushState 不要）。
  */
 function createInitialBrushState(
@@ -111,22 +117,29 @@ function createInitialBrushState(
   brushState: BrushRenderState | undefined;
   brushSeed: number;
 } {
-  if (style.brush.type !== "stamp") {
+  if (style.brush.type === "round-pen") {
     return { brushState: undefined, brushSeed: 0 };
   }
   const brushSeed = (Math.random() * 0xffffffff) | 0;
-  const tipCanvas = generateBrushTip(
-    style.brush.tip,
-    Math.ceil(style.lineWidth * 2),
-    style.color,
-    registry,
-  );
+  const tipCanvas =
+    style.brush.type === "stamp"
+      ? generateBrushTip(
+          style.brush.tip,
+          Math.ceil(style.lineWidth * 2),
+          style.color,
+          registry,
+        )
+      : generateBrushTip(
+          style.brush.particle,
+          calculateSprayTipSize(style),
+          style.color,
+          registry,
+        );
   return {
     brushState: {
-      accumulatedDistance: 0,
       tipCanvas,
       seed: brushSeed,
-      stampCount: 0,
+      branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
     },
     brushSeed,
   };

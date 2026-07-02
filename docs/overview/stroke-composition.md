@@ -12,6 +12,8 @@
 
 stamp ブラシでは、まず小さなブラシ先端画像である `tipCanvas` が作られます。その `tipCanvas` をストローク上に何度も置いたものが `dab` です。ユーザーには1本の線に見えますが、内部的にはたくさんの dab が重なって描画されています。
 
+spray ブラシでも `tipCanvas` を使います。ただし `tipCanvas` は dab ではなく小さな粒子の元画像で、ストローク上の各 emission ごとに散布領域内へ複数回配置されます。
+
 描画中のストロークは、確定済みの部分と、まだ位置が変わる可能性がある未確定の部分に分けて扱います。そのため、描画先も `committedLayer.canvas` と `pendingLayer.canvas` に分かれます。
 
 ![Normal stroke route](./images/stroke-normal-route.svg)
@@ -23,6 +25,8 @@ stamp ブラシでは、まず小さなブラシ先端画像である `tipCanvas
 `dab` は、その tip をストローク上の1地点に配置したものです。stamp ブラシでは、spacing に従って dab を並べることでストロークを表現します。
 
 重要なのは、`tipCanvas` は「元画像」であり、実際にレイヤーに残るのは配置された dab の集合だという点です。
+
+spray ブラシでは、spacing に従って並ぶ単位は `emission` です。1つの emission は散布領域1回分の粒子バーストで、粒子数は散布半径と密度から決まります。spray は pickup を行わないため、粒子は `tipCanvas` から直接 `committedLayer.canvas` または `pendingLayer.canvas` へ描かれます。
 
 ## 3. committed と pending
 
@@ -48,6 +52,8 @@ pickup も alpha lock もない場合、流れは単純です。
 5. 表示用 canvas には、レイヤー群と pending overlay を合成して描く。
 
 このルートでは、dab を作る工程と、表示用 canvas に合成する工程が素直につながっています。
+
+spray ブラシもこの通常ルートに入ります。pickup 用の `sourceLayer`、`colorBuffer`、`mixedCanvas` は使わず、emission ごとの粒子配置だけが stamp の dab 配置と異なります。
 
 ## 5. pickup がある場合
 
@@ -86,4 +92,3 @@ alpha lock ありの live preview では、`workLayer.canvas` が「見た目を
 - pickup は、dab を作る前に色を混ぜる工程を追加する。
 - alpha lock は、pending preview を表示する直前に committed の alpha で制限する。
 - ユーザーが見ているのは、これらの canvas を合成した表示用 canvas。
-

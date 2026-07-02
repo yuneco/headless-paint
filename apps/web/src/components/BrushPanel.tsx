@@ -1,6 +1,8 @@
 import type {
   BrushConfig,
+  BrushTipConfig,
   BrushTipRegistry,
+  SprayBrushConfig,
   StampBrushConfig,
 } from "@headless-paint/engine";
 import { DEFAULT_BRUSH_MIXING, generateBrushTip } from "@headless-paint/engine";
@@ -14,6 +16,16 @@ interface BrushPanelProps {
   readonly registryReady: boolean;
 }
 
+function isSameTip(a: BrushTipConfig, b: BrushTipConfig): boolean {
+  if (a.type === "circle" && b.type === "circle") {
+    return a.hardness === b.hardness;
+  }
+  if (a.type === "image" && b.type === "image") {
+    return a.imageId === b.imageId;
+  }
+  return false;
+}
+
 function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
   if (a.type !== b.type) return false;
   if (a.type === "round-pen" && b.type === "round-pen") {
@@ -22,10 +34,39 @@ function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
       a.pressureDynamics.flow === b.pressureDynamics.flow
     );
   }
+  if (a.type === "spray" && b.type === "spray") {
+    const sa = a as SprayBrushConfig;
+    const sb = b as SprayBrushConfig;
+    return (
+      isSameTip(sa.particle, sb.particle) &&
+      sa.dynamics.spacing === sb.dynamics.spacing &&
+      sa.dynamics.density === sb.dynamics.density &&
+      sa.dynamics.particleSize === sb.dynamics.particleSize &&
+      sa.dynamics.particleSizeJitter === sb.dynamics.particleSizeJitter &&
+      sa.dynamics.sizeJitterMode === sb.dynamics.sizeJitterMode &&
+      sa.dynamics.opacityJitter === sb.dynamics.opacityJitter &&
+      sa.dynamics.flow === sb.dynamics.flow &&
+      sa.dynamics.radialDistribution.startY ===
+        sb.dynamics.radialDistribution.startY &&
+      sa.dynamics.radialDistribution.control1.x ===
+        sb.dynamics.radialDistribution.control1.x &&
+      sa.dynamics.radialDistribution.control1.y ===
+        sb.dynamics.radialDistribution.control1.y &&
+      sa.dynamics.radialDistribution.control2.x ===
+        sb.dynamics.radialDistribution.control2.x &&
+      sa.dynamics.radialDistribution.control2.y ===
+        sb.dynamics.radialDistribution.control2.y &&
+      sa.dynamics.radialDistribution.endY ===
+        sb.dynamics.radialDistribution.endY &&
+      sa.pressureDynamics.size === sb.pressureDynamics.size &&
+      sa.pressureDynamics.flow === sb.pressureDynamics.flow &&
+      sa.pressureDynamics.density === sb.pressureDynamics.density
+    );
+  }
   const sa = a as StampBrushConfig;
   const sb = b as StampBrushConfig;
   return (
-    sa.tip.type === sb.tip.type &&
+    isSameTip(sa.tip, sb.tip) &&
     sa.dynamics.spacing === sb.dynamics.spacing &&
     sa.dynamics.flow === sb.dynamics.flow &&
     sa.pressureDynamics.size === sb.pressureDynamics.size &&
@@ -71,7 +112,9 @@ function BrushPreviewCanvas({
     } else {
       const color = { r: 51, g: 51, b: 51, a: 255 };
       try {
-        const tip = generateBrushTip(config.tip, PREVIEW_SIZE, color, registry);
+        const tipConfig =
+          config.type === "stamp" ? config.tip : config.particle;
+        const tip = generateBrushTip(tipConfig, PREVIEW_SIZE, color, registry);
         ctx.drawImage(tip, 0, 0, PREVIEW_SIZE, PREVIEW_SIZE);
       } catch {
         // registry にまだテクスチャがない場合はフォールバック

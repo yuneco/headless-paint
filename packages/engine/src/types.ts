@@ -107,12 +107,21 @@ export const DEFAULT_BACKGROUND_COLOR: Color = {
 };
 
 // ============================================================
-// Pressure Curve
+// Parametric Curve / Pressure Curve
 // ============================================================
 
-export interface PressureCurve {
+export interface ParametricCurve {
   readonly y1: number;
   readonly y2: number;
+}
+
+export type PressureCurve = ParametricCurve;
+
+export interface DensityProfileCurve {
+  readonly startY: number;
+  readonly control1: Point;
+  readonly control2: Point;
+  readonly endY: number;
 }
 
 export const DEFAULT_PRESSURE_CURVE: PressureCurve = {
@@ -166,6 +175,51 @@ export const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
   flow: 1.0,
 };
 
+export interface SprayDynamics {
+  readonly spacing: number;
+  readonly density: number;
+  readonly particleSize: number;
+  readonly particleSizeJitter: number;
+  readonly sizeJitterMode: SpraySizeJitterMode;
+  readonly opacityJitter: number;
+  readonly flow: number;
+  readonly radialDistribution: DensityProfileCurve;
+}
+
+export type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
+
+export interface SprayPressureDynamics {
+  readonly size: number;
+  readonly flow: number;
+  readonly density: number;
+}
+
+export const DEFAULT_RADIAL_DISTRIBUTION: DensityProfileCurve = {
+  startY: 1,
+  control1: { x: 1 / 3, y: 1 },
+  control2: { x: 2 / 3, y: 1 },
+  endY: 1,
+};
+
+export const SPRAY_MAX_PARTICLES_PER_EMISSION = 512;
+
+export const DEFAULT_SPRAY_DYNAMICS: SprayDynamics = {
+  spacing: 0.1,
+  density: 5,
+  particleSize: 2,
+  particleSizeJitter: 0,
+  sizeJitterMode: "uniform",
+  opacityJitter: 0,
+  flow: 0.35,
+  radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+};
+
+export const DEFAULT_SPRAY_PRESSURE_DYNAMICS: SprayPressureDynamics = {
+  size: 1,
+  flow: 0,
+  density: 0,
+};
+
 export interface BrushMixing {
   readonly enabled: boolean;
   readonly pickup: number;
@@ -195,7 +249,18 @@ export interface StampBrushConfig {
   readonly mixing?: BrushMixing;
 }
 
-export type BrushConfig = RoundPenBrushConfig | StampBrushConfig;
+/** 散布ブラシ。lineWidth は散布領域の直径を意味する */
+export interface SprayBrushConfig {
+  readonly type: "spray";
+  readonly particle: BrushTipConfig;
+  readonly dynamics: SprayDynamics;
+  readonly pressureDynamics: SprayPressureDynamics;
+}
+
+export type BrushConfig =
+  | RoundPenBrushConfig
+  | StampBrushConfig
+  | SprayBrushConfig;
 
 export const ROUND_PEN: RoundPenBrushConfig = {
   type: "round-pen",
@@ -207,6 +272,23 @@ export const AIRBRUSH: StampBrushConfig = {
   tip: { type: "circle", hardness: 0.0 },
   dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
   pressureDynamics: { size: 0, flow: 1 },
+};
+
+export const SPRAY_AIRBRUSH: SprayBrushConfig = {
+  type: "spray",
+  particle: { type: "circle", hardness: 1.0 },
+  dynamics: {
+    ...DEFAULT_SPRAY_DYNAMICS,
+    spacing: 0.1,
+    density: 5,
+    particleSize: 2,
+    particleSizeJitter: 0.35,
+    sizeJitterMode: "uniform",
+    opacityJitter: 0.3,
+    flow: 0.35,
+    radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+  },
+  pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
 };
 
 export const PENCIL: StampBrushConfig = {
@@ -228,20 +310,22 @@ export const MARKER: StampBrushConfig = {
   pressureDynamics: { size: 0.2, flow: 0.5 },
 };
 
-export interface BrushBranchRenderState {
-  readonly accumulatedDistance: number;
-  readonly stampCount: number;
+export interface BrushMixingState {
   readonly colorBuffer?: OffscreenCanvas;
   readonly mixedCanvas?: OffscreenCanvas;
   readonly lastMixingUpdateDistance?: number;
 }
 
-export interface BrushRenderState {
+export interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
+  readonly emissionCount: number;
+  readonly mixing?: BrushMixingState;
+}
+
+export interface BrushRenderState {
   readonly tipCanvas: OffscreenCanvas | null;
   readonly seed: number;
-  readonly stampCount: number;
-  readonly branches?: readonly BrushBranchRenderState[];
+  readonly branches: readonly BrushBranchRenderState[];
 }
 
 // ============================================================

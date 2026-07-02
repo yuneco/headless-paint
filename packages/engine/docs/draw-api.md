@@ -122,26 +122,28 @@ drawPath(layer, freehand, green);
 
 ---
 
-## applyPressureCurve
+## evaluateParametricCurve
 
-筆圧カーブを適用する。パラメトリック cubic-bezier で入力筆圧を変換する。
+0-1 のパラメータ変換カーブを評価する。パラメトリック cubic-bezier で入力値を変換する。筆圧カーブだけでなく、spray ブラシの半径方向分布にも使う。
 
 ```typescript
-function applyPressureCurve(
-  pressure: number,
-  curve: PressureCurve,
+function evaluateParametricCurve(
+  value: number,
+  curve: ParametricCurve,
 ): number
 ```
 
 **引数**:
 | 名前 | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `pressure` | `number` | ○ | 入力筆圧（0.0〜1.0） |
-| `curve` | `PressureCurve` | ○ | カーブの制御点 |
+| `value` | `number` | ○ | 入力値（0.0〜1.0） |
+| `curve` | `ParametricCurve` | ○ | カーブの制御点 |
 
-**戻り値**: `number` - 変換後の筆圧（0.0〜1.0）
+**戻り値**: `number` - 変換後の値（0.0〜1.0）
 
-**計算式**: `output = 3 * mt² * t * y1 + 3 * mt * t² * y2 + t³` (t=pressure, mt=1-t)
+**計算式**: `output = 3 * mt² * t * y1 + 3 * mt * t² * y2 + t³` (t=value, mt=1-t)
+
+旧 `applyPressureCurve` 名の互換エイリアスは提供しない。筆圧用途では `PressureCurve`（`ParametricCurve` のエイリアス）を渡す。
 
 ---
 
@@ -169,7 +171,7 @@ function calculateRadius(
 **戻り値**: `number` - 描画半径（ピクセル）
 
 **計算ロジック**:
-1. `pressureCurve` がある場合、`applyPressureCurve` で筆圧を変換
+1. `pressureCurve` がある場合、`evaluateParametricCurve` で筆圧を変換
 2. `pressureSize=0`: `baseLineWidth / 2`（均一）
 3. `pressureSize=1`: `baseLineWidth * pressure`（筆圧比例）
 4. 中間値: 均一と筆圧の線形補間

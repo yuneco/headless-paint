@@ -2,14 +2,22 @@ import { createLayer } from "@headless-paint/core";
 import type {
   BackgroundSettings,
   BrushConfig,
+  BrushTipConfig,
   Color,
+  DensityProfileCurve,
   ExpandConfig,
   Layer,
   LayerMeta,
   PressureCurve,
   PressureDynamics,
+  SprayPressureDynamics,
+  SpraySizeJitterMode,
 } from "@headless-paint/core";
-import { DEFAULT_PRESSURE_DYNAMICS } from "@headless-paint/core";
+import {
+  DEFAULT_PRESSURE_DYNAMICS,
+  DEFAULT_RADIAL_DISTRIBUTION,
+  DEFAULT_SPRAY_PRESSURE_DYNAMICS,
+} from "@headless-paint/core";
 import type { ViewTransform } from "@headless-paint/core";
 import type { ToolType } from "./usePointerHandler";
 
@@ -335,6 +343,26 @@ function cloneBrushConfig(brush: BrushConfig): BrushConfig {
       pressureDynamics: clonePressureDynamics(brush.pressureDynamics),
     };
   }
+  if (brush.type === "spray") {
+    const particle =
+      brush.particle.type === "circle"
+        ? { type: "circle" as const, hardness: brush.particle.hardness }
+        : { type: "image" as const, imageId: brush.particle.imageId };
+    return {
+      type: "spray",
+      particle,
+      dynamics: {
+        ...brush.dynamics,
+        radialDistribution: {
+          startY: brush.dynamics.radialDistribution.startY,
+          control1: { ...brush.dynamics.radialDistribution.control1 },
+          control2: { ...brush.dynamics.radialDistribution.control2 },
+          endY: brush.dynamics.radialDistribution.endY,
+        },
+      },
+      pressureDynamics: cloneSprayPressureDynamics(brush.pressureDynamics),
+    };
+  }
   const mixing = brush.mixing ? { ...brush.mixing } : undefined;
   if (brush.tip.type === "circle") {
     return {
@@ -358,6 +386,16 @@ function clonePressureDynamics(dynamics: PressureDynamics): PressureDynamics {
   return {
     size: dynamics.size,
     flow: dynamics.flow,
+  };
+}
+
+function cloneSprayPressureDynamics(
+  dynamics: SprayPressureDynamics,
+): SprayPressureDynamics {
+  return {
+    size: dynamics.size,
+    flow: dynamics.flow,
+    density: dynamics.density,
   };
 }
 
@@ -429,6 +467,30 @@ function isPressureCurve(value: unknown): value is PressureCurve {
   );
 }
 
+function isUnitNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0 && value <= 1;
+}
+
+function isDensityProfileCurve(value: unknown): value is DensityProfileCurve {
+  return (
+    isRecord(value) &&
+    isUnitNumber(value.startY) &&
+    isRecord(value.control1) &&
+    isUnitNumber(value.control1.x) &&
+    isUnitNumber(value.control1.y) &&
+    isRecord(value.control2) &&
+    isUnitNumber(value.control2.x) &&
+    isUnitNumber(value.control2.y) &&
+    isUnitNumber(value.endY)
+  );
+}
+
+function parseSpraySizeJitterMode(value: unknown): SpraySizeJitterMode {
+  return value === "power" || value === "lognormal" || value === "bimodal"
+    ? value
+    : "uniform";
+}
+
 function isBackgroundSettings(value: unknown): value is BackgroundSettings {
   return (
     isRecord(value) &&
@@ -453,19 +515,95 @@ function parsePressureDynamics(
   };
 }
 
+function parseSprayPressureDynamics(
+  value: unknown,
+  sizeFallback: number,
+): SprayPressureDynamics | null {
+  if (value === undefined) {
+    return {
+      size: sizeFallback,
+      flow: DEFAULT_SPRAY_PRESSURE_DYNAMICS.flow,
+      density: DEFAULT_SPRAY_PRESSURE_DYNAMICS.density,
+    };
+  }
+  if (!isRecord(value)) return null;
+  return {
+    size: isFiniteNumber(value.size) ? value.size : sizeFallback,
+    flow: isFiniteNumber(value.flow)
+      ? value.flow
+      : DEFAULT_SPRAY_PRESSURE_DYNAMICS.flow,
+    density: isFiniteNumber(value.density)
+      ? value.density
+      : DEFAULT_SPRAY_PRESSURE_DYNAMICS.density,
+  };
+}
+
 function parseBrushConfig(
   value: unknown,
   pressureSizeFallback: number,
 ): BrushConfig | null {
   if (!isRecord(value) || typeof value.type !== "string") return null;
+  if (value.type === "round-pen") {
+    const pressureDynamics = parsePressureDynamics(
+      value.pressureDynamics,
+      pressureSizeFallback,
+    );
+    if (!pressureDynamics) return null;
+    return { type: "round-pen", pressureDynamics };
+  }
+  if (value.type === "spray") {
+    if (!isRecord(value.particle) || !isRecord(value.dynamics)) return null;
+    const pressureDynamics = parseSprayPressureDynamics(
+      value.pressureDynamics,
+      pressureSizeFallback,
+    );
+    if (!pressureDynamics) return null;
+    const particle = parseBrushTipConfig(value.particle);
+    if (!particle) return null;
+    const dynamics = value.dynamics;
+    if (
+      !(
+        isFiniteNumber(dynamics.spacing) &&
+        isFiniteNumber(dynamics.density) &&
+        isFiniteNumber(dynamics.particleSize) &&
+        isFiniteNumber(dynamics.particleSizeJitter) &&
+        isFiniteNumber(dynamics.opacityJitter) &&
+        isFiniteNumber(dynamics.flow)
+      )
+    ) {
+      return null;
+    }
+    const radialDistribution = isDensityProfileCurve(
+      dynamics.radialDistribution,
+    )
+      ? dynamics.radialDistribution
+      : DEFAULT_RADIAL_DISTRIBUTION;
+    return {
+      type: "spray",
+      particle,
+      dynamics: {
+        spacing: dynamics.spacing as number,
+        density: dynamics.density as number,
+        particleSize: dynamics.particleSize as number,
+        particleSizeJitter: dynamics.particleSizeJitter as number,
+        sizeJitterMode: parseSpraySizeJitterMode(dynamics.sizeJitterMode),
+        opacityJitter: dynamics.opacityJitter as number,
+        flow: dynamics.flow as number,
+        radialDistribution: {
+          startY: radialDistribution.startY,
+          control1: { ...radialDistribution.control1 },
+          control2: { ...radialDistribution.control2 },
+          endY: radialDistribution.endY,
+        },
+      },
+      pressureDynamics,
+    };
+  }
   const pressureDynamics = parsePressureDynamics(
     value.pressureDynamics,
     pressureSizeFallback,
   );
   if (!pressureDynamics) return null;
-  if (value.type === "round-pen") {
-    return { type: "round-pen", pressureDynamics };
-  }
   if (
     value.type !== "stamp" ||
     !isRecord(value.tip) ||
@@ -474,11 +612,8 @@ function parseBrushConfig(
     return null;
   }
 
-  const tipValue = value.tip;
-  const tipValid =
-    (tipValue.type === "circle" && isFiniteNumber(tipValue.hardness)) ||
-    (tipValue.type === "image" && typeof tipValue.imageId === "string");
-  if (!tipValid) return null;
+  const tip = parseBrushTipConfig(value.tip);
+  if (!tip) return null;
 
   const dynamics = value.dynamics;
   if (
@@ -506,10 +641,6 @@ function parseBrushConfig(
     }
   }
 
-  const tip =
-    tipValue.type === "circle"
-      ? { type: "circle" as const, hardness: tipValue.hardness as number }
-      : { type: "image" as const, imageId: tipValue.imageId as string };
   const mixing = value.mixing
     ? {
         enabled: value.mixing.enabled as boolean,
@@ -532,6 +663,17 @@ function parseBrushConfig(
     pressureDynamics,
     mixing,
   };
+}
+
+function parseBrushTipConfig(value: unknown): BrushTipConfig | null {
+  if (!isRecord(value)) return null;
+  if (value.type === "circle" && isFiniteNumber(value.hardness)) {
+    return { type: "circle", hardness: value.hardness };
+  }
+  if (value.type === "image" && typeof value.imageId === "string") {
+    return { type: "image", imageId: value.imageId };
+  }
+  return null;
 }
 
 function isExpandConfig(value: unknown): value is ExpandConfig {

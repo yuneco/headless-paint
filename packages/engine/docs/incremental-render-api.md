@@ -34,6 +34,19 @@
 - **未確定点**: クリア→再描画（点数が少ないので高速）
 - **合成**: Canvas to Canvas転写（GPU最適化されている）
 
+### ブラシ状態管理
+
+差分描画 API は Expand で分岐したストロークを順に `renderBrushStroke` へ渡す。`BrushRenderState` の初期化、branch ごとの取り出し、描画後の merge、pending 描画用クローンは `packages/engine/src/brush/state.ts` が担当する。
+
+`incremental-render.ts` は以下のブラシ内部事情を直接管理しない。
+
+- `BrushRenderState.branches` の不足分補完と branch state の生成
+- branch ごとの `accumulatedDistance` / `emissionCount` の merge
+- mixing 有効時の `colorBuffer` / `mixedCanvas` / `lastMixingUpdateDistance` のクローン
+- pending 描画が committed state を汚さないための `PENDING_COLOR_BUFFER_CACHE`
+
+これにより、stamp / spray / round-pen は同じ branch ループで扱われる。spray は mixing 非対応のため、pending クローンは数値 state と `tipCanvas` 参照だけを引き継ぐ軽い経路になる。
+
 ---
 
 ## RenderUpdate
@@ -79,18 +92,20 @@ function appendToCommittedLayer(
 | `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
-| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。スタンプブラシの `accumulatedDistance` と `tipCanvas`、混色有効時の分岐別 `colorBuffer` / `mixedCanvas` を含む。`round-pen` では省略可 |
+| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。`tipCanvas` と branch ごとの `accumulatedDistance` / `emissionCount`、混色有効時の `branches[].mixing` を含む。`round-pen` では省略可 |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 | `alphaLocked` | `boolean` | - | 通常描画を既存 alpha に制限するか。省略時は `layer.meta.alphaLocked` を使用する |
 
 **動作**:
 1. pointsを`expandStrokePoints`で展開（pressure保持）
-2. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画。混色有効時は展開ストロークごとに独立した `colorBuffer` / `mixedCanvas` を距離ベースで更新し、`sourceLayer` を指定した場合はストローク開始時のレイヤー状態から背景色を拾う
-3. `alphaLocked` が `true` かつ通常描画の場合は `source-atop` で描画し、既存 alpha のある範囲にだけ反映する
-4. 既存の描画は保持される（追加描画のみ）
-5. 更新された `BrushRenderState` を返す（`accumulatedDistance` が進む）
+2. `brush/state.ts` で `BrushRenderState.branches` を展開数に揃え、branch ごとの開始 state を取り出す
+3. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画。混色有効時は展開ストロークごとに独立した `mixing.colorBuffer` / `mixedCanvas` を距離ベースで更新し、`sourceLayer` を指定した場合はストローク開始時のレイヤー状態から背景色を拾う
+4. 描画後の branch state を `brush/state.ts` で merge する
+5. `alphaLocked` が `true` かつ通常描画の場合は `source-atop` で描画し、既存 alpha のある範囲にだけ反映する
+6. 既存の描画は保持される（追加描画のみ）
+7. 更新された `BrushRenderState` を返す（各 branch の `accumulatedDistance` / `emissionCount` が進む）
 
-**戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。スタンプブラシでは `accumulatedDistance` と `stampCount` が更新されている。`round-pen` では `{ accumulatedDistance: 0, tipCanvas: null, seed: 0, stampCount: 0 }` を返す。
+**戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。stamp / spray では branch ごとの `accumulatedDistance` と `emissionCount` が更新されている。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 
 **消しゴムモードの動作**:
 `style.compositeOperation` が `"destination-out"` の場合、committedレイヤーの既存ピクセルが直接消去される。
@@ -140,14 +155,15 @@ function renderPendingLayer(
 | `points` | `readonly StrokePoint[]` | ○ | 未確定点全体（pressure含む） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
-| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。スタンプブラシでは committed 描画から引き継いだ `accumulatedDistance` と混色更新状態を使用し、境界でのスタンプと混色の連続性を保つ |
+| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。committed 描画から引き継いだ branch ごとの `accumulatedDistance` / `emissionCount` と混色更新状態を使用し、境界での emission と混色の連続性を保つ |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 | `previewBaseLayer` | `Layer` | - | 混色プレビュー用の表示ベース。指定時は pending レイヤーにこのレイヤーをコピーしてから pending 点を描画する |
 
 **動作**:
 1. レイヤーをクリア
 2. pointsを`expandStrokePoints`で展開（pressure保持）
-3. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画（`compositeOperation` は適用しない、常に `source-over`）。混色有効時は `brushState` の `colorBuffer` / `mixedCanvas` を直接汚さないよう、pending 描画用に複製した状態を使う
+3. `brush/state.ts` で pending 描画用の `BrushRenderState` を複製する。混色有効時は `colorBuffer` / `mixedCanvas` も複製し、committed state を直接汚さない
+4. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画（`compositeOperation` は適用しない、常に `source-over`）
 
 `renderPendingLayer` は alpha lock を評価しない。alpha lock 有効時の live preview は `renderLayers` / `composeLayers` の pending overlay 合成で committed レイヤーの alpha を使ってマスクする。pending レイヤー自体は従来通り、未確定点の pixels だけを保持する。
 

@@ -51,20 +51,27 @@ function replayStrokeCommand(
     y: p.y,
     pressure: p.pressure,
   }));
-  // スタンプブラシの場合は tipCanvas を再生成して初期 BrushRenderState を構築
+  // スタンプ/spray ブラシの場合は tipCanvas を再生成して初期 BrushRenderState を構築
   let brushState: BrushRenderState | undefined;
-  if (command.style.brush.type === "stamp") {
-    const tipCanvas = generateBrushTip(
-      command.style.brush.tip,
-      Math.ceil(command.style.lineWidth * 2),
-      command.style.color,
-      registry,
-    );
+  if (command.style.brush.type !== "round-pen") {
+    const tipCanvas =
+      command.style.brush.type === "stamp"
+        ? generateBrushTip(
+            command.style.brush.tip,
+            Math.ceil(command.style.lineWidth * 2),
+            command.style.color,
+            registry,
+          )
+        : generateBrushTip(
+            command.style.brush.particle,
+            calculateSprayTipSize(command),
+            command.style.color,
+            registry,
+          );
     brushState = {
-      accumulatedDistance: 0,
       tipCanvas,
       seed: command.brushSeed,
-      stampCount: 0,
+      branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
     };
   }
   const sourceLayer =
@@ -82,6 +89,13 @@ function replayStrokeCommand(
     sourceLayer,
     command.alphaLocked,
   );
+}
+
+function calculateSprayTipSize(command: StrokeCommand): number {
+  if (command.style.brush.type !== "spray") return 0;
+  const maxScale =
+    command.style.brush.dynamics.sizeJitterMode === "lognormal" ? 4 : 1;
+  return Math.ceil(command.style.brush.dynamics.particleSize * maxScale);
 }
 
 function cloneLayerForSampling(layer: Layer): Layer {

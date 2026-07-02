@@ -1,4 +1,8 @@
-import { createLayer, createViewTransform } from "@headless-paint/core";
+import {
+  DEFAULT_RADIAL_DISTRIBUTION,
+  createLayer,
+  createViewTransform,
+} from "@headless-paint/core";
 import type { ViewTransform } from "@headless-paint/core";
 import { describe, expect, it } from "vitest";
 import {
@@ -193,6 +197,118 @@ describe("persistence", () => {
     expect(imported?.pen.brush).toEqual({
       type: "round-pen",
       pressureDynamics: { size: 0.35, flow: 0 },
+    });
+  });
+
+  it("imports spray density profile and size jitter mode", () => {
+    const snapshot = {
+      version: 1,
+      tool: "pen",
+      transform: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      background: {
+        color: { r: 255, g: 255, b: 255, a: 255 },
+        visible: true,
+      },
+      pen: {
+        color: { r: 10, g: 20, b: 30, a: 255 },
+        lineWidth: 8,
+        pressureCurve: { y1: 0.2, y2: 0.6 },
+        eraser: false,
+        brush: {
+          type: "spray",
+          particle: { type: "circle", hardness: 1 },
+          dynamics: {
+            spacing: 0.1,
+            density: 5,
+            particleSize: 2,
+            particleSizeJitter: 0.5,
+            sizeJitterMode: "lognormal",
+            opacityJitter: 0.2,
+            flow: 0.35,
+            radialDistribution: {
+              startY: 0.8,
+              control1: { x: 0.2, y: 1 },
+              control2: { x: 0.8, y: 0.1 },
+              endY: 0,
+            },
+          },
+          pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
+        },
+      },
+      smoothing: {
+        enabled: true,
+        windowSize: 5,
+      },
+      expand: {
+        levels: [
+          { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
+        ],
+      },
+    };
+
+    const imported = importPaintSettings(snapshot);
+    expect(imported?.pen.brush).toMatchObject({
+      type: "spray",
+      dynamics: {
+        sizeJitterMode: "lognormal",
+        radialDistribution: {
+          startY: 0.8,
+          control1: { x: 0.2, y: 1 },
+          control2: { x: 0.8, y: 0.1 },
+          endY: 0,
+        },
+      },
+    });
+  });
+
+  it("falls back invalid spray radialDistribution and unknown sizeJitterMode", () => {
+    const snapshot = {
+      version: 1,
+      tool: "pen",
+      transform: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      background: {
+        color: { r: 255, g: 255, b: 255, a: 255 },
+        visible: true,
+      },
+      pen: {
+        color: { r: 10, g: 20, b: 30, a: 255 },
+        lineWidth: 8,
+        pressureCurve: { y1: 0.2, y2: 0.6 },
+        eraser: false,
+        brush: {
+          type: "spray",
+          particle: { type: "circle", hardness: 1 },
+          dynamics: {
+            spacing: 0.1,
+            density: 5,
+            particleSize: 2,
+            particleSizeJitter: 0.5,
+            sizeJitterMode: "unknown",
+            opacityJitter: 0.2,
+            flow: 0.35,
+            radialDistribution: { y1: 0, y2: 0.12 },
+          },
+          pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
+        },
+      },
+      smoothing: {
+        enabled: true,
+        windowSize: 5,
+      },
+      expand: {
+        levels: [
+          { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
+        ],
+      },
+    };
+
+    const imported = importPaintSettings(snapshot);
+    expect(imported?.pen.brush).toMatchObject({
+      type: "spray",
+      dynamics: {
+        sizeJitterMode: "uniform",
+        radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+      },
     });
   });
 

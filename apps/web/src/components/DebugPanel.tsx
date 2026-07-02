@@ -1,9 +1,12 @@
 import {
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_PRESSURE_DYNAMICS,
+  DEFAULT_SPRAY_DYNAMICS,
+  DEFAULT_SPRAY_PRESSURE_DYNAMICS,
   type ExpandMode,
   type PatternMode,
   type Point,
+  type SprayBrushConfig,
   type StampBrushConfig,
 } from "@headless-paint/engine";
 import { type ViewTransform, decomposeTransform } from "@headless-paint/input";
@@ -16,6 +19,7 @@ import type { GUI } from "lil-gui";
 import { memo, useEffect, useRef } from "react";
 import type { UsePatternPreviewResult } from "../hooks/usePatternPreview";
 import { BezierCurveEditor } from "./BezierCurveEditor";
+import { DensityProfileCurveEditor } from "./DensityProfileCurveEditor";
 
 interface DebugPanelProps {
   transform: ViewTransform;
@@ -32,6 +36,7 @@ interface DebugPanelProps {
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 const PATTERN_MODES: PatternMode[] = ["none", "grid", "repeat-x", "repeat-y"];
+const SIZE_JITTER_MODES = ["uniform", "power", "lognormal", "bimodal"] as const;
 
 function DebugPanelComponent({
   transform,
@@ -95,7 +100,34 @@ function DebugPanelComponent({
     flowPressure: penSettings.brush.pressureDynamics.flow,
   });
 
-  const dynamicsFolderRef = useRef<ReturnType<GUI["addFolder"]> | null>(null);
+  const sprayDynamics =
+    penSettings.brush.type === "spray"
+      ? penSettings.brush.dynamics
+      : DEFAULT_SPRAY_DYNAMICS;
+  const sprayDynamicsDataRef = useRef({
+    spacing: sprayDynamics.spacing,
+    density: sprayDynamics.density,
+    particleSize: sprayDynamics.particleSize,
+    particleSizeJitter: sprayDynamics.particleSizeJitter,
+    sizeJitterMode: sprayDynamics.sizeJitterMode,
+    opacityJitter: sprayDynamics.opacityJitter,
+    flow: sprayDynamics.flow,
+    flowPressure:
+      penSettings.brush.type === "spray"
+        ? penSettings.brush.pressureDynamics.flow
+        : DEFAULT_SPRAY_PRESSURE_DYNAMICS.flow,
+    densityPressure:
+      penSettings.brush.type === "spray"
+        ? penSettings.brush.pressureDynamics.density
+        : DEFAULT_SPRAY_PRESSURE_DYNAMICS.density,
+  });
+
+  const stampDynamicsFolderRef = useRef<ReturnType<GUI["addFolder"]> | null>(
+    null,
+  );
+  const sprayDynamicsFolderRef = useRef<ReturnType<GUI["addFolder"]> | null>(
+    null,
+  );
 
   const patternDataRef = useRef({
     mode: patternPreview.config.mode,
@@ -279,7 +311,7 @@ function DebugPanelComponent({
       const penFolder = gui.addFolder("Pen Settings");
 
       penFolder
-        .add(penDataRef.current, "lineWidth", 1, 50, 1)
+        .add(penDataRef.current, "lineWidth", 1, 150, 1)
         .name("Line Width")
         .listen()
         .onChange((value: number) => {
@@ -300,7 +332,7 @@ function DebugPanelComponent({
 
       penFolder.open();
 
-      const dynamicsFolder = gui.addFolder("Brush Dynamics");
+      const dynamicsFolder = gui.addFolder("Stamp Dynamics");
 
       const updateDynamics = (field: string, value: number) => {
         const ps = penSettingsRef.current;
@@ -371,7 +403,98 @@ function DebugPanelComponent({
         dynamicsFolder.hide();
       }
       dynamicsFolder.open();
-      dynamicsFolderRef.current = dynamicsFolder;
+      stampDynamicsFolderRef.current = dynamicsFolder;
+
+      const sprayFolder = gui.addFolder("Spray Dynamics");
+
+      const updateSprayDynamics = (
+        field: string,
+        value: number | (typeof SIZE_JITTER_MODES)[number],
+      ) => {
+        const ps = penSettingsRef.current;
+        if (ps.brush.type !== "spray") return;
+        const updated: SprayBrushConfig = {
+          ...ps.brush,
+          dynamics: { ...ps.brush.dynamics, [field]: value },
+        };
+        ps.setBrush(updated);
+      };
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "spacing", 0.01, 1.0, 0.01)
+        .name("Spacing")
+        .listen()
+        .onChange((v: number) => updateSprayDynamics("spacing", v));
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "density", 0, 40, 0.1)
+        .name("Density")
+        .listen()
+        .onChange((v: number) => updateSprayDynamics("density", v));
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "particleSize", 0.5, 12, 0.1)
+        .name("Particle Size")
+        .listen()
+        .onChange((v: number) => updateSprayDynamics("particleSize", v));
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "particleSizeJitter", 0, 1, 0.05)
+        .name("Size Jitter")
+        .listen()
+        .onChange((v: number) => updateSprayDynamics("particleSizeJitter", v));
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "sizeJitterMode", SIZE_JITTER_MODES)
+        .name("Size Jitter Mode")
+        .listen()
+        .onChange((v: (typeof SIZE_JITTER_MODES)[number]) =>
+          updateSprayDynamics("sizeJitterMode", v),
+        );
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "opacityJitter", 0, 1, 0.05)
+        .name("Opacity Jitter")
+        .listen()
+        .onChange((v: number) => updateSprayDynamics("opacityJitter", v));
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "flow", 0, 1, 0.05)
+        .name("Flow")
+        .listen()
+        .onChange((v: number) => updateSprayDynamics("flow", v));
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "flowPressure", 0, 1, 0.05)
+        .name("Flow Pressure")
+        .listen()
+        .onChange((value: number) => {
+          const ps = penSettingsRef.current;
+          if (ps.brush.type !== "spray") return;
+          ps.setBrushPressureDynamics({
+            ...ps.brush.pressureDynamics,
+            flow: value,
+          });
+        });
+
+      sprayFolder
+        .add(sprayDynamicsDataRef.current, "densityPressure", 0, 1, 0.05)
+        .name("Density Pressure")
+        .listen()
+        .onChange((value: number) => {
+          const ps = penSettingsRef.current;
+          if (ps.brush.type !== "spray") return;
+          ps.setBrushPressureDynamics({
+            ...ps.brush.pressureDynamics,
+            density: value,
+          });
+        });
+
+      if (penSettingsRef.current.brush.type !== "spray") {
+        sprayFolder.hide();
+      }
+      sprayFolder.open();
+      sprayDynamicsFolderRef.current = sprayFolder;
 
       const patternFolder = gui.addFolder("Pattern Preview");
 
@@ -509,9 +632,34 @@ function DebugPanelComponent({
         : DEFAULT_PRESSURE_DYNAMICS.flow;
 
     if (penSettings.brush.type === "stamp") {
-      dynamicsFolderRef.current?.show();
+      stampDynamicsFolderRef.current?.show();
     } else {
-      dynamicsFolderRef.current?.hide();
+      stampDynamicsFolderRef.current?.hide();
+    }
+    const spray =
+      penSettings.brush.type === "spray"
+        ? penSettings.brush.dynamics
+        : DEFAULT_SPRAY_DYNAMICS;
+    sprayDynamicsDataRef.current.spacing = spray.spacing;
+    sprayDynamicsDataRef.current.density = spray.density;
+    sprayDynamicsDataRef.current.particleSize = spray.particleSize;
+    sprayDynamicsDataRef.current.particleSizeJitter = spray.particleSizeJitter;
+    sprayDynamicsDataRef.current.sizeJitterMode = spray.sizeJitterMode;
+    sprayDynamicsDataRef.current.opacityJitter = spray.opacityJitter;
+    sprayDynamicsDataRef.current.flow = spray.flow;
+    sprayDynamicsDataRef.current.flowPressure =
+      penSettings.brush.type === "spray"
+        ? penSettings.brush.pressureDynamics.flow
+        : DEFAULT_SPRAY_PRESSURE_DYNAMICS.flow;
+    sprayDynamicsDataRef.current.densityPressure =
+      penSettings.brush.type === "spray"
+        ? penSettings.brush.pressureDynamics.density
+        : DEFAULT_SPRAY_PRESSURE_DYNAMICS.density;
+
+    if (penSettings.brush.type === "spray") {
+      sprayDynamicsFolderRef.current?.show();
+    } else {
+      sprayDynamicsFolderRef.current?.hide();
     }
   }, [penSettings.brush]);
 
@@ -538,6 +686,8 @@ function DebugPanelComponent({
         top: 0,
         right: 0,
         zIndex: 100,
+        maxHeight: "100vh",
+        overflowY: "auto",
       }}
     >
       <div ref={containerRef} />
@@ -562,6 +712,33 @@ function DebugPanelComponent({
           value={penSettings.pressureCurve}
           onChange={penSettings.setPressureCurve}
         />
+        {penSettings.brush.type === "spray" ? (
+          <>
+            <div
+              style={{
+                fontSize: 11,
+                color: "#ebebeb",
+                marginTop: 8,
+                marginBottom: 4,
+              }}
+            >
+              Radial Distribution
+            </div>
+            <DensityProfileCurveEditor
+              value={penSettings.brush.dynamics.radialDistribution}
+              onChange={(curve) => {
+                if (penSettings.brush.type !== "spray") return;
+                penSettings.setBrush({
+                  ...penSettings.brush,
+                  dynamics: {
+                    ...penSettings.brush.dynamics,
+                    radialDistribution: curve,
+                  },
+                });
+              }}
+            />
+          </>
+        ) : null}
       </div>
     </div>
   );

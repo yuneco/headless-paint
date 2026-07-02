@@ -1,6 +1,13 @@
 import { colorToStyle } from "./layer";
 import { interpolateStrokePointsCentripetal } from "./stroke-interpolation";
-import type { Color, Layer, Point, PressureCurve, StrokePoint } from "./types";
+import type {
+  Color,
+  Layer,
+  ParametricCurve,
+  Point,
+  PressureCurve,
+  StrokePoint,
+} from "./types";
 
 const DEFAULT_PRESSURE = 0.5;
 
@@ -59,14 +66,14 @@ export function drawPath(
 }
 
 /**
- * 筆圧カーブを適用する
+ * パラメトリックカーブを評価する
  * パラメトリック cubic-bezier: 端点 (0,0)→(1,1) 固定、制御点の y 座標のみ調整
  */
-export function applyPressureCurve(
-  pressure: number,
-  curve: PressureCurve,
+export function evaluateParametricCurve(
+  value: number,
+  curve: ParametricCurve,
 ): number {
-  const t = pressure;
+  const t = value;
   const mt = 1 - t;
   return 3 * mt * mt * t * curve.y1 + 3 * mt * t * t * curve.y2 + t * t * t;
 }
@@ -82,7 +89,7 @@ export function calculateRadius(
 ): number {
   let p = pressure ?? DEFAULT_PRESSURE;
   if (pressureCurve) {
-    p = applyPressureCurve(p, pressureCurve);
+    p = evaluateParametricCurve(p, pressureCurve);
   }
   const uniformRadius = baseLineWidth / 2;
   const pressureRadius = baseLineWidth * p;

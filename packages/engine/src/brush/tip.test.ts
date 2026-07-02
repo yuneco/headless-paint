@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createBrushTipRegistry, generateBrushTip } from "./brush-tip";
-import type { Color } from "./types";
+import type { Color } from "../types";
+import { createBrushTipRegistry, generateBrushTip } from "./tip";
 
 const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };
 const RED: Color = { r: 255, g: 0, b: 0, a: 255 };

@@ -1,5 +1,5 @@
-import { colorToStyle } from "./layer";
-import type { BrushTipConfig, Color } from "./types";
+import { colorToStyle } from "../layer";
+import type { BrushTipConfig, Color } from "../types";
 
 // ============================================================
 // BrushTipRegistry

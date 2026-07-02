@@ -5,6 +5,7 @@ import {
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_DYNAMICS,
   ROUND_PEN,
+  SPRAY_AIRBRUSH,
 } from "@headless-paint/engine";
 
 export interface BrushPresetEntry {
@@ -61,6 +62,7 @@ const ACRYLIC: StampBrushConfig = {
 export const APP_BRUSH_PRESETS: readonly BrushPresetEntry[] = [
   { label: "Pen", config: ROUND_PEN },
   { label: "Airbrush", config: AIRBRUSH },
+  { label: "Spray", config: SPRAY_AIRBRUSH },
   { label: "Pencil", config: PENCIL_TEXTURED },
   { label: "Acrylic", config: ACRYLIC },
   { label: "Star", config: STAR_SCATTER },
