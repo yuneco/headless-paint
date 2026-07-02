@@ -2,68 +2,52 @@
 
 ## プロジェクト概要
 
-Canvas2Dベースのペイントライブラリ。OffscreenCanvasを使用しヘッドレス環境(Node.js, Worker)で動作する。関数型設計で純粋関数+イミュータブルデータ構造を採用。
-本プロジェクトは現時点で初期開発中であり、既存の顧客データは存在しない。過去データの互換性は考慮せず破壊的な仕様変更を行って良い。
+Canvas2Dベースのペイントライブラリ。OffscreenCanvasでヘッドレス環境(Node.js, Worker)でも動作する。関数型設計（純粋関数+イミュータブルデータ構造）を採用。
 
-## コマンド
+`plans/agents-note.md` はLLMエージェントが自由に記載・編集して良い。以下の内容を記載し、セッション完了ごとに整理する：
 
-```bash
-pnpm dev                  # Webデモアプリの開発サーバー起動
-pnpm build                # 全パッケージビルド
-pnpm test                 # 全テスト実行 (Playwright + Chromium でブラウザテスト)
-pnpm lint                 # Biome lint
-pnpm format               # Biome format
+- 自身の作業またはユーザーとの対話の中で発見した設計の欠陥・課題
+- 追加したい機能・アーキテクチャ
+- 中期的に行うべき作業・改善点
+- 中長期にユーサーに覚えておいて欲しいこと・考えておいて欲しいこと
+- その他、アーキテクトとして記録すべきと判断したこと。ただしこのファイルは設計ドキュメントではない。
 
-# パッケージ単体
-pnpm --filter @headless-paint/engine test
-pnpm --filter @headless-paint/stroke test
-pnpm --filter @headless-paint/input test
-```
+## 役割分担（重要）
 
-テストはVitest + Playwright (Chromium) でブラウザ上実行される。`packages/**/*.test.ts` が対象。
+このプロジェクトは **Claude（はかせ）が設計と全体指揮** を担当し、**実装・動作確認・テスト実行などの具体作業は `codex` コマンドに依頼** する方針。
 
-## パッケージ構成と依存関係
+- Claude自身は「進捗管理・指揮統制・設計・計画・レビュー・判断」に集中する。手を動かす作業を抱え込まない
+- コードの実装、ファイルの一括編集、テスト/ビルドの実行、動作確認は原則 codex に委譲する。特に難易度に対してコンテキスト使用量が嵩む作業は移譲する
+- codex に依頼する際は、目的・対象・完了条件を明確に伝える
+- 委譲結果を Claude がレビューし、設計意図と合っているか判断する
 
-```
-engine (描画エンジン)          ← culori, gl-matrix
-  Layer管理、描画プリミティブ、Expand(対称展開)、差分レンダリング
+### codex の呼び出し方（実装委譲）
 
-input (入力処理)              ← gl-matrix
-  座標変換(Screen↔Layer)、ビュー変換(pan/zoom/rotate)、FilterPipeline
+`codex exec --full-auto "<プロンプト>" </dev/null` で単独起動する。ハマりどころ:
 
-stroke (ストローク管理)        ← engine, input (peer deps)
-  セッション管理(1ストロークのライフサイクル)、Undo/Redo履歴、コマンド生成
+- **`</dev/null` 必須**: 付けないと「Reading additional input from stdin...」でハングする
+- **`&&` チェーン禁止**: 他コマンドと繋ぐとセッション開始前にハングする。必ず単独の呼び出しで起動
+- **完了条件に必ず含める**: 「`pnpm -r build && pnpm test && pnpm lint` 全グリーン」「コミットしない」。コミット・ドキュメント更新は Claude 側で行う
+- **sandbox 制約**: 外部ネット不可。実API疎通・検収(build/test/lint再実行)は Claude 側で実施
+- コンフリクトしない作業なら 2-3 多重で並列起動してよい。難所は `-c model_reasoning_effort=high` を付ける
+- 読み取り専用レビューは `codex review`（`/codex-review` skill）を使う。委譲とは用途を分ける
 
-web (apps/web, Reactデモ)     ← engine, input, stroke, react, lil-gui
-  UIとイベントハンドリング統合層
-```
-
-## アーキテクチャの要点
-
-### データフロー
+## パッケージ構成と責務
 
 ```
-PointerEvent → 座標変換(ViewTransform) → FilterPipeline(smoothing等)
-  → StrokeSession → RenderUpdate → Engine(差分レンダリング)
+engine  描画エンジン        Layer管理、描画プリミティブ、Expand(対称展開)、差分レンダリング
+input   入力処理            座標変換(Screen↔Layer)、ビュー変換、FilterPipeline
+stroke  ストローク管理       Session(1ストロークのライフサイクル)、Undo/Redo履歴、コマンド生成
+web     Reactデモ(apps/web)  UIとイベントハンドリング統合層
 ```
 
-### committed/pending モデル
+依存: `stroke` → engine, input (peer) / `web` → engine, input, stroke
 
-描画は2レイヤーに分離される:
-- **committedLayer**: 確定済みポイントの累積描画。新規確定分のみ追記(差分)
-- **pendingLayer**: 未確定ポイント。毎フレーム全消去→再描画
+## ドキュメント
 
-FilterPipelineのsmoothing windowにより、末尾のポイントはpending(座標が変わりうる)。ストローク終了時にfinalizeで全て確定。
-
-### Expand(対称展開)のタイミング
-
-Expandは**入力時ではなく描画時**に適用される。SessionはExpandを意識せず常に1ストロークを管理。`appendToCommittedLayer`/`renderPendingLayer`に`ExpandConfig`を渡す。
-
-### 履歴(Undo/Redo)
-
-- `StrokeCommand`に入力ポイント+FilterConfig+Expand設定を保存
-- Undo時はコマンド列をリプレイ(Filterを再適用)
-- Checkpoint(ImageDataスナップショット)で効率化
+- アーキテクチャ・API詳細は `packages/*/docs/` にある。設計判断の前に必ず参照する
+- 新機能・仕様変更時は影響範囲のドキュメント更新漏れがないか確認する
+- ドキュメント内の型定義にもコーディング規約（readonly等）を適用する
 
 ## コーディング規約
 
@@ -71,43 +55,30 @@ Expandは**入力時ではなく描画時**に適用される。SessionはExpand
 - **関数型API**: クラスではなく純粋関数。状態は明示的に受け渡し
 - **readonly**: 型定義のフィールドはreadonly
 
-## スキルと作業フロー
+## 作業フロー
 
-### Skill同期ルール（Claude/Codex）
+### Doc-First開発
 
-- skill の正本は `/.claude/skills/` とする
-- 新しい skill を追加・更新したら、必ず Codex 側 `~/.codex/skills/` に同名のシンボリックリンクを作成・更新する
-- 各 `SKILL.md` の frontmatter には Codex 必須項目として `name` と `description` を必ず入れる
-- 例: `ln -sfn /Users/yuki/dev/headless-paint/.claude/skills/<skill-name> /Users/yuki/.codex/skills/<skill-name>`
-
-### Doc-First開発 
-
-計画の作成や、計画に従った実装を行う際は、planning-flow skillのフローに必ず従う。
-このプロジェクトではDoc-Firstで開発する。計画の中身（作業手順）を以下のPhaseで構成すること:
+計画作成・実装は必ず planning-flow skill のフローに従う。作業手順は以下のPhaseで構成する:
 
 1. API設計・ドキュメント作成 → 2. 利用イメージレビュー(承認まで実装に進まない) → 3. 実装 → 4. アーキテクトレビュー(通過して初めて完了報告)
 
-### セルフレビュー (review-library-usage)
+### セルフレビュー
 
-実装完了後、報告前にセルフレビューを行う:
-- review-library-usage スキルを使用してセルフレビューを行う
-- パッケージAPIの活用漏れがないか
-- 既存コードとの実装パターンの一貫性
-- ドキュメント(`packages/*/docs/README.md`)との整合性
+実装完了後・報告前に review-library-usage skill でセルフレビュー（API活用漏れ、既存パターンとの一貫性、ドキュメント整合）を行う。
 
-## ドキュメント
+### Skill同期ルール（Claude/Codex）
 
-各パッケージの詳細APIは `packages/*/docs/` にある。新機能追加時はこれらを参照し、影響範囲のドキュメント更新漏れがないか確認する。
-
-### ドキュメント更新ルール
-
-- **readonly**: ドキュメント内の型定義にもコーディング規約に従い `readonly` を付ける
-- **バグ修正・リファクタ時**: planning-flowが適用されない小さな修正でも、関数シグネチャ・デフォルト値・型を変更した場合は対応する `packages/*/docs/` のドキュメントを確認・更新する
+- skill の正本は `/.claude/skills/`
+- 追加・更新したら Codex 側 `~/.codex/skills/` に同名のシンボリックリンクを作成・更新する
+  - 例: `ln -sfn /Users/yuki/dev/headless-paint/.claude/skills/<name> /Users/yuki/.codex/skills/<name>`
+- 各 `SKILL.md` の frontmatter に Codex 必須項目の `name` と `description` を入れる
 
 ## コミット時のルール
 
-- デバッグ用のスクリーンショット（`*.png`）やログファイル（`*.txt`）がプロジェクトルートに残っていないか確認し、コミット前に削除する
+- デバッグ用のスクリーンショット(`*.png`)やログ(`*.txt`)がルートに残っていないか確認し、削除する
 
 ## コンテキスト管理
-次のステップ/フェーズに進む前にコンテキストの残りを把握する。
-使用量が70%を超えたら新規の作業には着手しない。現在の作業をできるだけ詳細に計画に記載し、速やかに停止する。
+
+- 次のステップ/フェーズに進む前に残量を把握する
+- 使用量が70%を超えたら新規作業に着手しない。現在の作業を計画に詳細記載して速やかに停止する
