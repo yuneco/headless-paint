@@ -589,6 +589,9 @@ function parseBrushConfig(
         sizeJitterMode: parseSpraySizeJitterMode(dynamics.sizeJitterMode),
         opacityJitter: dynamics.opacityJitter as number,
         flow: dynamics.flow as number,
+        emissionsPerSecond: parseEmissionsPerSecond(
+          dynamics.emissionsPerSecond,
+        ),
         radialDistribution: {
           startY: radialDistribution.startY,
           control1: { ...radialDistribution.control1 },
@@ -659,10 +662,16 @@ function parseBrushConfig(
       sizeJitter: dynamics.sizeJitter as number,
       rotationJitter: dynamics.rotationJitter as number,
       scatter: dynamics.scatter as number,
+      emissionsPerSecond: parseEmissionsPerSecond(dynamics.emissionsPerSecond),
     },
     pressureDynamics,
     mixing,
   };
+}
+
+/** 吹きつけレート。正の有限数のみ有効、それ以外は undefined（OFF） */
+function parseEmissionsPerSecond(value: unknown): number | undefined {
+  return isFiniteNumber(value) && value > 0 ? value : undefined;
 }
 
 function parseBrushTipConfig(value: unknown): BrushTipConfig | null {

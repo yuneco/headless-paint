@@ -12,7 +12,7 @@ import type {
   Layer,
   StrokeStyle,
 } from "@headless-paint/core";
-import { generateBrushTip } from "@headless-paint/core";
+import { generateBrushTip, timeSpacingMsFromRate } from "@headless-paint/core";
 import {
   compileFilterPipeline,
   createFilterPipelineState,
@@ -27,7 +27,7 @@ import type {
 } from "@headless-paint/core";
 import { addPointToSession, startStrokeSession } from "@headless-paint/core";
 import type { StrokeSessionState } from "@headless-paint/core";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRafRenderVersion } from "./useRafRenderVersion";
 
 export interface StrokeCompleteData {
@@ -90,7 +90,17 @@ function toStrokePoints(points: readonly InputPoint[]) {
     x: point.x,
     y: point.y,
     pressure: point.pressure,
+    timestamp: point.timestamp,
   }));
+}
+
+/**
+ * 吹きつけ（時間ベースemission）有効時の synthetic point 注入間隔。
+ * 無効なら undefined。
+ */
+function getEmissionIntervalMs(style: StrokeStyle): number | undefined {
+  if (style.brush.type === "round-pen") return undefined;
+  return timeSpacingMsFromRate(style.brush.dynamics.emissionsPerSecond);
 }
 
 function buildLiveStrokePoints(session: StrokeSessionState) {
@@ -186,6 +196,35 @@ export function useStrokeSession(
   const sessionRef = useRef<SessionInternal | null>(null);
   const pendingOnlyRef = useRef(false);
   const strokePointsRef = useRef<InputPoint[]>([]);
+
+  // 吹きつけ（時間ベースemission）用: 静止中に synthetic point を注入する timer。
+  // 実入力・synthetic を問わず入力のたびに再スケジュールされるため、
+  // 入力が emissionsPerSecond より速い間は発火しない。
+  const emissionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastInputPointRef = useRef<InputPoint | null>(null);
+  const onStrokeMoveRef = useRef<(point: InputPoint) => void>(() => {});
+
+  const stopEmissionTimer = useCallback(() => {
+    if (emissionTimerRef.current !== null) {
+      clearTimeout(emissionTimerRef.current);
+      emissionTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleEmissionTick = useCallback(() => {
+    stopEmissionTimer();
+    const intervalMs = getEmissionIntervalMs(strokeStyleRef.current);
+    if (intervalMs === undefined) return;
+    emissionTimerRef.current = setTimeout(() => {
+      emissionTimerRef.current = null;
+      const last = lastInputPointRef.current;
+      if (!sessionRef.current || !last) return;
+      // 最後に観測した座標・筆圧を現在時刻で再注入し、時間経過を履歴に固定する
+      onStrokeMoveRef.current({ ...last, timestamp: performance.now() });
+    }, intervalMs);
+  }, [stopEmissionTimer]);
+
+  useEffect(() => stopEmissionTimer, [stopEmissionTimer]);
 
   // refs で最新値をコールバック内から参照
   const expandConfigRef = useRef(expandConfig);
@@ -286,6 +325,8 @@ export function useStrokeSession(
       );
 
       strokePointsRef.current = [inputPoint];
+      lastInputPointRef.current = inputPoint;
+      scheduleEmissionTick();
       setIsDrawing(true);
       bumpRenderVersion();
     },
@@ -294,6 +335,7 @@ export function useStrokeSession(
       straightLinePipeline,
       pendingLayer,
       bumpRenderVersion,
+      scheduleEmissionTick,
     ],
   );
 
@@ -322,6 +364,7 @@ export function useStrokeSession(
       sessionRef.current.filterState = filterResult.state;
       sessionRef.current.inputPoints.push(inputPoint);
       strokePointsRef.current = [...strokePointsRef.current, inputPoint];
+      lastInputPointRef.current = inputPoint;
 
       if (!pendingOnlyRef.current) {
         const brushState = appendToCommittedLayer(
@@ -348,12 +391,15 @@ export function useStrokeSession(
         sessionRef.current.samplingLayer ?? currentLayer,
       );
 
+      scheduleEmissionTick();
       bumpRenderVersion();
     },
-    [pendingLayer, bumpRenderVersion],
+    [pendingLayer, bumpRenderVersion, scheduleEmissionTick],
   );
+  onStrokeMoveRef.current = onStrokeMove;
 
   const onStrokeEnd = useCallback(() => {
+    stopEmissionTimer();
     if (!sessionRef.current) {
       strokePointsRef.current = [];
       setIsDrawing(false);
@@ -427,7 +473,7 @@ export function useStrokeSession(
     sessionRef.current = null;
     strokePointsRef.current = [];
     setIsDrawing(false);
-  }, [pendingLayer, bumpRenderVersion]);
+  }, [pendingLayer, bumpRenderVersion, stopEmissionTimer]);
 
   const onDrawConfirm = useCallback(() => {
     if (!sessionRef.current || !pendingOnlyRef.current) return;
@@ -460,6 +506,7 @@ export function useStrokeSession(
   }, [bumpRenderVersion]);
 
   const onDrawCancel = useCallback(() => {
+    stopEmissionTimer();
     const currentSession = sessionRef.current;
     const currentLayer = layerRef.current;
     if (
@@ -477,7 +524,7 @@ export function useStrokeSession(
     strokePointsRef.current = [];
     setIsDrawing(false);
     bumpRenderVersion();
-  }, [pendingLayer, bumpRenderVersion]);
+  }, [pendingLayer, bumpRenderVersion, stopEmissionTimer]);
 
   return {
     onStrokeStart,

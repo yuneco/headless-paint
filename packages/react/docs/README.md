@@ -375,7 +375,7 @@ interface StrokeStartOptions {
 
 ```typescript
 interface StrokeCompleteData {
-  /** 生の入力ポイント列（フィルタ適用前） */
+  /** 生の入力ポイント列（フィルタ適用前）。吹きつけ用 synthetic point も含む */
   readonly inputPoints: readonly InputPoint[];
   /** ストローク時に使用された FilterPipeline の設定 */
   readonly filterPipelineConfig: FilterPipelineConfig;
@@ -385,6 +385,8 @@ interface StrokeCompleteData {
   readonly strokeStyle: StrokeStyle;
   /** スタンプブラシの PRNG シード（round-pen では 0） */
   readonly brushSeed: number;
+  /** ストローク開始時点の対象レイヤー alpha lock 設定 */
+  readonly alphaLocked: boolean;
   /** 確定済みポイントの総数 */
   readonly totalPoints: number;
 }
@@ -421,6 +423,14 @@ interface UseStrokeSessionResult {
 ```
 
 描画ブラシは live 描画中のみ `pendingLayer` 側でストローク全体を再描画し、ストローク終了時に `committed layer` へ確定する。高速カーブや急コーナーで future context を失った補間結果を早期確定しないための挙動で、外部 API の使い方は変わらない。
+
+### 吹きつけ用 synthetic input
+
+`strokeStyle.brush.type` が `"stamp"` または `"spray"` で、`brush.dynamics.emissionsPerSecond` が正の有限数の場合、`useStrokeSession` は描画中だけ synthetic input を注入する。最後に受け取った座標・筆圧を保持し、`1000 / emissionsPerSecond` ms 後に `performance.now()` を `timestamp` とする `InputPoint` を `onStrokeMove` と同じ経路へ流す。
+
+- 実入力・synthetic input のどちらを受け取っても timer は再スケジュールされる。そのため、実入力がレートより速く届いている間は synthetic input は発火しない。
+- synthetic input は通常の入力と同じく `inputPoints` に追加され、`onStrokeComplete.inputPoints` に含まれる。履歴に保存すると、replay は保存済み timestamp から同じ時間ベース emission を再現できる。
+- timer は `onStrokeEnd()`、`onDrawCancel()`、unmount で停止する。`round-pen`、または `emissionsPerSecond` が未指定・非有限・`0` 以下の場合は timer を使わない。
 
 ### 使い方
 
@@ -902,6 +912,7 @@ function importPaintDocument(value: unknown): Promise<PaintInitialDocument | nul
 - zod 等のスキーマライブラリは使わず、手書きの軽量チェックで安全に失敗させる
 - 旧設定の `pen.pressureSensitivity` は `pen.brush.pressureDynamics.size` に補完する。`pressureDynamics.flow` は `0` として扱う
 - 旧 `BrushConfig` に `pressureDynamics` がない場合は `DEFAULT_PRESSURE_DYNAMICS` で補完する
+- `pen.brush.dynamics.emissionsPerSecond` は stamp / spray の両方で正の有限数のみ復元する。未指定、非有限、`0` 以下は `undefined` として扱い、吹きつけOFFにする
 
 ### 使い方（保存先はアプリ側で選択）
 
@@ -954,10 +965,13 @@ const documentSnapshot = await exportPaintDocument({
 | `ExpandConfig` | engine | 対称展開の設定 |
 | `CompiledExpand` | engine | 構築済み対称展開変換 |
 | `ExpandMode` | engine | `"none" \| "axial" \| "radial" \| "kaleidoscope"` |
-| `BrushConfig` | engine | ブラシ設定（`RoundPenBrushConfig \| StampBrushConfig`） |
+| `BrushConfig` | engine | ブラシ設定（`RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig`） |
 | `StampBrushConfig` | engine | スタンプベースブラシの設定 |
+| `SprayBrushConfig` | engine | spray ブラシの設定 |
 | `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
+| `SprayDynamics` | engine | spray ブラシの動的パラメータ |
+| `SprayPressureDynamics` | engine | 筆圧を spray の散布径/flow/密度へ反映する強さ |
 | `BrushMixing` | engine | スタンプブラシの混色パラメータ（pickup / restore / updateDistancePx） |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
 | `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
@@ -975,7 +989,8 @@ const documentSnapshot = await exportPaintDocument({
 | 定数 | 元パッケージ | 説明 |
 |----|-------------|------|
 | `ROUND_PEN` | engine | デフォルトの round-pen ブラシ |
-| `AIRBRUSH` | engine | エアブラシプリセット |
+| `AIRBRUSH` | engine | エアブラシプリセット（時間ベース emission 有効） |
+| `SPRAY_AIRBRUSH` | engine | spray エアブラシプリセット（時間ベース emission 有効） |
 | `PENCIL` | engine | 鉛筆プリセット |
 | `MARKER` | engine | マーカープリセット |
 | `DEFAULT_BRUSH_DYNAMICS` | engine | `BrushDynamics` のデフォルト値 |

@@ -96,4 +96,23 @@ describe("brush render state", () => {
     expect(clonedBuffer).not.toBe(colorBuffer);
     expect(cloned?.branches[0].mixing?.lastMixingUpdateDistance).toBe(10);
   });
+
+  it("pending clone は時間 emission 状態も複製する", () => {
+    const state = {
+      tipCanvas: null,
+      seed: 1,
+      branches: [
+        {
+          accumulatedDistance: 3,
+          emissionCount: 4,
+          lastTimestamp: 120,
+          nextTimeEmissionAt: 145,
+        },
+      ],
+    };
+
+    const cloned = cloneBrushRenderState(state);
+    expect(cloned?.branches[0].lastTimestamp).toBe(120);
+    expect(cloned?.branches[0].nextTimeEmissionAt).toBe(145);
+  });
 });

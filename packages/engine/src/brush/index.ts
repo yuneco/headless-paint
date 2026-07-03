@@ -10,7 +10,11 @@ import { renderStampBrushStroke } from "./stamp";
 import { DEFAULT_BRUSH_RENDER_STATE } from "./state";
 
 export { hashSeed, mulberry32 } from "./prng";
-export { walkEmissions, type EmissionPoint } from "./scheduler";
+export {
+  timeSpacingMsFromRate,
+  walkEmissions,
+  type EmissionPoint,
+} from "./scheduler";
 export {
   cloneBrushRenderState,
   createDefaultBrushState,

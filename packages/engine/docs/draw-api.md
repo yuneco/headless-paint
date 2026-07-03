@@ -200,6 +200,7 @@ function interpolateStrokePoints(
 **特記事項**:
 - 2点未満の場合はそのままコピーを返す
 - ポイント間の距離に応じて補間点数を自動決定
+- `timestamp` は補間セグメント両端が値を持つ場合のみ線形補間する。片側でも欠落している場合は補間点の `timestamp` は `undefined` になる
 - 描画関数の内部で使用される（FilterPipelineではなく描画時に適用）
 - `overlapCount > 0` の場合、内部で `skipSegments = max(0, overlapCount - 1)` を計算し、先頭セグメントを出力から除外する
 - `overlapCount = 0` の場合、従来と完全に同一の動作
@@ -227,7 +228,7 @@ function drawVariableWidthPath(
 | 名前 | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `layer` | `Layer` | ○ | 対象レイヤー |
-| `points` | `readonly StrokePoint[]` | ○ | ポイント列（pressure含む） |
+| `points` | `readonly StrokePoint[]` | ○ | ポイント列（pressure/timestamp含む。`drawVariableWidthPath` は timestamp を参照しない） |
 | `color` | `Color` | ○ | 描画色 |
 | `baseLineWidth` | `number` | ○ | 基準線幅 |
 | `pressureSize` | `number` | ○ | 筆圧をサイズへ反映する強さ（0.0〜1.0） |

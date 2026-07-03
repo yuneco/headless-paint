@@ -64,11 +64,14 @@ describe("session", () => {
 
       const result = startStrokeSession(filterOutput, style, expandConfig);
 
-      expect(result.renderUpdate.newlyCommitted).toEqual([{ x: 10, y: 20 }]);
+      // timestamp は StrokePoint まで保持される（時間ベースemission用）
+      expect(result.renderUpdate.newlyCommitted).toEqual([
+        { x: 10, y: 20, pressure: undefined, timestamp: 1000 },
+      ]);
       // currentPending includes last committed point for visual continuity
       expect(result.renderUpdate.currentPending).toEqual([
-        { x: 10, y: 20 },
-        { x: 15, y: 25 },
+        { x: 10, y: 20, pressure: undefined, timestamp: 1000 },
+        { x: 15, y: 25, pressure: undefined, timestamp: 1001 },
       ]);
     });
 
@@ -106,13 +109,13 @@ describe("session", () => {
       // newlyCommitted: max(0, lastRenderedCommitIndex=0)=0 から開始
       // オーバーラップ1点を含み、パスの連続性を確保
       expect(result2.renderUpdate.newlyCommitted).toEqual([
-        { x: 10, y: 20 },
-        { x: 30, y: 40 },
+        { x: 10, y: 20, pressure: undefined, timestamp: 1000 },
+        { x: 30, y: 40, pressure: undefined, timestamp: 1002 },
       ]);
       // currentPending includes last committed point for visual continuity
       expect(result2.renderUpdate.currentPending).toEqual([
-        { x: 30, y: 40 },
-        { x: 35, y: 45 },
+        { x: 30, y: 40, pressure: undefined, timestamp: 1002 },
+        { x: 35, y: 45, pressure: undefined, timestamp: 1003 },
       ]);
     });
 
@@ -150,9 +153,9 @@ describe("session", () => {
       // committedOverlapCount = min(3, 1+1) = 2
       expect(result3.renderUpdate.committedOverlapCount).toBe(2);
       expect(result3.renderUpdate.newlyCommitted).toEqual([
-        { x: 10, y: 20 }, // overlap
-        { x: 30, y: 40 }, // overlap
-        { x: 50, y: 60 }, // new
+        { x: 10, y: 20, pressure: undefined, timestamp: 1000 }, // overlap
+        { x: 30, y: 40, pressure: undefined, timestamp: 1002 }, // overlap
+        { x: 50, y: 60, pressure: undefined, timestamp: 1004 }, // new
       ]);
     });
 

@@ -94,7 +94,7 @@ function addPointToSession(
 2. filterOutput.pending を currentPending に設定
 3. lastRenderedCommitIndex からオーバーラップ点（最大3点）を含めて newlyCommitted を計算
 4. `committedOverlapCount = min(3, lastRenderedCommitIndex + 1)` で利用可能なオーバーラップ点数をクランプ
-5. InputPointからStrokePoint（pressure保持）に変換してRenderUpdateを生成
+5. InputPointからStrokePoint（pressure/timestamp保持）に変換してRenderUpdateを生成
 
 **使用例**:
 ```typescript
@@ -135,7 +135,7 @@ function endStrokeSession(
 |------|-----|------|------|
 | `state` | `StrokeSessionState` | ○ | 現在のセッション状態 |
 | `layerId` | `string` | ○ | 描画先レイヤーの ID（コマンドに記録される） |
-| `inputPoints` | `readonly InputPoint[]` | ○ | フィルタ前の入力点列（履歴保存用） |
+| `inputPoints` | `readonly InputPoint[]` | ○ | フィルタ前の入力点列（履歴保存用）。`timestamp` もそのまま保存され、時間ベース emission の replay に使われる |
 | `filterPipeline` | `FilterPipelineConfig` | ○ | 使用したフィルタパイプライン設定 |
 | `alphaLocked` | `boolean` | - | ストローク実行時点の対象レイヤー alpha lock 設定。省略時は `false` |
 
@@ -144,6 +144,8 @@ function endStrokeSession(
 - 無効なストローク（0点）の場合: `null`
 
 `alphaLocked` は replay の決定性を保つため command に保存される。履歴 replay では現在の `LayerMeta.alphaLocked` ではなく、この command に保存された値で通常描画を既存 alpha に制限するかを決める。
+
+時間ベース emission（吹きつけ）でも replay はタイマーや現在時刻を使わない。`inputPoints` に保存された `timestamp` と `brushSeed`、ブラシ設定から同じ emission 列を再生成する。
 
 **使用例**:
 ```typescript

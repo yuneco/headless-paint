@@ -45,11 +45,12 @@ function replayStrokeCommand(
   // 展開設定をコンパイル
   const compiledExpand = compileExpand(command.expand);
 
-  // StrokePoint に変換（pressure 保持）
+  // StrokePoint に変換（pressure + timestamp 保持）
   const strokePoints: StrokePoint[] = filteredPoints.map((p) => ({
     x: p.x,
     y: p.y,
     pressure: p.pressure,
+    timestamp: p.timestamp,
   }));
   // スタンプ/spray ブラシの場合は tipCanvas を再生成して初期 BrushRenderState を構築
   let brushState: BrushRenderState | undefined;

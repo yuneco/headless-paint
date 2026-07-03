@@ -252,6 +252,7 @@ export function expandStrokePoints(
         x: outputVec[0],
         y: outputVec[1],
         pressure: point.pressure,
+        timestamp: point.timestamp,
       });
     }
   }

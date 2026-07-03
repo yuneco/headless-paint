@@ -41,7 +41,7 @@
 `incremental-render.ts` は以下のブラシ内部事情を直接管理しない。
 
 - `BrushRenderState.branches` の不足分補完と branch state の生成
-- branch ごとの `accumulatedDistance` / `emissionCount` の merge
+- branch ごとの `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` の merge
 - mixing 有効時の `colorBuffer` / `mixedCanvas` / `lastMixingUpdateDistance` のクローン
 - pending 描画が committed state を汚さないための `PENDING_COLOR_BUFFER_CACHE`
 
@@ -57,8 +57,8 @@
 ```typescript
 // stroke で定義され、公開 API では @yuneco/headless-paint/core から利用できる
 interface RenderUpdate {
-  readonly newlyCommitted: readonly StrokePoint[];  // 今回新たに確定した点（pressure含む）
-  readonly currentPending: readonly StrokePoint[];  // 現在のpending全体（pressure含む）
+  readonly newlyCommitted: readonly StrokePoint[];  // 今回新たに確定した点（pressure/timestamp含む）
+  readonly currentPending: readonly StrokePoint[];  // 現在のpending全体（pressure/timestamp含む）
   readonly style: StrokeStyle;
   readonly expand: ExpandConfig;
   readonly committedOverlapCount: number;            // 先頭のオーバーラップ点数
@@ -88,24 +88,24 @@ function appendToCommittedLayer(
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 確定レイヤー |
-| `points` | `readonly StrokePoint[]` | ○ | 新しく確定した点（pressure含む）。先頭に `overlapCount` 個のオーバーラップ点を含む |
+| `points` | `readonly StrokePoint[]` | ○ | 新しく確定した点（pressure/timestamp含む）。先頭に `overlapCount` 個のオーバーラップ点を含む |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
-| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。`tipCanvas` と branch ごとの `accumulatedDistance` / `emissionCount`、混色有効時の `branches[].mixing` を含む。`round-pen` では省略可 |
+| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。`tipCanvas` と branch ごとの `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では省略可 |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 | `alphaLocked` | `boolean` | - | 通常描画を既存 alpha に制限するか。省略時は `layer.meta.alphaLocked` を使用する |
 
 **動作**:
-1. pointsを`expandStrokePoints`で展開（pressure保持）
+1. pointsを`expandStrokePoints`で展開（pressure/timestamp保持）
 2. `brush/state.ts` で `BrushRenderState.branches` を展開数に揃え、branch ごとの開始 state を取り出す
 3. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画。混色有効時は展開ストロークごとに独立した `mixing.colorBuffer` / `mixedCanvas` を距離ベースで更新し、`sourceLayer` を指定した場合はストローク開始時のレイヤー状態から背景色を拾う
 4. 描画後の branch state を `brush/state.ts` で merge する
 5. `alphaLocked` が `true` かつ通常描画の場合は `source-atop` で描画し、既存 alpha のある範囲にだけ反映する
 6. 既存の描画は保持される（追加描画のみ）
-7. 更新された `BrushRenderState` を返す（各 branch の `accumulatedDistance` / `emissionCount` が進む）
+7. 更新された `BrushRenderState` を返す（各 branch の `accumulatedDistance` / `emissionCount` / 時間 state が進む）
 
-**戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。stamp / spray では branch ごとの `accumulatedDistance` と `emissionCount` が更新されている。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
+**戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。stamp / spray では branch ごとの `accumulatedDistance`、`emissionCount`、`lastTimestamp`、`nextTimeEmissionAt` が更新されている。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 
 **消しゴムモードの動作**:
 `style.compositeOperation` が `"destination-out"` の場合、committedレイヤーの既存ピクセルが直接消去される。
@@ -152,18 +152,21 @@ function renderPendingLayer(
 | 名前 | 型 | 必須 | 説明 |
 |------|-----|------|------|
 | `layer` | `Layer` | ○ | 作業レイヤー |
-| `points` | `readonly StrokePoint[]` | ○ | 未確定点全体（pressure含む） |
+| `points` | `readonly StrokePoint[]` | ○ | 未確定点全体（pressure/timestamp含む） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
-| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。committed 描画から引き継いだ branch ごとの `accumulatedDistance` / `emissionCount` と混色更新状態を使用し、境界での emission と混色の連続性を保つ |
+| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。committed 描画から引き継いだ branch ごとの `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` と混色更新状態を使用し、境界での emission と混色の連続性を保つ |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 | `previewBaseLayer` | `Layer` | - | 混色プレビュー用の表示ベース。指定時は pending レイヤーにこのレイヤーをコピーしてから pending 点を描画する |
 
 **動作**:
 1. レイヤーをクリア
-2. pointsを`expandStrokePoints`で展開（pressure保持）
-3. `brush/state.ts` で pending 描画用の `BrushRenderState` を複製する。混色有効時は `colorBuffer` / `mixedCanvas` も複製し、committed state を直接汚さない
+2. pointsを`expandStrokePoints`で展開（pressure/timestamp保持）
+3. `brush/state.ts` で pending 描画用の `BrushRenderState` を複製する。時間ベース emission 用の `lastTimestamp` / `nextTimeEmissionAt` も複製し、pending 再描画が committed state を直接進めない。混色有効時は `colorBuffer` / `mixedCanvas` も複製する
 4. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画（`compositeOperation` は適用しない、常に `source-over`）
+
+**時間ベース emission と境界処理**:
+`renderPendingLayer` は committed state を複製してから pending 点列を再描画する。`walkEmissions` は branch state の `lastTimestamp` 以前の overlap 再入力区間を時間 emission の対象外にするため、committed/pending の接続に必要な overlap 点を渡しても、静止中の吹きつけが境界で二重配置されない。距離 emission も従来通り `overlapCount` と `accumulatedDistance` により描画済み区間を再配置しない。
 
 `renderPendingLayer` は alpha lock を評価しない。alpha lock 有効時の live preview は `renderLayers` / `composeLayers` の pending overlay 合成で committed レイヤーの alpha を使ってマスクする。pending レイヤー自体は従来通り、未確定点の pixels だけを保持する。
 

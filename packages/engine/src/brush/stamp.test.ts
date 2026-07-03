@@ -180,6 +180,57 @@ describe("renderBrushStroke", () => {
       expect(pixels1).toEqual(pixels2);
     });
 
+    it("吹きつけ有効時は同一座標でも時間経過で描画が濃くなる", () => {
+      const holdPoints: StrokePoint[] = [
+        { x: 50, y: 50, pressure: 0.5, timestamp: 0 },
+        { x: 50, y: 50, pressure: 0.5, timestamp: 200 },
+      ];
+      const makeHoldStyle = (emissionsPerSecond?: number) =>
+        makeStyle({
+          brush: {
+            type: "stamp",
+            tip: { type: "circle", hardness: 1.0 },
+            dynamics: {
+              ...DEFAULT_BRUSH_DYNAMICS,
+              spacing: 0.25,
+              flow: 0.2,
+              emissionsPerSecond,
+            },
+            pressureDynamics: { size: 0, flow: 0 },
+          },
+        });
+
+      // 吹きつけOFF: 開始 emission のみ
+      const styleOff = makeHoldStyle(undefined);
+      const layerOff = createLayer(100, 100);
+      renderBrushStroke(
+        layerOff,
+        holdPoints,
+        styleOff,
+        0,
+        makeInitialState(styleOff),
+      );
+      const alphaOff = layerOff.ctx.getImageData(50, 50, 1, 1).data[3];
+
+      // 吹きつけON: 開始 + 時間 emission が同座標に重なる
+      const styleOn = makeHoldStyle(40);
+      const layerOn = createLayer(100, 100);
+      const resultOn = renderBrushStroke(
+        layerOn,
+        holdPoints,
+        styleOn,
+        0,
+        makeInitialState(styleOn),
+      );
+      const alphaOn = layerOn.ctx.getImageData(50, 50, 1, 1).data[3];
+
+      expect(alphaOff).toBeGreaterThan(0);
+      expect(alphaOn).toBeGreaterThan(alphaOff);
+      // 40/sec（25ms間隔）× 200ms = 8 emissions + 開始1
+      expect(primaryBranch(resultOn).emissionCount).toBe(9);
+      expect(primaryBranch(resultOn).accumulatedDistance).toBe(0);
+    });
+
     it("スタンプがキャンバスに実際に描画されている", () => {
       const layer = createLayer(200, 200);
       const points = makeLine(10, 100, 190, 100, 10);

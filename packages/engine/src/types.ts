@@ -12,6 +12,8 @@ export interface Color {
 
 export interface StrokePoint extends Point {
   pressure?: number;
+  /** 入力時刻(ms)。時間ベースemission（吹きつけ）に使用。ない場合は距離ベースのみ */
+  timestamp?: number;
 }
 
 export interface LayerMeta {
@@ -164,6 +166,8 @@ export interface BrushDynamics {
   readonly rotationJitter: number;
   readonly scatter: number;
   readonly flow: number;
+  /** 吹きつけ: 時間ベースemissionのレート。未指定 or 0以下でOFF（従来の距離ベースのみ） */
+  readonly emissionsPerSecond?: number;
 }
 
 export const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
@@ -184,6 +188,8 @@ export interface SprayDynamics {
   readonly opacityJitter: number;
   readonly flow: number;
   readonly radialDistribution: DensityProfileCurve;
+  /** 吹きつけ: 時間ベースemissionのレート。未指定 or 0以下でOFF（従来の距離ベースのみ） */
+  readonly emissionsPerSecond?: number;
 }
 
 export type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
@@ -270,7 +276,12 @@ export const ROUND_PEN: RoundPenBrushConfig = {
 export const AIRBRUSH: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
-  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.05,
+    flow: 0.1,
+    emissionsPerSecond: 30,
+  },
   pressureDynamics: { size: 0, flow: 1 },
 };
 
@@ -287,6 +298,7 @@ export const SPRAY_AIRBRUSH: SprayBrushConfig = {
     opacityJitter: 0.3,
     flow: 0.35,
     radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+    emissionsPerSecond: 30,
   },
   pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
 };
@@ -319,6 +331,10 @@ export interface BrushMixingState {
 export interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  /** 時間emission: この分岐で最後に処理した入力時刻 */
+  readonly lastTimestamp?: number;
+  /** 時間emission: 次にemissionを配置する予定時刻 */
+  readonly nextTimeEmissionAt?: number;
   readonly mixing?: BrushMixingState;
 }
 

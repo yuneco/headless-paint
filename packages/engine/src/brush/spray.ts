@@ -11,7 +11,7 @@ import { SPRAY_MAX_PARTICLES_PER_EMISSION } from "../types";
 import { sampleDensityProfileRadius } from "./density-curve";
 import { calculatePressureFlow } from "./pressure";
 import { hashSeed, mulberry32 } from "./prng";
-import { walkEmissions } from "./scheduler";
+import { timeSpacingMsFromRate, walkEmissions } from "./scheduler";
 
 const TWO_PI = Math.PI * 2;
 
@@ -96,6 +96,7 @@ export function renderSprayBrushStroke(
         emission.emissionIndex,
       );
     },
+    timeSpacingMsFromRate(dynamics.emissionsPerSecond),
   );
 
   ctx.globalAlpha = previousAlpha;
@@ -108,6 +109,8 @@ export function renderSprayBrushStroke(
       {
         accumulatedDistance: nextBranch.accumulatedDistance,
         emissionCount: nextBranch.emissionCount,
+        lastTimestamp: nextBranch.lastTimestamp,
+        nextTimeEmissionAt: nextBranch.nextTimeEmissionAt,
       },
     ],
   };

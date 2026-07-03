@@ -42,12 +42,23 @@ Point を拡張し、筆圧情報を含む型。ペンタブレット入力な�
 ```typescript
 interface StrokePoint extends Point {
   readonly pressure?: number;  // 筆圧 (オプション)
+  readonly timestamp?: number; // 入力時刻 ms。時間ベース emission に使用
 }
 ```
 
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `pressure` | `number` | 筆圧。未指定時は描画側で `0.5` として扱う |
+| `timestamp` | `number` | 入力時刻 ms。stamp / spray の時間ベース emission（吹きつけ）に使用する。未指定の点列では従来通り距離ベース emission のみ発生する |
+
 **使用例**:
 ```typescript
-const strokePoint: StrokePoint = { x: 50, y: 50, pressure: 0.8 };
+const strokePoint: StrokePoint = {
+  x: 50,
+  y: 50,
+  pressure: 0.8,
+  timestamp: performance.now(),
+};
 ```
 
 ## LayerMeta
@@ -511,10 +522,11 @@ interface BrushDynamics {
   readonly rotationJitter: number;
   readonly scatter: number;
   readonly flow: number;
+  readonly emissionsPerSecond?: number;
 }
 ```
 
-全フィールドが required。`DEFAULT_BRUSH_DYNAMICS` からの spread で差分のみ指定できる。
+`emissionsPerSecond` 以外は required。`DEFAULT_BRUSH_DYNAMICS` からの spread で差分のみ指定できる。
 
 | フィールド | 型 | 説明 |
 |---|---|---|
@@ -524,6 +536,7 @@ interface BrushDynamics {
 | `rotationJitter` | `number` | 回転のランダム変動 [0, PI] ラジアン |
 | `scatter` | `number` | 散布距離（直径比率） |
 | `flow` | `number` | 1スタンプあたりの塗料量 [0, 1] |
+| `emissionsPerSecond` | `number` | 時間ベース emission のレート。正の有限数で吹きつけ有効、未指定または `0` 以下でOFF（従来の距離ベースのみ）。`round-pen` では使わない |
 
 **関連定数**:
 
@@ -545,6 +558,7 @@ const airbrushDynamics: BrushDynamics = {
   ...DEFAULT_BRUSH_DYNAMICS,
   spacing: 0.05,
   flow: 0.1,
+  emissionsPerSecond: 30,
 };
 
 // パステル的な設定（散布・回転あり）
@@ -573,12 +587,13 @@ interface SprayDynamics {
   readonly opacityJitter: number;
   readonly flow: number;
   readonly radialDistribution: DensityProfileCurve;
+  readonly emissionsPerSecond?: number;
 }
 
 type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
 ```
 
-全フィールドが required。`DEFAULT_SPRAY_DYNAMICS` からの spread で差分のみ指定できる。
+`emissionsPerSecond` 以外は required。`DEFAULT_SPRAY_DYNAMICS` からの spread で差分のみ指定できる。
 
 | フィールド | 型 | 説明 |
 |---|---|---|
@@ -590,6 +605,7 @@ type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
 | `opacityJitter` | `number` | 粒子不透明度の縮小方向ランダム変動 [0, 1] |
 | `flow` | `number` | 粒子ごとの基準塗料量 [0, 1] |
 | `radialDistribution` | `DensityProfileCurve` | 半径方向の密度プロファイル。x は中央→辺縁、y は相対密度 |
+| `emissionsPerSecond` | `number` | 時間ベース emission のレート。正の有限数で吹きつけ有効、未指定または `0` 以下でOFF（従来の距離ベースのみ） |
 
 **関連定数**:
 
@@ -613,6 +629,7 @@ const DEFAULT_SPRAY_DYNAMICS: SprayDynamics = {
 - `radialDistribution` は相対密度 `d(x)` として評価され、半径 pdf は `pdf(x) ∝ d(x) * x` になる。デフォルトの一様密度では一様円盤、中央高・辺縁低のカーブでは中心が厚くなる。
 - `sizeJitterMode` は `particleSizeJitter` の乱数分布を切り替える実験用フィールド。`uniform` は従来の一様縮小、`power` は小粒を増やす分布、`lognormal` は 0.25-4 倍の対数正規近似、`bimodal` は基準粒と微小粒の二峰分布。
 - 1 emission あたりの粒子数は `SPRAY_MAX_PARTICLES_PER_EMISSION` で上限クランプされる。
+- `emissionsPerSecond` が正の有限数なら、入力座標が静止していても `timestamp` の進行に応じて emission が発生する。
 
 ---
 
@@ -751,7 +768,12 @@ const ROUND_PEN: RoundPenBrushConfig = {
 const AIRBRUSH: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
-  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.05,
+    flow: 0.1,
+    emissionsPerSecond: 30,
+  },
   pressureDynamics: { size: 0, flow: 1 },
 };
 
@@ -768,6 +790,7 @@ const SPRAY_AIRBRUSH: SprayBrushConfig = {
     opacityJitter: 0.3,
     flow: 0.35,
     radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+    emissionsPerSecond: 30,
   },
   pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
 };
@@ -790,8 +813,8 @@ const MARKER: StampBrushConfig = {
 | 定数 | チップ | 特徴 |
 |------|--------|------|
 | `ROUND_PEN` | — | 従来の circle+trapezoid 方式（デフォルト） |
-| `AIRBRUSH` | ソフト円 (hardness=0.0) | 密間隔・低フロー。滑らかな噴射効果 |
-| `SPRAY_AIRBRUSH` | ハード小粒子 (hardness=1.0) | 散布領域内に小粒子を確率配置する粒子感エアブラシ |
+| `AIRBRUSH` | ソフト円 (hardness=0.0) | 密間隔・低フロー。`emissionsPerSecond: 30` で静止中も噴射する |
+| `SPRAY_AIRBRUSH` | ハード小粒子 (hardness=1.0) | `emissionsPerSecond: 30` で静止中も小粒子を確率配置する粒子感エアブラシ |
 | `PENCIL` | ほぼハード円 (hardness=0.95) | 微小なサイズ・位置のゆらぎ |
 | `MARKER` | やや柔らか (hardness=0.7) | 中間フロー。マーカー的な塗り |
 
@@ -801,7 +824,12 @@ const MARKER: StampBrushConfig = {
 const airbrush: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
-  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.05,
+    flow: 0.1,
+    emissionsPerSecond: 30,
+  },
   pressureDynamics: { size: 0, flow: 1 },
 };
 
@@ -817,6 +845,7 @@ const sprayAirbrush: SprayBrushConfig = {
     sizeJitterMode: "uniform",
     opacityJitter: 0.3,
     flow: 0.35,
+    emissionsPerSecond: 30,
   },
   pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
 };
@@ -912,6 +941,8 @@ interface BrushMixingState {
 interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  readonly lastTimestamp?: number;
+  readonly nextTimeEmissionAt?: number;
   readonly mixing?: BrushMixingState;
 }
 
@@ -934,6 +965,8 @@ interface BrushRenderState {
 |---|---|---|
 | `accumulatedDistance` | `number` | 分岐ごとの emission 配置累積距離。committed→pending 間で引き継ぎ、ギャップや二重配置を防ぐ |
 | `emissionCount` | `number` | 分岐ごとの emission 通し番号。stamp の dab と spray の粒子バーストで共通に使う |
+| `lastTimestamp` | `number` | 時間ベース emission で、この分岐が最後に処理した入力時刻。overlap 再入力区間で二重配置しないために使う |
+| `nextTimeEmissionAt` | `number` | 時間ベース emission で、次に emission を配置する予定時刻 |
 | `mixing` | `BrushMixingState` | stamp + mixing 有効時のみ保持する混色状態 |
 
 **BrushMixingState**:
@@ -947,8 +980,9 @@ interface BrushRenderState {
 **設計意図**:
 
 - `branches` は常に存在し、Expand の出力 branch 数と一致する。非 Expand は長さ 1。
-- branch ごとに独立した `accumulatedDistance` / `emissionCount` を持つため、stamp / spray とも branch 間で spacing 位相が揃う。
+- branch ごとに独立した `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、stamp / spray とも branch 間で spacing 位相と時間 emission の位相が揃う。
 - branch の実効 seed は `hashSeed(seed, branchIndex)` で導出する。emission 序数は branch ごとに 0 から数え、各 emission の局所 seed は `hashSeed(branchSeed, emissionIndex)` で導出する。
+- 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
 - 混色有効時は Expand 分岐ごとに拾う背景が異なるため、`mixing` に分岐別の色バッファを保持する。spray は混色非対応のため `mixing` を持たない。
 
 **使用例**:

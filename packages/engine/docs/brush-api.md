@@ -31,14 +31,14 @@ StrokeStyle.brush.type
 |---|---|
 | `index.ts` | `renderBrushStroke` の dispatch と公開 re-export |
 | `prng.ts` | `mulberry32` / `hashSeed` |
-| `scheduler.ts` | 距離ベース emission 走査（stamp / spray 共有） |
+| `scheduler.ts` | 距離ベース + 時間ベース emission 走査（stamp / spray 共有） |
 | `state.ts` | `BrushRenderState` の生成・branch 分解・merge・pending クローン |
 | `tip.ts` | `generateBrushTip` / `BrushTipRegistry` |
 | `stamp.ts` | stamp 描画（`walkEmissions` + dab 配置） |
 | `mixing.ts` | stamp 混色チップ生成と color buffer 更新 |
 | `spray.ts` | spray 描画（`walkEmissions` + 粒子バースト） |
 
-`@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions` と、ブラシ関連型・プリセット定数。
+`@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
 
 ---
 
@@ -64,7 +64,7 @@ function renderBrushStroke(
 | `points` | `readonly StrokePoint[]` | ○ | 描画ポイント列（展開済みの単一ストローク） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（`brush` フィールドでブラシ種別を判定） |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
-| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` では `tipCanvas` と `branches[].accumulatedDistance` / `emissionCount`、混色有効時の `branches[].mixing` を含む。`round-pen` では無視される |
+| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` では `tipCanvas` と `branches[].accumulatedDistance` / `emissionCount`、時間ベース emission 用の `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では無視される |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 
 **戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
@@ -74,23 +74,25 @@ function renderBrushStroke(
 2. `"round-pen"`: `drawVariableWidthPath` を呼び出し（従来方式）
 3. `"stamp"`: スタンプ方式で描画:
    - ポイント列を Catmull-Rom 補間
-   - branch の `accumulatedDistance` から `spacing` 間隔でパスを走査
+   - branch の `accumulatedDistance` と時間 state から、距離 + 時間 emission を発生順に走査
    - 各スタンプ位置で `tipCanvas` を `drawImage` で配置
    - `brush.pressureDynamics.size` でスタンプサイズを決める
    - `brush.pressureDynamics.flow` でスタンプごとの flow を筆圧変化させる
    - 混色有効時は、一定距離ごとに描画先 footprint を分岐ごとの `mixing.colorBuffer` へ `pickup` の強さで転写し、元色を `restore` の強さで重ねた後、`tipCanvas` の alpha を適用して描画
    - jitter パラメータは emission 通し番号ベース PRNG で決定
+   - `brush.dynamics.emissionsPerSecond` が正の有限数なら、`StrokePoint.timestamp` の進行に応じて静止中も emission を追加する
 4. `"spray"`: 散布方式で描画:
    - ポイント列を Catmull-Rom 補間
-   - branch の `accumulatedDistance` から `spacing` 間隔で emission を発生させる
+   - branch の `accumulatedDistance` と時間 state から、距離 + 時間 emission を発生順に走査
    - 各 emission で散布領域内に複数の粒子を確率配置する
    - `brush.pressureDynamics.size` で散布径、`flow` で粒子不透明度、`density` で粒子数を筆圧変化させる
+   - `brush.dynamics.emissionsPerSecond` が正の有限数なら、`StrokePoint.timestamp` の進行に応じて静止中も粒子バーストを追加する
 
 ---
 
 ## walkEmissions
 
-Catmull-Rom 補間済み点列を距離 spacing で走査し、stamp の dab と spray の粒子バーストに共通する emission 位置を列挙する。
+Catmull-Rom 補間済み点列を距離 spacing と任意の時間 spacing で走査し、stamp の dab と spray の粒子バーストに共通する emission 位置を列挙する。
 
 ```typescript
 interface EmissionPoint {
@@ -107,12 +109,17 @@ function walkEmissions(
   startState: {
     readonly accumulatedDistance: number;
     readonly emissionCount: number;
+    readonly lastTimestamp?: number;
+    readonly nextTimeEmissionAt?: number;
   },
   overlapCount: number,
   emit: (point: EmissionPoint) => void,
+  timeSpacingMs?: number,
 ): {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  readonly lastTimestamp?: number;
+  readonly nextTimeEmissionAt?: number;
 }
 ```
 
@@ -121,16 +128,37 @@ function walkEmissions(
 |------|-----|------|------|
 | `interpolated` | `readonly StrokePoint[]` | ○ | `interpolateStrokePoints` 済みの点列 |
 | `spacingPx` | `number` | ○ | emission 間隔 px |
-| `startState` | `{ accumulatedDistance, emissionCount }` | ○ | branch ごとの開始状態 |
+| `startState` | `{ accumulatedDistance, emissionCount, lastTimestamp?, nextTimeEmissionAt? }` | ○ | branch ごとの開始状態。時間ベース emission 有効時は最後に処理した時刻と次回予定時刻も含む |
 | `overlapCount` | `number` | ○ | 先頭のオーバーラップ点数。ストローク開始 emission と spacing 位相を既存差分描画に合わせる |
 | `emit` | `(point: EmissionPoint) => void` | ○ | emission ごとに呼ばれる callback |
+| `timeSpacingMs` | `number` | - | 時間ベース emission の間隔 ms。未指定または `0` 以下の場合は距離ベースのみ |
 
-**戻り値**: 更新後の branch state。`accumulatedDistance` は次回チャンクの spacing 位相に、`emissionCount` は次回 emission の序数に使う。
+**戻り値**: 更新後の branch state。`accumulatedDistance` は次回チャンクの spacing 位相に、`emissionCount` は次回 emission の序数に使う。`lastTimestamp` / `nextTimeEmissionAt` は時間ベース emission の位相に使う。
 
 **設計意図**:
-- emission は「距離 scheduler が発生させる描画単位」。stamp では dab 1個、spray では散布領域1回分の粒子バーストを意味する。
+- emission は scheduler が発生させる描画単位。stamp では dab 1個、spray では散布領域1回分の粒子バーストを意味する。
 - ストローク開始 emission（`distance=0`）と `nextStampDist` 相当の位相計算は `walkEmissions` に集約する。
-- 将来の時間 emission は同じ `scheduler.ts` に `walkTimeEmissions()` として追加し、距離 emission と序数空間を共有する。
+- 距離 emission と時間 emission は、同一セグメント内の発生位置順に merge される。時間 emission の位置は両端の `timestamp` から線形比率を求め、同じ比率で座標・筆圧を補間する。
+- 両方が同じ位置で発生可能な場合は距離 emission を先に処理し、次に時間 emission を処理する。どちらも単一の `emissionIndex` / `emissionCount` 空間を消費する。
+- `timeSpacingMs` が有効でも、点列に `timestamp` がない、片側だけ欠落している、または timestamp が非単調なセグメントでは時間 emission を発生させない。距離 emission は従来通り発生する。
+- `lastTimestamp` 以前の overlap 再入力区間は時間 emission の対象外にし、committed→pending 境界や incremental 再描画で二重配置しない。
+- engine は現在時刻を読まない。時間 emission は `StrokePoint.timestamp` と branch state だけで決まる。
+
+### timeSpacingMsFromRate
+
+`BrushDynamics.emissionsPerSecond` / `SprayDynamics.emissionsPerSecond` を `walkEmissions` に渡す時間間隔へ変換する。
+
+```typescript
+function timeSpacingMsFromRate(
+  emissionsPerSecond: number | undefined,
+): number | undefined
+```
+
+| 引数 | 説明 |
+|---|---|
+| `emissionsPerSecond` | 1秒あたりの時間ベース emission 数。正の有限数のみ有効 |
+
+**戻り値**: `1000 / emissionsPerSecond`。未指定、非有限値、`0` 以下は `undefined` を返し、吹きつけOFFを表す。
 
 ### 筆圧の反映先
 
@@ -147,7 +175,12 @@ const pencil: StampBrushConfig = {
 const airbrush: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
-  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.05,
+    flow: 0.1,
+    emissionsPerSecond: 30,
+  },
   pressureDynamics: { size: 0, flow: 1 },
 };
 
@@ -192,11 +225,11 @@ const acrylic: StampBrushConfig = {
 3. 同じ混色更新タイミングで `style.color` を `restore` の強さで `colorBuffer` へ重ね、透明領域へ移動したときに元色へ戻す
 4. `colorBuffer` に `tipCanvas` の alpha を適用し、dab として描画する。混色更新を行わない stamp では直近の mixed dab を再利用する
 
-この方式では、大きいブラシが赤/青の境界をまたいだときに tip 全体を単一の紫へ平均化せず、`colorBuffer` 内に赤寄り・青寄りの局所差を保持できる。Expand 使用時は分岐ごとに `colorBuffer` を持つため、分岐ごとに異なる背景色を拾う。混色状態はスタンプごとではなく `mixing.updateDistancePx` を下限とする距離ベースで更新されるため、ブラシサイズに依存せず pickup / restore / mask の頻度を制御できる。実際の更新間隔は `max(stampSpacing, mixing.updateDistancePx)` で、スタンプ配置より高頻度にはならない。
+この方式では、大きいブラシが赤/青の境界をまたいだときに tip 全体を単一の紫へ平均化せず、`colorBuffer` 内に赤寄り・青寄りの局所差を保持できる。Expand 使用時は分岐ごとに `colorBuffer` を持つため、分岐ごとに異なる背景色を拾う。混色状態はスタンプごとではなく `mixing.updateDistancePx` を下限とする距離ベースで更新されるため、ブラシサイズに依存せず pickup / restore / mask の頻度を制御できる。実際の更新間隔は `max(stampSpacing, mixing.updateDistancePx)` で、スタンプ配置より高頻度にはならない。時間ベース emission で静止中に dab が追加されても、距離が進まない間は混色更新は発生せず、直近の混色状態が使われる。
 
 ### Spray の描画モデル
 
-spray ブラシは `lineWidth` を散布領域の直径として扱い、`walkEmissions` が発生させる emission ごとに複数の粒子を描画する。粒子チップは `SprayBrushConfig.particle` からストローク開始時に生成し、`BrushRenderState.tipCanvas` として全 emission で共有する。
+spray ブラシは `lineWidth` を散布領域の直径として扱い、`walkEmissions` が発生させる emission ごとに複数の粒子を描画する。粒子チップは `SprayBrushConfig.particle` からストローク開始時に生成し、`BrushRenderState.tipCanvas` として全 emission で共有する。`SprayDynamics.emissionsPerSecond` が正の有限数なら、入力座標が止まっていても `StrokePoint.timestamp` の進行に応じて emission が発生する。
 
 emission 1回の処理:
 
@@ -244,7 +277,9 @@ const emissionSeed = hashSeed(branchSeed, emissionIndex);
 const rng = mulberry32(emissionSeed);
 ```
 
-`emissionIndex` は branch ごとに 0 から数える。これにより、branch ごとに jitter / 粒子配置の相関を避けながら、incremental 描画と replay の結果を一致させる。branch ごとに `accumulatedDistance` と `emissionCount` を持つため、非 mixing の stamp / spray でも branch 間で開始 emission と spacing 位相が揃う。
+`emissionIndex` は branch ごとに 0 から数える。距離 emission と時間 emission は同じ `emissionIndex` 空間を消費するため、時間ベース emission が混ざっても incremental 描画と replay の PRNG 列が一致する。branch ごとに `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、非 mixing の stamp / spray でも branch 間で開始 emission、spacing 位相、時間 emission 位相が揃う。
+
+Expand 有効時は `expandStrokePoints` が各分岐へ `timestamp` をそのまま渡す。各分岐の時間 state は独立して進むため、同じ入力時刻列から展開された branch でも emission の二重配置防止と PRNG 消費は branch 単位で完結する。
 
 **使用例**:
 ```typescript
@@ -418,7 +453,12 @@ import { ROUND_PEN, AIRBRUSH, SPRAY_AIRBRUSH, PENCIL, MARKER } from "@yuneco/hea
 const AIRBRUSH: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.0 },
-  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.05, flow: 0.1 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.05,
+    flow: 0.1,
+    emissionsPerSecond: 30,
+  },
   pressureDynamics: { size: 0, flow: 1 },
 };
 
@@ -435,6 +475,7 @@ const SPRAY_AIRBRUSH: SprayBrushConfig = {
     opacityJitter: 0.3,
     flow: 0.35,
     radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+    emissionsPerSecond: 30,
   },
   pressureDynamics: { size: 0.2, flow: 1, density: 0.5 },
 };
@@ -457,8 +498,8 @@ const MARKER: StampBrushConfig = {
 
 | プリセット | チップ | 特徴 |
 |-----------|--------|------|
-| AIRBRUSH | ソフト円 (hardness=0.0) | stamp 方式の密間隔・低フロー。滑らかな噴射効果 |
-| SPRAY_AIRBRUSH | ハード小粒子 (hardness=1.0) | spray 方式。散布領域内に小粒子を確率配置する粒子感エアブラシ |
+| AIRBRUSH | ソフト円 (hardness=0.0) | stamp 方式の密間隔・低フロー。`emissionsPerSecond: 30` で静止中も噴射する |
+| SPRAY_AIRBRUSH | ハード小粒子 (hardness=1.0) | spray 方式。`emissionsPerSecond: 30` で静止中も小粒子を確率配置する粒子感エアブラシ |
 | PENCIL | ほぼハード円 (hardness=0.95) | 微小なサイズ・位置のゆらぎ |
 | MARKER | やや柔らか (hardness=0.7) | 中間フロー。マーカー的な塗り |
 

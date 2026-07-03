@@ -25,19 +25,24 @@ import type {
 const COMMITTED_OVERLAP_COUNT = 3;
 
 /**
- * InputPoint から StrokePoint への変換（座標 + pressure を保持）
+ * InputPoint から StrokePoint への変換（座標 + pressure + timestamp を保持）
  */
 function toStrokePoints(
   inputPoints: readonly InputPoint[],
 ): readonly StrokePoint[] {
-  return inputPoints.map((p) => ({ x: p.x, y: p.y, pressure: p.pressure }));
+  return inputPoints.map((p) => ({
+    x: p.x,
+    y: p.y,
+    pressure: p.pressure,
+    timestamp: p.timestamp,
+  }));
 }
 
 /**
  * InputPoint から StrokePoint への変換（単一点用）
  */
 function toStrokePoint(p: InputPoint): StrokePoint {
-  return { x: p.x, y: p.y, pressure: p.pressure };
+  return { x: p.x, y: p.y, pressure: p.pressure, timestamp: p.timestamp };
 }
 
 /**

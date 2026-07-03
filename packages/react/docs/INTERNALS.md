@@ -25,11 +25,14 @@ headless-paint のコアパッケージ（engine / input / stroke）を React �
 | pendingOnly モード | タッチ入力の pending-until-confirmed パターン。`onStrokeStart(point, true)` で開始し、`onDrawConfirm()` まで committed layer への書き込みを保留する |
 | FilterPipeline 処理 | `createFilterPipelineState` → `processPoint`（毎ポイント）→ `finalizePipeline`（ストローク終了時）の一連のフローを管理 |
 | 差分レンダリング | `appendToCommittedLayer` / `renderPendingLayer` / `clearLayer` の呼び出し。`committedOverlapCount` による差分描画最適化を含む |
+| 時間ベース emission | stamp / spray で `emissionsPerSecond > 0` のとき、描画中に `setTimeout` で最後の座標・筆圧へ `performance.now()` の synthetic `InputPoint` を注入する |
 | compositeOperation の同期 | ストローク開始時に `pendingLayer.meta.compositeOperation` を strokeStyle から設定し、終了時に `undefined` にリセット |
 | renderVersion | 描画操作後に `requestAnimationFrame` 単位で合流して進む再描画トリガー |
 | canDraw 判定 | `layer !== null && layer.meta.visible` |
 
-**境界**: 履歴への記録は責務外。ストローク完了時に `onStrokeComplete` コールバックでデータを通知し、呼び出し側が記録する。
+時間ベース emission の timer は実入力・synthetic input のたびに再スケジュールするため、実入力がレートより速い間は発火しない。synthetic input は通常入力と同じ `inputPoints` に保存され、`onStrokeComplete` へ渡される。timer は stroke end / cancel / unmount で停止する。
+
+**境界**: 履歴への記録は責務外。ストローク完了時に `onStrokeComplete` コールバックでデータを通知し、呼び出し側が記録する。時間ベース emission の replay は保存済み `inputPoints.timestamp` で行い、React hook の timer は live 入力補完だけを担当する。
 
 ### usePaintEngine
 
@@ -60,6 +63,10 @@ useStrokeSession + useLayers + 履歴 + wrap shift のオーケストレーシ�
 | usePenSettings | brush | `ROUND_PEN`（`pressureDynamics` は `DEFAULT_PRESSURE_DYNAMICS`） |
 | useSmoothing | enabled | `true` |
 | useSmoothing | windowSize | `5` |
+
+### Persistence
+
+`persistence.ts` は `BrushConfig` の clone で `dynamics` を spread するため、`emissionsPerSecond` は stamp / spray の両方で保存時にそのまま含まれる。復元時の `parseBrushConfig` は正の有限数だけを `emissionsPerSecond` として採用し、それ以外は `undefined`（吹きつけOFF）に正規化する。
 
 ### その他の hooks
 

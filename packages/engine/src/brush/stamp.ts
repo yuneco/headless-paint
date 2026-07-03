@@ -17,7 +17,7 @@ import {
 } from "./mixing";
 import { calculatePressureFlow } from "./pressure";
 import { hashSeed, mulberry32 } from "./prng";
-import { walkEmissions } from "./scheduler";
+import { timeSpacingMsFromRate, walkEmissions } from "./scheduler";
 
 /**
  * スタンプ用の補間。
@@ -89,6 +89,7 @@ export function renderStampBrushStroke(
       mixedCanvas = result.mixedCanvas;
       lastMixingUpdateDistance = result.lastMixingUpdateDistance;
     },
+    timeSpacingMsFromRate(dynamics.emissionsPerSecond),
   );
 
   return {
@@ -98,6 +99,8 @@ export function renderStampBrushStroke(
       {
         accumulatedDistance: nextBranch.accumulatedDistance,
         emissionCount: nextBranch.emissionCount,
+        lastTimestamp: nextBranch.lastTimestamp,
+        nextTimeEmissionAt: nextBranch.nextTimeEmissionAt,
         mixing:
           colorBuffer || mixedCanvas || lastMixingUpdateDistance !== undefined
             ? {

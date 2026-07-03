@@ -307,7 +307,7 @@ const config = createDefaultExpandConfig(1920, 1080);
 
 ## expandStrokePoints
 
-StrokePoint版のストローク展開。座標を変換しつつ、pressure値をそのまま保持する。
+StrokePoint版のストローク展開。座標を変換しつつ、pressure / timestamp 値をそのまま保持する。
 
 ```typescript
 function expandStrokePoints(
@@ -326,13 +326,13 @@ function expandStrokePoints(
 
 **動作**:
 - 座標（x, y）は `expandPoint` と同様に変換行列で変換
-- `pressure` は元の値をそのままコピー（全展開ストロークで同じ筆圧）
+- `pressure` と `timestamp` は元の値をそのままコピー（全展開ストロークで同じ値）
 
 **使用例**:
 ```typescript
 const strokePoints: StrokePoint[] = [
-  { x: 100, y: 100, pressure: 0.5 },
-  { x: 150, y: 120, pressure: 0.8 },
+  { x: 100, y: 100, pressure: 0.5, timestamp: 1000 },
+  { x: 150, y: 120, pressure: 0.8, timestamp: 1016 },
 ];
 
 const strokes = expandStrokePoints(strokePoints, compiled);

@@ -55,6 +55,7 @@ export {
   hashSeed,
   mulberry32,
   renderBrushStroke,
+  timeSpacingMsFromRate,
   walkEmissions,
   type EmissionPoint,
 } from "@headless-paint/engine";

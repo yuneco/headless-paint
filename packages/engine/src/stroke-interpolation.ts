@@ -5,6 +5,16 @@ const PARAM_EPSILON = 1e-4;
 const CENTRIPETAL_ALPHA = 0.5;
 const DEFAULT_PRESSURE = 0.5;
 
+/** 両端がtimestampを持つ場合のみ線形補間する（単調性維持のため片側欠落時はundefined） */
+function lerpTimestamp(
+  a: StrokePoint,
+  b: StrokePoint,
+  t: number,
+): number | undefined {
+  if (a.timestamp === undefined || b.timestamp === undefined) return undefined;
+  return a.timestamp + (b.timestamp - a.timestamp) * t;
+}
+
 function extrapolatePrevious(p1: StrokePoint, p2: StrokePoint): StrokePoint {
   return {
     x: p1.x - (p2.x - p1.x),
@@ -12,6 +22,7 @@ function extrapolatePrevious(p1: StrokePoint, p2: StrokePoint): StrokePoint {
     pressure:
       (p1.pressure ?? DEFAULT_PRESSURE) -
       ((p2.pressure ?? DEFAULT_PRESSURE) - (p1.pressure ?? DEFAULT_PRESSURE)),
+    timestamp: lerpTimestamp(p1, p2, -1),
   };
 }
 
@@ -22,6 +33,7 @@ function extrapolateNext(p1: StrokePoint, p2: StrokePoint): StrokePoint {
     pressure:
       (p2.pressure ?? DEFAULT_PRESSURE) +
       ((p2.pressure ?? DEFAULT_PRESSURE) - (p1.pressure ?? DEFAULT_PRESSURE)),
+    timestamp: lerpTimestamp(p1, p2, 2),
   };
 }
 
@@ -72,6 +84,7 @@ function interpolateSegment(
       (p1.pressure ?? DEFAULT_PRESSURE) +
       ((p2.pressure ?? DEFAULT_PRESSURE) - (p1.pressure ?? DEFAULT_PRESSURE)) *
         t,
+    timestamp: lerpTimestamp(p1, p2, t),
   };
 }
 
@@ -115,7 +128,12 @@ export function interpolateStrokePointsCentripetal(
             );
 
     if (i >= skipSegments) {
-      result.push({ x: p1.x, y: p1.y, pressure: p1.pressure });
+      result.push({
+        x: p1.x,
+        y: p1.y,
+        pressure: p1.pressure,
+        timestamp: p1.timestamp,
+      });
     }
 
     if (i < points.length - 1 && i >= skipSegments) {

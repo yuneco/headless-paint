@@ -22,6 +22,8 @@ pnpm add @yuneco/headless-paint
 3. **履歴管理**: マルチレイヤー対応のUndo/Redo機能の提供
 4. **コマンド生成**: 描画コマンドおよび構造コマンド（レイヤー追加/削除/並び替え/複製/下統合）の生成
 
+`InputPoint` から `StrokePoint` への変換では pressure と timestamp を保持する。stamp / spray の時間ベース emission は保存済み `inputPoints.timestamp` と `brushSeed` で再現され、stroke パッケージの replay はタイマーや現在時刻を使わない。
+
 ### やってはいけないこと
 
 - 直接の描画処理（→ engineに委譲）
@@ -137,7 +139,7 @@ if (canUndo(historyState)) {
 |---|---|
 | `startStrokeSession(filterOutput, style, expand)` | セッション開始 |
 | `addPointToSession(state, filterOutput)` | 点を追加 |
-| `endStrokeSession(state, layerId, inputPoints, filterPipeline, alphaLocked?)` | セッション終了（`layerId` 必須）。`alphaLocked` は command に保存され replay に使われる |
+| `endStrokeSession(state, layerId, inputPoints, filterPipeline, alphaLocked?)` | セッション終了（`layerId` 必須）。`inputPoints.timestamp` と `alphaLocked` は command に保存され replay に使われる |
 | `createStrokeCommand(layerId, inputPoints, filterPipeline, expand, style, brushSeed?, alphaLocked?)` | ストロークコマンドを直接作成。`alphaLocked` 省略時は `false` |
 | `createClearCommand(layerId)` | クリアコマンドを作成 |
 | `createWrapShiftCommand(dx, dy)` | ラップシフトコマンドを作成（グローバル） |
@@ -223,6 +225,7 @@ input (FilterOutput)
 stroke: セッション管理
     - 前回からの差分計算
     → RenderUpdate { newlyCommitted, currentPending, style, expand, committedOverlapCount }
+      ※ StrokePoint は pressure/timestamp を保持
     ↓
 engine: 描画
     - expand適用（確定/pending両方）

@@ -58,6 +58,7 @@ export {
   hashSeed,
   mulberry32,
   renderBrushStroke,
+  timeSpacingMsFromRate,
   walkEmissions,
   type BrushTipRegistry,
   type EmissionPoint,

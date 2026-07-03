@@ -28,6 +28,8 @@ spray ブラシでも `tipCanvas` を使います。ただし `tipCanvas` は da
 
 spray ブラシでは、spacing に従って並ぶ単位は `emission` です。1つの emission は散布領域1回分の粒子バーストで、粒子数は散布半径と密度から決まります。spray は pickup を行わないため、粒子は `tipCanvas` から直接 `committedLayer.canvas` または `pendingLayer.canvas` へ描かれます。
 
+stamp / spray とも、`emissionsPerSecond` を設定すると距離ベースの emission に加えて時間ベースの emission（吹きつけ）が発生します。入力座標が止まっていても、入力点の timestamp の進行に応じて同じ場所へ dab / 粒子バーストが追加されます。
+
 ## 3. committed と pending
 
 ストローク中の点は、すべてが同じ確度で扱われるわけではありません。

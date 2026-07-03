@@ -46,6 +46,8 @@ function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
       sa.dynamics.sizeJitterMode === sb.dynamics.sizeJitterMode &&
       sa.dynamics.opacityJitter === sb.dynamics.opacityJitter &&
       sa.dynamics.flow === sb.dynamics.flow &&
+      (sa.dynamics.emissionsPerSecond ?? 0) ===
+        (sb.dynamics.emissionsPerSecond ?? 0) &&
       sa.dynamics.radialDistribution.startY ===
         sb.dynamics.radialDistribution.startY &&
       sa.dynamics.radialDistribution.control1.x ===
@@ -69,6 +71,8 @@ function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
     isSameTip(sa.tip, sb.tip) &&
     sa.dynamics.spacing === sb.dynamics.spacing &&
     sa.dynamics.flow === sb.dynamics.flow &&
+    (sa.dynamics.emissionsPerSecond ?? 0) ===
+      (sb.dynamics.emissionsPerSecond ?? 0) &&
     sa.pressureDynamics.size === sb.pressureDynamics.size &&
     sa.pressureDynamics.flow === sb.pressureDynamics.flow &&
     (sa.mixing?.enabled ?? false) === (sb.mixing?.enabled ?? false) &&
@@ -148,6 +152,27 @@ function BrushPanelComponent({
   registry,
   registryReady,
 }: BrushPanelProps) {
+  const DEFAULT_EMISSIONS_PER_SECOND = 30;
+
+  const updateEmissionsPerSecond = (value: number | undefined) => {
+    if (brush.type === "stamp") {
+      onBrushChange({
+        ...brush,
+        dynamics: { ...brush.dynamics, emissionsPerSecond: value },
+      });
+    } else if (brush.type === "spray") {
+      onBrushChange({
+        ...brush,
+        dynamics: { ...brush.dynamics, emissionsPerSecond: value },
+      });
+    }
+  };
+
+  const emissionsPerSecond =
+    brush.type === "round-pen"
+      ? undefined
+      : (brush.dynamics.emissionsPerSecond ?? undefined);
+
   const updateMixing = (
     field: "pickup" | "restore" | "updateDistancePx",
     value: number,
@@ -206,6 +231,40 @@ function BrushPanelComponent({
           );
         })}
       </div>
+
+      {brush.type !== "round-pen" ? (
+        <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={emissionsPerSecond !== undefined}
+              onChange={(event) =>
+                updateEmissionsPerSecond(
+                  event.currentTarget.checked
+                    ? DEFAULT_EMISSIONS_PER_SECOND
+                    : undefined,
+                )
+              }
+            />
+            <span>Airbrush Buildup（吹きつけ）</span>
+          </label>
+          {emissionsPerSecond !== undefined ? (
+            <label style={{ display: "grid", gap: 2 }}>
+              <span>Rate {emissionsPerSecond.toFixed(0)} /sec</span>
+              <input
+                type="range"
+                min={1}
+                max={60}
+                step={1}
+                value={emissionsPerSecond}
+                onChange={(event) =>
+                  updateEmissionsPerSecond(Number(event.currentTarget.value))
+                }
+              />
+            </label>
+          ) : null}
+        </div>
+      ) : null}
 
       {brush.type === "stamp" && brush.mixing?.enabled ? (
         <div style={{ display: "grid", gap: 6, fontSize: 11 }}>

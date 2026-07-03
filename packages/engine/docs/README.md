@@ -101,14 +101,15 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
-| `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit)` | 距離ベース emission を走査（stamp / spray 共有） |
+| `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit, timeSpacingMs?)` | 距離ベース + 時間ベース emission を走査（stamp / spray 共有） |
+| `timeSpacingMsFromRate(emissionsPerSecond)` | 吹きつけレートを時間ベース emission 間隔 ms に変換 |
 | `generateBrushTip(config, size, color, registry?)` | ブラシチップ画像を生成 |
 | `createBrushTipRegistry()` | 画像チップ管理用の `BrushTipRegistry` を作成 |
 | `mulberry32(seed)` | 32bit シードから PRNG を生成 |
 | `hashSeed(globalSeed, index)` | branch / emission 固有のシードを生成 |
 | `ROUND_PEN` | デフォルトの round-pen ブラシ定数 |
-| `AIRBRUSH` | エアブラシプリセット（ソフト円、密間隔・低フロー） |
-| `SPRAY_AIRBRUSH` | 粒子感エアブラシプリセット（spray、小粒子散布） |
+| `AIRBRUSH` | エアブラシプリセット（ソフト円、密間隔・低フロー、時間ベース emission 有効） |
+| `SPRAY_AIRBRUSH` | 粒子感エアブラシプリセット（spray、小粒子散布、時間ベース emission 有効） |
 | `PENCIL` | 鉛筆プリセット（ほぼハード円、微小 jitter） |
 | `MARKER` | マーカープリセット（やや柔らか、中間フロー） |
 | `DEFAULT_PRESSURE_DYNAMICS` | `PressureDynamics` のデフォルト値 |
@@ -136,7 +137,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `compileLocalTransforms(mode, divisions)` | 1レベル分のローカル回転/反射行列を生成 |
 | `expandPoint(point, compiled)` | 単一点を展開 |
 | `expandStroke(points, compiled)` | ストローク全体を展開（Point版） |
-| `expandStrokePoints(points, compiled)` | ストローク全体を展開（StrokePoint版、pressure保持） |
+| `expandStrokePoints(points, compiled)` | ストローク全体を展開（StrokePoint版、pressure/timestamp保持） |
 | `getExpandCount(config)` | 展開の出力数を取得 |
 | `createDefaultExpandConfig(width, height)` | デフォルト設定を作成 |
 

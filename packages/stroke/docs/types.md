@@ -92,8 +92,8 @@ interface RenderUpdate {
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `newlyCommitted` | `readonly StrokePoint[]` | 今回新たに確定した点（差分、pressure含む）。先頭に `committedOverlapCount` 個のオーバーラップ点を含む |
-| `currentPending` | `readonly StrokePoint[]` | 現在のpending全体（pressure含む） |
+| `newlyCommitted` | `readonly StrokePoint[]` | 今回新たに確定した点（差分、pressure/timestamp含む）。先頭に `committedOverlapCount` 個のオーバーラップ点を含む |
+| `currentPending` | `readonly StrokePoint[]` | 現在のpending全体（pressure/timestamp含む） |
 | `style` | `StrokeStyle` | 描画スタイル |
 | `expand` | `ExpandConfig` | 展開設定 |
 | `committedOverlapCount` | `number` | `newlyCommitted` 先頭に含まれる描画済みオーバーラップ点の数。Catmull-Rom の曲率計算に使用され、描画はスキップされる |
@@ -111,7 +111,7 @@ interface RenderUpdate {
 
 **ゼロ新規点ガード**: `newlyCommitted.length === committedOverlapCount` の場合、新規点がないため `appendToCommittedLayer` の呼び出しをスキップすること。
 
-**StrokePoint型への変更理由**: 筆圧情報（pressure）をengineの描画関数まで伝達するため。InputPointからpressureを保持したままStrokePointに変換される。
+**StrokePoint型への変更理由**: 筆圧情報（pressure）と入力時刻（timestamp）をengineの描画関数まで伝達するため。InputPointからpressure/timestampを保持したままStrokePointに変換される。timestamp は stamp / spray の時間ベース emission に使われ、未指定の場合は従来通り距離ベース emission のみになる。
 
 ---
 
@@ -137,17 +137,18 @@ interface StrokeCommand {
 |---|---|---|
 | `type` | `"stroke"` | コマンド種別 |
 | `layerId` | `string` | 対象レイヤーのID |
-| `inputPoints` | `readonly InputPoint[]` | 変換前の入力点列 |
+| `inputPoints` | `readonly InputPoint[]` | 変換前の入力点列。`timestamp` を含めて保存し、時間ベース emission の replay に使う |
 | `filterPipeline` | `FilterPipelineConfig` | フィルタパイプライン設定 |
 | `expand` | `ExpandConfig` | 展開設定 |
 | `style` | `StrokeStyle` | 描画スタイル（色、線幅、筆圧カーブ、合成モード、ブラシ設定を含む）。筆圧のサイズ/flow反映は `style.brush.pressureDynamics` に保存する |
-| `brushSeed` | `number` | ブラシの PRNG シード。スタンプブラシの jitter を決定論的にリプレイするために使用。`round-pen` では `0` |
+| `brushSeed` | `number` | ブラシの PRNG シード。stamp / spray の jitter と粒子配置を決定論的にリプレイするために使用。`round-pen` では `0` |
 | `alphaLocked` | `boolean` | ストローク実行時点の対象レイヤー alpha lock 設定。replay 時の通常描画を既存 alpha に制限するかを決める |
 | `timestamp` | `number` | 作成時刻 |
 
 **特徴**:
 - 入力点（フィルタ前）のみを保存
 - リプレイ時にフィルタ→展開を再適用
+- replay は保存済み `inputPoints.timestamp` と `brushSeed` だけで時間ベース emission を再現し、タイマーや現在時刻を使わない
 - `style: StrokeStyle` に集約することで、従来の個別フィールド展開（`color`, `lineWidth`, `pressureSensitivity?` 等）を廃止。command 保存と replay で optional の解釈不一致を構造的に排除
 - 新形式では `pressureSensitivity` を保存せず、ブラシごとの `pressureDynamics` を保存する。旧コマンドや旧設定を読み込む場合は、`pressureSensitivity` を `pressureDynamics.size` に補完してよい。旧形式との replay 等価性は保証しない
 - `alphaLocked` は replay の決定性を保つために保存する。replay / undo / redo / rebuild では現在の `LayerMeta.alphaLocked` ではなく、常に `StrokeCommand.alphaLocked` を使って描画する。現在の `LayerMeta.alphaLocked` は次に作成される stroke command の元値であり、過去 stroke の再描画結果は変えない
