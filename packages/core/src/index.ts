@@ -262,3 +262,17 @@ export {
   replayCommand,
   replayCommands,
 } from "@headless-paint/stroke";
+export type {
+  CustomCommandExecutor,
+  CustomCommandOutcome,
+  DirtyHint,
+  ExecutorDeps,
+  ExecutorFailure,
+  ExecutorResult,
+  LayerListOp,
+  PersistenceEvent,
+} from "@headless-paint/stroke";
+export {
+  executeHistoryOp,
+  resolvePushPersistenceEvent,
+} from "@headless-paint/stroke";
