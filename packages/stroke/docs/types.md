@@ -234,6 +234,13 @@ type DrawCommand = StrokeCommand | ClearCommand | WrapShiftCommand | TransformLa
 
 レイヤーの構造（追加・削除・並び替え・複製・下統合）を操作するコマンド。描画コマンドと同じ履歴に記録される。
 
+**分類の基準**は「replay（ピクセル再構築）を壊すか」ではなく「**レイヤーリスト（枚数・並び）を変えるか**」。
+`replayCommand` は draw 系しか処理せず、レイヤーリストの変更を replay 経路に持ち込まない設計のため、
+リストを変える操作はすべて structural に分類して checkpoint で仕切り直す。
+たとえば reorder-layer は理屈上 layerId 単位の rebuild に影響しないが、例外扱いすると
+「コマンドログ = ピクセル操作のみ」という不変条件が崩れるため、一貫して structural に含める。
+逆に wrap-shift は全レイヤーのピクセルをずらすがリストは変えないので draw 系（DrawCommand）に属する。
+
 ### AddLayerCommand
 
 ```typescript
