@@ -14,8 +14,6 @@ import type {
 } from "@headless-paint/core";
 import type { CompiledFilterPipeline, InputPoint } from "@headless-paint/core";
 import {
-  applyDuplicateLayerCommand,
-  applyMergeLayerDownCommand,
   beginHistoryMutation,
   canRedo as checkCanRedo,
   canUndo as checkCanUndo,
@@ -28,20 +26,18 @@ import {
   createTransformLayerCommand,
   createWrapShiftCommand,
   duplicateLayerAtomic,
-  getAffectedLayerIds,
-  getCommandAt,
-  isCustomCommand,
-  isStructuralCommand,
+  executeHistoryOp,
   mergeLayerDownAtomic,
   pushCommand,
-  rebuildLayerFromHistory,
-  redo,
-  undo,
 } from "@headless-paint/core";
 import type {
   Command,
+  CustomCommandExecutor,
+  CustomCommandOutcome,
+  ExecutorResult,
   HistoryConfig,
   HistoryState,
+  LayerListOp,
 } from "@headless-paint/core";
 import type { mat3 } from "gl-matrix";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -173,6 +169,42 @@ function createDuplicateLayerName(
   return `${baseName} ${index}`;
 }
 
+function getCommandType(command: unknown): string {
+  const typed = command as { readonly type?: unknown } | undefined;
+  return typeof typed?.type === "string" ? typed.type : "custom";
+}
+
+function shouldApplyActiveLayerHint<TCustom>(
+  op: "undo" | "redo",
+  result: ExecutorResult<TCustom>,
+  currentActiveLayerId: string | null,
+): boolean {
+  if (!result.activeLayerIdHint) return false;
+
+  const commandType = getCommandType(result.command);
+  const isNearbyRemoveHint =
+    (op === "undo" && commandType === "add-layer") ||
+    (op === "redo" && commandType === "remove-layer");
+  if (!isNearbyRemoveHint) return true;
+
+  return result.layerListOps.some(
+    (listOp) =>
+      listOp.type === "remove" && listOp.layerId === currentActiveLayerId,
+  );
+}
+
+function warnHistoryExecutorFailure<TCustom>(
+  op: "undo" | "redo",
+  result: ExecutorResult<TCustom>,
+): void {
+  const failure = result.failure;
+  const commandType = failure?.commandType ?? getCommandType(result.command);
+  const layerPart = failure?.layerId ? ` layerId=${failure.layerId}` : "";
+  console.warn(
+    `[headless-paint] ${op} skipped ${commandType}: ${failure?.reason ?? "unknown"}${layerPart}`,
+  );
+}
+
 export function usePaintEngine<TCustom = never>(
   config: PaintEngineConfig<TCustom>,
 ): PaintEngineResult<TCustom> {
@@ -209,7 +241,6 @@ export function usePaintEngine<TCustom = never>(
     activeEntry,
     addLayer: addLayerRaw,
     removeLayer: removeLayerById,
-    reinsertLayer,
     replaceEntries,
     setActiveLayerId,
     toggleVisibility,
@@ -626,262 +657,138 @@ export function usePaintEngine<TCustom = never>(
   );
 
   // ── Undo/Redo ──
-  const handleUndo = useCallback(() => {
-    const prev = historyStateRef.current;
-    if (!checkCanUndo(prev)) return;
-    const undoneCommand = getCommandAt(prev, prev.currentIndex);
-    if (!undoneCommand) return;
-    const newState = undo(prev);
+  const applyMoveLayerListOp = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      const currentEntries = entriesRef.current;
+      const movedEntry = currentEntries[fromIndex];
+      if (!movedEntry || toIndex < 0 || toIndex >= currentEntries.length) {
+        return;
+      }
 
-    if (isCustomCommand(undoneCommand)) {
-      customCommandHandlerRef.current?.undo(undoneCommand, {
-        entries: entriesRef.current,
-        findEntry,
-        bumpRenderVersion,
+      if (toIndex === fromIndex + 1) {
+        moveLayerUpRaw(movedEntry.id);
+        return;
+      }
+      if (toIndex === fromIndex - 1) {
+        moveLayerDownRaw(movedEntry.id);
+        return;
+      }
+
+      const layers = currentEntries.map((entry) => entry.committedLayer);
+      const [movedLayer] = layers.splice(fromIndex, 1);
+      layers.splice(toIndex, 0, movedLayer);
+      replaceEntries(layers);
+    },
+    [entriesRef, moveLayerUpRaw, moveLayerDownRaw, replaceEntries],
+  );
+
+  const applyLayerListOps = useCallback(
+    (ops: readonly LayerListOp[]) => {
+      for (const listOp of ops) {
+        switch (listOp.type) {
+          case "insert": {
+            const layers = entriesRef.current.map(
+              (entry) => entry.committedLayer,
+            );
+            const index = Math.max(0, Math.min(listOp.index, layers.length));
+            layers.splice(index, 0, listOp.layer);
+            replaceEntries(layers);
+            break;
+          }
+          case "remove":
+            removeLayerById(listOp.layerId);
+            break;
+          case "move":
+            applyMoveLayerListOp(listOp.fromIndex, listOp.toIndex);
+            break;
+          case "replace":
+            replaceEntries(listOp.layers, listOp.activeLayerId);
+            break;
+        }
+      }
+    },
+    [entriesRef, removeLayerById, replaceEntries, applyMoveLayerListOp],
+  );
+
+  const createCustomExecutor = useCallback(():
+    | CustomCommandExecutor<TCustom>
+    | undefined => {
+    const handler = customCommandHandlerRef.current;
+    if (!handler) return undefined;
+
+    const createOutcome = (run: () => void): CustomCommandOutcome => {
+      run();
+      return { ok: true };
+    };
+
+    return {
+      apply: (cmd) =>
+        createOutcome(() => {
+          handler.apply(cmd, {
+            entries: entriesRef.current,
+            findEntry,
+            bumpRenderVersion,
+          });
+        }),
+      unapply: (cmd) =>
+        createOutcome(() => {
+          handler.undo(cmd, {
+            entries: entriesRef.current,
+            findEntry,
+            bumpRenderVersion,
+          });
+        }),
+    };
+  }, [entriesRef, findEntry, bumpRenderVersion]);
+
+  const executeAndApplyHistoryOp = useCallback(
+    (op: "undo" | "redo") => {
+      const prev = historyStateRef.current;
+      if (op === "undo" ? !checkCanUndo(prev) : !checkCanRedo(prev)) return;
+
+      const result = executeHistoryOp(op, prev, {
+        layers: entriesRef.current.map((entry) => entry.committedLayer),
+        tipRegistry: registryRef.current,
+        customExecutor: createCustomExecutor(),
+        shiftTempCanvas,
       });
-    } else if (undoneCommand.type === "wrap-shift") {
-      for (const entry of entriesRef.current) {
-        wrapShiftLayer(
-          entry.committedLayer,
-          -undoneCommand.dx,
-          -undoneCommand.dy,
-          shiftTempCanvas,
-        );
-      }
-    } else if (isStructuralCommand(undoneCommand)) {
-      switch (undoneCommand.type) {
-        case "add-layer":
-          removeLayerById(undoneCommand.layerId);
-          break;
-        case "remove-layer": {
-          const entry = reinsertLayer(
-            undoneCommand.layerId,
-            undoneCommand.removedIndex,
-            undoneCommand.meta,
-          );
-          const result = rebuildLayerFromHistory(
-            entry.committedLayer,
-            newState,
-            registryRef.current,
-          );
-          if (!result.ok) {
-            console.warn(
-              `[headless-paint] undo skipped remove-layer rebuild: ${result.reason} layerId=${result.layerId}`,
-            );
-          }
-          break;
-        }
-        case "reorder-layer": {
-          if (undoneCommand.toIndex > undoneCommand.fromIndex) {
-            moveLayerDownRaw(undoneCommand.layerId);
-          } else {
-            moveLayerUpRaw(undoneCommand.layerId);
-          }
-          break;
-        }
-        case "duplicate-layer":
-          removeLayerById(undoneCommand.layerId);
-          setActiveLayerId(undoneCommand.sourceLayerId);
-          break;
-        case "merge-layer-down": {
-          const sourceEntry = reinsertLayer(
-            undoneCommand.sourceLayerId,
-            undoneCommand.sourceIndex,
-            undoneCommand.sourceMeta,
-          );
-          const targetEntry = findEntry(undoneCommand.targetLayerId);
-          if (targetEntry) {
-            targetEntry.committedLayer.meta.name =
-              undoneCommand.targetMetaBefore.name;
-            targetEntry.committedLayer.meta.visible =
-              undoneCommand.targetMetaBefore.visible;
-            targetEntry.committedLayer.meta.opacity =
-              undoneCommand.targetMetaBefore.opacity;
-            targetEntry.committedLayer.meta.alphaLocked =
-              undoneCommand.targetMetaBefore.alphaLocked;
-            targetEntry.committedLayer.meta.compositeOperation =
-              undoneCommand.targetMetaBefore.compositeOperation;
-          }
-          for (const entry of [sourceEntry, targetEntry]) {
-            if (!entry) continue;
-            const result = rebuildLayerFromHistory(
-              entry.committedLayer,
-              newState,
-              registryRef.current,
-            );
-            if (!result.ok) {
-              console.warn(
-                `[headless-paint] undo skipped merge-layer-down rebuild: ${result.reason} layerId=${result.layerId}`,
-              );
-              return;
-            }
-          }
-          setActiveLayerId(undoneCommand.sourceLayerId);
-          break;
-        }
-      }
-    } else {
-      const affected = getAffectedLayerIds(
-        prev,
-        newState.currentIndex,
-        prev.currentIndex,
-      );
-      const ids =
-        affected.type === "all"
-          ? entriesRef.current.map((e) => e.id)
-          : affected.layerIds;
-      for (const id of ids) {
-        const e = findEntry(id);
-        if (!e) continue;
-        const result = rebuildLayerFromHistory(
-          e.committedLayer,
-          newState,
-          registryRef.current,
-        );
-        if (!result.ok) {
-          console.warn(
-            `[headless-paint] undo skipped layer rebuild: ${result.reason} layerId=${result.layerId}`,
-          );
-          return;
-        }
-        if (!e.committedLayer.meta.visible) {
-          setLayerVisible(e.id, true);
-        }
-      }
-    }
 
-    bumpRenderVersion();
-    commitHistoryState(newState);
-  }, [
-    entriesRef,
-    shiftTempCanvas,
-    findEntry,
-    removeLayerById,
-    reinsertLayer,
-    moveLayerUpRaw,
-    moveLayerDownRaw,
-    setLayerVisible,
-    setActiveLayerId,
-    commitHistoryState,
-    bumpRenderVersion,
-  ]);
+      if (!result.ok) {
+        warnHistoryExecutorFailure(op, result);
+        return;
+      }
+
+      applyLayerListOps(result.layerListOps);
+      if (shouldApplyActiveLayerHint(op, result, activeLayerId)) {
+        setActiveLayerId(result.activeLayerIdHint ?? null);
+      }
+      for (const layerId of result.visibilityFixLayerIds) {
+        setLayerVisible(layerId, true);
+      }
+
+      commitHistoryState(result.next);
+      bumpRenderVersion();
+    },
+    [
+      activeLayerId,
+      entriesRef,
+      shiftTempCanvas,
+      createCustomExecutor,
+      applyLayerListOps,
+      setActiveLayerId,
+      setLayerVisible,
+      commitHistoryState,
+      bumpRenderVersion,
+    ],
+  );
+
+  const handleUndo = useCallback(() => {
+    executeAndApplyHistoryOp("undo");
+  }, [executeAndApplyHistoryOp]);
 
   const handleRedo = useCallback(() => {
-    const prev = historyStateRef.current;
-    if (!checkCanRedo(prev)) return;
-    const newState = redo(prev);
-    const redoneCommand = getCommandAt(newState, newState.currentIndex);
-    if (!redoneCommand) return;
-
-    if (isCustomCommand(redoneCommand)) {
-      customCommandHandlerRef.current?.apply(redoneCommand, {
-        entries: entriesRef.current,
-        findEntry,
-        bumpRenderVersion,
-      });
-    } else if (redoneCommand.type === "wrap-shift") {
-      for (const entry of entriesRef.current) {
-        wrapShiftLayer(
-          entry.committedLayer,
-          redoneCommand.dx,
-          redoneCommand.dy,
-          shiftTempCanvas,
-        );
-      }
-    } else if (isStructuralCommand(redoneCommand)) {
-      switch (redoneCommand.type) {
-        case "add-layer":
-          reinsertLayer(
-            redoneCommand.layerId,
-            redoneCommand.insertIndex,
-            redoneCommand.meta,
-          );
-          break;
-        case "remove-layer":
-          removeLayerById(redoneCommand.layerId);
-          break;
-        case "reorder-layer": {
-          if (redoneCommand.toIndex > redoneCommand.fromIndex) {
-            moveLayerUpRaw(redoneCommand.layerId);
-          } else {
-            moveLayerDownRaw(redoneCommand.layerId);
-          }
-          break;
-        }
-        case "duplicate-layer": {
-          const result = applyDuplicateLayerCommand(
-            entriesRef.current.map((e) => e.committedLayer),
-            redoneCommand,
-          );
-          if (!result) {
-            console.warn(
-              `[headless-paint] redo skipped duplicate-layer apply: layerId=${redoneCommand.layerId}`,
-            );
-            return;
-          }
-          replaceEntries(result.layers, redoneCommand.layerId);
-          break;
-        }
-        case "merge-layer-down": {
-          const result = applyMergeLayerDownCommand(
-            entriesRef.current.map((e) => e.committedLayer),
-            redoneCommand,
-          );
-          if (!result) {
-            console.warn(
-              `[headless-paint] redo skipped merge-layer-down apply: sourceLayerId=${redoneCommand.sourceLayerId}`,
-            );
-            return;
-          }
-          replaceEntries(result.layers, redoneCommand.targetLayerId);
-          break;
-        }
-      }
-    } else {
-      const affected = getAffectedLayerIds(
-        newState,
-        prev.currentIndex,
-        newState.currentIndex,
-      );
-      const ids =
-        affected.type === "all"
-          ? entriesRef.current.map((e) => e.id)
-          : affected.layerIds;
-      for (const id of ids) {
-        const e = findEntry(id);
-        if (!e) continue;
-        const result = rebuildLayerFromHistory(
-          e.committedLayer,
-          newState,
-          registryRef.current,
-        );
-        if (!result.ok) {
-          console.warn(
-            `[headless-paint] redo skipped layer rebuild: ${result.reason} layerId=${result.layerId}`,
-          );
-          return;
-        }
-        if (!e.committedLayer.meta.visible) {
-          setLayerVisible(e.id, true);
-        }
-      }
-    }
-
-    bumpRenderVersion();
-    commitHistoryState(newState);
-  }, [
-    entriesRef,
-    shiftTempCanvas,
-    findEntry,
-    removeLayerById,
-    reinsertLayer,
-    replaceEntries,
-    moveLayerUpRaw,
-    moveLayerDownRaw,
-    setLayerVisible,
-    commitHistoryState,
-    bumpRenderVersion,
-  ]);
+    executeAndApplyHistoryOp("redo");
+  }, [executeAndApplyHistoryOp]);
 
   // ── レイヤー配列構築 ──
   const combinedRenderVersion = layerRenderVersion + session.renderVersion;
