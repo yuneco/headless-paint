@@ -590,7 +590,7 @@ interface SprayDynamics {
   readonly emissionsPerSecond?: number;
 }
 
-type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
+type SpraySizeJitterMode = "lognormal" | "bimodal";
 ```
 
 `emissionsPerSecond` 以外は required。`DEFAULT_SPRAY_DYNAMICS` からの spread で差分のみ指定できる。
@@ -601,7 +601,7 @@ type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
 | `density` | `number` | 基準粒子密度。emission 1回あたり、1000px² に配置する粒子数 |
 | `particleSize` | `number` | 粒子チップの最大径 px。散布径とは独立した絶対値 |
 | `particleSizeJitter` | `number` | 粒子径の縮小方向ランダム変動 [0, 1] |
-| `sizeJitterMode` | `SpraySizeJitterMode` | 粒子径ジッタの分布モード。実験的フィールドで、最終的に1つの挙動へ固定する予定 |
+| `sizeJitterMode` | `SpraySizeJitterMode` | 粒子径ジッタの分布モード。対数正規近似または二峰分布を選択する |
 | `opacityJitter` | `number` | 粒子不透明度の縮小方向ランダム変動 [0, 1] |
 | `flow` | `number` | 粒子ごとの基準塗料量 [0, 1] |
 | `radialDistribution` | `DensityProfileCurve` | 半径方向の密度プロファイル。x は中央→辺縁、y は相対密度 |
@@ -617,7 +617,7 @@ const DEFAULT_SPRAY_DYNAMICS: SprayDynamics = {
   density: 5,
   particleSize: 2,
   particleSizeJitter: 0,
-  sizeJitterMode: "uniform",
+  sizeJitterMode: "bimodal",
   opacityJitter: 0,
   flow: 0.35,
   radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
@@ -627,7 +627,7 @@ const DEFAULT_SPRAY_DYNAMICS: SprayDynamics = {
 **描画上の意味**:
 - emission 1回の基準粒子数は `density * Math.PI * R * R / 1000` で、散布半径 `R` の面積に比例する。
 - `radialDistribution` は相対密度 `d(x)` として評価され、半径 pdf は `pdf(x) ∝ d(x) * x` になる。デフォルトの一様密度では一様円盤、中央高・辺縁低のカーブでは中心が厚くなる。
-- `sizeJitterMode` は `particleSizeJitter` の乱数分布を切り替える実験用フィールド。`uniform` は従来の一様縮小、`power` は小粒を増やす分布、`lognormal` は 0.25-4 倍の対数正規近似、`bimodal` は基準粒と微小粒の二峰分布。
+- `sizeJitterMode` は `particleSizeJitter` の乱数分布を切り替えるフィールド。`lognormal` は 0.25-4 倍の対数正規近似、`bimodal` は基準粒と微小粒の二峰分布。
 - 1 emission あたりの粒子数は `SPRAY_MAX_PARTICLES_PER_EMISSION` で上限クランプされる。
 - `emissionsPerSecond` が正の有限数なら、入力座標が静止していても `timestamp` の進行に応じて emission が発生する。
 
@@ -786,7 +786,7 @@ const SPRAY_AIRBRUSH: SprayBrushConfig = {
     density: 5,
     particleSize: 2,
     particleSizeJitter: 0.35,
-    sizeJitterMode: "uniform",
+    sizeJitterMode: "bimodal",
     opacityJitter: 0.3,
     flow: 0.35,
     radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
@@ -842,7 +842,7 @@ const sprayAirbrush: SprayBrushConfig = {
     density: 5,
     particleSize: 2,
     particleSizeJitter: 0.35,
-    sizeJitterMode: "uniform",
+    sizeJitterMode: "bimodal",
     opacityJitter: 0.3,
     flow: 0.35,
     emissionsPerSecond: 30,

@@ -192,7 +192,7 @@ export interface SprayDynamics {
   readonly emissionsPerSecond?: number;
 }
 
-export type SpraySizeJitterMode = "uniform" | "power" | "lognormal" | "bimodal";
+export type SpraySizeJitterMode = "lognormal" | "bimodal";
 
 export interface SprayPressureDynamics {
   readonly size: number;
@@ -214,7 +214,7 @@ export const DEFAULT_SPRAY_DYNAMICS: SprayDynamics = {
   density: 5,
   particleSize: 2,
   particleSizeJitter: 0,
-  sizeJitterMode: "uniform",
+  sizeJitterMode: "bimodal",
   opacityJitter: 0,
   flow: 0.35,
   radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
@@ -294,7 +294,7 @@ export const SPRAY_AIRBRUSH: SprayBrushConfig = {
     density: 5,
     particleSize: 2,
     particleSizeJitter: 0.35,
-    sizeJitterMode: "uniform",
+    sizeJitterMode: "bimodal",
     opacityJitter: 0.3,
     flow: 0.35,
     radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,

@@ -485,10 +485,8 @@ function isDensityProfileCurve(value: unknown): value is DensityProfileCurve {
   );
 }
 
-function parseSpraySizeJitterMode(value: unknown): SpraySizeJitterMode {
-  return value === "power" || value === "lognormal" || value === "bimodal"
-    ? value
-    : "uniform";
+function isSpraySizeJitterMode(value: unknown): value is SpraySizeJitterMode {
+  return value === "lognormal" || value === "bimodal";
 }
 
 function isBackgroundSettings(value: unknown): value is BackgroundSettings {
@@ -567,6 +565,7 @@ function parseBrushConfig(
         isFiniteNumber(dynamics.density) &&
         isFiniteNumber(dynamics.particleSize) &&
         isFiniteNumber(dynamics.particleSizeJitter) &&
+        isSpraySizeJitterMode(dynamics.sizeJitterMode) &&
         isFiniteNumber(dynamics.opacityJitter) &&
         isFiniteNumber(dynamics.flow)
       )
@@ -586,7 +585,7 @@ function parseBrushConfig(
         density: dynamics.density as number,
         particleSize: dynamics.particleSize as number,
         particleSizeJitter: dynamics.particleSizeJitter as number,
-        sizeJitterMode: parseSpraySizeJitterMode(dynamics.sizeJitterMode),
+        sizeJitterMode: dynamics.sizeJitterMode,
         opacityJitter: dynamics.opacityJitter as number,
         flow: dynamics.flow as number,
         emissionsPerSecond: parseEmissionsPerSecond(

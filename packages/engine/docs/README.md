@@ -57,7 +57,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `ParametricCurve` | 0-1 パラメータ変換カーブ制御点 `{ y1, y2 }` |
 | `PressureCurve` | 筆圧カーブ制御点 `{ y1, y2 }` |
 | `DensityProfileCurve` | spray の半径方向密度プロファイル `{ startY, control1, control2, endY }` |
-| `SpraySizeJitterMode` | spray 粒子径ジッタの実験的分布モード |
+| `SpraySizeJitterMode` | spray 粒子径ジッタの分布モード |
 | `ContentBounds` | レイヤー内容の非透明ピクセル境界矩形 `{ x, y, width, height }` |
 | `LayerTransformPreview` | レイヤー変換プレビュー `{ layerId, matrix }` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |

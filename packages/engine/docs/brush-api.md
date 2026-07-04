@@ -254,12 +254,10 @@ const theta = 2 * Math.PI * v;
 
 粒子ごとの乱数消費順は固定で、`u`（半径）, `v`（角度）, `sizeU1`, `sizeU2`, `sizeU3`（粒径）, `z`（不透明度）の順に消費する。`sizeJitterMode` が粒径に使う乱数個数に関係なく、粒径用には常に3個消費する。
 
-`sizeJitterMode` は `particleSizeJitter` の分布を切り替える実験的フィールド。最終的には1つの挙動へ固定する予定。
+`sizeJitterMode` は `particleSizeJitter` の分布を切り替えるフィールド。粒径のばらつきを対数正規近似または二峰分布から選択する。
 
 | mode | 粒径 |
 |---|---|
-| `"uniform"` | `size * (1 - jitter * sizeU1)` |
-| `"power"` | `size * (1 - jitter * sizeU1 ** gamma)`、`gamma = lerp(1, 0.4, jitter)` |
 | `"lognormal"` | `size * clamp(2 ** (sigma * g), 0.25, 4)`、`sigma = 2 * jitter`, `g = sizeU1 + sizeU2 + sizeU3 - 1.5` |
 | `"bimodal"` | 確率 `0.7 * jitter` で `size * lerp(0.2, 0.5, sizeU2)`、それ以外は `size` |
 
@@ -471,7 +469,7 @@ const SPRAY_AIRBRUSH: SprayBrushConfig = {
     density: 5,
     particleSize: 2,
     particleSizeJitter: 0.35,
-    sizeJitterMode: "uniform",
+    sizeJitterMode: "bimodal",
     opacityJitter: 0.3,
     flow: 0.35,
     radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,

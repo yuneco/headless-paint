@@ -386,7 +386,7 @@ describe("spray brush", () => {
     expect(innerDensity / outerDensity).toBeLessThan(1.6);
   });
 
-  it.each(["uniform", "power", "lognormal", "bimodal"] as const)(
+  it.each(["lognormal", "bimodal"] as const)(
     "sizeJitterMode=%s は同seedで決定論性を保つ",
     (sizeJitterMode) => {
       const brush = makeSprayBrush({

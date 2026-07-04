@@ -34,10 +34,6 @@ function calculateParticleSize(
   u3: number,
 ): number {
   switch (mode) {
-    case "power": {
-      const gamma = 1 + (0.4 - 1) * jitter;
-      return baseSize * (1 - jitter * u1 ** gamma);
-    }
     case "lognormal": {
       const sigma = 2 * jitter;
       const gaussian = u1 + u2 + u3 - 1.5;
@@ -51,8 +47,6 @@ function calculateParticleSize(
       }
       return baseSize;
     }
-    case "uniform":
-      return baseSize * (1 - jitter * u1);
   }
 }
 

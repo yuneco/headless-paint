@@ -36,7 +36,7 @@ interface DebugPanelProps {
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 const PATTERN_MODES: PatternMode[] = ["none", "grid", "repeat-x", "repeat-y"];
-const SIZE_JITTER_MODES = ["uniform", "power", "lognormal", "bimodal"] as const;
+const SIZE_JITTER_MODES = ["lognormal", "bimodal"] as const;
 
 function DebugPanelComponent({
   transform,
@@ -311,7 +311,7 @@ function DebugPanelComponent({
       const penFolder = gui.addFolder("Pen Settings");
 
       penFolder
-        .add(penDataRef.current, "lineWidth", 1, 150, 1)
+        .add(penDataRef.current, "lineWidth", 1, 250, 1)
         .name("Line Width")
         .listen()
         .onChange((value: number) => {
