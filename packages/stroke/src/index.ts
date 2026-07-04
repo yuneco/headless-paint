@@ -91,6 +91,19 @@ export {
   transitionStroke,
 } from "./stroke-machine";
 
+// Transform machine
+export type {
+  TransformMachineEffect,
+  TransformMachineEvent,
+  TransformPhase,
+  TransformPixelSource,
+  TransformTransitionResult,
+} from "./transform-machine";
+export {
+  createInitialTransformPhase,
+  transitionTransform,
+} from "./transform-machine";
+
 // Stroke runtime
 export type {
   StrokeRuntime,

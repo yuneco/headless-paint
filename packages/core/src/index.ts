@@ -112,6 +112,18 @@ export {
   type PatternPreviewConfig,
 } from "@headless-paint/engine";
 export { getContentBounds } from "@headless-paint/engine";
+export {
+  composeRotation,
+  composeScaleAboutAnchor,
+  composeTranslation,
+  getEdgeMidpoints,
+  getOutwardNormal,
+  getTransformedCorners,
+  isIdentityMatrix,
+  isPointInQuad,
+  type Mat3Like,
+  type QuadCorners,
+} from "@headless-paint/engine";
 export { transformLayer } from "@headless-paint/engine";
 export { wrapShiftLayer } from "@headless-paint/engine";
 export {
@@ -209,7 +221,12 @@ export type {
   StrokeStartConfig,
   StrokeSessionResult,
   StrokeSessionState,
+  TransformMachineEffect,
+  TransformMachineEvent,
   StructuralCommand,
+  TransformPhase,
+  TransformPixelSource,
+  TransformTransitionResult,
   TransformLayerCommand,
   WrapShiftCommand,
 } from "@headless-paint/stroke";
@@ -233,10 +250,12 @@ export {
   createStrokeCommand,
   createTransformLayerCommand,
   createWrapShiftCommand,
+  createInitialTransformPhase,
   duplicateLayerAtomic,
   endStrokeSession,
   mergeLayerDownAtomic,
   startStrokeSession,
+  transitionTransform,
 } from "@headless-paint/stroke";
 export { createStrokeRuntime } from "@headless-paint/stroke";
 export {

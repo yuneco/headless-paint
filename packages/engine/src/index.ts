@@ -111,6 +111,18 @@ export {
   type PatternPreviewConfig,
 } from "./pattern-preview";
 export { getContentBounds } from "./content-bounds";
+export {
+  composeRotation,
+  composeScaleAboutAnchor,
+  composeTranslation,
+  getEdgeMidpoints,
+  getOutwardNormal,
+  getTransformedCorners,
+  isIdentityMatrix,
+  isPointInQuad,
+  type Mat3Like,
+  type QuadCorners,
+} from "./transform-geometry";
 export { transformLayer } from "./transform-layer";
 export { wrapShiftLayer } from "./wrap-shift";
 export {

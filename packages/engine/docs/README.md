@@ -60,6 +60,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `SpraySizeJitterMode` | spray 粒子径ジッタの分布モード |
 | `ContentBounds` | レイヤー内容の非透明ピクセル境界矩形 `{ x, y, width, height }` |
 | `LayerTransformPreview` | レイヤー変換プレビュー `{ layerId, matrix }` |
+| `Mat3Like` | gl-matrix `mat3` 互換の flat 3x3 行列 |
+| `QuadCorners` | 変換後矩形の4隅 `[tl, tr, bl, br]` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
 | `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig`） |
 | `BrushRenderState` | ブラシレンダリング状態 `{ seed, tipCanvas, branches }` |
@@ -178,6 +180,14 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `getContentBounds(layer)` | レイヤーの非透明ピクセル境界矩形を返す。空レイヤーは `null` |
+| `getTransformedCorners(bounds, matrix)` | content bounds の4隅に mat3 を適用し `[tl, tr, bl, br]` を返す |
+| `getEdgeMidpoints(corners)` | 変換後4隅から `[top, bottom, left, right]` の辺中点を返す |
+| `getOutwardNormal(edgeStart, edgeEnd, quadCenter)` | 辺の外側単位法線を返す |
+| `isPointInQuad(point, corners)` | 点が四角形の内側または境界上にあるか判定する |
+| `composeTranslation(startMatrix, dx, dy)` | `translation * startMatrix` の mat3 を返す |
+| `composeRotation(startMatrix, center, angleDelta)` | 指定中心まわりの回転を `startMatrix` に合成した mat3 を返す |
+| `composeScaleAboutAnchor(startMatrix, anchor, sx, sy)` | anchor を支点にした scale を `startMatrix` に合成した mat3 を返す |
+| `isIdentityMatrix(matrix)` | mat3 が単位行列と厳密一致するか判定する |
 | `transformLayer(layer, matrix, temp?)` | アフィン変換をピクセルに焼き込む（temp canvas パターン） |
 
 ### Wrap Shift
