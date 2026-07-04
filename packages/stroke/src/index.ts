@@ -79,6 +79,18 @@ export {
   resolvePushPersistenceEvent,
 } from "./command-executor";
 
+// Stroke machine
+export type {
+  StrokeMachineEffect,
+  StrokeMachineEvent,
+  StrokePhase,
+  StrokeTransitionResult,
+} from "./stroke-machine";
+export {
+  createInitialStrokePhase,
+  transitionStroke,
+} from "./stroke-machine";
+
 // History
 export {
   canRedo,

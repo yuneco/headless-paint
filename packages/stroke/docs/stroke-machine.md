@@ -3,7 +3,7 @@
 > ステータス: IF 設計ドラフト。「ストローク中割り込み仕様表」（paint-app
 > `plans/2026-07-05-ws2-phase1-review.md`）のユーザーレビュー完了後に実装へ進む。
 > 参照実装: `packages/react/src/useStrokeSession.ts`（SessionInternal）。
-> 状態機械の先例: `packages/input/src/gesture.ts`（純遷移関数 `(state, event) => [next, effects]`）。
+> 状態機械の先例: `packages/input/src/gesture.ts`（純関数・判別共用体・phase 別 handler）。
 
 ## 層の分業
 
@@ -22,31 +22,39 @@ type StrokePhase =
   | { readonly phase: "active";
       readonly layerId: string;
       readonly pendingOnly: boolean;   // 直線ツール等の pending 蓄積モード
+      readonly hasEmission: boolean;   // 吹きつけあり（move 時の schedule-emission 判定）
       readonly pointCount: number };
 
 type StrokeMachineEvent =
-  | { type: "start"; layerId: string; pendingOnly: boolean; hasEmission: boolean }
-  | { type: "move" }              // 実入力・emission 合成点の区別は machine では不要
-  | { type: "confirm" }           // pendingOnly → 通常 active へ（直線確定）
-  | { type: "end" }
-  | { type: "cancel" }
-  | { type: "dispose" };
+  | { readonly type: "start"; readonly layerId: string; readonly pendingOnly: boolean; readonly hasEmission: boolean }
+  | { readonly type: "move" }              // 実入力・emission 合成点の区別は machine では不要
+  | { readonly type: "confirm" }           // pendingOnly → 通常 active へ（直線確定）
+  | { readonly type: "end" }
+  | { readonly type: "cancel" }
+  | { readonly type: "dispose" };
 
 type StrokeMachineEffect =
-  | { type: "snapshot-layer" }         // cancel 復元 + mixing サンプリング元の捕捉
-  | { type: "append-committed" }       // チャンク追記
-  | { type: "render-pending" }
-  | { type: "schedule-emission" } | { type: "cancel-emission" }
-  | { type: "schedule-render" }        // rAF coalesce
-  | { type: "finalize-commit" }        // end: 確定描画 + StrokeCommand 生成
-  | { type: "restore-snapshot" }       // cancel
-  | { type: "drawing-changed"; isDrawing: boolean };
+  | { readonly type: "snapshot-layer" }         // cancel 復元 + mixing サンプリング元の捕捉
+  | { readonly type: "append-committed" }       // チャンク追記
+  | { readonly type: "render-pending" }
+  | { readonly type: "schedule-emission" } | { readonly type: "cancel-emission" }
+  | { readonly type: "schedule-render" }        // rAF coalesce
+  | { readonly type: "finalize-commit" }        // end: 確定描画 + StrokeCommand 生成
+  | { readonly type: "restore-snapshot" }       // cancel
+  | { readonly type: "drawing-changed"; readonly isDrawing: boolean };
 
-transitionStroke(state, event) => { next: StrokePhase; effects: readonly StrokeMachineEffect[] }
+interface StrokeTransitionResult {
+  readonly next: StrokePhase;
+  readonly effects: readonly StrokeMachineEffect[];
+}
+
+function createInitialStrokePhase(): StrokePhase;
+function transitionStroke(state: StrokePhase, event: StrokeMachineEvent): StrokeTransitionResult;
 ```
 
-不正イベント（idle への move/end 等、active 中の start=多重開始）は「no-op + 空 effects」。
-多重 start は前ストロークを auto-cancel してから開始する案もあるが、仕様表レビューで確定する。
+不正イベント（idle への move/end/cancel/confirm 等）は「no-op + 空 effects」。
+active 中の start（多重開始）は前ストロークを auto-cancel（`cancel-emission` + `restore-snapshot`）
+してから新規 start の effects を続ける。
 
 ## stroke-runtime
 

@@ -109,6 +109,10 @@ if (canUndo(historyState)) {
 | `StrokeSessionState` | セッション状態 |
 | `StrokeSessionResult` | セッション操作の結果（state + renderUpdate） |
 | `RenderUpdate` | 描画更新データ |
+| `StrokePhase` | ストローク状態機械の phase |
+| `StrokeMachineEvent` | `transitionStroke` に渡すイベント |
+| `StrokeMachineEffect` | runtime が解釈する副作用指示 |
+| `StrokeTransitionResult` | `transitionStroke` の結果（next + effects） |
 | `StrokeCommand` | ストロークコマンド（`layerId` 付き） |
 | `ClearCommand` | クリアコマンド（`layerId` 付き） |
 | `WrapShiftCommand` | ラップシフトコマンド（グローバル） |
@@ -149,6 +153,15 @@ if (canUndo(historyState)) {
 | `createReorderLayerCommand(layerId, fromIndex, toIndex)` | レイヤー並び替えコマンドを作成 |
 | `createDuplicateLayerCommand(sourceLayerId, layerId, insertIndex, width, height, meta)` | レイヤー複製コマンドを作成 |
 | `createMergeLayerDownCommand(sourceLayerId, targetLayerId, sourceIndex, targetIndex, sourceMeta, targetMetaBefore, targetMetaAfter)` | レイヤー下統合コマンドを作成 |
+
+### Stroke Machine
+
+詳細は [stroke-machine.md](./stroke-machine.md) を参照。
+
+| 関数 | 説明 |
+|---|---|
+| `createInitialStrokePhase()` | 初期 idle phase を作成 |
+| `transitionStroke(state, event)` | ストローク状態を純粋に遷移し、runtime 向け effects を返す |
 
 ### Atomic Layer Operations
 
