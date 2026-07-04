@@ -1,33 +1,19 @@
-import {
-  appendToCommittedLayer,
-  clearLayer,
-  createLayer,
-  renderPendingLayer,
-} from "@headless-paint/core";
 import type {
-  BrushRenderState,
   BrushTipRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
+  StrokeCommand,
+  StrokeRuntime,
   StrokeStyle,
-} from "@headless-paint/core";
-import { generateBrushTip, timeSpacingMsFromRate } from "@headless-paint/core";
-import {
-  compileFilterPipeline,
-  createFilterPipelineState,
-  finalizePipeline,
-  processPoint,
 } from "@headless-paint/core";
 import type {
   CompiledFilterPipeline,
   FilterPipelineConfig,
-  FilterPipelineState,
   InputPoint,
 } from "@headless-paint/core";
-import { addPointToSession, startStrokeSession } from "@headless-paint/core";
-import type { StrokeSessionState } from "@headless-paint/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createStrokeRuntime } from "@headless-paint/core";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRafRenderVersion } from "./useRafRenderVersion";
 
 export interface StrokeCompleteData {
@@ -71,460 +57,135 @@ export interface UseStrokeSessionResult {
   readonly isDrawing: boolean;
 }
 
-interface SessionInternal {
-  strokeSession: StrokeSessionState;
-  filterState: FilterPipelineState;
-  inputPoints: InputPoint[];
-  compiledExpand: CompiledExpand;
-  compiledFilterPipeline: CompiledFilterPipeline;
-  layerId: string;
-  alphaLocked: boolean;
-  brushState?: BrushRenderState;
-  brushSeed: number;
-  samplingLayer?: Layer;
-  committedSnapshot?: Layer;
-}
+const STRAIGHT_LINE_FILTER_PIPELINE: FilterPipelineConfig = {
+  filters: [{ type: "straight-line", config: {} }],
+};
 
-function toStrokePoints(points: readonly InputPoint[]) {
-  return points.map((point) => ({
-    x: point.x,
-    y: point.y,
-    pressure: point.pressure,
-    timestamp: point.timestamp,
-  }));
-}
-
-/**
- * 吹きつけ（時間ベースemission）有効時の synthetic point 注入間隔。
- * 無効なら undefined。
- */
-function getEmissionIntervalMs(style: StrokeStyle): number | undefined {
-  if (style.brush.type === "round-pen") return undefined;
-  return timeSpacingMsFromRate(style.brush.dynamics.emissionsPerSecond);
-}
-
-function buildLiveStrokePoints(session: StrokeSessionState) {
-  return [
-    ...toStrokePoints(session.allCommitted),
-    ...toStrokePoints(session.currentPending),
-  ];
-}
-
-function calculateSprayTipSize(style: StrokeStyle): number {
-  if (style.brush.type !== "spray") return 0;
-  const maxScale = style.brush.dynamics.sizeJitterMode === "lognormal" ? 4 : 1;
-  return Math.ceil(style.brush.dynamics.particleSize * maxScale);
-}
-
-/**
- * スタンプ/spray ブラシ用の初期 BrushRenderState を生成する。
- * round-pen では undefined を返す（brushState 不要）。
- */
-function createInitialBrushState(
-  style: StrokeStyle,
-  registry?: BrushTipRegistry,
-): {
-  brushState: BrushRenderState | undefined;
-  brushSeed: number;
-} {
-  if (style.brush.type === "round-pen") {
-    return { brushState: undefined, brushSeed: 0 };
-  }
-  const brushSeed = (Math.random() * 0xffffffff) | 0;
-  const tipCanvas =
-    style.brush.type === "stamp"
-      ? generateBrushTip(
-          style.brush.tip,
-          Math.ceil(style.lineWidth * 2),
-          style.color,
-          registry,
-        )
-      : generateBrushTip(
-          style.brush.particle,
-          calculateSprayTipSize(style),
-          style.color,
-          registry,
-        );
+function toStrokeCompleteData(command: StrokeCommand): StrokeCompleteData {
   return {
-    brushState: {
-      tipCanvas,
-      seed: brushSeed,
-      branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
-    },
-    brushSeed,
+    inputPoints: command.inputPoints,
+    filterPipelineConfig: command.filterPipeline,
+    expandConfig: command.expand,
+    strokeStyle: command.style,
+    brushSeed: command.brushSeed,
+    alphaLocked: command.alphaLocked,
+    totalPoints: command.inputPoints.length,
   };
-}
-
-function needsSamplingLayer(style: StrokeStyle): boolean {
-  return style.brush.type === "stamp" && !!style.brush.mixing?.enabled;
-}
-
-function cloneLayerContent(layer: Layer): Layer {
-  const snapshot = createLayer(layer.width, layer.height);
-  snapshot.ctx.drawImage(layer.canvas, 0, 0);
-  return snapshot;
-}
-
-function restoreLayerContent(layer: Layer, snapshot: Layer): void {
-  clearLayer(layer);
-  layer.ctx.drawImage(snapshot.canvas, 0, 0);
-}
-
-function getPendingCompositeOperation(
-  style: StrokeStyle,
-): GlobalCompositeOperation {
-  return style.compositeOperation;
 }
 
 export function useStrokeSession(
   config: UseStrokeSessionConfig,
 ): UseStrokeSessionResult {
-  const {
-    layer,
-    pendingLayer,
-    strokeStyle,
-    compiledFilterPipeline,
-    expandConfig,
-    compiledExpand,
-    onStrokeComplete,
-    registry,
-  } = config;
-
   const [renderVersion, bumpRenderVersion] = useRafRenderVersion();
   const [isDrawing, setIsDrawing] = useState(false);
 
-  const sessionRef = useRef<SessionInternal | null>(null);
+  const configRef = useRef(config);
+  configRef.current = config;
+  const onStrokeCompleteRef = useRef(config.onStrokeComplete);
+  onStrokeCompleteRef.current = config.onStrokeComplete;
+
+  const mountedRef = useRef(true);
+  const strokePointsRef = useRef<readonly InputPoint[]>([]);
   const pendingOnlyRef = useRef(false);
-  const strokePointsRef = useRef<InputPoint[]>([]);
+  const runtimeRef = useRef<StrokeRuntime | null>(null);
+  if (runtimeRef.current === null) {
+    runtimeRef.current = createStrokeRuntime({
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (id) => {
+        clearTimeout(id as ReturnType<typeof setTimeout>);
+      },
+      now: () => performance.now(),
+      requestRender: bumpRenderVersion,
+      onCommit: (command) => {
+        onStrokeCompleteRef.current?.(toStrokeCompleteData(command));
+      },
+      onDrawingChanged: (nextIsDrawing) => {
+        if (mountedRef.current) {
+          setIsDrawing(nextIsDrawing);
+        }
+        if (!nextIsDrawing) {
+          strokePointsRef.current = [];
+          pendingOnlyRef.current = false;
+        }
+      },
+    });
+  }
 
-  // 吹きつけ（時間ベースemission）用: 静止中に synthetic point を注入する timer。
-  // 実入力・synthetic を問わず入力のたびに再スケジュールされるため、
-  // 入力が emissionsPerSecond より速い間は発火しない。
-  const emissionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastInputPointRef = useRef<InputPoint | null>(null);
-  const onStrokeMoveRef = useRef<(point: InputPoint) => void>(() => {});
-
-  const stopEmissionTimer = useCallback(() => {
-    if (emissionTimerRef.current !== null) {
-      clearTimeout(emissionTimerRef.current);
-      emissionTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleEmissionTick = useCallback(() => {
-    stopEmissionTimer();
-    const intervalMs = getEmissionIntervalMs(strokeStyleRef.current);
-    if (intervalMs === undefined) return;
-    emissionTimerRef.current = setTimeout(() => {
-      emissionTimerRef.current = null;
-      const last = lastInputPointRef.current;
-      if (!sessionRef.current || !last) return;
-      // 最後に観測した座標・筆圧を現在時刻で再注入し、時間経過を履歴に固定する
-      onStrokeMoveRef.current({ ...last, timestamp: performance.now() });
-    }, intervalMs);
-  }, [stopEmissionTimer]);
-
-  useEffect(() => stopEmissionTimer, [stopEmissionTimer]);
-
-  // refs で最新値をコールバック内から参照
-  const expandConfigRef = useRef(expandConfig);
-  expandConfigRef.current = expandConfig;
-  const compiledExpandRef = useRef(compiledExpand);
-  compiledExpandRef.current = compiledExpand;
-  const strokeStyleRef = useRef(strokeStyle);
-  strokeStyleRef.current = strokeStyle;
-  const onStrokeCompleteRef = useRef(onStrokeComplete);
-  onStrokeCompleteRef.current = onStrokeComplete;
-  const layerRef = useRef(layer);
-  layerRef.current = layer;
-  const registryRef = useRef(registry);
-  registryRef.current = registry;
-
-  const canDraw = layer?.meta.visible ?? false;
-
-  const straightLinePipeline = useMemo(
-    () =>
-      compileFilterPipeline({
-        filters: [{ type: "straight-line", config: {} }],
-      }),
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      runtimeRef.current?.dispose();
+    },
     [],
   );
 
+  const canDraw = config.layer?.meta.visible ?? false;
+
+  const appendStrokePoint = useCallback((point: InputPoint) => {
+    strokePointsRef.current = [...strokePointsRef.current, point];
+  }, []);
+
   const onStrokeStart = useCallback(
-    (inputPoint: InputPoint, options?: StrokeStartOptions) => {
-      const currentLayer = layerRef.current;
-      if (!currentLayer || !currentLayer.meta.visible) return;
-      pendingOnlyRef.current = options?.pendingOnly ?? false;
-
-      const compiled = compiledExpandRef.current;
-      const style = strokeStyleRef.current;
-      const activePipeline = options?.straightLine
-        ? straightLinePipeline
-        : compiledFilterPipeline;
-      const filterState = createFilterPipelineState(activePipeline);
-      const filterResult = processPoint(
-        filterState,
-        inputPoint,
-        activePipeline,
-      );
-
-      const strokeResult = startStrokeSession(
-        filterResult.output,
-        style,
-        expandConfigRef.current,
-      );
-
-      const { brushState: initialBrushState, brushSeed } =
-        createInitialBrushState(style, registryRef.current);
-      const committedSnapshot = pendingOnlyRef.current
-        ? undefined
-        : cloneLayerContent(currentLayer);
-      const samplingLayer = needsSamplingLayer(style)
-        ? committedSnapshot
-        : undefined;
-
-      sessionRef.current = {
-        strokeSession: strokeResult.state,
-        filterState: filterResult.state,
-        inputPoints: [inputPoint],
-        compiledExpand: compiled,
-        compiledFilterPipeline: activePipeline,
-        layerId: currentLayer.id,
-        alphaLocked: currentLayer.meta.alphaLocked,
-        brushState: initialBrushState,
-        brushSeed,
-        samplingLayer,
-        committedSnapshot,
-      };
-
-      if (!pendingOnlyRef.current) {
-        const brushState = appendToCommittedLayer(
-          currentLayer,
-          strokeResult.renderUpdate.newlyCommitted,
-          style,
-          compiled,
-          strokeResult.renderUpdate.committedOverlapCount,
-          initialBrushState,
-          samplingLayer,
-          sessionRef.current.alphaLocked,
-        );
-        sessionRef.current.brushState = brushState;
-      }
-
-      pendingLayer.meta.compositeOperation =
-        getPendingCompositeOperation(style);
-      renderPendingLayer(
+    (point: InputPoint, options?: StrokeStartOptions) => {
+      const {
+        layer,
         pendingLayer,
-        pendingOnlyRef.current
-          ? buildLiveStrokePoints(strokeResult.state)
-          : strokeResult.renderUpdate.currentPending,
-        style,
-        compiled,
-        sessionRef.current.brushState,
-        samplingLayer ?? currentLayer,
-      );
+        strokeStyle,
+        compiledFilterPipeline,
+        expandConfig,
+        registry,
+      } = configRef.current;
+      if (!layer || !layer.meta.visible) return;
 
-      strokePointsRef.current = [inputPoint];
-      lastInputPointRef.current = inputPoint;
-      scheduleEmissionTick();
-      setIsDrawing(true);
+      pendingOnlyRef.current = options?.pendingOnly ?? false;
+      strokePointsRef.current = [point];
+      runtimeRef.current?.start(point, {
+        layer,
+        pendingLayer,
+        style: strokeStyle,
+        filterPipeline: options?.straightLine
+          ? STRAIGHT_LINE_FILTER_PIPELINE
+          : compiledFilterPipeline.config,
+        expand: expandConfig,
+        alphaLocked: layer.meta.alphaLocked,
+        pendingOnly: options?.pendingOnly,
+        tipRegistry: registry,
+      });
       bumpRenderVersion();
     },
-    [
-      compiledFilterPipeline,
-      straightLinePipeline,
-      pendingLayer,
-      bumpRenderVersion,
-      scheduleEmissionTick,
-    ],
+    [bumpRenderVersion],
   );
 
   const onStrokeMove = useCallback(
-    (inputPoint: InputPoint) => {
-      if (!sessionRef.current) return;
-
-      // layer の最新を参照（描画中にレイヤーが変わることは通常ないが安全のため）
-      const currentLayer = layerRef.current;
-      if (!currentLayer || currentLayer.id !== sessionRef.current.layerId)
-        return;
-
-      const style = strokeStyleRef.current;
-      const filterResult = processPoint(
-        sessionRef.current.filterState,
-        inputPoint,
-        sessionRef.current.compiledFilterPipeline,
-      );
-
-      const strokeResult = addPointToSession(
-        sessionRef.current.strokeSession,
-        filterResult.output,
-      );
-
-      sessionRef.current.strokeSession = strokeResult.state;
-      sessionRef.current.filterState = filterResult.state;
-      sessionRef.current.inputPoints.push(inputPoint);
-      strokePointsRef.current = [...strokePointsRef.current, inputPoint];
-      lastInputPointRef.current = inputPoint;
-
-      if (!pendingOnlyRef.current) {
-        const brushState = appendToCommittedLayer(
-          currentLayer,
-          strokeResult.renderUpdate.newlyCommitted,
-          style,
-          sessionRef.current.compiledExpand,
-          strokeResult.renderUpdate.committedOverlapCount,
-          sessionRef.current.brushState,
-          sessionRef.current.samplingLayer,
-          sessionRef.current.alphaLocked,
-        );
-        sessionRef.current.brushState = brushState;
-      }
-
-      renderPendingLayer(
-        pendingLayer,
-        pendingOnlyRef.current
-          ? buildLiveStrokePoints(strokeResult.state)
-          : strokeResult.renderUpdate.currentPending,
-        style,
-        sessionRef.current.compiledExpand,
-        sessionRef.current.brushState,
-        sessionRef.current.samplingLayer ?? currentLayer,
-      );
-
-      scheduleEmissionTick();
-      bumpRenderVersion();
+    (point: InputPoint) => {
+      if (!runtimeRef.current?.isDrawing) return;
+      appendStrokePoint(point);
+      runtimeRef.current.move(point);
     },
-    [pendingLayer, bumpRenderVersion, scheduleEmissionTick],
+    [appendStrokePoint],
   );
-  onStrokeMoveRef.current = onStrokeMove;
 
   const onStrokeEnd = useCallback(() => {
-    stopEmissionTimer();
-    if (!sessionRef.current) {
-      strokePointsRef.current = [];
-      setIsDrawing(false);
-      return;
-    }
-
-    // Still in pending-only mode → stroke was never confirmed → discard
+    if (!runtimeRef.current?.isDrawing) return;
     if (pendingOnlyRef.current) {
-      clearLayer(pendingLayer);
-      pendingLayer.meta.compositeOperation = undefined;
-      sessionRef.current = null;
-      pendingOnlyRef.current = false;
-      strokePointsRef.current = [];
-      setIsDrawing(false);
-      bumpRenderVersion();
-      return;
+      runtimeRef.current.cancel();
+    } else {
+      runtimeRef.current.end();
     }
-
-    const {
-      inputPoints,
-      strokeSession,
-      filterState,
-      compiledFilterPipeline: sessionFilter,
-      compiledExpand: sessionExpand,
-      brushSeed,
-      samplingLayer,
-      alphaLocked,
-    } = sessionRef.current;
-
-    const currentLayer = layerRef.current;
-    if (!currentLayer || currentLayer.id !== sessionRef.current.layerId) {
-      sessionRef.current = null;
-      strokePointsRef.current = [];
-      setIsDrawing(false);
-      return;
-    }
-
-    const style = strokeStyleRef.current;
-    const finalOutput = finalizePipeline(filterState, sessionFilter);
-    const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
-    const brushState = appendToCommittedLayer(
-      currentLayer,
-      finalStrokeResult.renderUpdate.newlyCommitted,
-      style,
-      sessionExpand,
-      finalStrokeResult.renderUpdate.committedOverlapCount,
-      sessionRef.current.brushState,
-      samplingLayer,
-      alphaLocked,
-    );
-    sessionRef.current.brushState = brushState;
-
-    const totalPoints = finalStrokeResult.state.allCommitted.length;
-
-    if (totalPoints >= 1) {
-      onStrokeCompleteRef.current?.({
-        inputPoints,
-        filterPipelineConfig: sessionFilter.config,
-        expandConfig: strokeSession.expand,
-        strokeStyle: style,
-        brushSeed,
-        alphaLocked,
-        totalPoints,
-      });
-    }
-
-    clearLayer(pendingLayer);
-    pendingLayer.meta.compositeOperation = undefined;
     bumpRenderVersion();
-
-    sessionRef.current = null;
-    strokePointsRef.current = [];
-    setIsDrawing(false);
-  }, [pendingLayer, bumpRenderVersion, stopEmissionTimer]);
+  }, [bumpRenderVersion]);
 
   const onDrawConfirm = useCallback(() => {
-    if (!sessionRef.current || !pendingOnlyRef.current) return;
+    runtimeRef.current?.confirm();
     pendingOnlyRef.current = false;
-
-    const currentLayer = layerRef.current;
-    if (!currentLayer || currentLayer.id !== sessionRef.current.layerId) return;
-
-    const style = strokeStyleRef.current;
-    const committedSnapshot = cloneLayerContent(currentLayer);
-    sessionRef.current.committedSnapshot = committedSnapshot;
-    sessionRef.current.samplingLayer = needsSamplingLayer(style)
-      ? committedSnapshot
-      : undefined;
-
-    // 蓄積された全 committed ポイントを committed layer にフラッシュ
-    const brushState = appendToCommittedLayer(
-      currentLayer,
-      sessionRef.current.strokeSession.allCommitted,
-      style,
-      sessionRef.current.compiledExpand,
-      0,
-      sessionRef.current.brushState,
-      sessionRef.current.samplingLayer,
-      sessionRef.current.alphaLocked,
-    );
-    sessionRef.current.brushState = brushState;
-
     bumpRenderVersion();
   }, [bumpRenderVersion]);
 
   const onDrawCancel = useCallback(() => {
-    stopEmissionTimer();
-    const currentSession = sessionRef.current;
-    const currentLayer = layerRef.current;
-    if (
-      currentSession &&
-      currentLayer &&
-      currentLayer.id === currentSession.layerId &&
-      currentSession.committedSnapshot
-    ) {
-      restoreLayerContent(currentLayer, currentSession.committedSnapshot);
-    }
-    clearLayer(pendingLayer);
-    pendingLayer.meta.compositeOperation = undefined;
-    sessionRef.current = null;
+    runtimeRef.current?.cancel();
     pendingOnlyRef.current = false;
-    strokePointsRef.current = [];
-    setIsDrawing(false);
     bumpRenderVersion();
-  }, [pendingLayer, bumpRenderVersion, stopEmissionTimer]);
+  }, [bumpRenderVersion]);
 
   return {
     onStrokeStart,
