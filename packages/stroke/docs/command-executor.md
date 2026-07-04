@@ -90,6 +90,11 @@ resolvePushPersistenceEvent(command: Command<TCustom>): PersistenceEvent
 
 - rebuild 後に対象 layer が不可視なら `visibilityFixLayerIds` に載せる（現行 usePaintEngine L747-749 の仕様化）
 - ストローク中ガード（isDrawing）は **app 側の責務のまま**（executor は履歴とレイヤーしか知らない）
+- **activeLayerIdHint の適用規則**: executor は active layer を知らないため hint は常に返す。
+  呼び出し側は「レイヤー削除を伴う操作（add-layer undo / remove-layer redo）の近傍 hint は
+  **現 active が削除対象のときだけ採用**」し、それ以外（duplicate/merge/add redo/remove undo）は
+  無条件に採用する（現行 historyAtoms / usePaintEngine の挙動）
+- **失敗時（ok:false）は persistence を実行してはならない**（result に event が含まれていても無視する）
 
 ## 失敗セマンティクス（レビュー対象・決定事項は app 側レビュー md 参照）
 

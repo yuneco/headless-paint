@@ -1,5 +1,9 @@
-import type { BrushTipRegistry, Layer } from "@headless-paint/engine";
-import { wrapShiftLayer } from "@headless-paint/engine";
+import type {
+  BrushTipRegistry,
+  Layer,
+  LayerMeta,
+} from "@headless-paint/engine";
+import { createLayer, wrapShiftLayer } from "@headless-paint/engine";
 import {
   canRedo,
   canUndo,
@@ -8,6 +12,10 @@ import {
   redo,
   undo,
 } from "./history";
+import {
+  applyDuplicateLayerCommand,
+  applyMergeLayerDownCommand,
+} from "./layer-operations";
 import { rebuildLayerFromHistory } from "./replay";
 import type { Command, HistoryState } from "./types";
 import { isDrawCommand, isStructuralCommand } from "./types";
@@ -83,6 +91,51 @@ export interface ExecutorResult<TCustom = never> {
 const EMPTY_LAYER_LIST_OPS: readonly LayerListOp[] = [];
 const EMPTY_LAYER_IDS: readonly string[] = [];
 const DIRTY_NONE: DirtyHint = { type: "none" };
+
+function setLayerId(layer: Layer, layerId: string): void {
+  (layer as { id: string }).id = layerId;
+}
+
+function createRestoredLayer(
+  width: number,
+  height: number,
+  layerId: string,
+  meta: LayerMeta,
+): Layer {
+  const layer = createLayer(width, height, meta);
+  setLayerId(layer, layerId);
+  return layer;
+}
+
+function restoreLayerMeta(
+  layer: Layer,
+  meta: {
+    readonly name: string;
+    readonly visible: boolean;
+    readonly opacity: number;
+    readonly alphaLocked: boolean;
+    readonly compositeOperation?: GlobalCompositeOperation;
+  },
+): void {
+  layer.meta.name = meta.name;
+  layer.meta.visible = meta.visible;
+  layer.meta.opacity = meta.opacity;
+  layer.meta.alphaLocked = meta.alphaLocked;
+  layer.meta.compositeOperation = meta.compositeOperation;
+}
+
+function getActiveHintAfterRemove(
+  layers: readonly Layer[],
+  layerId: string,
+): string | undefined {
+  const index = layers.findIndex((layer) => layer.id === layerId);
+  if (index < 0) return undefined;
+
+  const remaining = layers.filter((layer) => layer.id !== layerId);
+  if (remaining.length === 0) return undefined;
+
+  return remaining[Math.min(index, remaining.length - 1)]?.id;
+}
 
 function getCommandType<TCustom>(
   command: Command<TCustom> | undefined,
@@ -216,6 +269,336 @@ function executeLayerDraw<TCustom>(
   };
 }
 
+function executeCustom<TCustom>(
+  op: "undo" | "redo",
+  state: HistoryState<TCustom>,
+  next: HistoryState<TCustom>,
+  command: Command<TCustom>,
+  deps: ExecutorDeps<TCustom>,
+  persistence: PersistenceEvent,
+): ExecutorResult<TCustom> {
+  if (!deps.customExecutor) {
+    return createFailureResult(
+      state,
+      command,
+      {
+        reason: "apply-failed",
+        commandType: getCommandType(command),
+      },
+      persistence,
+    );
+  }
+
+  const outcome =
+    op === "undo"
+      ? deps.customExecutor.unapply(command as TCustom)
+      : deps.customExecutor.apply(command as TCustom);
+
+  if (!outcome.ok) {
+    return createFailureResult(
+      state,
+      command,
+      outcome.failure ?? {
+        reason: "apply-failed",
+        commandType: getCommandType(command),
+      },
+      persistence,
+    );
+  }
+
+  return {
+    ok: true,
+    next,
+    command,
+    layerListOps: outcome.layerListOps ?? EMPTY_LAYER_LIST_OPS,
+    activeLayerIdHint: outcome.activeLayerIdHint,
+    visibilityFixLayerIds: outcome.visibilityFixLayerIds ?? EMPTY_LAYER_IDS,
+    dirty: outcome.dirty ?? DIRTY_NONE,
+    persistence,
+  };
+}
+
+function executeStructural<TCustom>(
+  op: "undo" | "redo",
+  state: HistoryState<TCustom>,
+  next: HistoryState<TCustom>,
+  command: Command<TCustom>,
+  deps: ExecutorDeps<TCustom>,
+  persistence: PersistenceEvent,
+): ExecutorResult<TCustom> {
+  if (!isStructuralCommand(command)) {
+    return createFailureResult(
+      state,
+      command,
+      {
+        reason: "apply-failed",
+        commandType: getCommandType(command),
+      },
+      persistence,
+    );
+  }
+
+  switch (command.type) {
+    case "add-layer": {
+      if (op === "undo") {
+        return {
+          ok: true,
+          next,
+          command,
+          layerListOps: [{ type: "remove", layerId: command.layerId }],
+          activeLayerIdHint: getActiveHintAfterRemove(
+            deps.layers,
+            command.layerId,
+          ),
+          visibilityFixLayerIds: EMPTY_LAYER_IDS,
+          dirty: DIRTY_NONE,
+          persistence,
+        };
+      }
+
+      const layer = createRestoredLayer(
+        command.width,
+        command.height,
+        command.layerId,
+        command.meta,
+      );
+      return {
+        ok: true,
+        next,
+        command,
+        layerListOps: [{ type: "insert", index: command.insertIndex, layer }],
+        activeLayerIdHint: command.layerId,
+        visibilityFixLayerIds: EMPTY_LAYER_IDS,
+        dirty: DIRTY_NONE,
+        persistence,
+      };
+    }
+
+    case "remove-layer": {
+      if (op === "redo") {
+        return {
+          ok: true,
+          next,
+          command,
+          layerListOps: [{ type: "remove", layerId: command.layerId }],
+          activeLayerIdHint: getActiveHintAfterRemove(
+            deps.layers,
+            command.layerId,
+          ),
+          visibilityFixLayerIds: EMPTY_LAYER_IDS,
+          dirty: DIRTY_NONE,
+          persistence,
+        };
+      }
+
+      const layer = createRestoredLayer(
+        state.layerWidth,
+        state.layerHeight,
+        command.layerId,
+        command.meta,
+      );
+      const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry);
+      if (!result.ok) {
+        return createFailureResult(
+          state,
+          command,
+          {
+            reason: result.reason,
+            commandType: command.type,
+            layerId: result.layerId,
+          },
+          persistence,
+        );
+      }
+
+      return {
+        ok: true,
+        next,
+        command,
+        layerListOps: [{ type: "insert", index: command.removedIndex, layer }],
+        activeLayerIdHint: command.layerId,
+        visibilityFixLayerIds: EMPTY_LAYER_IDS,
+        dirty: { type: "layers", layerIds: [command.layerId] },
+        persistence,
+      };
+    }
+
+    case "reorder-layer": {
+      const fromIndex = op === "undo" ? command.toIndex : command.fromIndex;
+      const toIndex = op === "undo" ? command.fromIndex : command.toIndex;
+      return {
+        ok: true,
+        next,
+        command,
+        layerListOps: [{ type: "move", fromIndex, toIndex }],
+        visibilityFixLayerIds: EMPTY_LAYER_IDS,
+        dirty: DIRTY_NONE,
+        persistence,
+      };
+    }
+
+    case "duplicate-layer": {
+      if (op === "undo") {
+        return {
+          ok: true,
+          next,
+          command,
+          layerListOps: [{ type: "remove", layerId: command.layerId }],
+          activeLayerIdHint: command.sourceLayerId,
+          visibilityFixLayerIds: EMPTY_LAYER_IDS,
+          dirty: DIRTY_NONE,
+          persistence,
+        };
+      }
+
+      const result = applyDuplicateLayerCommand(deps.layers, command);
+      if (!result) {
+        return createFailureResult(
+          state,
+          command,
+          {
+            reason: "apply-failed",
+            commandType: command.type,
+            layerId: command.layerId,
+          },
+          persistence,
+        );
+      }
+
+      return {
+        ok: true,
+        next,
+        command,
+        layerListOps: [
+          {
+            type: "replace",
+            layers: result.layers,
+            activeLayerId: command.layerId,
+          },
+        ],
+        activeLayerIdHint: command.layerId,
+        visibilityFixLayerIds: EMPTY_LAYER_IDS,
+        dirty: { type: "layers", layerIds: [command.layerId] },
+        persistence,
+      };
+    }
+
+    case "merge-layer-down": {
+      if (op === "redo") {
+        const result = applyMergeLayerDownCommand(deps.layers, command);
+        if (!result) {
+          return createFailureResult(
+            state,
+            command,
+            {
+              reason: "apply-failed",
+              commandType: command.type,
+              layerId: command.sourceLayerId,
+            },
+            persistence,
+          );
+        }
+
+        return {
+          ok: true,
+          next,
+          command,
+          layerListOps: [
+            {
+              type: "replace",
+              layers: result.layers,
+              activeLayerId: command.targetLayerId,
+            },
+          ],
+          activeLayerIdHint: command.targetLayerId,
+          visibilityFixLayerIds: EMPTY_LAYER_IDS,
+          dirty: { type: "layers", layerIds: [command.targetLayerId] },
+          persistence,
+        };
+      }
+
+      const sourceLayer = createRestoredLayer(
+        state.layerWidth,
+        state.layerHeight,
+        command.sourceLayerId,
+        command.sourceMeta,
+      );
+      const sourceResult = rebuildLayerFromHistory(
+        sourceLayer,
+        next,
+        deps.tipRegistry,
+      );
+      if (!sourceResult.ok) {
+        return createFailureResult(
+          state,
+          command,
+          {
+            reason: sourceResult.reason,
+            commandType: command.type,
+            layerId: sourceResult.layerId,
+          },
+          persistence,
+        );
+      }
+
+      const targetLayer = deps.layers.find(
+        (layer) => layer.id === command.targetLayerId,
+      );
+      if (!targetLayer) {
+        return createFailureResult(
+          state,
+          command,
+          {
+            reason: "apply-failed",
+            commandType: command.type,
+            layerId: command.targetLayerId,
+          },
+          persistence,
+        );
+      }
+
+      restoreLayerMeta(targetLayer, command.targetMetaBefore);
+      const targetResult = rebuildLayerFromHistory(
+        targetLayer,
+        next,
+        deps.tipRegistry,
+      );
+      if (!targetResult.ok) {
+        return createFailureResult(
+          state,
+          command,
+          {
+            reason: targetResult.reason,
+            commandType: command.type,
+            layerId: targetResult.layerId,
+          },
+          persistence,
+        );
+      }
+
+      return {
+        ok: true,
+        next,
+        command,
+        layerListOps: [
+          {
+            type: "insert",
+            index: command.sourceIndex,
+            layer: sourceLayer,
+          },
+        ],
+        activeLayerIdHint: command.sourceLayerId,
+        visibilityFixLayerIds: EMPTY_LAYER_IDS,
+        dirty: {
+          type: "layers",
+          layerIds: [command.sourceLayerId, command.targetLayerId],
+        },
+        persistence,
+      };
+    }
+  }
+}
+
 export function executeHistoryOp<TCustom>(
   op: "undo" | "redo",
   state: HistoryState<TCustom>,
@@ -252,13 +635,9 @@ export function executeHistoryOp<TCustom>(
     return executeLayerDraw(op, state, next, command, deps, persistence);
   }
 
-  return createFailureResult(
-    state,
-    command,
-    {
-      reason: "not-implemented",
-      commandType: getCommandType(command),
-    },
-    persistence,
-  );
+  if (isStructuralCommand(command)) {
+    return executeStructural(op, state, next, command, deps, persistence);
+  }
+
+  return executeCustom(op, state, next, command, deps, persistence);
 }
