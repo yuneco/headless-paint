@@ -63,6 +63,22 @@ export {
   mergeLayerDownAtomic,
 } from "./layer-operations";
 
+// Command executor
+export type {
+  CustomCommandExecutor,
+  CustomCommandOutcome,
+  DirtyHint,
+  ExecutorDeps,
+  ExecutorFailure,
+  ExecutorResult,
+  LayerListOp,
+  PersistenceEvent,
+} from "./command-executor";
+export {
+  executeHistoryOp,
+  resolvePushPersistenceEvent,
+} from "./command-executor";
+
 // History
 export {
   canRedo,
