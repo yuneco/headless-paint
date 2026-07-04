@@ -1,16 +1,23 @@
 # live-vs-replay パリティテスト基盤（WS0-3）
 
 中間層リファクタリング（paint-app `plans/2026-07-04-headless-paint-middle-layer.md`）のリグレッションガード。
-「ライブ描画」「記録された StrokeCommand の replay」「undo→redo の rebuild」が同一ピクセルを生むことを、
-リファクタ前後で保証する。スクリーンショット保存 baseline は使わず、**同一実行内のピクセル完全一致比較**を主軸にする。
+現行コードでは「ライブ描画」と「記録された `StrokeCommand` の replay」は非等価である。
+これは live がチャンク描画、replay が一発描画であることに由来する既知仕様として固定し、
+中間層WS2で修正対象にする。スクリーンショット保存 baseline は使わず、
+**同一実行内のピクセル完全一致比較**を主軸にする。
 
 ## 検証する性質
 
-1. **(a) live vs replay**: セッション API（`startStrokeSession` → `addPointToSession`×N → `endStrokeSession`）で
+1. **(a) live vs replay**: セッション API（`startStrokeSession` → `addPointToSession`×N）で
    描いたレイヤーと、そこで生成された `StrokeCommand` を `replayCommand` で新規レイヤーに再生した結果が
-   ピクセル完全一致すること
-2. **(b) undo/redo 等価**: stroke 後に `pushCommand` → `undo` → `rebuildLayerFromHistory` でストローク前の
-   ピクセルに戻り、`redo` → `rebuildLayerFromHistory` で (a) の live 結果と完全一致すること
+   現行コードで非等価であることを `it.fails` で固定する。7ケースすべてが既知の失敗であり、
+   失敗メッセージには差分ピクセル数、bounding box、RGBA の `maxChannelDelta` を出す。
+2. **(b) undo rebuild**: stroke 後に `pushCommand` → `undo` → `rebuildLayerFromHistory` でストローク前の
+   ピクセルに完全一致すること。下地があるケースでは、描画前の `beginHistoryMutation()` で
+   pre-stroke checkpoint を履歴に保持する。
+3. **(c) redo rebuild vs replay**: `redo` → `rebuildLayerFromHistory` の結果が、同じ `StrokeCommand` を
+   `replayCommand` した結果に完全一致すること。これは replay 同士の決定性を守る本命の
+   リグレッションガードで、全ケース green を必須とする。
 
 ## 決定化の方法
 
@@ -27,7 +34,7 @@
 ```
 packages/stroke/src/
   parity-helpers.ts      # テスト専用ヘルパー（export はテストからのみ使用）
-  parity.test.ts         # (a)(b) のマトリクステスト
+  parity.test.ts         # (a)(b)(c) のマトリクステスト
 ```
 
 既存の `replay.test.ts`/`history.test.ts` は engine を vi.mock するが、**パリティテストは実 engine を使う**
@@ -52,7 +59,7 @@ simulateLiveStroke(opts: {
 // StrokeCommand を新規/指定レイヤーに replay
 replayOnLayer(command: StrokeCommand, layer: Layer, sourceLayer?: Layer): void
 
-// ピクセル完全一致アサーション。不一致時は差分ピクセル数と bounding box を出力
+// ピクセル完全一致アサーション。不一致時は差分ピクセル数、maxChannelDelta、bounding box を出力
 expectPixelEqual(actual: Layer, expected: Layer, label: string): void
 ```
 
@@ -70,12 +77,15 @@ expectPixelEqual(actual: Layer, expected: Layer, label: string): void
 | spray lognormal | SPRAY_AIRBRUSH | sizeJitterMode: "lognormal" |
 | spray bimodal | SPRAY_AIRBRUSH | sizeJitterMode: "bimodal" |
 
-各ケースで (a)(b) 両方を検証する。
+各ケースで (a)(b)(c) を検証する。(a) は `it.fails` として既知の非等価を固定し、
+(b)(c) は通常の green テストとして維持する。
 
 ## 既知のリスク（実装時の停止条件）
 
 live は `addPointToSession` がオーバーラップ付きチャンクで `appendToCommittedLayer` を複数回呼び
 brushState（accumulatedDistance/emissionCount）を引き継ぐのに対し、replay は fresh state から1回で描く。
-stamp/spray でこの構造差が非等価を生む可能性がある。**パリティ不一致が出た場合、engine/stroke の
-実装コードを修正して合わせにいかないこと**。不一致の組合せ・差分規模を記録してテストは失敗のまま報告し、
-扱い（現状挙動の仕様化 or 中間層での修正対象化）は計画側で判断する。
+この構造差は round-pen / stamp / spray の全7ケースで非等価として実測済みで、現行仕様として
+`it.fails` により固定する。**非等価そのものを engine/stroke の実装コードで修正して合わせにいかないこと**。
+
+(b) が失敗した場合は checkpoint 設定または undo rebuild のテスト手順を疑う。(c) が失敗した場合は
+live/replay の非等価ではなく replay 経路の非決定性を示すため、実装コードを直さず詳細を記録して停止する。

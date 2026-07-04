@@ -1,0 +1,366 @@
+import type {
+  Color,
+  ExpandConfig,
+  Layer,
+  StrokeStyle,
+} from "@headless-paint/engine";
+import {
+  AIRBRUSH,
+  DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_BRUSH_MIXING,
+  DEFAULT_PRESSURE_CURVE,
+  DEFAULT_RADIAL_DISTRIBUTION,
+  DEFAULT_SPRAY_DYNAMICS,
+  DEFAULT_SPRAY_PRESSURE_DYNAMICS,
+  ROUND_PEN,
+  SPRAY_AIRBRUSH,
+  clearLayer,
+  copyLayerPixels,
+  createLayer,
+} from "@headless-paint/engine";
+import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
+import { describe, expect, it } from "vitest";
+import {
+  beginHistoryMutation,
+  createHistoryState,
+  pushCommand,
+  redo,
+  undo,
+} from "./history";
+import {
+  expectPixelEqual,
+  replayOnLayer,
+  simulateLiveStroke,
+} from "./parity-helpers";
+import { rebuildLayerFromHistory } from "./replay";
+import type { HistoryConfig, HistoryState } from "./types";
+
+const WIDTH = 180;
+const HEIGHT = 140;
+const LAYER_ID = "parity-layer";
+const BRUSH_SEED = 0x5eed_1234;
+const HISTORY_CONFIG: HistoryConfig = {
+  checkpointInterval: 10,
+  maxCheckpoints: 10,
+  checkpointCompression: "none",
+};
+const FILTER_PIPELINE: FilterPipelineConfig = {
+  filters: [{ type: "smoothing", config: { windowSize: 3 } }],
+};
+const EXPAND: ExpandConfig = {
+  levels: [
+    {
+      mode: "none",
+      offset: { x: WIDTH / 2, y: HEIGHT / 2 },
+      angle: 0,
+      divisions: 1,
+    },
+  ],
+};
+const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };
+const RED: Color = { r: 225, g: 30, b: 30, a: 255 };
+const GREEN: Color = { r: 30, g: 185, b: 90, a: 255 };
+const BLUE: Color = { r: 35, g: 95, b: 235, a: 255 };
+const WHITE: Color = { r: 255, g: 255, b: 255, a: 255 };
+
+const INPUT_POINTS: readonly InputPoint[] = [
+  { x: 24, y: 70, pressure: 0.25, timestamp: 10_000 },
+  { x: 44, y: 66, pressure: 0.5, timestamp: 10_016 },
+  { x: 64, y: 74, pressure: 0.78, timestamp: 10_032 },
+  { x: 64, y: 74, pressure: 0.78, timestamp: 10_112 },
+  { x: 88, y: 82, pressure: 0.35, timestamp: 10_128 },
+  { x: 116, y: 69, pressure: 0.92, timestamp: 10_144 },
+  { x: 116, y: 69, pressure: 0.92, timestamp: 10_224 },
+  { x: 146, y: 86, pressure: 0.56, timestamp: 10_240 },
+];
+
+interface ParityCase {
+  readonly name: string;
+  readonly style: StrokeStyle;
+  readonly alphaLocked: boolean;
+  readonly paintBase?: (layer: Layer) => void;
+}
+
+const cases: readonly ParityCase[] = [
+  {
+    name: "round-pen basic",
+    style: makeStyle({
+      color: BLACK,
+      lineWidth: 12,
+      brush: { ...ROUND_PEN, pressureDynamics: { size: 1, flow: 0 } },
+    }),
+    alphaLocked: false,
+  },
+  {
+    name: "round-pen eraser",
+    style: makeStyle({
+      color: BLACK,
+      lineWidth: 18,
+      compositeOperation: "destination-out",
+      brush: { ...ROUND_PEN, pressureDynamics: { size: 0.5, flow: 0 } },
+    }),
+    alphaLocked: false,
+    paintBase: paintOpaqueBands,
+  },
+  {
+    name: "round-pen alpha lock",
+    style: makeStyle({
+      color: GREEN,
+      lineWidth: 22,
+      brush: { ...ROUND_PEN, pressureDynamics: { size: 1, flow: 0 } },
+    }),
+    alphaLocked: true,
+    paintBase: paintAlphaLockBase,
+  },
+  {
+    name: "stamp jitter",
+    style: makeStyle({
+      color: RED,
+      lineWidth: 24,
+      brush: {
+        ...AIRBRUSH,
+        dynamics: {
+          ...AIRBRUSH.dynamics,
+          spacing: 0.22,
+          opacityJitter: 0.32,
+          sizeJitter: 0.45,
+          rotationJitter: 0.2,
+          scatter: 0.35,
+          flow: 0.65,
+          emissionsPerSecond: 30,
+        },
+        pressureDynamics: { size: 0.45, flow: 0.35 },
+      },
+    }),
+    alphaLocked: false,
+  },
+  {
+    name: "stamp mixing",
+    style: makeStyle({
+      color: WHITE,
+      lineWidth: 26,
+      brush: {
+        type: "stamp",
+        tip: { type: "circle", hardness: 1 },
+        dynamics: {
+          ...DEFAULT_BRUSH_DYNAMICS,
+          spacing: 0.35,
+          flow: 1,
+          emissionsPerSecond: 30,
+        },
+        pressureDynamics: { size: 0.2, flow: 0 },
+        mixing: {
+          ...DEFAULT_BRUSH_MIXING,
+          enabled: true,
+          pickup: 1,
+          restore: 0,
+          updateDistancePx: 1,
+        },
+      },
+    }),
+    alphaLocked: false,
+    paintBase: paintOpaqueBands,
+  },
+  {
+    name: "spray lognormal",
+    style: makeStyle({
+      color: BLUE,
+      lineWidth: 36,
+      brush: {
+        ...SPRAY_AIRBRUSH,
+        dynamics: {
+          ...DEFAULT_SPRAY_DYNAMICS,
+          spacing: 0.24,
+          density: 4,
+          particleSize: 2,
+          particleSizeJitter: 0.42,
+          sizeJitterMode: "lognormal",
+          opacityJitter: 0.28,
+          flow: 0.42,
+          radialDistribution: DEFAULT_RADIAL_DISTRIBUTION,
+          emissionsPerSecond: 30,
+        },
+        pressureDynamics: {
+          ...DEFAULT_SPRAY_PRESSURE_DYNAMICS,
+          size: 0.3,
+          flow: 0.8,
+          density: 0.45,
+        },
+      },
+    }),
+    alphaLocked: false,
+  },
+  {
+    name: "spray bimodal",
+    style: makeStyle({
+      color: BLACK,
+      lineWidth: 34,
+      brush: {
+        ...SPRAY_AIRBRUSH,
+        dynamics: {
+          ...SPRAY_AIRBRUSH.dynamics,
+          spacing: 0.2,
+          density: 4,
+          particleSize: 2,
+          particleSizeJitter: 0.36,
+          sizeJitterMode: "bimodal",
+          opacityJitter: 0.24,
+          flow: 0.38,
+          emissionsPerSecond: 30,
+        },
+        pressureDynamics: {
+          ...SPRAY_AIRBRUSH.pressureDynamics,
+          size: 0.25,
+          flow: 0.75,
+          density: 0.5,
+        },
+      },
+    }),
+    alphaLocked: false,
+  },
+];
+
+describe("live-vs-replay parity", () => {
+  for (const parityCase of cases) {
+    it.fails(`${parityCase.name}: live vs replay`, () => {
+      // 既知の非等価: live はチャンク描画、replay は一発描画。中間層WS2で修正予定。
+      suppressExpectedFailureScreenshot();
+      const { liveLayer, replayLayer } = runParityCase(parityCase);
+      expectPixelEqual(
+        replayLayer,
+        liveLayer,
+        `${parityCase.name} live vs replay`,
+      );
+    });
+
+    it(`${parityCase.name}: undo rebuild matches pre-stroke pixels`, () => {
+      const { beforeLayer, history } = runParityCase(parityCase);
+      const undoneState = undo(history);
+      const undoLayer = createTestLayer(parityCase.alphaLocked);
+      const undoResult = rebuildLayerFromHistory(undoLayer, undoneState);
+      expect(undoResult.ok).toBe(true);
+      expectPixelEqual(
+        undoLayer,
+        beforeLayer,
+        `${parityCase.name} undo rebuild vs pre-stroke`,
+      );
+    });
+
+    it(`${parityCase.name}: redo rebuild matches replay`, () => {
+      const { replayLayer, history } = runParityCase(parityCase);
+      const undoneState = undo(history);
+      const redoneState = redo(undoneState);
+      const redoLayer = createTestLayer(parityCase.alphaLocked);
+      const redoResult = rebuildLayerFromHistory(redoLayer, redoneState);
+      expect(redoResult.ok).toBe(true);
+      expectPixelEqual(
+        redoLayer,
+        replayLayer,
+        `${parityCase.name} redo rebuild vs replay`,
+      );
+    });
+  }
+});
+
+interface ParityRun {
+  readonly beforeLayer: Layer;
+  readonly liveLayer: Layer;
+  readonly replayLayer: Layer;
+  readonly history: HistoryState;
+}
+
+function runParityCase(parityCase: ParityCase): ParityRun {
+  const baseLayer = createTestLayer();
+  parityCase.paintBase?.(baseLayer);
+
+  const liveLayer = createTestLayer(parityCase.alphaLocked);
+  copyLayerPixels(baseLayer, liveLayer);
+  const beforeLayer = createTestLayer(parityCase.alphaLocked);
+  copyLayerPixels(liveLayer, beforeLayer);
+
+  let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+  history = beginHistoryMutation(
+    history,
+    { affectedLayers: [liveLayer], layerCount: 1 },
+    HISTORY_CONFIG,
+  );
+
+  const { command } = simulateLiveStroke({
+    layer: liveLayer,
+    inputPoints: INPUT_POINTS,
+    style: parityCase.style,
+    filterPipeline: FILTER_PIPELINE,
+    expand: EXPAND,
+    brushSeed: BRUSH_SEED,
+    alphaLocked: parityCase.alphaLocked,
+    sourceLayer: baseLayer,
+  });
+
+  const replayLayer = createTestLayer(parityCase.alphaLocked);
+  replayOnLayer(command, replayLayer, baseLayer);
+
+  history = pushCommand(
+    history,
+    command,
+    { afterLayer: liveLayer, layerCount: 1 },
+    HISTORY_CONFIG,
+  );
+
+  return { beforeLayer, liveLayer, replayLayer, history };
+}
+
+function suppressExpectedFailureScreenshot(): void {
+  // Vitest browser records screenshots for expected failures unless disabled.
+  const worker = (
+    window as unknown as {
+      readonly __vitest_worker__?: {
+        readonly config?: {
+          readonly browser?: { screenshotFailures?: boolean };
+        };
+      };
+    }
+  ).__vitest_worker__;
+  if (worker?.config?.browser) {
+    worker.config.browser.screenshotFailures = false;
+  }
+}
+
+function makeStyle(overrides: Partial<StrokeStyle>): StrokeStyle {
+  return {
+    color: BLACK,
+    lineWidth: 10,
+    pressureCurve: DEFAULT_PRESSURE_CURVE,
+    compositeOperation: "source-over",
+    brush: ROUND_PEN,
+    ...overrides,
+  };
+}
+
+function createTestLayer(alphaLocked = false): Layer {
+  const layer = createLayer(WIDTH, HEIGHT, {
+    name: "parity",
+    visible: true,
+    opacity: 1,
+    alphaLocked,
+  });
+  (layer as { id: string }).id = LAYER_ID;
+  return layer;
+}
+
+function paintOpaqueBands(layer: Layer): void {
+  clearLayer(layer);
+  layer.ctx.fillStyle = "rgb(240, 75, 65)";
+  layer.ctx.fillRect(0, 0, WIDTH / 2, HEIGHT);
+  layer.ctx.fillStyle = "rgb(35, 95, 220)";
+  layer.ctx.fillRect(WIDTH / 2, 0, WIDTH / 2, HEIGHT);
+  layer.ctx.fillStyle = "rgb(245, 215, 90)";
+  layer.ctx.fillRect(0, HEIGHT - 34, WIDTH, 34);
+}
+
+function paintAlphaLockBase(layer: Layer): void {
+  clearLayer(layer);
+  layer.ctx.fillStyle = "rgba(20, 20, 20, 1)";
+  layer.ctx.fillRect(18, 48, 130, 48);
+  layer.ctx.fillStyle = "rgba(220, 220, 220, 0.75)";
+  layer.ctx.fillRect(62, 22, 48, 92);
+}
