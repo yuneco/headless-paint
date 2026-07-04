@@ -4,11 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { replayCommand } from "./replay";
 import type { StrokeCommand } from "./types";
 
-vi.mock("@headless-paint/input", () => ({
-  compileFilterPipeline: vi.fn((config) => ({ config })),
-  processAllPoints: vi.fn((points) => points),
-}));
-
 vi.mock("@headless-paint/engine", () => ({
   appendToCommittedLayer: vi.fn(),
   clearLayer: vi.fn(),

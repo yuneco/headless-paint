@@ -107,9 +107,9 @@ interface RenderUpdate {
 |---|---|---|
 | `startStrokeSession` | 0 | 初回描画、オーバーラップなし |
 | `addPointToSession` | `min(3, 前回までの committed 点数)` | 利用可能な点数でクランプ |
-| `onDrawConfirm`（全フラッシュ） | 呼び出し側で 0 を指定（デフォルト） | allCommitted を一括描画 |
+| `createIncrementalStrokeRenderer` | `startStrokeSession` / `addPointToSession` の値をそのまま使用 | live/replay とも同じ逐次 append 経路を通る |
 
-**ゼロ新規点ガード**: `newlyCommitted.length === committedOverlapCount` の場合、新規点がないため `appendToCommittedLayer` の呼び出しをスキップすること。
+`newlyCommitted.length === committedOverlapCount` の場合は新規点がなく、実質的にオーバーラップのみの append になる。canonical incremental path では live/replay の呼び出し列を揃えるため、この最終 append も同じステッパー上で処理する。
 
 **StrokePoint型への変更理由**: 筆圧情報（pressure）と入力時刻（timestamp）をengineの描画関数まで伝達するため。InputPointからpressure/timestampを保持したままStrokePointに変換される。timestamp は stamp / spray の時間ベース emission に使われ、未指定の場合は従来通り距離ベース emission のみになる。
 

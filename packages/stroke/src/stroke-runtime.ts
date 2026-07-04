@@ -1,9 +1,7 @@
 import {
-  appendToCommittedLayer,
   clearLayer,
   compileExpand,
   createLayer,
-  generateBrushTip,
   renderPendingLayer,
   timeSpacingMsFromRate,
 } from "@headless-paint/engine";
@@ -27,6 +25,11 @@ import type {
   FilterPipelineState,
   InputPoint,
 } from "@headless-paint/input";
+import {
+  createIncrementalStrokeRenderer,
+  createInitialBrushState,
+} from "./incremental-stroke";
+import type { IncrementalStrokeRenderer } from "./incremental-stroke";
 import {
   addPointToSession,
   createStrokeCommand,
@@ -102,6 +105,8 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   let inputPoints: InputPoint[] = [];
   let brushState: BrushRenderState | undefined;
   let brushSeed = 0;
+  let renderer: IncrementalStrokeRenderer | null = null;
+  let rendererFedPointCount = 0;
   let committedSnapshot: Layer | undefined;
   let samplingLayer: Layer | undefined;
   let frozenConfig: FrozenStrokeConfig | null = null;
@@ -244,6 +249,18 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     inputPoints = [start.point];
     brushState = initialBrush.brushState;
     brushSeed = initialBrush.brushSeed;
+    renderer = createIncrementalStrokeRenderer({
+      layer: start.config.layer,
+      style: start.config.style,
+      filterPipeline: start.config.filterPipeline,
+      expand: start.config.expand,
+      brushSeed,
+      alphaLocked: start.config.alphaLocked,
+      onRenderUpdate: (update) => {
+        brushState = update.brushState;
+      },
+    });
+    rendererFedPointCount = 0;
     committedSnapshot = undefined;
     samplingLayer = undefined;
     currentRenderUpdate = strokeResult.renderUpdate;
@@ -268,32 +285,23 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function appendCommitted(eventType: StrokeMachineEvent["type"]): void {
-    if (!frozenConfig || !strokeSession) return;
+    if (!frozenConfig || !strokeSession || !renderer) return;
     if (eventType === "confirm") {
-      brushState = appendToCommittedLayer(
-        frozenConfig.layer,
-        toStrokePoints(strokeSession.allCommitted),
-        frozenConfig.style,
-        frozenConfig.compiledExpand,
-        0,
-        brushState,
-        samplingLayer,
-        frozenConfig.alphaLocked,
-      );
+      feedPendingRendererPoints();
       frozenConfig = { ...frozenConfig, pendingOnly: false };
       return;
     }
-    if (!currentRenderUpdate) return;
-    brushState = appendToCommittedLayer(
-      frozenConfig.layer,
-      currentRenderUpdate.newlyCommitted,
-      frozenConfig.style,
-      frozenConfig.compiledExpand,
-      currentRenderUpdate.committedOverlapCount,
-      brushState,
-      samplingLayer,
-      frozenConfig.alphaLocked,
-    );
+    feedPendingRendererPoints();
+  }
+
+  function feedPendingRendererPoints(): void {
+    if (!renderer) return;
+    while (rendererFedPointCount < inputPoints.length) {
+      const point = inputPoints[rendererFedPointCount];
+      if (!point) return;
+      renderer.feed(point);
+      rendererFedPointCount++;
+    }
   }
 
   function renderPending(): void {
@@ -339,16 +347,10 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       frozenConfig.compiledFilterPipeline,
     );
     const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
-    brushState = appendToCommittedLayer(
-      frozenConfig.layer,
-      finalStrokeResult.renderUpdate.newlyCommitted,
-      frozenConfig.style,
-      frozenConfig.compiledExpand,
-      finalStrokeResult.renderUpdate.committedOverlapCount,
-      brushState,
-      samplingLayer,
-      frozenConfig.alphaLocked,
-    );
+    strokeSession = finalStrokeResult.state;
+    currentRenderUpdate = finalStrokeResult.renderUpdate;
+    feedPendingRendererPoints();
+    renderer?.finalize();
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
     if (totalPoints >= 1) {
@@ -389,6 +391,8 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     inputPoints = [];
     brushState = undefined;
     brushSeed = 0;
+    renderer = null;
+    rendererFedPointCount = 0;
     committedSnapshot = undefined;
     samplingLayer = undefined;
     frozenConfig = null;
@@ -405,44 +409,6 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
 function getEmissionIntervalMs(style: StrokeStyle): number | undefined {
   if (style.brush.type === "round-pen") return undefined;
   return timeSpacingMsFromRate(style.brush.dynamics.emissionsPerSecond);
-}
-
-function createInitialBrushState(
-  style: StrokeStyle,
-  seed: number,
-): {
-  readonly brushState: BrushRenderState | undefined;
-  readonly brushSeed: number;
-} {
-  if (style.brush.type === "round-pen") {
-    return { brushState: undefined, brushSeed: seed };
-  }
-  const tipCanvas =
-    style.brush.type === "stamp"
-      ? generateBrushTip(
-          style.brush.tip,
-          Math.ceil(style.lineWidth * 2),
-          style.color,
-        )
-      : generateBrushTip(
-          style.brush.particle,
-          calculateSprayTipSize(style),
-          style.color,
-        );
-  return {
-    brushState: {
-      tipCanvas,
-      seed,
-      branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
-    },
-    brushSeed: seed,
-  };
-}
-
-function calculateSprayTipSize(style: StrokeStyle): number {
-  if (style.brush.type !== "spray") return 0;
-  const maxScale = style.brush.dynamics.sizeJitterMode === "lognormal" ? 4 : 1;
-  return Math.ceil(style.brush.dynamics.particleSize * maxScale);
 }
 
 function needsSamplingLayer(style: StrokeStyle): boolean {

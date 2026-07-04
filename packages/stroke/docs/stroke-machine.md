@@ -104,7 +104,7 @@ interface StrokeStartConfig {
 - **brushSeed / 合成点 timestamp は deps 経由**で決定化（パリティ・emission テスト用）
 - **style/pipeline/expand/alphaLocked は start 時にスナップショット**（現行と同じ凍結仕様）
 
-### live≠replay 統一: canonical incremental path（WS0-3 既知非等価の解消・レビュー対象）
+### live≠replay 統一: canonical incremental path（WS0-3 既知非等価の解消・実装済み）
 
 runtime に「**1点ずつ feed するインクリメンタル描画関数**」を1つ定義し、live（入力到着ごと）と
 replay（記録済み inputPoints のループ）が**同じ関数を通る**構成にする。
@@ -127,4 +127,4 @@ replay（記録済み inputPoints のループ）が**同じ関数を通る**構
 - runtime: 注入 clock/setTimeout による emission 決定化テスト（入力が rate より速い間は
   発火しない / 静止時は継続 / end・cancel・dispose 後は発火しない）
 - lifecycle: dispose 後に timer が発火しない、2つの runtime が互いに干渉しない
-- パリティ: canonical path 導入後、parity.test.ts の (a) it.fails を「ビット一致の通常 it」へ昇格
+- パリティ: `parity.test.ts` の (a) live vs replay は「ビット一致の通常 it」として維持する

@@ -1,27 +1,13 @@
-import type {
-  BrushRenderState,
-  ExpandConfig,
-  Layer,
-  StrokeStyle,
-} from "@headless-paint/engine";
+import type { ExpandConfig, Layer, StrokeStyle } from "@headless-paint/engine";
 import {
-  appendToCommittedLayer,
-  compileExpand,
   copyLayerPixels,
   createLayer,
-  generateBrushTip,
   getImageData,
 } from "@headless-paint/engine";
-import {
-  compileFilterPipeline,
-  createFilterPipelineState,
-  finalizePipeline,
-  processPoint,
-} from "@headless-paint/input";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
 import { expect } from "vitest";
 import { replayCommand } from "./replay";
-import { addPointToSession, startStrokeSession } from "./session";
+import { createStrokeRuntime } from "./stroke-runtime";
 import type { StrokeCommand } from "./types";
 
 export interface SimulateLiveStrokeOptions {
@@ -32,7 +18,6 @@ export interface SimulateLiveStrokeOptions {
   readonly expand: ExpandConfig;
   readonly brushSeed: number;
   readonly alphaLocked: boolean;
-  readonly sourceLayer?: Layer;
 }
 
 export interface SimulateLiveStrokeResult {
@@ -47,85 +32,40 @@ export function simulateLiveStroke(
     throw new Error("simulateLiveStroke requires at least one input point");
   }
 
-  const compiledFilterPipeline = compileFilterPipeline(opts.filterPipeline);
-  const compiledExpand = compileExpand(opts.expand);
-  let filterState = createFilterPipelineState(compiledFilterPipeline);
-  const firstFilterResult = processPoint(
-    filterState,
-    firstPoint,
-    compiledFilterPipeline,
-  );
-  filterState = firstFilterResult.state;
+  let command: StrokeCommand | null = null;
+  const pendingLayer = createLayer(opts.layer.width, opts.layer.height);
+  const runtime = createStrokeRuntime({
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    now: () => firstPoint.timestamp ?? 0,
+    requestRender: () => {},
+    onCommit: (committed) => {
+      command = committed;
+    },
+    onDrawingChanged: () => {},
+    randomSeed: () => opts.brushSeed,
+  });
 
-  let strokeResult = startStrokeSession(
-    firstFilterResult.output,
-    opts.style,
-    opts.expand,
-  );
-  let strokeSession = strokeResult.state;
-  let brushState = createInitialBrushState(opts.style, opts.brushSeed);
-  const samplingLayer =
-    opts.sourceLayer ?? createSamplingLayer(opts.layer, opts.style);
-
-  brushState = appendToCommittedLayer(
-    opts.layer,
-    strokeResult.renderUpdate.newlyCommitted,
-    opts.style,
-    compiledExpand,
-    strokeResult.renderUpdate.committedOverlapCount,
-    brushState,
-    samplingLayer,
-    opts.alphaLocked,
-  );
+  runtime.start(firstPoint, {
+    layer: opts.layer,
+    pendingLayer,
+    style: opts.style,
+    filterPipeline: opts.filterPipeline,
+    expand: opts.expand,
+    alphaLocked: opts.alphaLocked,
+    brushSeed: opts.brushSeed,
+  });
 
   for (const inputPoint of opts.inputPoints.slice(1)) {
-    const filterResult = processPoint(
-      filterState,
-      inputPoint,
-      compiledFilterPipeline,
-    );
-    filterState = filterResult.state;
+    runtime.move(inputPoint);
+  }
+  runtime.end();
 
-    strokeResult = addPointToSession(strokeSession, filterResult.output);
-    strokeSession = strokeResult.state;
-    brushState = appendToCommittedLayer(
-      opts.layer,
-      strokeResult.renderUpdate.newlyCommitted,
-      opts.style,
-      compiledExpand,
-      strokeResult.renderUpdate.committedOverlapCount,
-      brushState,
-      samplingLayer,
-      opts.alphaLocked,
-    );
+  if (!command) {
+    throw new Error("simulateLiveStroke did not commit a stroke command");
   }
 
-  const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
-  const finalStrokeResult = addPointToSession(strokeSession, finalOutput);
-  appendToCommittedLayer(
-    opts.layer,
-    finalStrokeResult.renderUpdate.newlyCommitted,
-    opts.style,
-    compiledExpand,
-    finalStrokeResult.renderUpdate.committedOverlapCount,
-    brushState,
-    samplingLayer,
-    opts.alphaLocked,
-  );
-
-  return {
-    command: {
-      type: "stroke",
-      layerId: opts.layer.id,
-      inputPoints: [...opts.inputPoints],
-      filterPipeline: opts.filterPipeline,
-      expand: opts.expand,
-      style: opts.style,
-      brushSeed: opts.brushSeed,
-      alphaLocked: opts.alphaLocked,
-      timestamp: 1_000_000,
-    },
-  };
+  return { command };
 }
 
 export function replayOnLayer(
@@ -176,50 +116,6 @@ export function calculateLayerPixelDiff(
     expectedImage.data,
     actualImage.width,
   );
-}
-
-function createInitialBrushState(
-  style: StrokeStyle,
-  brushSeed: number,
-): BrushRenderState | undefined {
-  if (style.brush.type === "round-pen") return undefined;
-
-  const tipCanvas =
-    style.brush.type === "stamp"
-      ? generateBrushTip(
-          style.brush.tip,
-          Math.ceil(style.lineWidth * 2),
-          style.color,
-        )
-      : generateBrushTip(
-          style.brush.particle,
-          calculateSprayTipSize(style),
-          style.color,
-        );
-
-  return {
-    tipCanvas,
-    seed: brushSeed,
-    branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
-  };
-}
-
-function calculateSprayTipSize(style: StrokeStyle): number {
-  if (style.brush.type !== "spray") return 0;
-  const maxScale = style.brush.dynamics.sizeJitterMode === "lognormal" ? 4 : 1;
-  return Math.ceil(style.brush.dynamics.particleSize * maxScale);
-}
-
-function createSamplingLayer(
-  layer: Layer,
-  style: StrokeStyle,
-): Layer | undefined {
-  if (style.brush.type !== "stamp" || !style.brush.mixing?.enabled) {
-    return undefined;
-  }
-  const samplingLayer = createLayer(layer.width, layer.height);
-  copyLayerPixels(layer, samplingLayer);
-  return samplingLayer;
 }
 
 function calculatePixelDiff(

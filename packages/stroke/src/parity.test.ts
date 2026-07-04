@@ -222,9 +222,7 @@ const cases: readonly ParityCase[] = [
 
 describe("live-vs-replay parity", () => {
   for (const parityCase of cases) {
-    it.fails(`${parityCase.name}: live vs replay`, () => {
-      // 既知の非等価: live はチャンク描画、replay は一発描画。中間層WS2で修正予定。
-      suppressExpectedFailureScreenshot();
+    it(`${parityCase.name}: live vs replay`, () => {
       const { liveLayer, replayLayer } = runParityCase(parityCase);
       expectPixelEqual(
         replayLayer,
@@ -293,7 +291,6 @@ function runParityCase(parityCase: ParityCase): ParityRun {
     expand: EXPAND,
     brushSeed: BRUSH_SEED,
     alphaLocked: parityCase.alphaLocked,
-    sourceLayer: baseLayer,
   });
 
   const replayLayer = createTestLayer(parityCase.alphaLocked);
@@ -307,22 +304,6 @@ function runParityCase(parityCase: ParityCase): ParityRun {
   );
 
   return { beforeLayer, liveLayer, replayLayer, history };
-}
-
-function suppressExpectedFailureScreenshot(): void {
-  // Vitest browser records screenshots for expected failures unless disabled.
-  const worker = (
-    window as unknown as {
-      readonly __vitest_worker__?: {
-        readonly config?: {
-          readonly browser?: { screenshotFailures?: boolean };
-        };
-      };
-    }
-  ).__vitest_worker__;
-  if (worker?.config?.browser) {
-    worker.config.browser.screenshotFailures = false;
-  }
 }
 
 function makeStyle(overrides: Partial<StrokeStyle>): StrokeStyle {

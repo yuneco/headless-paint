@@ -1,16 +1,14 @@
 # live-vs-replay パリティテスト基盤（WS0-3）
 
 中間層リファクタリング（paint-app `plans/2026-07-04-headless-paint-middle-layer.md`）のリグレッションガード。
-現行コードでは「ライブ描画」と「記録された `StrokeCommand` の replay」は非等価である。
-これは live がチャンク描画、replay が一発描画であることに由来する既知仕様として固定し、
-中間層WS2で修正対象にする。スクリーンショット保存 baseline は使わず、
+「ライブ描画」と「記録された `StrokeCommand` の replay」が同じ canonical incremental path を通り、
+ビット一致することを固定する。スクリーンショット保存 baseline は使わず、
 **同一実行内のピクセル完全一致比較**を主軸にする。
 
 ## 検証する性質
 
-1. **(a) live vs replay**: セッション API（`startStrokeSession` → `addPointToSession`×N）で
-   描いたレイヤーと、そこで生成された `StrokeCommand` を `replayCommand` で新規レイヤーに再生した結果が
-   現行コードで非等価であることを `it.fails` で固定する。7ケースすべてが既知の失敗であり、
+1. **(a) live vs replay**: `createStrokeRuntime` で描いたレイヤーと、そこで生成された `StrokeCommand`
+   を `replayCommand` で新規レイヤーに再生した結果が、全ケースでピクセル完全一致すること。
    失敗メッセージには差分ピクセル数、bounding box、RGBA の `maxChannelDelta` を出す。
 2. **(b) undo rebuild**: stroke 後に `pushCommand` → `undo` → `rebuildLayerFromHistory` でストローク前の
    ピクセルに完全一致すること。下地があるケースでは、描画前の `beginHistoryMutation()` で
@@ -26,8 +24,8 @@
 - **クロック**: replay に実クロックは不要。入力点の `timestamp` はテストデータとして固定値を埋め込む。
   静止吹きつけ（emission）は「timestamp だけ進んだ同座標の点列」をテストデータで表現する
   （react 層のタイマーが行う合成点注入と同じ形。タイマー自体はここではテストしない）
-- **フィルタ**: live 側もテストヘルパーが filterPipeline をコンパイルして逐次処理し、replay 側の
-  `processAllPoints`（一括処理）と突き合わせる。逐次 vs 一括の差もパリティ対象に含める
+- **フィルタ**: live/replay とも `processPoint` + `finalizePipeline` の逐次処理に統一する。
+  replay は `processAllPoints` による一括処理を使わない。
 
 ## 構成
 
@@ -44,7 +42,7 @@ packages/stroke/src/
 ### ヘルパー IF
 
 ```ts
-// ライブ経路をシミュレートし、描画済み layer と生成された StrokeCommand を返す
+// stroke-runtime のライブ経路を実行し、描画済み layer と生成された StrokeCommand を返す
 simulateLiveStroke(opts: {
   layer: Layer;                       // 描画先（事前内容があってもよい）
   inputPoints: InputPoint[];          // 生入力（timestamp 固定値埋め込み済み）
@@ -53,7 +51,6 @@ simulateLiveStroke(opts: {
   expand: ExpandConfig;
   brushSeed: number;                  // 必須（既定 0 に頼らない）
   alphaLocked: boolean;
-  sourceLayer?: Layer;                // mixing 用サンプリング元
 }): { command: StrokeCommand }
 
 // StrokeCommand を新規/指定レイヤーに replay
@@ -77,15 +74,13 @@ expectPixelEqual(actual: Layer, expected: Layer, label: string): void
 | spray lognormal | SPRAY_AIRBRUSH | sizeJitterMode: "lognormal" |
 | spray bimodal | SPRAY_AIRBRUSH | sizeJitterMode: "bimodal" |
 
-各ケースで (a)(b)(c) を検証する。(a) は `it.fails` として既知の非等価を固定し、
-(b)(c) は通常の green テストとして維持する。
+各ケースで (a)(b)(c) を通常の green テストとして検証する。
 
 ## 既知のリスク（実装時の停止条件）
 
-live は `addPointToSession` がオーバーラップ付きチャンクで `appendToCommittedLayer` を複数回呼び
-brushState（accumulatedDistance/emissionCount）を引き継ぐのに対し、replay は fresh state から1回で描く。
-この構造差は round-pen / stamp / spray の全7ケースで非等価として実測済みで、現行仕様として
-`it.fails` により固定する。**非等価そのものを engine/stroke の実装コードで修正して合わせにいかないこと**。
+live と replay は `createIncrementalStrokeRenderer` を通り、1点ずつ `feed` してから `finalize` する。
+この構造により、`addPointToSession` のオーバーラップ判定、filter の逐次処理、brushState の carry、
+mixing 用 sampling layer の作成タイミングを統一する。
 
 (b) が失敗した場合は checkpoint 設定または undo rebuild のテスト手順を疑う。(c) が失敗した場合は
-live/replay の非等価ではなく replay 経路の非決定性を示すため、実装コードを直さず詳細を記録して停止する。
+replay 経路の非決定性を示すため、差分ピクセル数、`maxChannelDelta`、原因仮説を記録して停止する。
