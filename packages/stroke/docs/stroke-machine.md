@@ -95,18 +95,22 @@ interface StrokeStartConfig {
 - **brushSeed / 合成点 timestamp は deps 経由**で決定化（パリティ・emission テスト用）
 - **style/pipeline/expand/alphaLocked は start 時にスナップショット**（現行と同じ凍結仕様）
 
-### live≠replay 統一（WS0-3 既知非等価の解消・レビュー対象）
+### live≠replay 統一: canonical incremental path（WS0-3 既知非等価の解消・レビュー対象）
 
-推奨案「**finalize-by-replay**」: ストローク中は現行どおりチャンク描画（書き味・性能を維持）し、
-**end 時に committedSnapshot を復元してから replay と同一の一発描画で確定**する。
+runtime に「**1点ずつ feed するインクリメンタル描画関数**」を1つ定義し、live（入力到着ごと）と
+replay（記録済み inputPoints のループ）が**同じ関数を通る**構成にする。
 
-- ストローク中の見た目と確定結果の差は AA 縁レベル（WS0-3 実測）で、確定瞬間の変化は知覚不能
-- **replay 実装は無変更** → 保存済みドキュメントの再現が変わらない（互換面で最重要）
-- 確定後のレイヤー内容 = replay 結果になるため、undo→redo でピクセルが動く現象が消える。
-  パリティテスト (a) の it.fails が green 化する見込み
-- コスト: end 時に snapshot 復元 + 全点一発描画が1回（O(n)、直線 confirm が既にこの形）
-
-代替案は仕様表レビュー md 参照（②replay をチャンク化に合わせる ③live を pending 蓄積化）。
+- 非等価の真因は、live のチャンク境界が入力イベントのタイミング依存で replay から
+  再現不能なこと。分割を `addPointToSession` の決定的ロジック（点数・幾何のみ）に
+  一本化すれば、描画呼び出し列が構造的に同一になり seed 固定でビット一致する
+- 成立根拠: 合成点（emission）は inputPoints に記録済み / brushSeed 記録済み /
+  フィルタは両側とも逐次処理（processPoint + finalizePipeline）に統一 / コマンド JSON 無変更
+- `replayCommand` の stroke 処理はこのインクリメンタル関数のループ呼び出しに置き換える
+  （processAllPoints + 一発 appendToCommittedLayer を廃止）
+- ストローク終了時に描線が動かない（finalize-by-replay 案はこの点で棄却、レビュー質疑参照）
+- 影響: 過去に保存されたドキュメントの再構築結果が1回だけ AA 縁レベルで変わる（承認事項）。
+  rebuild コストは live 実描画と同オーダー
+- move(point) は**単一点 feed を canonical** とする（coalesced events は呼び出し側で1点ずつ渡す）
 
 ## テスト計画（Phase 3 で実装）
 
@@ -114,4 +118,4 @@ interface StrokeStartConfig {
 - runtime: 注入 clock/setTimeout による emission 決定化テスト（入力が rate より速い間は
   発火しない / 静止時は継続 / end・cancel・dispose 後は発火しない）
 - lifecycle: dispose 後に timer が発火しない、2つの runtime が互いに干渉しない
-- パリティ: finalize-by-replay 導入後、parity.test.ts の (a) it.fails を通常 it へ戻す
+- パリティ: canonical path 導入後、parity.test.ts の (a) it.fails を「ビット一致の通常 it」へ昇格
