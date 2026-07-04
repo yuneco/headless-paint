@@ -91,6 +91,14 @@ export {
   transitionStroke,
 } from "./stroke-machine";
 
+// Stroke runtime
+export type {
+  StrokeRuntime,
+  StrokeRuntimeDeps,
+  StrokeStartConfig,
+} from "./stroke-runtime";
+export { createStrokeRuntime } from "./stroke-runtime";
+
 // History
 export {
   canRedo,

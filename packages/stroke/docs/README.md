@@ -113,6 +113,9 @@ if (canUndo(historyState)) {
 | `StrokeMachineEvent` | `transitionStroke` に渡すイベント |
 | `StrokeMachineEffect` | runtime が解釈する副作用指示 |
 | `StrokeTransitionResult` | `transitionStroke` の結果（next + effects） |
+| `StrokeRuntimeDeps` | `createStrokeRuntime` に注入する timer / clock / callback 依存 |
+| `StrokeRuntime` | stroke-machine effects を実行する命令的 runtime |
+| `StrokeStartConfig` | runtime start 時に凍結する layer / style / pipeline 設定 |
 | `StrokeCommand` | ストロークコマンド（`layerId` 付き） |
 | `ClearCommand` | クリアコマンド（`layerId` 付き） |
 | `WrapShiftCommand` | ラップシフトコマンド（グローバル） |
@@ -162,6 +165,7 @@ if (canUndo(historyState)) {
 |---|---|
 | `createInitialStrokePhase()` | 初期 idle phase を作成 |
 | `transitionStroke(state, event)` | ストローク状態を純粋に遷移し、runtime 向け effects を返す |
+| `createStrokeRuntime(deps)` | `transitionStroke` の effects を解釈し、live stroke 描画・emission・commit を行う |
 
 ### Atomic Layer Operations
 

@@ -203,7 +203,10 @@ export type {
   RemoveLayerCommand,
   RenderUpdate,
   ReorderLayerCommand,
+  StrokeRuntime,
+  StrokeRuntimeDeps,
   StrokeCommand,
+  StrokeStartConfig,
   StrokeSessionResult,
   StrokeSessionState,
   StructuralCommand,
@@ -235,6 +238,7 @@ export {
   mergeLayerDownAtomic,
   startStrokeSession,
 } from "@headless-paint/stroke";
+export { createStrokeRuntime } from "@headless-paint/stroke";
 export {
   canRedo,
   canUndo,

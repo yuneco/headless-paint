@@ -68,6 +68,7 @@ interface StrokeRuntimeDeps {
   readonly requestRender: () => void;          // rAF coalesce は呼び出し側実装でも可
   readonly onCommit: (command: StrokeCommand) => void;
   readonly onDrawingChanged: (isDrawing: boolean) => void;
+  readonly randomSeed?: () => number;          // brushSeed 省略時の seed 生成を注入
 }
 
 interface StrokeRuntime {
