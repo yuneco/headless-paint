@@ -23,13 +23,11 @@ Canvas2Dベースのペイントライブラリ。OffscreenCanvasでヘッドレ
 
 ### codex の呼び出し方（実装委譲）
 
-`codex exec --full-auto "<プロンプト>" </dev/null` で単独起動する。ハマりどころ:
+**委譲プロンプトの書き方・検収手順・差し戻しの型は delegation skill に必ず従う。** 最重要の不変則のみここに置く:
 
-- **`</dev/null` 必須**: 付けないと「Reading additional input from stdin...」でハングする
-- **`&&` チェーン禁止**: 他コマンドと繋ぐとセッション開始前にハングする。必ず単独の呼び出しで起動
-- **完了条件に必ず含める**: 「`pnpm -r build && pnpm test && pnpm lint` 全グリーン」「コミットしない」。コミット・ドキュメント更新は Claude 側で行う
-- **sandbox 制約**: 外部ネット不可。実API疎通・検収(build/test/lint再実行)は Claude 側で実施
-- コンフリクトしない作業なら 2-3 多重で並列起動してよい。難所は `-c model_reasoning_effort=high` を付ける
+- `codex exec --full-auto "<プロンプト>" </dev/null` 単独起動（`</dev/null` 必須・`&&` チェーン禁止）
+- **codex の「テスト通過」報告を検収とみなさない**。codex sandbox では browser テスト（vitest browser mode）が実行できないため、報告は常にノンブラウザ範囲のみ。検収（`pnpm -r build && pnpm test && pnpm lint` のフル実行 + 核心テストの現物確認）は Claude 側で実施し、green になってからコミットする
+- 検収でテストが落ちたら「直して」で返さず、根本原因を特定・分類して差し戻す。production バグの場合は該当テストを変更禁止と明記する
 - 読み取り専用レビューは `codex review`（`/codex-review` skill）を使う。委譲とは用途を分ける
 
 ## パッケージ構成と責務
@@ -67,12 +65,10 @@ web     Reactデモ(apps/web)  UIとイベントハンドリング統合層
 
 実装完了後・報告前に review-library-usage skill でセルフレビュー（API活用漏れ、既存パターンとの一貫性、ドキュメント整合）を行う。
 
-### Skill同期ルール（Claude/Codex）
+### Skill の置き場所
 
-- skill の正本は `/.claude/skills/`
-- 追加・更新したら Codex 側 `~/.codex/skills/` に同名のシンボリックリンクを作成・更新する
-  - 例: `ln -sfn /Users/yuki/dev/headless-paint/.claude/skills/<name> /Users/yuki/.codex/skills/<name>`
-- 各 `SKILL.md` の frontmatter に Codex 必須項目の `name` と `description` を入れる
+- Claude 用 skill の正本は `/.claude/skills/`。frontmatter に `name` と `description` を必ず入れる
+- `~/.codex/skills/` へのシンボリックリンク運用は**廃止**（ユーザーレベルのディレクトリが特定プロジェクトを指すのが誤りだったため。2026-07-05 ユーザー決定）。codex 用 skill はプロジェクト内に codex 自身が作成する方式へ移行予定
 
 ## コミット時のルール
 
