@@ -88,36 +88,44 @@ export function useStrokeSession(
   const strokePointsRef = useRef<readonly InputPoint[]>([]);
   const pendingOnlyRef = useRef(false);
   const runtimeRef = useRef<StrokeRuntime | null>(null);
-  if (runtimeRef.current === null) {
-    runtimeRef.current = createStrokeRuntime({
-      setTimeout: (fn, ms) => setTimeout(fn, ms),
-      clearTimeout: (id) => {
-        clearTimeout(id as ReturnType<typeof setTimeout>);
-      },
-      now: () => performance.now(),
-      requestRender: bumpRenderVersion,
-      onCommit: (command) => {
-        onStrokeCompleteRef.current?.(toStrokeCompleteData(command));
-      },
-      onDrawingChanged: (nextIsDrawing) => {
-        if (mountedRef.current) {
-          setIsDrawing(nextIsDrawing);
-        }
-        if (!nextIsDrawing) {
-          strokePointsRef.current = [];
-          pendingOnlyRef.current = false;
-        }
-      },
-    });
-  }
 
-  useEffect(
-    () => () => {
+  // runtime は遅延生成する。StrictMode はマウント直後に unmount/remount を
+  // シミュレートするため、cleanup で dispose した runtime を使い回さないよう
+  // ref を null に戻し、次の操作時に再生成する
+  const getRuntime = useCallback((): StrokeRuntime => {
+    if (runtimeRef.current === null) {
+      runtimeRef.current = createStrokeRuntime({
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (id) => {
+          clearTimeout(id as ReturnType<typeof setTimeout>);
+        },
+        now: () => performance.now(),
+        requestRender: bumpRenderVersion,
+        onCommit: (command) => {
+          onStrokeCompleteRef.current?.(toStrokeCompleteData(command));
+        },
+        onDrawingChanged: (nextIsDrawing) => {
+          if (mountedRef.current) {
+            setIsDrawing(nextIsDrawing);
+          }
+          if (!nextIsDrawing) {
+            strokePointsRef.current = [];
+            pendingOnlyRef.current = false;
+          }
+        },
+      });
+    }
+    return runtimeRef.current;
+  }, [bumpRenderVersion]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
       runtimeRef.current?.dispose();
-    },
-    [],
-  );
+      runtimeRef.current = null;
+    };
+  }, []);
 
   const canDraw = config.layer?.meta.visible ?? false;
 
@@ -139,7 +147,7 @@ export function useStrokeSession(
 
       pendingOnlyRef.current = options?.pendingOnly ?? false;
       strokePointsRef.current = [point];
-      runtimeRef.current?.start(point, {
+      getRuntime().start(point, {
         layer,
         pendingLayer,
         style: strokeStyle,
@@ -153,7 +161,7 @@ export function useStrokeSession(
       });
       bumpRenderVersion();
     },
-    [bumpRenderVersion],
+    [bumpRenderVersion, getRuntime],
   );
 
   const onStrokeMove = useCallback(
