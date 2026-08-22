@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm -F @headless-paint/web dev",
+    "dev:https:setup": "node ./scripts/setup-local-https.mjs",
+    "dev:https": "pnpm -F @headless-paint/web dev:https",
     "typecheck": "tsc -p tsconfig.check.json --noEmit",
     "build": "pnpm run typecheck && pnpm -r build && node ./scripts/verify-publish-artifacts.mjs",
     "publish:dry-run": "pnpm --filter @yuneco/headless-paint publish --access public --dry-run",

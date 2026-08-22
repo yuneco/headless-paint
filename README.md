@@ -90,6 +90,19 @@ pnpm lint    # Biome lint
 pnpm format  # Biome format
 ```
 
+### iPad / Apple PencilでHTTPS接続する
+
+LAN上のiPadで`getCoalescedEvents()`を含む高頻度Pointer Eventsを取得するには、Secure Contextでデモを開きます。
+
+```bash
+pnpm dev:https:setup # 初回とMacのLAN IPが変わったときに証明書を生成
+pnpm dev:https       # HTTPSでデモを起動
+```
+
+`dev:https:setup`が表示する`headless-paint-local-ca.crt`をiPadへインストールし、「設定 → 一般 → 情報 → 証明書信頼設定」で完全信頼を有効にします。その後、Viteが`Network`として表示した`https://<MacのLAN IP>:<port>/`をSafariで開いてください。既定portが使用中ならViteが空いているportへ切り替えます。
+
+ローカルCA、秘密鍵、server証明書はgit管理外の`work.local/https/`へ生成されます。通常の`pnpm dev`は従来どおりHTTPで起動します。
+
 ## 技術スタック
 
 - **言語**: TypeScript（strict mode）

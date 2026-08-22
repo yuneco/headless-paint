@@ -4,6 +4,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 発見した課題・改善候補
 
+- **Apple Pencil実機評価はHTTPS必須（2026-08-22）**: LAN上の平文HTTPではSafariの`getCoalescedEvents()`が露出せず入力点密度が下がり、補間・ブラシ性能の評価を誤る。rootの`pnpm dev:https:setup`で現在のLAN IPをSANへ含むignored証明書を生成し、`pnpm dev:https`で起動する。iPadでは生成したlocal CAをインストールして完全信頼を有効にする。
 - **Production web統合後の最終実機gate（2026-08-22）**: Acrylic v2 / Rough bristleは`apps/web`でまとめて評価できる。ローカルWebKit固定入力ではRough p95 `16.1–16.2ms`、late / early `0.94–0.96`、Acrylic late / early `0.61–0.80`で時間軸劣化なし。残件はiPad Safariで長時間stroke、描画直後UI、tab安定性、25〜100% zoom高速操作を官能確認すること。webのCall metricは同期engine callbackだけで非同期GPU完了を含まない。
 - **Acrylic v2の新混色経路はWebKitで時間軸劣化なし（2026-08-22）**: production `apps/web`で576点の連続strokeを3回測定し、後半/前半の処理比は`0.96 / 0.86 / 1.03`、描画後preset切替は`42–78ms`だった。Playwrightが各点を同期送信するため絶対値はFPS gateに使えないが、旧CPU tip更新で見られた数秒後の桁違いの失速は再現しなかった。新方式は18x8のbrush-local連続色場と有限checkpoint tileだけを更新する。iPad実機の長時間stroke・描画直後UI・タブ安定性は最終統合時にも確認する。
 - **Mixing / bristleのpendingはengine-level no-opに固定（2026-08-22）**: 色場・毛束状態と確定canvasの因果順序をrollback可能なpendingへ含める複雑性を避けた。汎用input pluginとして`causal-adaptive`（過去情報だけを使う速度・急旋回適応補正）を追加し、`apps/web`ではAcrylic v2とRough bristleへ標準適用する。他ブラシの既存smoothing設定は変えない。
