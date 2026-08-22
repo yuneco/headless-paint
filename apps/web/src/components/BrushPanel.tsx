@@ -160,6 +160,17 @@ function BrushPanelComponent({
     });
   };
 
+  const updateMixingEnabled = (enabled: boolean) => {
+    if (brush.type !== "stamp" && brush.type !== "bristle") return;
+    onBrushChange({
+      ...brush,
+      mixing: {
+        ...(brush.mixing ?? DEFAULT_BRUSH_MIXING),
+        enabled,
+      },
+    });
+  };
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {usesCausalInput && (
@@ -253,108 +264,122 @@ function BrushPanelComponent({
         </div>
       ) : null}
 
-      {(brush.type === "stamp" || brush.type === "bristle") &&
-      brush.mixing?.enabled ? (
+      {brush.type === "stamp" || brush.type === "bristle" ? (
         <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
-          <label style={{ display: "grid", gap: 2 }}>
-            <span>
-              Pickup rate {brush.mixing.pickupRatePerPx.toFixed(3)} /px
-            </span>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <input
-              type="range"
-              min={0}
-              max={0.03}
-              step={0.001}
-              value={brush.mixing.pickupRatePerPx}
+              type="checkbox"
+              checked={brush.mixing?.enabled ?? false}
               onChange={(event) =>
-                updateMixing(
-                  "pickupRatePerPx",
-                  Number(event.currentTarget.value),
-                )
+                updateMixingEnabled(event.currentTarget.checked)
               }
             />
+            <span>Color mixing（下地色の取り込み）</span>
           </label>
-          <label style={{ display: "grid", gap: 2 }}>
-            <span>
-              Restore rate {brush.mixing.restoreRatePerPx.toFixed(3)} /px
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={0.03}
-              step={0.001}
-              value={brush.mixing.restoreRatePerPx}
-              onChange={(event) =>
-                updateMixing(
-                  "restoreRatePerPx",
-                  Number(event.currentTarget.value),
-                )
-              }
-            />
-          </label>
-          <label style={{ display: "grid", gap: 2 }}>
-            <span>
-              Diffusion rate {brush.mixing.diffusionRatePerPx.toFixed(2)}{" "}
-              pass/px
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={0.2}
-              step={0.01}
-              value={brush.mixing.diffusionRatePerPx}
-              onChange={(event) =>
-                updateMixing(
-                  "diffusionRatePerPx",
-                  Number(event.currentTarget.value),
-                )
-              }
-            />
-          </label>
-          <label style={{ display: "grid", gap: 2 }}>
-            <span>
-              Mix Distance{" "}
-              {(
-                brush.mixing.updateDistancePx ??
-                DEFAULT_BRUSH_MIXING.updateDistancePx
-              ).toFixed(0)}
-              px
-            </span>
-            <input
-              type="range"
-              min={1}
-              max={32}
-              step={1}
-              value={
-                brush.mixing.updateDistancePx ??
-                DEFAULT_BRUSH_MIXING.updateDistancePx
-              }
-              onChange={(event) =>
-                updateMixing(
-                  "updateDistancePx",
-                  Number(event.currentTarget.value),
-                )
-              }
-            />
-          </label>
-          <label style={{ display: "grid", gap: 2 }}>
-            <span>
-              Pickup checkpoint {brush.mixing.checkpointDistancePx.toFixed(0)}px
-            </span>
-            <input
-              type="range"
-              min={8}
-              max={96}
-              step={1}
-              value={brush.mixing.checkpointDistancePx}
-              onChange={(event) =>
-                updateMixing(
-                  "checkpointDistancePx",
-                  Number(event.currentTarget.value),
-                )
-              }
-            />
-          </label>
+          {brush.mixing?.enabled ? (
+            <>
+              <label style={{ display: "grid", gap: 2 }}>
+                <span>
+                  Pickup rate {brush.mixing.pickupRatePerPx.toFixed(3)} /px
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.03}
+                  step={0.001}
+                  value={brush.mixing.pickupRatePerPx}
+                  onChange={(event) =>
+                    updateMixing(
+                      "pickupRatePerPx",
+                      Number(event.currentTarget.value),
+                    )
+                  }
+                />
+              </label>
+              <label style={{ display: "grid", gap: 2 }}>
+                <span>
+                  Restore rate {brush.mixing.restoreRatePerPx.toFixed(3)} /px
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.03}
+                  step={0.001}
+                  value={brush.mixing.restoreRatePerPx}
+                  onChange={(event) =>
+                    updateMixing(
+                      "restoreRatePerPx",
+                      Number(event.currentTarget.value),
+                    )
+                  }
+                />
+              </label>
+              <label style={{ display: "grid", gap: 2 }}>
+                <span>
+                  Diffusion rate {brush.mixing.diffusionRatePerPx.toFixed(2)}{" "}
+                  pass/px
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.2}
+                  step={0.01}
+                  value={brush.mixing.diffusionRatePerPx}
+                  onChange={(event) =>
+                    updateMixing(
+                      "diffusionRatePerPx",
+                      Number(event.currentTarget.value),
+                    )
+                  }
+                />
+              </label>
+              <label style={{ display: "grid", gap: 2 }}>
+                <span>
+                  Mix Distance{" "}
+                  {(
+                    brush.mixing.updateDistancePx ??
+                    DEFAULT_BRUSH_MIXING.updateDistancePx
+                  ).toFixed(0)}
+                  px
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={32}
+                  step={1}
+                  value={
+                    brush.mixing.updateDistancePx ??
+                    DEFAULT_BRUSH_MIXING.updateDistancePx
+                  }
+                  onChange={(event) =>
+                    updateMixing(
+                      "updateDistancePx",
+                      Number(event.currentTarget.value),
+                    )
+                  }
+                />
+              </label>
+              <label style={{ display: "grid", gap: 2 }}>
+                <span>
+                  Pickup checkpoint{" "}
+                  {brush.mixing.checkpointDistancePx.toFixed(0)}px
+                </span>
+                <input
+                  type="range"
+                  min={8}
+                  max={96}
+                  step={1}
+                  value={brush.mixing.checkpointDistancePx}
+                  onChange={(event) =>
+                    updateMixing(
+                      "checkpointDistancePx",
+                      Number(event.currentTarget.value),
+                    )
+                  }
+                />
+              </label>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>

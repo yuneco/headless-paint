@@ -43,7 +43,19 @@ StrokeStyle.brush.type
 | `bristle-mask.ts` | stroke-space面掠れとdocument-space紙目を局所maskへ解決する |
 | `bristle.ts` | 連続掃引、cusp split、短い毛束lag、混色stage、局所合成 |
 
-`@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
+`@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`isBrushMixingActive`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
+
+---
+
+## isBrushMixingActive
+
+```typescript
+function isBrushMixingActive(mixing: BrushMixing | undefined): boolean
+```
+
+`enabled`だけでなく、色場が実際に下地を取得できる設定かを含めて混色stageの有効性を判定する。
+`mixing`が未指定、`enabled: false`、または`pickupRatePerPx <= 0`なら`false`を返す。engine外の
+stroke runtimeもこの関数を使い、snapshot作成とpending抑止の条件をrenderer本体と一致させる。
 
 ---
 
@@ -82,6 +94,8 @@ function renderBrushStroke(
    - branch の `accumulatedDistance` と時間 state から、距離 + 時間 emission を発生順に走査
 
 混色有効時に`sourceLayer`がない、または`layer.canvas`と同一の場合は例外にする。現在dabをsampling sourceへ再帰的に混ぜる曖昧な低レベル呼び出しは補完しない。通常のstroke実行経路は開始時にsnapshotを作成して渡す。
+
+`pickupRatePerPx <= 0`は混色stage全体を無効化する。色場はstroke開始時に元色一色で初期化され、stroke間へ保持されないため、下地を取得しない状態でrestore / diffusionだけを実行しても出力は変化しない。`pickup = 0`ではsampling、色場upload、checkpoint、混色用の描画区間分割を行わない。
    - 各スタンプ位置で `tipCanvas` を `drawImage` で配置
    - `brush.pressureDynamics.size` でスタンプサイズを決める
    - `brush.dynamics.spacingSizeCoupling` が正の場合、距離spacingを筆圧反映後のtip径へ追従させる

@@ -28,6 +28,7 @@ export interface UsePointerHandlerOptions {
   ) => void;
   readonly onStrokeStart?: (point: InputPoint) => void;
   readonly onStrokeMove?: (point: InputPoint) => void;
+  readonly onStrokeMoves?: (points: readonly InputPoint[]) => void;
   readonly onStrokeEnd?: () => void;
   readonly onWrapShift?: (dx: number, dy: number) => void;
   readonly onWrapShiftEnd?: (totalDx: number, totalDy: number) => void;
@@ -54,6 +55,7 @@ export function usePointerHandler(
     onRotate,
     onStrokeStart,
     onStrokeMove,
+    onStrokeMoves,
     onStrokeEnd,
     onWrapShift,
     onWrapShiftEnd,
@@ -125,23 +127,38 @@ export function usePointerHandler(
       switch (tool) {
         case "pen":
         case "eraser": {
-          const screenPoint = { x: currentX, y: currentY };
-          const layerPoint = screenToLayer(screenPoint, transform);
-          if (layerPoint) {
+          const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? [];
+          const samples = coalesced.length > 0 ? coalesced : [e.nativeEvent];
+          const acceptedPoints: InputPoint[] = [];
+          const rect = e.currentTarget.getBoundingClientRect();
+          for (const sample of samples) {
+            const screenPoint = {
+              x: sample.clientX - rect.left,
+              y: sample.clientY - rect.top,
+            };
+            const layerPoint = screenToLayer(screenPoint, transform);
+            if (!layerPoint) continue;
             const [accepted, newState] = shouldAcceptPoint(
               layerPoint,
-              e.timeStamp,
+              sample.timeStamp,
               samplingStateRef.current,
               samplingConfig,
             );
             samplingStateRef.current = newState;
             if (accepted) {
-              onStrokeMove?.({
+              acceptedPoints.push({
                 x: layerPoint.x,
                 y: layerPoint.y,
-                pressure: e.nativeEvent.pressure,
-                timestamp: e.timeStamp,
+                pressure: sample.pressure,
+                timestamp: sample.timeStamp,
               });
+            }
+          }
+          if (acceptedPoints.length > 0) {
+            if (onStrokeMoves) {
+              onStrokeMoves(acceptedPoints);
+            } else {
+              for (const point of acceptedPoints) onStrokeMove?.(point);
             }
           }
           break;
@@ -200,6 +217,7 @@ export function usePointerHandler(
       onZoom,
       onRotate,
       onStrokeMove,
+      onStrokeMoves,
       onWrapShift,
       centerX,
       centerY,

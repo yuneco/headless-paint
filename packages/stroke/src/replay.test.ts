@@ -19,6 +19,7 @@ vi.mock("@headless-paint/engine", () => ({
   })),
   generateBrushTip: vi.fn(),
   getImageData: vi.fn(),
+  isBrushMixingActive: vi.fn(() => false),
   mergeLayerDown: vi.fn(),
   transformLayer: vi.fn(),
   wrapShiftLayer: vi.fn(),

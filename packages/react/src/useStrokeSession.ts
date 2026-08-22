@@ -48,6 +48,7 @@ export interface UseStrokeSessionResult {
     options?: StrokeStartOptions,
   ) => void;
   readonly onStrokeMove: (point: InputPoint) => void;
+  readonly onStrokeMoves: (points: readonly InputPoint[]) => void;
   readonly onStrokeEnd: () => void;
   readonly onDrawConfirm: () => void;
   readonly onDrawCancel: () => void;
@@ -173,6 +174,12 @@ export function useStrokeSession(
     [appendStrokePoint],
   );
 
+  const onStrokeMoves = useCallback((points: readonly InputPoint[]) => {
+    if (!runtimeRef.current?.isDrawing || points.length === 0) return;
+    strokePointsRef.current = [...strokePointsRef.current, ...points];
+    runtimeRef.current.moveMany(points);
+  }, []);
+
   const onStrokeEnd = useCallback(() => {
     if (!runtimeRef.current?.isDrawing) return;
     if (pendingOnlyRef.current) {
@@ -198,6 +205,7 @@ export function useStrokeSession(
   return {
     onStrokeStart,
     onStrokeMove,
+    onStrokeMoves,
     onStrokeEnd,
     onDrawConfirm,
     onDrawCancel,

@@ -203,6 +203,10 @@ interface UseViewTransformResult {
 
 マウス / ペンのポインタイベントを、選択中のツールに応じたコールバックに変換する。
 内部で screen→layer の座標変換とポイントサンプリング（間引き）を行う。
+pen / eraser の `pointermove` では `getCoalescedEvents()` が返す実入力を時刻順に展開し、
+代表イベントだけを使って高速ストロークの曲線を直線化しない。coalesced input が利用できない
+環境では代表イベントへfallbackする。採用点は `onStrokeMoves` へ1 pointer event単位のbatchとして
+渡す。batch callbackが未指定の場合だけ、互換用の `onStrokeMove` を点ごとに呼ぶ。
 
 ```typescript
 function usePointerHandler(tool: ToolType, options: UsePointerHandlerOptions): PointerHandlers;
@@ -226,6 +230,8 @@ interface UsePointerHandlerOptions {
   readonly onStrokeStart?: (point: InputPoint) => void;
   /** pen / eraser ツールでの描画移動 */
   readonly onStrokeMove?: (point: InputPoint) => void;
+  /** coalesced inputを1 pointer event単位で渡すbatch callback（指定時はこちらを優先） */
+  readonly onStrokeMoves?: (points: readonly InputPoint[]) => void;
   /** pen / eraser ツールでの描画終了 */
   readonly onStrokeEnd?: () => void;
   /** offset ツールでの差分移動（layer 座標系、ピクセル単位に丸め済み） */
@@ -405,6 +411,8 @@ interface UseStrokeSessionResult {
   readonly onStrokeStart: (point: InputPoint, options?: StrokeStartOptions) => void;
   /** ポイントを追加する。FilterPipeline を通過後、差分レンダリングが実行される */
   readonly onStrokeMove: (point: InputPoint) => void;
+  /** 複数点を順番どおり処理する。描画のbatch方針はbrush rendererが決める */
+  readonly onStrokeMoves: (points: readonly InputPoint[]) => void;
   /** ストロークを終了する。FilterPipeline をフラッシュし、onStrokeComplete を呼ぶ */
   readonly onStrokeEnd: () => void;
   /** pending ストロークを確定する。蓄積されたポイントが committed layer に描画される */
@@ -604,6 +612,8 @@ interface PaintEngineResult<TCustom = never> {
   readonly onStrokeStart: (point: InputPoint, options?: StrokeStartOptions) => void;
   /** ポイントを追加する */
   readonly onStrokeMove: (point: InputPoint) => void;
+  /** coalesced inputをbatch追加する */
+  readonly onStrokeMoves: (points: readonly InputPoint[]) => void;
   /** ストロークを終了する。履歴にコマンドが自動記録される */
   readonly onStrokeEnd: () => void;
   /** pending ストロークを確定する */

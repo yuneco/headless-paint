@@ -48,13 +48,10 @@ export function getActiveMixing(
     mixing.diffusionRatePerPx,
     DEFAULT_BRUSH_MIXING.diffusionRatePerPx,
   );
-  if (
-    pickupRatePerPx <= 0 &&
-    restoreRatePerPx <= 0 &&
-    diffusionRatePerPx <= 0
-  ) {
-    return null;
-  }
+  // The field starts each stroke as a uniform base color and is not carried
+  // across strokes. Without pickup there is therefore nothing for restore or
+  // diffusion to change, so the complete material stage is a semantic no-op.
+  if (pickupRatePerPx <= 0) return null;
   return {
     enabled: true,
     pickupRatePerPx,
@@ -80,6 +77,10 @@ export function getActiveMixing(
       DEFAULT_BRUSH_MIXING.fieldRows,
     ),
   };
+}
+
+export function isBrushMixingActive(mixing: BrushMixing | undefined): boolean {
+  return getActiveMixing(mixing) !== null;
 }
 
 export function prepareMixingState(

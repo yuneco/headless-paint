@@ -114,6 +114,7 @@ export interface PaintEngineResult<TCustom = never> {
     options?: StrokeStartOptions,
   ) => void;
   readonly onStrokeMove: (point: InputPoint) => void;
+  readonly onStrokeMoves: (points: readonly InputPoint[]) => void;
   readonly onStrokeEnd: () => void;
   readonly onDrawConfirm: () => void;
   readonly onDrawCancel: () => void;
@@ -841,6 +842,7 @@ export function usePaintEngine<TCustom = never>(
     // ストローク
     onStrokeStart: handleStrokeStart,
     onStrokeMove: session.onStrokeMove,
+    onStrokeMoves: session.onStrokeMoves,
     onStrokeEnd: session.onStrokeEnd,
     onDrawConfirm: handleDrawConfirm,
     onDrawCancel: handleDrawCancel,

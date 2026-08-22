@@ -11,6 +11,7 @@ import {
   copyLayerPixels,
   createLayer,
   generateBrushTip,
+  isBrushMixingActive,
 } from "@headless-paint/engine";
 import {
   compileFilterPipeline,
@@ -46,8 +47,11 @@ export interface IncrementalStrokeRenderUpdate {
 
 export interface IncrementalStrokeRenderer {
   feed(point: InputPoint): void;
+  feedMany(points: readonly InputPoint[]): void;
   finalize(): void;
 }
+
+const BRISTLE_BATCH_INTERVAL_MS = 32;
 
 export function createIncrementalStrokeRenderer(
   config: IncrementalStrokeRendererConfig,
@@ -68,10 +72,47 @@ export function createIncrementalStrokeRenderer(
   ).brushState;
   let hasFed = false;
   let finalized = false;
+  let renderedCommittedCount = 0;
+  let pendingBristlePoints: InputPoint[] = [];
 
-  return {
-    feed(point) {
-      if (finalized) return;
+  function appendProcessedBatch(
+    nextSession: StrokeSessionState,
+    lastUpdate: RenderUpdate,
+  ): void {
+    const nextCommittedCount = nextSession.allCommitted.length;
+    const hasNewCommitted = nextCommittedCount > renderedCommittedCount;
+    const overlapCount = Math.min(3, renderedCommittedCount);
+    const startIndex = Math.max(0, renderedCommittedCount - overlapCount);
+    const batchUpdate: RenderUpdate = {
+      ...lastUpdate,
+      newlyCommitted: hasNewCommitted
+        ? nextSession.allCommitted.slice(startIndex).map(toStrokePoint)
+        : [],
+      committedOverlapCount: hasNewCommitted ? overlapCount : 0,
+    };
+    if (hasNewCommitted) {
+      brushState = appendToCommittedLayer(
+        config.layer,
+        batchUpdate.newlyCommitted,
+        config.style,
+        compiledExpand,
+        batchUpdate.committedOverlapCount,
+        brushState,
+        samplingLayer,
+        config.alphaLocked,
+      );
+      renderedCommittedCount = nextCommittedCount;
+    }
+    config.onRenderUpdate?.({
+      session: nextSession,
+      renderUpdate: batchUpdate,
+      brushState,
+    });
+  }
+
+  function processBatch(points: readonly InputPoint[]): void {
+    let lastUpdate: RenderUpdate | null = null;
+    for (const point of points) {
       const filterResult = processPoint(
         filterState,
         point,
@@ -82,45 +123,82 @@ export function createIncrementalStrokeRenderer(
         ? addPointToSession(strokeSession, filterResult.output)
         : startStrokeSession(filterResult.output, config.style, config.expand);
       strokeSession = strokeResult.state;
-      brushState = appendToCommittedLayer(
-        config.layer,
-        strokeResult.renderUpdate.newlyCommitted,
-        config.style,
-        compiledExpand,
-        strokeResult.renderUpdate.committedOverlapCount,
-        brushState,
-        samplingLayer,
-        config.alphaLocked,
-      );
-      hasFed = true;
-      config.onRenderUpdate?.({
-        session: strokeResult.state,
-        renderUpdate: strokeResult.renderUpdate,
-        brushState,
-      });
+      lastUpdate = strokeResult.renderUpdate;
+    }
+    if (strokeSession && lastUpdate) {
+      appendProcessedBatch(strokeSession, lastUpdate);
+    }
+  }
+
+  function feedMany(points: readonly InputPoint[]): void {
+    if (finalized || points.length === 0) return;
+    hasFed = true;
+    if (config.style.brush.type !== "bristle") {
+      for (const point of points) processBatch([point]);
+      return;
+    }
+    for (const point of points) {
+      pendingBristlePoints.push(point);
+      if (
+        shouldFlushBristleBatch(pendingBristlePoints, config.style.lineWidth)
+      ) {
+        processBatch(pendingBristlePoints);
+        pendingBristlePoints = [];
+      }
+    }
+  }
+
+  return {
+    feed(point) {
+      feedMany([point]);
     },
+    feedMany,
     finalize() {
-      if (finalized || !hasFed || !strokeSession) return;
+      if (finalized || !hasFed) return;
+      if (pendingBristlePoints.length > 0) {
+        processBatch(pendingBristlePoints);
+        pendingBristlePoints = [];
+      }
+      if (!strokeSession) return;
       finalized = true;
       const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
       const strokeResult = addPointToSession(strokeSession, finalOutput);
       strokeSession = strokeResult.state;
-      brushState = appendToCommittedLayer(
-        config.layer,
-        strokeResult.renderUpdate.newlyCommitted,
-        config.style,
-        compiledExpand,
-        strokeResult.renderUpdate.committedOverlapCount,
-        brushState,
-        samplingLayer,
-        config.alphaLocked,
-      );
-      config.onRenderUpdate?.({
-        session: strokeResult.state,
-        renderUpdate: strokeResult.renderUpdate,
-        brushState,
-      });
+      appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
     },
+  };
+}
+
+function shouldFlushBristleBatch(
+  points: readonly InputPoint[],
+  brushSize: number,
+): boolean {
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (!first || !last || points.length < 2) return false;
+  if (last.timestamp - first.timestamp >= BRISTLE_BATCH_INTERVAL_MS) {
+    return true;
+  }
+  let traveledDistance = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    if (!previous || !current) continue;
+    traveledDistance += Math.hypot(
+      current.x - previous.x,
+      current.y - previous.y,
+    );
+    if (traveledDistance >= brushSize * 1.5) return true;
+  }
+  return false;
+}
+
+function toStrokePoint(point: InputPoint) {
+  return {
+    x: point.x,
+    y: point.y,
+    pressure: point.pressure,
+    timestamp: point.timestamp,
   };
 }
 
@@ -181,7 +259,7 @@ function createSamplingLayer(
 ): Layer | undefined {
   if (
     (style.brush.type !== "stamp" && style.brush.type !== "bristle") ||
-    !style.brush.mixing?.enabled
+    !isBrushMixingActive(style.brush.mixing)
   ) {
     return undefined;
   }

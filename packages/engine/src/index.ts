@@ -68,6 +68,7 @@ export {
   createBrushTipRegistry,
   generateBrushTip,
   hashSeed,
+  isBrushMixingActive,
   mulberry32,
   renderBrushStroke,
   timeSpacingMsFromRate,

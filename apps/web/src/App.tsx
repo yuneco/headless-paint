@@ -182,6 +182,12 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     },
     [engine.onStrokeMove, measureStrokeCall],
   );
+  const handleMeasuredStrokeMoves = useCallback(
+    (points: readonly InputPoint[]) => {
+      measureStrokeCall(() => engine.onStrokeMoves(points));
+    },
+    [engine.onStrokeMoves, measureStrokeCall],
+  );
   const handleMeasuredTouchStrokeStart = useCallback(
     (point: InputPoint) => {
       measureStrokeCall(() => engine.onStrokeStart(point));
@@ -390,6 +396,11 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         onStrokeMove={
           !isTransformLocked && engine.canDraw
             ? handleMeasuredStrokeMove
+            : undefined
+        }
+        onStrokeMoves={
+          !isTransformLocked && engine.canDraw
+            ? handleMeasuredStrokeMoves
             : undefined
         }
         onStrokeEnd={

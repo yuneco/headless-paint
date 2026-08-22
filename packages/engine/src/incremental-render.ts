@@ -3,6 +3,7 @@ import {
   createDefaultBrushState,
   ensureBrushRenderState,
   getBranchBrushState,
+  isBrushMixingActive,
   mergeBrushState,
   renderBrushStroke,
   stateToBranch,
@@ -136,7 +137,7 @@ export function renderPendingLayer(
 function hasStatefulPendingDisabled(style: StrokeStyle): boolean {
   return (
     style.brush.type === "bristle" ||
-    (style.brush.type === "stamp" && !!style.brush.mixing?.enabled)
+    (style.brush.type === "stamp" && isBrushMixingActive(style.brush.mixing))
   );
 }
 

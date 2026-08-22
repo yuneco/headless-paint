@@ -6,6 +6,7 @@ import type {
   StrokeStyle,
 } from "../types";
 import { renderBristleBrushStroke } from "./bristle";
+import { isBrushMixingActive } from "./mixing";
 import { renderSprayBrushStroke } from "./spray";
 import { renderStampBrushStroke } from "./stamp";
 import { DEFAULT_BRUSH_RENDER_STATE } from "./state";
@@ -27,6 +28,7 @@ export {
   mergeBrushState,
   stateToBranch,
 } from "./state";
+export { isBrushMixingActive } from "./mixing";
 export {
   createBrushTipRegistry,
   generateBrushTip,
@@ -59,7 +61,7 @@ export function renderBrushStroke(
       return state ?? DEFAULT_BRUSH_RENDER_STATE;
     case "stamp":
       if (
-        style.brush.mixing?.enabled &&
+        isBrushMixingActive(style.brush.mixing) &&
         (!sourceLayer || sourceLayer.canvas === layer.canvas)
       ) {
         throw new Error(
@@ -86,7 +88,7 @@ export function renderBrushStroke(
       );
     case "bristle":
       if (
-        style.brush.mixing?.enabled &&
+        isBrushMixingActive(style.brush.mixing) &&
         (!sourceLayer || sourceLayer.canvas === layer.canvas)
       ) {
         throw new Error(

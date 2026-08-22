@@ -361,7 +361,15 @@ function renderSweepRun(
     inkCtx.globalCompositeOperation = "source-over";
   }
   drawSweep(maskCtx, maskAtlas, points, style.lineWidth, minX, minY, true);
-  applyDocumentGrain(maskCtx, minX, minY, width, height, brush.dynamics);
+  applyDocumentGrain(
+    maskCtx,
+    minX,
+    minY,
+    width,
+    height,
+    brush.dynamics,
+    averagePressure(points),
+  );
   inkCtx.globalCompositeOperation = "destination-in";
   inkCtx.drawImage(mask, 0, 0);
   inkCtx.globalCompositeOperation = "source-over";
@@ -371,6 +379,12 @@ function renderSweepRun(
   layer.ctx.globalCompositeOperation = style.compositeOperation;
   layer.ctx.drawImage(ink, minX, minY);
   layer.ctx.restore();
+}
+
+function averagePressure(points: readonly ResolvedSweepPoint[]): number {
+  let total = 0;
+  for (const point of points) total += point.pressure;
+  return points.length > 0 ? total / points.length : 0;
 }
 
 function resolvePointBounds(points: readonly ResolvedSweepPoint[]): {

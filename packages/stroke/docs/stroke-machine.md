@@ -120,7 +120,12 @@ replay（記録済み inputPoints のループ）が**同じ関数を通る**構
 - ストローク終了時に描線が動かない（finalize-by-replay 案はこの点で棄却、レビュー質疑参照）
 - 影響: 過去に保存されたドキュメントの再構築結果が1回だけ AA 縁レベルで変わる（承認事項）。
   rebuild コストは live 実描画と同オーダー
-- move(point) は**単一点 feed を canonical** とする（coalesced events は呼び出し側で1点ずつ渡す）
+- `moveMany(points)` はcoalesced inputのcanonicalな受け口である。batch内のfilter/session更新は
+  点順を維持する。通常ブラシは従来どおり1点単位で確定描画し、Rough bristleだけは呼び出し側の
+  pointer event境界に依存しないよう、timestamp 32msまたは累積移動距離1.5B（B=brush幅）の
+  決定的な境界でまとめて描画する。`move(point)` は単一点batchの便宜APIとする。
+- UI統合層は高密度入力を欠落させず、1 pointer eventの採用点を1 batchとして渡す。
+  pointerupは最後のbatchまで同期的に受理してからendする。履歴には展開済みの全採用点を保存する。
 
 ## テスト計画（Phase 3 で実装）
 

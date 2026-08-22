@@ -29,6 +29,7 @@ interface PaintCanvasProps {
   onRotate?: (angleRad: number, centerX: number, centerY: number) => void;
   onStrokeStart?: (point: InputPoint) => void;
   onStrokeMove?: (point: InputPoint) => void;
+  onStrokeMoves?: (points: readonly InputPoint[]) => void;
   onStrokeEnd?: () => void;
   onTouchPointerEvent?: (e: React.PointerEvent) => void;
   onWrapShift?: (dx: number, dy: number) => void;
@@ -54,6 +55,7 @@ export function PaintCanvas({
   onRotate,
   onStrokeStart,
   onStrokeMove,
+  onStrokeMoves,
   onStrokeEnd,
   onTouchPointerEvent,
   onWrapShift,
@@ -184,6 +186,7 @@ export function PaintCanvas({
     onRotate,
     onStrokeStart,
     onStrokeMove,
+    onStrokeMoves,
     onStrokeEnd,
     onWrapShift,
     onWrapShiftEnd,

@@ -415,7 +415,7 @@ export const ROUGH_BRISTLE: BristleBrushConfig = {
   pressureDynamics: DEFAULT_BRISTLE_PRESSURE_DYNAMICS,
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
-    enabled: true,
+    enabled: false,
   },
 };
 

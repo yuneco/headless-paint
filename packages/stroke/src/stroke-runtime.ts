@@ -2,6 +2,7 @@ import {
   clearLayer,
   compileExpand,
   createLayer,
+  isBrushMixingActive,
   renderPendingLayer,
   timeSpacingMsFromRate,
 } from "@headless-paint/engine";
@@ -57,6 +58,7 @@ export interface StrokeRuntimeDeps {
 export interface StrokeRuntime {
   start(point: InputPoint, config: StrokeStartConfig): void;
   move(point: InputPoint): void;
+  moveMany(points: readonly InputPoint[]): void;
   confirm(): void;
   end(): void;
   cancel(): void;
@@ -130,10 +132,16 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       pendingStart = null;
     },
     move(point) {
+      runtime.moveMany([point]);
+    },
+    moveMany(points) {
       if (disposed || machine.phase !== "active" || !strokeSession) return;
-      feedPoint(point);
-      const result = transition({ type: "move" });
-      executeEffects(result.effects, "move");
+      let lastResult: ReturnType<typeof transition> | null = null;
+      for (const point of points) {
+        feedPoint(point);
+        lastResult = transition({ type: "move" });
+      }
+      if (lastResult) executeEffects(lastResult.effects, "move");
     },
     confirm() {
       if (disposed) return;
@@ -301,12 +309,9 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
 
   function feedPendingRendererPoints(): void {
     if (!renderer) return;
-    while (rendererFedPointCount < inputPoints.length) {
-      const point = inputPoints[rendererFedPointCount];
-      if (!point) return;
-      renderer.feed(point);
-      rendererFedPointCount++;
-    }
+    if (rendererFedPointCount >= inputPoints.length) return;
+    renderer.feedMany(inputPoints.slice(rendererFedPointCount));
+    rendererFedPointCount = inputPoints.length;
   }
 
   function renderPending(): void {
@@ -421,7 +426,7 @@ function getEmissionIntervalMs(style: StrokeStyle): number | undefined {
 function needsSamplingLayer(style: StrokeStyle): boolean {
   return (
     (style.brush.type === "stamp" || style.brush.type === "bristle") &&
-    !!style.brush.mixing?.enabled
+    isBrushMixingActive(style.brush.mixing)
   );
 }
 

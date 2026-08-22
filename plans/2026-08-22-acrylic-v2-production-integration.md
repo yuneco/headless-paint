@@ -216,8 +216,19 @@ Gate: Lab referenceに対する構造的な官能一致、incremental/replay par
 - 反復接触は追加pigment canvasを持たず、決定的な低接触floorを面掠れと紙目へ残してsource-overで蓄積する。Labの高コストなper-pixel packed stateは移植しなかった
 - bristle pendingはengineで常にno-opとし、汎用input plugin `causal-adaptive`を製品デモのAcrylic / Rough bristleへ適用した。各入力を即時確定し、低速の微細な揺れだけを過去情報で抑える
 - Live / replay、Undo、RedoをRough bristle + mixingでピクセル完全一致させた。保存形式は全bristle propertyを必須検証し、欠落・範囲外を黙って丸めない
-- 50px、384点のローカルWebKit同期入力ベンチはsample p50 `12.1ms`、p95 `16.9ms`、後半/前半比 `0.95`。絶対値は合成的な1入力1同期callなのでFPS換算せず、時間軸劣化がないことをgateとした
+- 50px、384点のローカルWebKit同期入力ベンチはsample p50 `12.1ms`、p95 `16.9ms`、後半/前半比 `0.95`だったが、これはLabの実入力fixtureと同じgateではなかった。さらにLab COMBは混色を含まず、production presetの混色ONと比較していたため、統合性能の根拠には使わない
 - 初期版は不透明paint専用。chunkの小さな重なりで継ぎ目を防ぐため、半透明paintでは重なり濃度を保証しない。iPad 30fpsとズームアウト高速操作はP4/P5の統合官能gateで確認する
+
+#### P3 performance re-audit (2026-08-22)
+
+- Labでユーザーが採取した461 accepted points / 65 pointer batches / 約1918msのfixtureを比較基準に固定した
+- Labのframe-budgeted COMBはWebKit p50 / p95 `12 / 15ms`。対象は毛束形状・面掠れ・紙目・反復接触で、色混ぜは含まない
+- productionは代表pointer eventだけなら混色OFFでp95 `7ms`だが、coalesced実入力を捨てるため急曲線を直線で短絡し、見た目のgateを満たさない
+- Rough bristleの既定値は混色OFFとする。`pickupRatePerPx <= 0`もmaterial stage全体のno-opとし、restore / diffusionだけで高コスト経路へ入らない。ハケ混色の追加最適化は非混色経路がLab同等になった後の別gateとする
+- React入力境界からstroke runtimeまで`getCoalescedEvents()`の全採用点をbatchで渡す。bristle rendererはpointer event境界ではなく、入力時刻32msまたは累積移動距離1.5B（B=brush幅）で決定的にflushする。caller batchを変えてもlive/replayの出力pixelが一致するテストを追加した
+- Lab Roughのtextureは外部画像ではなく、`scalePx=4 / amount=0.85 / hardness=0.82 / seed=1`のprocedural Fine tooth（2周波value noise）だった。同じ式をdocument座標固定のsurface grainとして移植したため追加ライセンスはない。TEX-03で収集した外部CC0画像はRoughのLab referenceではないためproductionへ混入させない
+- Fine toothの高さ場はseed / scale単位で共有し、筆圧16段階では接触maskだけを再計算する。固定fixtureの最終WebKitはCall p50 / p95 `6 / 15ms`、batch wall p50 / p95 `5 / 15ms`、61 engine callsでLab p95と同等。max `78ms`は最初の毛束・紙目resource生成を含むcold spikeとして残る
+- 固定fixtureの画像ではcoalesced input欠落時の急曲線短絡が消え、低接触部の細かな紙目欠け、高筆圧部のベタ着彩、交差の連続性を同時に維持した。最終的な色・zoomを含む官能判断はproduction webの実機gateへ渡す
 
 ### P4 — Web integration and combined sensory gate
 
@@ -256,7 +267,7 @@ Gate: API、保守性、module boundary、dependency direction、docs、determin
 
 - `pnpm typecheck`: pass
 - `pnpm -r build`: pass（7 workspace projects）
-- `pnpm test`: 37 files / 460 tests pass
+- `pnpm test`: 39 files / 466 tests pass
 - `pnpm lint`: pass
 - 新しい公開型はbrush-local material / bristle parameterだけを表し、Canvas backendやLab variantを露出していない
 - `input`の`causal-adaptive`はbrushを知らず、`stroke`はmaterial / bristle内部stateを解釈せず、描画stateは`engine`へ閉じている

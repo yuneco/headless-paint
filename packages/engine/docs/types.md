@@ -772,7 +772,10 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 
 `bristleCount` は概念上の細い毛束数、`bristleFill` は平均毛束幅、2つのvariationは幅と配置の不均一さを表す。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`transverseMaskCellPx`、`dropoutLengthPx`、`dropoutWidthPx` は毛束数から独立した面掠れ場の解像度と相関長を定める。
 
-`depositHardness` と `edgeTexture*` は着彩/無着彩境界、`surfaceGrain` はdocument座標へ固定した紙目、`repeatStrength` は同じ場所へ再接触したときに隙間が埋まる強さを表す。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
+`depositHardness` と `edgeTexture*` は着彩/無着彩境界、`surfaceGrain` はdocument座標へ固定した
+Fine tooth（細かな紙目）、`repeatStrength` は同じ場所へ再接触したときに隙間が埋まる強さを表す。
+Fine toothは2周波のvalue noiseを合成し、描画chunkの平均筆圧を16段階へ量子化したcontactで凹凸への
+接触率を変える。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
 
 初期版は不透明またはほぼ不透明なpaintを対象とする。掃引chunk間の重なりはこの契約の下で継ぎ目を防ぐために使い、半透明paintの厳密な重なり濃度は保証しない。pending描画は常にno-opで、確定描画だけを表示する。
 
@@ -842,7 +845,7 @@ const BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX = 256;
 | `fieldColumns` | `number` | tip-local色場の進行方向解像度 |
 | `fieldRows` | `number` | tip-local色場の横断方向解像度 |
 
-ratesは0以上、距離は正の有限数、field解像度は2〜64の整数、checkpoint距離は256px以下を有効範囲とする。永続化境界では範囲外を暗黙に丸めずrejectする。
+ratesは0以上、距離は正の有限数、field解像度は2〜64の整数、checkpoint距離は256px以下を有効範囲とする。永続化境界では範囲外を暗黙に丸めずrejectする。`pickupRatePerPx <= 0`ではstroke中に色場が元色から変化しないため、restore / diffusionの値にかかわらず混色stage全体をno-opとする。
 
 **関連定数**:
 

@@ -1,4 +1,5 @@
 import type { BristleDynamics } from "../types";
+import { hashSeed } from "./prng";
 
 export interface BristleMaskSample {
   readonly pressure: number;
@@ -9,9 +10,11 @@ const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
 >();
-const GRAIN_CACHE_LIMIT = 16;
+const GRAIN_CACHE_LIMIT = 32;
+const GRAIN_HEIGHT_CACHE_LIMIT = 8;
 const GRAIN_TILE_SIZE = 128;
 const grainCache = new Map<string, OffscreenCanvas>();
+const grainHeightCache = new Map<string, Float32Array<ArrayBuffer>>();
 
 export function createBristleMaskAtlas(
   samples: readonly BristleMaskSample[],
@@ -89,9 +92,10 @@ export function applyDocumentGrain(
   width: number,
   height: number,
   dynamics: BristleDynamics,
+  pressure: number,
 ): void {
   if (dynamics.surfaceGrain.amount <= 0) return;
-  const tile = getGrainTile(dynamics);
+  const tile = getGrainTile(dynamics, pressure);
   const pattern = ctx.createPattern(tile, "repeat");
   if (!pattern)
     throw new Error("Failed to create bristle surface grain pattern");
@@ -103,14 +107,19 @@ export function applyDocumentGrain(
   ctx.restore();
 }
 
-function getGrainTile(dynamics: BristleDynamics): OffscreenCanvas {
+function getGrainTile(
+  dynamics: BristleDynamics,
+  pressure: number,
+): OffscreenCanvas {
   const grain = dynamics.surfaceGrain;
+  const contact = Math.round(clamp(pressure, 0, 1) * 16) / 16;
   const key = [
     grain.seed,
     grain.scalePx,
     grain.amount,
     grain.hardness,
     dynamics.repeatStrength,
+    contact,
   ].join(":");
   const cached = grainCache.get(key);
   if (cached) return cached;
@@ -120,23 +129,19 @@ function getGrainTile(dynamics: BristleDynamics): OffscreenCanvas {
   const image = ctx.createImageData(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
   const data = image.data;
   const amount = clamp(grain.amount, 0, 1);
-  const transition = 0.03 + (1 - clamp(grain.hardness, 0, 1)) * 0.3;
+  const softness = 0.01 + (1 - clamp(grain.hardness, 0, 1)) * 0.24;
   const valleyFloor = clamp(dynamics.repeatStrength, 0, 1) * 0.08;
-  const scale = Math.max(0.5, grain.scalePx);
+  const heights = getFineToothHeightTile(grain.seed, grain.scalePx);
   for (let y = 0; y < GRAIN_TILE_SIZE; y++) {
     for (let x = 0; x < GRAIN_TILE_SIZE; x++) {
-      const base = valueNoise2d(x / scale, y / scale, grain.seed);
-      const fibers = valueNoise2d(
-        x / (scale * 0.45),
-        y / (scale * 1.9),
-        grain.seed ^ 0x9e3779b9,
+      const pixelIndex = y * GRAIN_TILE_SIZE + x;
+      const height = heights[pixelIndex] ?? 0;
+      const grainCoverage = smoothstep(
+        (contact - height + softness) / (softness * 2),
       );
-      const contact = smoothstep(
-        (base * 0.75 + fibers * 0.25 - 0.42) / transition,
-      );
-      const textured = valleyFloor + (1 - valleyFloor) * contact;
+      const textured = valleyFloor + (1 - valleyFloor) * grainCoverage;
       const alpha = Math.round((1 - amount + amount * textured) * 255);
-      const offset = (y * GRAIN_TILE_SIZE + x) * 4;
+      const offset = pixelIndex * 4;
       data[offset] = 255;
       data[offset + 1] = 255;
       data[offset + 2] = 255;
@@ -150,6 +155,54 @@ function getGrainTile(dynamics: BristleDynamics): OffscreenCanvas {
     if (oldest !== undefined) grainCache.delete(oldest);
   }
   return canvas;
+}
+
+function getFineToothHeightTile(
+  seed: number,
+  scalePx: number,
+): Float32Array<ArrayBuffer> {
+  const scale = Math.max(0.5, scalePx);
+  const key = `${seed}:${scale}`;
+  const cached = grainHeightCache.get(key);
+  if (cached) return cached;
+
+  const heights = new Float32Array(GRAIN_TILE_SIZE * GRAIN_TILE_SIZE);
+  for (let y = 0; y < GRAIN_TILE_SIZE; y++) {
+    for (let x = 0; x < GRAIN_TILE_SIZE; x++) {
+      const sx = x / scale;
+      const sy = y / scale;
+      heights[y * GRAIN_TILE_SIZE + x] = clamp(
+        fineToothNoise2d(sx, sy, seed) * 0.68 +
+          fineToothNoise2d(sx * 2.3, sy * 2.3, seed + 17) * 0.32,
+        0,
+        1,
+      );
+    }
+  }
+  grainHeightCache.set(key, heights);
+  if (grainHeightCache.size > GRAIN_HEIGHT_CACHE_LIMIT) {
+    const oldest = grainHeightCache.keys().next().value;
+    if (oldest !== undefined) grainHeightCache.delete(oldest);
+  }
+  return heights;
+}
+
+function fineToothNoise2d(x: number, y: number, seed: number): number {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = smoothstep(x - x0);
+  const ty = smoothstep(y - y0);
+  const top =
+    fineToothHash(seed, x0, y0) * (1 - tx) +
+    fineToothHash(seed, x0 + 1, y0) * tx;
+  const bottom =
+    fineToothHash(seed, x0, y0 + 1) * (1 - tx) +
+    fineToothHash(seed, x0 + 1, y0 + 1) * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
+function fineToothHash(seed: number, x: number, y: number): number {
+  return hashSeed(hashSeed(seed, x), y) / 0x100000000;
 }
 
 function activationFromDistance(distance: number, hardness: number): number {
