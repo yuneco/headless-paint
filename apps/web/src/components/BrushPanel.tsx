@@ -1,10 +1,4 @@
-import type {
-  BrushConfig,
-  BrushTipConfig,
-  BrushTipRegistry,
-  SprayBrushConfig,
-  StampBrushConfig,
-} from "@headless-paint/engine";
+import type { BrushConfig, BrushTipRegistry } from "@headless-paint/engine";
 import { DEFAULT_BRUSH_MIXING, generateBrushTip } from "@headless-paint/engine";
 import { memo, useEffect, useRef } from "react";
 import { APP_BRUSH_PRESETS } from "../brush-presets";
@@ -16,81 +10,27 @@ interface BrushPanelProps {
   readonly registryReady: boolean;
 }
 
-function isSameTip(a: BrushTipConfig, b: BrushTipConfig): boolean {
-  if (a.type === "circle" && b.type === "circle") {
-    return a.hardness === b.hardness;
-  }
-  if (a.type === "image" && b.type === "image") {
-    return a.imageId === b.imageId;
-  }
-  return false;
+function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
+  return areConfigValuesEqual(a, b);
 }
 
-function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
-  if (a.type !== b.type) return false;
-  if (a.type === "round-pen" && b.type === "round-pen") {
-    return (
-      a.pressureDynamics.size === b.pressureDynamics.size &&
-      a.pressureDynamics.flow === b.pressureDynamics.flow
-    );
+function areConfigValuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || a === null) return false;
+  if (typeof b !== "object" || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((value, index) => areConfigValuesEqual(value, b[index]));
   }
-  if (a.type === "spray" && b.type === "spray") {
-    const sa = a as SprayBrushConfig;
-    const sb = b as SprayBrushConfig;
-    return (
-      isSameTip(sa.particle, sb.particle) &&
-      sa.dynamics.spacing === sb.dynamics.spacing &&
-      sa.dynamics.density === sb.dynamics.density &&
-      sa.dynamics.particleSize === sb.dynamics.particleSize &&
-      sa.dynamics.particleSizeJitter === sb.dynamics.particleSizeJitter &&
-      sa.dynamics.sizeJitterMode === sb.dynamics.sizeJitterMode &&
-      sa.dynamics.opacityJitter === sb.dynamics.opacityJitter &&
-      sa.dynamics.flow === sb.dynamics.flow &&
-      (sa.dynamics.emissionsPerSecond ?? 0) ===
-        (sb.dynamics.emissionsPerSecond ?? 0) &&
-      sa.dynamics.radialDistribution.startY ===
-        sb.dynamics.radialDistribution.startY &&
-      sa.dynamics.radialDistribution.control1.x ===
-        sb.dynamics.radialDistribution.control1.x &&
-      sa.dynamics.radialDistribution.control1.y ===
-        sb.dynamics.radialDistribution.control1.y &&
-      sa.dynamics.radialDistribution.control2.x ===
-        sb.dynamics.radialDistribution.control2.x &&
-      sa.dynamics.radialDistribution.control2.y ===
-        sb.dynamics.radialDistribution.control2.y &&
-      sa.dynamics.radialDistribution.endY ===
-        sb.dynamics.radialDistribution.endY &&
-      sa.pressureDynamics.size === sb.pressureDynamics.size &&
-      sa.pressureDynamics.flow === sb.pressureDynamics.flow &&
-      sa.pressureDynamics.density === sb.pressureDynamics.density
-    );
-  }
-  const sa = a as StampBrushConfig;
-  const sb = b as StampBrushConfig;
-  return (
-    isSameTip(sa.tip, sb.tip) &&
-    sa.dynamics.spacing === sb.dynamics.spacing &&
-    sa.dynamics.spacingSizeCoupling === sb.dynamics.spacingSizeCoupling &&
-    sa.dynamics.flow === sb.dynamics.flow &&
-    (sa.dynamics.emissionsPerSecond ?? 0) ===
-      (sb.dynamics.emissionsPerSecond ?? 0) &&
-    sa.pressureDynamics.size === sb.pressureDynamics.size &&
-    sa.pressureDynamics.flow === sb.pressureDynamics.flow &&
-    (sa.mixing?.enabled ?? false) === (sb.mixing?.enabled ?? false) &&
-    (sa.mixing?.pickupRatePerPx ?? 0) === (sb.mixing?.pickupRatePerPx ?? 0) &&
-    (sa.mixing?.restoreRatePerPx ?? 0) === (sb.mixing?.restoreRatePerPx ?? 0) &&
-    (sa.mixing?.diffusionRatePerPx ?? 0) ===
-      (sb.mixing?.diffusionRatePerPx ?? 0) &&
-    (sa.mixing?.updateDistancePx ?? DEFAULT_BRUSH_MIXING.updateDistancePx) ===
-      (sb.mixing?.updateDistancePx ?? DEFAULT_BRUSH_MIXING.updateDistancePx) &&
-    (sa.mixing?.checkpointDistancePx ??
-      DEFAULT_BRUSH_MIXING.checkpointDistancePx) ===
-      (sb.mixing?.checkpointDistancePx ??
-        DEFAULT_BRUSH_MIXING.checkpointDistancePx) &&
-    (sa.mixing?.fieldColumns ?? DEFAULT_BRUSH_MIXING.fieldColumns) ===
-      (sb.mixing?.fieldColumns ?? DEFAULT_BRUSH_MIXING.fieldColumns) &&
-    (sa.mixing?.fieldRows ?? DEFAULT_BRUSH_MIXING.fieldRows) ===
-      (sb.mixing?.fieldRows ?? DEFAULT_BRUSH_MIXING.fieldRows)
+  const left = a as Readonly<Record<string, unknown>>;
+  const right = b as Readonly<Record<string, unknown>>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every(
+    (key) =>
+      Object.hasOwn(right, key) && areConfigValuesEqual(left[key], right[key]),
   );
 }
 
@@ -124,6 +64,19 @@ function BrushPreviewCanvas({
         Math.PI * 2,
       );
       ctx.fill();
+    } else if (config.type === "bristle") {
+      ctx.strokeStyle = "#333";
+      ctx.lineCap = "round";
+      for (let index = 0; index < 7; index++) {
+        ctx.globalAlpha = 0.55 + (index % 3) * 0.18;
+        ctx.lineWidth = index % 2 === 0 ? 2 : 1;
+        const y = 7 + index * 3;
+        ctx.beginPath();
+        ctx.moveTo(3, y + (index % 2));
+        ctx.quadraticCurveTo(16, y - 4, 29, y + 1);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
     } else {
       const color = { r: 51, g: 51, b: 51, a: 255 };
       try {
@@ -180,9 +133,12 @@ function BrushPanelComponent({
   };
 
   const emissionsPerSecond =
-    brush.type === "round-pen"
+    brush.type === "round-pen" || brush.type === "bristle"
       ? undefined
       : (brush.dynamics.emissionsPerSecond ?? undefined);
+  const usesCausalInput =
+    brush.type === "bristle" ||
+    (brush.type === "stamp" && !!brush.mixing?.enabled);
 
   const updateMixing = (
     field:
@@ -193,7 +149,7 @@ function BrushPanelComponent({
       | "checkpointDistancePx",
     value: number,
   ) => {
-    if (brush.type !== "stamp") return;
+    if (brush.type !== "stamp" && brush.type !== "bristle") return;
     onBrushChange({
       ...brush,
       mixing: {
@@ -206,6 +162,21 @@ function BrushPanelComponent({
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
+      {usesCausalInput && (
+        <div
+          style={{
+            padding: "7px 8px",
+            borderRadius: 4,
+            background: "#f3f6f8",
+            color: "#48515a",
+            fontSize: 11,
+            lineHeight: 1.45,
+          }}
+        >
+          Causal adaptive（過去情報だけの速度適応補正）で入力を即時確定します。
+          このブラシでは共通Smoothingのpending（未来点待ち）は使用しません。
+        </div>
+      )}
       <div
         style={{
           display: "grid",
@@ -248,7 +219,7 @@ function BrushPanelComponent({
         })}
       </div>
 
-      {brush.type !== "round-pen" ? (
+      {brush.type === "stamp" || brush.type === "spray" ? (
         <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <input
@@ -282,7 +253,8 @@ function BrushPanelComponent({
         </div>
       ) : null}
 
-      {brush.type === "stamp" && brush.mixing?.enabled ? (
+      {(brush.type === "stamp" || brush.type === "bristle") &&
+      brush.mixing?.enabled ? (
         <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
           <label style={{ display: "grid", gap: 2 }}>
             <span>

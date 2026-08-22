@@ -4,6 +4,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 発見した課題・改善候補
 
+- **Production web統合後の最終実機gate（2026-08-22）**: Acrylic v2 / Rough bristleは`apps/web`でまとめて評価できる。ローカルWebKit固定入力ではRough p95 `16.1–16.2ms`、late / early `0.94–0.96`、Acrylic late / early `0.61–0.80`で時間軸劣化なし。残件はiPad Safariで長時間stroke、描画直後UI、tab安定性、25〜100% zoom高速操作を官能確認すること。webのCall metricは同期engine callbackだけで非同期GPU完了を含まない。
 - **Acrylic v2の新混色経路はWebKitで時間軸劣化なし（2026-08-22）**: production `apps/web`で576点の連続strokeを3回測定し、後半/前半の処理比は`0.96 / 0.86 / 1.03`、描画後preset切替は`42–78ms`だった。Playwrightが各点を同期送信するため絶対値はFPS gateに使えないが、旧CPU tip更新で見られた数秒後の桁違いの失速は再現しなかった。新方式は18x8のbrush-local連続色場と有限checkpoint tileだけを更新する。iPad実機の長時間stroke・描画直後UI・タブ安定性は最終統合時にも確認する。
 - **Mixing / bristleのpendingはengine-level no-opに固定（2026-08-22）**: 色場・毛束状態と確定canvasの因果順序をrollback可能なpendingへ含める複雑性を避けた。汎用input pluginとして`causal-adaptive`（過去情報だけを使う速度・急旋回適応補正）を追加し、`apps/web`ではAcrylic v2とRough bristleへ標準適用する。他ブラシの既存smoothing設定は変えない。
 - **Rough bristle production初期版は不透明paintを対象とする（2026-08-22）**: 連続掃引chunkは小さく重ねて継ぎ目を防ぐため、半透明paintでは重なり濃度が見える可能性がある。反復接触は追加pigment canvasを持たず、面掠れ・document grainの低接触floorをsource-overで蓄積する簡素なモデル。半透明対応や厳密な顔料厚は必要性を再評価してから別設計にする。
@@ -12,7 +13,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 - **React `useStrokeSession` の旧 `StrokeCompleteData.totalPoints` は runtime command から厳密復元しにくい**: WS5 で hook を `createStrokeRuntime` の薄いラッパーにした結果、runtime の commit 出力は `StrokeCommand` のみになった。既存利用は `totalPoints < 1` のガード用途のため `inputPoints.length` で互換維持したが、フィルタ後の確定点数を public IF として残す必要があるなら runtime 側の commit payload 拡張を検討する（2026-07-05 WS5）。
 - **デモUIの Line Width 上限が 50（lil-gui スライダー）**: spray は直径256px クラスの利用が想定されるが、デモUIでは試せない。上限拡大またはブラシ種別ごとの上限設定を検討したい（2026-07-03 spray 実装時に発見）。
 - **spray は小径だと粒子が極端に疎**: 仕様通り（密度が面積連動）だが、lineWidth 12 程度では 1 emission あたり粒子 1 個未満になりほぼ見えない。UX として小径時の密度下駄やプリセット側の density 引き上げを検討する余地がある。
-- **BrushPanel の `isSameBrush` は手書きフィールド比較**: フィールド追加のたびに漏れが出やすい（今回 codex review で particle 比較漏れを検出・修正）。ブラシ設定の構造比較ユーティリティ化を検討。
+- **BrushPanelの設定同値比較を構造比較へ変更（2026-08-22）**: Bristle / Mixing追加時に手書きfield比較の漏れが再発したため、plain config全体の再帰的な同値比較へ置換した。今後BrushConfigへfieldを追加してもpreset選択表示のための列挙更新は不要。
 
 ## 中期的に行うべき作業
 

@@ -1,4 +1,5 @@
 import {
+  type BrushConfig,
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_PRESSURE_DYNAMICS,
   DEFAULT_SPRAY_DYNAMICS,
@@ -37,6 +38,12 @@ interface DebugPanelProps {
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 const PATTERN_MODES: PatternMode[] = ["none", "grid", "repeat-x", "repeat-y"];
 const SIZE_JITTER_MODES = ["lognormal", "bimodal"] as const;
+
+function getPrimaryPressureResponse(brush: BrushConfig): number {
+  return brush.type === "bristle"
+    ? brush.pressureDynamics.coverage
+    : brush.pressureDynamics.size;
+}
 
 function DebugPanelComponent({
   transform,
@@ -83,7 +90,7 @@ function DebugPanelComponent({
 
   const penDataRef = useRef({
     lineWidth: penSettings.lineWidth,
-    sizePressure: penSettings.brush.pressureDynamics.size,
+    pressureResponse: getPrimaryPressureResponse(penSettings.brush),
   });
 
   const brushDynamics =
@@ -97,7 +104,10 @@ function DebugPanelComponent({
     sizeJitter: brushDynamics.sizeJitter,
     rotationJitter: brushDynamics.rotationJitter,
     scatter: brushDynamics.scatter,
-    flowPressure: penSettings.brush.pressureDynamics.flow,
+    flowPressure:
+      penSettings.brush.type === "stamp"
+        ? penSettings.brush.pressureDynamics.flow
+        : DEFAULT_PRESSURE_DYNAMICS.flow,
   });
 
   const sprayDynamics =
@@ -319,11 +329,15 @@ function DebugPanelComponent({
         });
 
       penFolder
-        .add(penDataRef.current, "sizePressure", 0, 1, 0.05)
-        .name("Size Pressure")
+        .add(penDataRef.current, "pressureResponse", 0, 1, 0.05)
+        .name("Pressure Response")
         .listen()
         .onChange((value: number) => {
           const ps = penSettingsRef.current;
+          if (ps.brush.type === "bristle") {
+            ps.setBrushPressureDynamics({ coverage: value });
+            return;
+          }
           ps.setBrushPressureDynamics({
             ...ps.brush.pressureDynamics,
             size: value,
@@ -612,8 +626,10 @@ function DebugPanelComponent({
 
   useEffect(() => {
     penDataRef.current.lineWidth = penSettings.lineWidth;
-    penDataRef.current.sizePressure = penSettings.brush.pressureDynamics.size;
-  }, [penSettings.lineWidth, penSettings.brush.pressureDynamics.size]);
+    penDataRef.current.pressureResponse = getPrimaryPressureResponse(
+      penSettings.brush,
+    );
+  }, [penSettings.lineWidth, penSettings.brush]);
 
   useEffect(() => {
     const d =

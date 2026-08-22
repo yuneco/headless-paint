@@ -3,7 +3,10 @@ import {
   createBrushTipRegistry,
 } from "@headless-paint/engine";
 import type { BackgroundSettings } from "@headless-paint/engine";
-import { createViewTransform } from "@headless-paint/input";
+import {
+  compileFilterPipeline,
+  createViewTransform,
+} from "@headless-paint/input";
 import type { InputPoint } from "@headless-paint/input";
 import {
   type PaintSettingsSnapshot,
@@ -30,6 +33,7 @@ import { TransformOverlay } from "./components/TransformOverlay";
 import { DEFAULT_PEN_CONFIG, DEFAULT_SMOOTHING_CONFIG } from "./config";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePatternPreview } from "./hooks/usePatternPreview";
+import { useStrokeCallMetrics } from "./hooks/useStrokeCallMetrics";
 import { useTransformMode } from "./hooks/useTransformMode";
 
 const LAYER_WIDTH = 1024 * 2;
@@ -141,6 +145,18 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
       restoredSettings?.smoothing.windowSize ??
       DEFAULT_SMOOTHING_CONFIG.initialWindowSize,
   });
+  const usesStatefulMaterial =
+    penSettings.brush.type === "bristle" ||
+    (penSettings.brush.type === "stamp" && !!penSettings.brush.mixing?.enabled);
+  const effectiveFilterPipeline = useMemo(
+    () =>
+      usesStatefulMaterial
+        ? compileFilterPipeline({
+            filters: [{ type: "causal-adaptive", config: {} }],
+          })
+        : smoothing.compiledFilterPipeline,
+    [smoothing.compiledFilterPipeline, usesStatefulMaterial],
+  );
   const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
   const patternPreview = usePatternPreview();
 
@@ -149,11 +165,33 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     layerWidth: LAYER_WIDTH,
     layerHeight: LAYER_HEIGHT,
     strokeStyle: penSettings.strokeStyle,
-    compiledFilterPipeline: smoothing.compiledFilterPipeline,
+    compiledFilterPipeline: effectiveFilterPipeline,
     expandConfig: expand.config,
     compiledExpand: expand.compiled,
     registry: registryRef.current,
   });
+  const {
+    metrics: strokeCallMetrics,
+    measure: measureStrokeCall,
+    flush: flushStrokeCallMetrics,
+    reset: resetStrokeCallMetrics,
+  } = useStrokeCallMetrics();
+  const handleMeasuredStrokeMove = useCallback(
+    (point: InputPoint) => {
+      measureStrokeCall(() => engine.onStrokeMove(point));
+    },
+    [engine.onStrokeMove, measureStrokeCall],
+  );
+  const handleMeasuredTouchStrokeStart = useCallback(
+    (point: InputPoint) => {
+      measureStrokeCall(() => engine.onStrokeStart(point));
+    },
+    [engine.onStrokeStart, measureStrokeCall],
+  );
+  const handleMeasuredStrokeEnd = useCallback(() => {
+    measureStrokeCall(engine.onStrokeEnd);
+    flushStrokeCallMetrics();
+  }, [engine.onStrokeEnd, flushStrokeCallMetrics, measureStrokeCall]);
 
   const [background, setBackground] = useState<BackgroundSettings>({
     color: restoredSettings?.background.color ?? DEFAULT_BACKGROUND_COLOR,
@@ -282,9 +320,9 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   // タッチジェスチャー
   const touchGesture = useTouchGesture({
     transform,
-    onStrokeStart: engine.canDraw ? engine.onStrokeStart : undefined,
-    onStrokeMove: engine.canDraw ? engine.onStrokeMove : undefined,
-    onStrokeEnd: engine.canDraw ? engine.onStrokeEnd : undefined,
+    onStrokeStart: engine.canDraw ? handleMeasuredTouchStrokeStart : undefined,
+    onStrokeMove: engine.canDraw ? handleMeasuredStrokeMove : undefined,
+    onStrokeEnd: engine.canDraw ? handleMeasuredStrokeEnd : undefined,
     onDrawConfirm: engine.onDrawConfirm,
     onDrawCancel: engine.onDrawCancel,
     onSetTransform: handleSetTransform,
@@ -310,9 +348,11 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   // Shift+ドラッグで直線モード
   const handleStrokeStart = useCallback(
     (point: InputPoint) => {
-      engine.onStrokeStart(point, { straightLine: shiftHeld.current });
+      measureStrokeCall(() =>
+        engine.onStrokeStart(point, { straightLine: shiftHeld.current }),
+      );
     },
-    [engine.onStrokeStart, shiftHeld],
+    [engine.onStrokeStart, measureStrokeCall, shiftHeld],
   );
 
   const strokeCount = engine.historyState.currentIndex + 1;
@@ -348,10 +388,14 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
           !isTransformLocked && engine.canDraw ? handleStrokeStart : undefined
         }
         onStrokeMove={
-          !isTransformLocked && engine.canDraw ? engine.onStrokeMove : undefined
+          !isTransformLocked && engine.canDraw
+            ? handleMeasuredStrokeMove
+            : undefined
         }
         onStrokeEnd={
-          !isTransformLocked && engine.canDraw ? engine.onStrokeEnd : undefined
+          !isTransformLocked && engine.canDraw
+            ? handleMeasuredStrokeEnd
+            : undefined
         }
         onTouchPointerEvent={
           !isTransformLocked ? touchGesture.handlePointerEvent : undefined
@@ -432,6 +476,8 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         onBrushChange={penSettings.setBrush}
         registry={registryRef.current}
         registryReady={registryReady}
+        strokeCallMetrics={strokeCallMetrics}
+        onResetStrokeCallMetrics={resetStrokeCallMetrics}
         entries={engine.entries}
         activeLayerId={engine.activeLayerId}
         background={background}

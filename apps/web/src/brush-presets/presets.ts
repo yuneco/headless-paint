@@ -4,6 +4,7 @@ import {
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_DYNAMICS,
+  ROUGH_BRISTLE,
   ROUND_PEN,
   SPRAY_AIRBRUSH,
 } from "@headless-paint/engine";
@@ -71,5 +72,6 @@ export const APP_BRUSH_PRESETS: readonly BrushPresetEntry[] = [
   { label: "Spray", config: SPRAY_AIRBRUSH },
   { label: "Pencil", config: PENCIL_TEXTURED },
   { label: "Acrylic", config: ACRYLIC },
+  { label: "Rough bristle", config: ROUGH_BRISTLE },
   { label: "Star", config: STAR_SCATTER },
 ];

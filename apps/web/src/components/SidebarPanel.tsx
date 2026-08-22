@@ -8,7 +8,9 @@ import type { ViewTransform } from "@headless-paint/input";
 import type { LayerEntry } from "@headless-paint/react";
 import type { HistoryState } from "@headless-paint/stroke";
 import { memo } from "react";
+import type { StrokeCallMetrics } from "../hooks/useStrokeCallMetrics";
 import { AccordionPanel } from "./AccordionPanel";
+import { BrushEvaluationPanel } from "./BrushEvaluationPanel";
 import { BrushPanel } from "./BrushPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";
 import { LayerPanel } from "./LayerPanel";
@@ -30,6 +32,8 @@ interface SidebarPanelProps {
   onBrushChange: (brush: BrushConfig) => void;
   registry: BrushTipRegistry;
   registryReady: boolean;
+  strokeCallMetrics: StrokeCallMetrics;
+  onResetStrokeCallMetrics: () => void;
   // Layer panel props
   entries: readonly LayerEntry[];
   activeLayerId: string | null;
@@ -108,6 +112,33 @@ const BrushSection = memo(function BrushSection({
         onBrushChange={onBrushChange}
         registry={registry}
         registryReady={registryReady}
+      />
+    </AccordionPanel>
+  );
+});
+
+interface EvaluationSectionProps {
+  readonly brush: BrushConfig;
+  readonly metrics: StrokeCallMetrics;
+  readonly onResetMetrics: () => void;
+}
+
+const EvaluationSection = memo(function EvaluationSection({
+  brush,
+  metrics,
+  onResetMetrics,
+}: EvaluationSectionProps) {
+  return (
+    <AccordionPanel
+      title="Material brush evaluation"
+      defaultExpanded={false}
+      isFirst={false}
+      isLast={false}
+    >
+      <BrushEvaluationPanel
+        brush={brush}
+        metrics={metrics}
+        onResetMetrics={onResetMetrics}
       />
     </AccordionPanel>
   );
@@ -236,6 +267,8 @@ function SidebarPanelComponent({
   onBrushChange,
   registry,
   registryReady,
+  strokeCallMetrics,
+  onResetStrokeCallMetrics,
   entries,
   activeLayerId,
   background,
@@ -261,6 +294,10 @@ function SidebarPanelComponent({
         top: 16,
         left: 16,
         width: 280,
+        maxHeight: "calc(100vh - 32px)",
+        overflowY: "auto",
+        overscrollBehavior: "contain",
+        WebkitOverflowScrolling: "touch",
       }}
     >
       <MinimapSection
@@ -275,6 +312,11 @@ function SidebarPanelComponent({
         onBrushChange={onBrushChange}
         registry={registry}
         registryReady={registryReady}
+      />
+      <EvaluationSection
+        brush={brush}
+        metrics={strokeCallMetrics}
+        onResetMetrics={onResetStrokeCallMetrics}
       />
       <LayersSection
         entries={entries}

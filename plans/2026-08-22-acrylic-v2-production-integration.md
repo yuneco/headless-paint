@@ -7,7 +7,7 @@
 - Lab reference: `experiment/acrylic-lab@4f5a1cd`
 - Sensory result: Simple acrylic / MIX、Rough bristle / COMB、Organic sponge / TEXはいずれも候補として合格
 - Production priority: Acrylic v2とRough bristleを先行し、Organic spongeは後回し
-- Progress: P0〜P3実装・ローカルWebKit gate完了、P4実装中（2026-08-22）
+- Progress: P0〜P4実装・ローカル検収完了。P5のiPad実機総合官能gate待ち（2026-08-22）
 
 この計画はLabの比較実装を移植する計画ではない。Labで選んだ表現だけを、productionの`input → stroke → engine → react/web`境界へ再設計して組み込む。
 
@@ -228,6 +228,18 @@ Gate: Lab referenceに対する構造的な官能一致、incremental/replay par
 
 Gate: ユーザーがwebデモだけでまとめて官能評価できる。
 
+#### P4 implementation result (2026-08-22)
+
+- 既存`apps/web`のAcrylicをv2設定へ置換し、Rough bristleを新presetとして追加した。Lab componentや比較backendへの依存はない
+- mixing Stamp / Bristle選択時だけ、汎用`causal-adaptive` input pipelineへ切り替える。共通Smoothing設定は保持するが、この2系統ではpendingを使わず各入力を即時確定する
+- Brush panelへ混色rate / update distance / checkpointの調整を統合し、追加fieldを手書き比較し続けない再帰的な設定同値比較へ置換した
+- 左sidebarを独立scroll領域にし、Acrylicの境界・spot・往復とRoughのS字・8の字・高速zoom操作を案内する折り畳み評価panelを追加した
+- 評価panelのCall p50 / p95 / maxは同期engine callback時間だけを最大240sampleで表示する。500msごととstroke終端だけpublishし、計測UI自身のReact再描画をstrokeごとに増やさない。Canvas合成や非同期GPU完了は含まないため実機官能gateの代替にはしない
+- ローカルWebKitのRough 50px / 384点固定入力は、最終2runでsample p95 `16.1 / 16.2ms`、後半/前半比 `0.94 / 0.96`。Undoでcanvasが変化し、Redo後はdata URL完全一致、reload後もRough設定を復元した
+- Acrylic 576点連続strokeの最終2runは後半/前半比 `0.80 / 0.61`、描画直後のPen→Acrylic切替は`56 / 52ms`。絶対値は同期Playwright入力のためFPS換算せず、時間経過で悪化しないことだけを確認した
+
+Gate result: production webだけで両brushを描画・調整・Undo / Redo・設定再読込・同期callback計測できる。最終的な書き味、iPad GPU安定性、25% zoom高速操作はユーザー官能評価へ渡す。
+
 ### P5 — Production validation and cleanup
 
 - `pnpm -r build`
@@ -239,6 +251,19 @@ Gate: ユーザーがwebデモだけでまとめて官能評価できる。
 - Lab由来の未使用比較コード・backend・compatibility branchがproductionにないことを監査する
 
 Gate: API、保守性、module boundary、dependency direction、docs、determinism、回帰がセルフレビューで説明可能。
+
+#### P5 local validation result (2026-08-22)
+
+- `pnpm typecheck`: pass
+- `pnpm -r build`: pass（7 workspace projects）
+- `pnpm test`: 37 files / 460 tests pass
+- `pnpm lint`: pass
+- 新しい公開型はbrush-local material / bristle parameterだけを表し、Canvas backendやLab variantを露出していない
+- `input`の`causal-adaptive`はbrushを知らず、`stroke`はmaterial / bristle内部stateを解釈せず、描画stateは`engine`へ閉じている
+- 旧mixing backend、pending clone、backend選択、Lab importはproduction経路に残していない
+- 既存Round pen / 非mixing Stamp / Sprayの回帰、mixing / Bristleのlive-replay、Undo-Redo、persistence errorは自動テストで確認した
+
+残るP5 gateはiPad Safari実機での長時間stroke、描画直後UI、tab安定性、25〜100% zoomの官能評価。Rough bristleの半透明paintは既知のnon-goalであり、このgateへ含めない。
 
 ## Performance and quality metrics
 
