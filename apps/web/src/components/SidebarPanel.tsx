@@ -34,6 +34,7 @@ interface SidebarPanelProps {
   registryReady: boolean;
   strokeCallMetrics: StrokeCallMetrics;
   onResetStrokeCallMetrics: () => void;
+  onDrawBristleSCurve?: () => void;
   // Layer panel props
   entries: readonly LayerEntry[];
   activeLayerId: string | null;
@@ -121,12 +122,14 @@ interface EvaluationSectionProps {
   readonly brush: BrushConfig;
   readonly metrics: StrokeCallMetrics;
   readonly onResetMetrics: () => void;
+  readonly onDrawBristleSCurve?: () => void;
 }
 
 const EvaluationSection = memo(function EvaluationSection({
   brush,
   metrics,
   onResetMetrics,
+  onDrawBristleSCurve,
 }: EvaluationSectionProps) {
   return (
     <AccordionPanel
@@ -139,6 +142,7 @@ const EvaluationSection = memo(function EvaluationSection({
         brush={brush}
         metrics={metrics}
         onResetMetrics={onResetMetrics}
+        onDrawBristleSCurve={onDrawBristleSCurve}
       />
     </AccordionPanel>
   );
@@ -269,6 +273,7 @@ function SidebarPanelComponent({
   registryReady,
   strokeCallMetrics,
   onResetStrokeCallMetrics,
+  onDrawBristleSCurve,
   entries,
   activeLayerId,
   background,
@@ -317,6 +322,7 @@ function SidebarPanelComponent({
         brush={brush}
         metrics={strokeCallMetrics}
         onResetMetrics={onResetStrokeCallMetrics}
+        onDrawBristleSCurve={onDrawBristleSCurve}
       />
       <LayersSection
         entries={entries}

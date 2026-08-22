@@ -25,7 +25,6 @@ function makeBrush(
         ...DEFAULT_BRISTLE_DYNAMICS.surfaceGrain,
         amount: 0,
       },
-      edgeTextureAmount: 0,
       ...overrides,
     },
     pressureDynamics: DEFAULT_BRISTLE_PRESSURE_DYNAMICS,
@@ -58,6 +57,10 @@ function line(pressure: number): readonly StrokePoint[] {
     { x: 140, y: 60, pressure },
     { x: 180, y: 60, pressure },
   ];
+}
+
+function longLine(pressure: number): readonly StrokePoint[] {
+  return [20, 210, 400, 590, 780].map((x) => ({ x, y: 60, pressure }));
 }
 
 function curve(): readonly StrokePoint[] {
@@ -119,17 +122,23 @@ describe("bristle brush", () => {
   });
 
   it("筆圧は外形幅をほぼ維持したまま着彩面積を増やす", () => {
-    const low = createLayer(200, 120);
-    const high = createLayer(200, 120);
-    renderBrushStroke(low, line(0.12), makeStyle(), 0, initialState());
-    renderBrushStroke(high, line(1), makeStyle(), 0, initialState());
+    // 面掠れは確率場なので、短い区間だけでは偶然edge側に着彩cellがない
+    // seedもあり得る。dropoutLengthを十分に跨ぐ代表区間で、名目上の外形を
+    // 縮めずに着彩面積だけが変わることを確認する。
+    const low = createLayer(800, 120);
+    const high = createLayer(800, 120);
+    renderBrushStroke(low, longLine(0.12), makeStyle(), 0, initialState());
+    renderBrushStroke(high, longLine(1), makeStyle(), 0, initialState());
     const lowStats = alphaStats(low);
     const highStats = alphaStats(high);
 
     expect(highStats.sum).toBeGreaterThan(lowStats.sum * 1.35);
     const lowHeight = lowStats.maxY - lowStats.minY;
     const highHeight = highStats.maxY - highStats.minY;
-    expect(Math.abs(highHeight - lowHeight)).toBeLessThanOrEqual(4);
+    expect(
+      Math.abs(highHeight - lowHeight),
+      JSON.stringify({ lowStats, highStats }),
+    ).toBeLessThanOrEqual(4);
   });
 
   it("同じ入力とseedから同じ描画結果を得る", () => {
@@ -186,7 +195,6 @@ describe("bristle brush", () => {
         ...DEFAULT_BRISTLE_DYNAMICS.surfaceGrain,
         amount: 0.85,
       },
-      repeatStrength: 0.75,
     });
     renderBrushStroke(layer, line(0.5), makeStyle(brush), 0, initialState(23));
     const once = alphaStats(layer).sum;

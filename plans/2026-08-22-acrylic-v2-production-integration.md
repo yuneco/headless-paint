@@ -139,7 +139,7 @@ interface BristleBrushConfig {
 }
 ```
 
-公開する`BristleDynamics`は、毛束断面（count / fill / width variation / spacing variation）、連続掃引間隔、毛束数から独立した面掠れの横断cellと縦横相関長、境界hardness / texture、cusp検出 / lag、document-space grain、反復接触強度に限定する。筆圧は`BristlePressureDynamics.coverage`で着彩率だけへ作用し、幅を変えない。初期版は不透明またはほぼ不透明なpaintだけを契約とし、半透明chunk overlapの厳密性は対象外とする。
+公開する`BristleDynamics`は、毛束断面（count / fill / width variation / spacing variation）、連続掃引間隔、毛束数から独立した面掠れの横断cellと縦横相関長、境界hardness / texture、cusp検出 / lag、document-space grainに限定する。筆圧は`BristlePressureDynamics.coverage`で着彩率だけへ作用し、幅を変えない。初期版は不透明またはほぼ不透明なpaintだけを契約とし、半透明chunk overlapの厳密性は対象外とする。
 
 初期production rendererはLabの次の採用部分だけを再構成する。
 
@@ -147,7 +147,7 @@ interface BristleBrushConfig {
 - coarse broad dropout mask
 - document-space surface grain
 - cusp split + short bristle lag
-- 低接触floor + source-over蓄積による軽量なrepeated contact
+- 着彩可能領域内の低alpha紙目をsource-over蓄積する軽量なrepeated contact
 - internal pending OFF
 - bounded incremental work
 
@@ -213,7 +213,7 @@ Gate: Lab referenceに対する構造的な官能一致、incremental/replay par
 
 - `bristle-profile.ts`（決定的な細い毛束断面）、`bristle-mask.ts`（毛束数と独立したstroke-space面掠れ + document-space紙目）、`bristle.ts`（連続掃引・cusp split・短い毛束lag・共通混色）へ責務を分離した
 - 筆圧はbrush幅を変えず面掠れのcoverageへ作用する。混色は毛束ごとのreservoirを持たず、stampと同じ連続RGBA色場を毛束alphaへ適用する
-- 反復接触は追加pigment canvasを持たず、決定的な低接触floorを面掠れと紙目へ残してsource-overで蓄積する。Labの高コストなper-pixel packed stateは移植しなかった
+- 反復接触は追加pigment canvasを持たず、面掠れで着彩可能な領域の低alpha紙目をsource-overで蓄積する。初回の未着彩cellへfloorは加えず、Labの高コストなper-pixel packed stateは移植しなかった
 - bristle pendingはengineで常にno-opとし、汎用input plugin `causal-adaptive`を製品デモのAcrylic / Rough bristleへ適用した。各入力を即時確定し、低速の微細な揺れだけを過去情報で抑える
 - Live / replay、Undo、RedoをRough bristle + mixingでピクセル完全一致させた。保存形式は全bristle propertyを必須検証し、欠落・範囲外を黙って丸めない
 - 50px、384点のローカルWebKit同期入力ベンチはsample p50 `12.1ms`、p95 `16.9ms`、後半/前半比 `0.95`だったが、これはLabの実入力fixtureと同じgateではなかった。さらにLab COMBは混色を含まず、production presetの混色ONと比較していたため、統合性能の根拠には使わない
@@ -229,6 +229,16 @@ Gate: Lab referenceに対する構造的な官能一致、incremental/replay par
 - Lab Roughのtextureは外部画像ではなく、`scalePx=4 / amount=0.85 / hardness=0.82 / seed=1`のprocedural Fine tooth（2周波value noise）だった。同じ式をdocument座標固定のsurface grainとして移植したため追加ライセンスはない。TEX-03で収集した外部CC0画像はRoughのLab referenceではないためproductionへ混入させない
 - Fine toothの高さ場はseed / scale単位で共有し、筆圧16段階では接触maskだけを再計算する。固定fixtureの最終WebKitはCall p50 / p95 `6 / 15ms`、batch wall p50 / p95 `5 / 15ms`、61 engine callsでLab p95と同等。max `78ms`は最初の毛束・紙目resource生成を含むcold spikeとして残る
 - 固定fixtureの画像ではcoalesced input欠落時の急曲線短絡が消え、低接触部の細かな紙目欠け、高筆圧部のベタ着彩、交差の連続性を同時に維持した。最終的な色・zoomを含む官能判断はproduction webの実機gateへ渡す
+
+#### P3 expression parity re-audit (2026-08-22)
+
+- production webのApple Pencil比較で、Lab COMBより高筆圧域が均一面へ寄り、低筆圧域が「完全な欠け」ではなく薄い全面着彩へ寄る差を確認した。性能fixtureのp95一致だけでは表現一致を保証できない
+- 比較入力の差を除くため、Labと同じ900×360 / 121点 / 8ms間隔の`S curve pressure wave`をproductionの評価panelから現在のbrush設定で履歴付き再生できるようにする。固定strokeでLab / productionのcoverage分布と見た目を比較する
+- 重点監査箇所は、(1) Labのpixel単位pressure fieldに対するproductionのchunk平均pressure、(2) Labの0/1寄りmaskに対するproductionのrepeat floor、(3) committed chunk overlapによる欠けの再着彩、(4) transverse mask解像度とedge noise相関長、(5) packed repeated-contactを低コスト近似へ置換した影響とする
+- パラメータ調整で一致するかを先に固定fixtureで確認し、上記の合成順・評価単位に起因する差はrendererのロジック不一致として扱う
+- 固定S字の初回比較で、productionの面掠れ0 cellへ`repeatStrength * 0.06`、紙目谷へ`repeatStrength * 0.08`を無条件に加えるfloorが薄い全面着彩の直接原因と判明した。Labの反復接触はcoreの着彩可能領域内だけを後段蓄積しており意味が異なる。初回floorと専用`repeatStrength`をproduction APIから除き、着彩可能領域内の低alpha紙目は通常のsource-overで再接触時に蓄積する単純な仕様へ寄せる
+- floor除去後も残った差はmaskの評価順序だった。Labは低解像度cellを符号付きpaint fieldのままswept quadへbilinear補間し、最終pixelでhardnessを適用して重複quadを`max(alpha)`結合する。productionは先に8-bit alpha atlasへ変換して各区間をCanvas `source-over`していたため、補間で生じた薄いalphaが区間境界へ蓄積していた。`bristle-mask.ts`をLabと同じsoftware raster順序へ変更し、固定S字のWebKit Call p50 / p95 `1 / 10ms`を確認した
+- 極低筆圧の外形回帰は、Lab既定の`edgeTextureAmount: 0.12`を含み、`dropoutLengthPx`を十分に跨ぐ代表長ストロークで確認する。境界textureを無効化した短区間では確率場の上側tailが不足し、外形比較自体が代表条件にならない
 
 ### P4 — Web integration and combined sensory gate
 

@@ -141,7 +141,7 @@ interface StrokeCommand {
 | `filterPipeline` | `FilterPipelineConfig` | フィルタパイプライン設定 |
 | `expand` | `ExpandConfig` | 展開設定 |
 | `style` | `StrokeStyle` | 描画スタイル（色、線幅、筆圧カーブ、合成モード、ブラシ設定を含む）。筆圧のサイズ/flow反映は `style.brush.pressureDynamics` に保存する |
-| `brushSeed` | `number` | ブラシの PRNG シード。stamp / spray の jitter と粒子配置を決定論的にリプレイするために使用。`round-pen` では `0` |
+| `brushSeed` | `number` | ブラシの PRNG シード。stamp / spray のjitter・粒子配置とbristleの毛束・面掠れを決定論的にリプレイするために使用。`round-pen` では `0` |
 | `alphaLocked` | `boolean` | ストローク実行時点の対象レイヤー alpha lock 設定。replay 時の通常描画を既存 alpha に制限するかを決める |
 | `timestamp` | `number` | 作成時刻 |
 

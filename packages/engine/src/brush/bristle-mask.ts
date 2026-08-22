@@ -6,6 +6,27 @@ export interface BristleMaskSample {
   readonly distance: number;
 }
 
+export interface BristleMaskSweepSample extends BristleMaskSample {
+  readonly x: number;
+  readonly y: number;
+  readonly frameX: number;
+  readonly frameY: number;
+  readonly breakBefore?: boolean;
+}
+
+interface BristleMaskField {
+  readonly width: number;
+  readonly height: number;
+  readonly values: Float32Array<ArrayBuffer>;
+}
+
+interface RasterVertex {
+  readonly x: number;
+  readonly y: number;
+  readonly u: number;
+  readonly v: number;
+}
+
 const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
@@ -16,22 +37,103 @@ const GRAIN_TILE_SIZE = 128;
 const grainCache = new Map<string, OffscreenCanvas>();
 const grainHeightCache = new Map<string, Float32Array<ArrayBuffer>>();
 
-export function createBristleMaskAtlas(
+/**
+ * LabのCOMB実験と同じ順序で、stroke-spaceの符号付きpaint fieldを
+ * swept quadへ補間してから最終pixelのalphaへ変換する。
+ *
+ * atlasを先にalpha化してCanvasで重ねると、区間境界のsource-overにより
+ * 低筆圧の未着彩部へ薄いalphaが蓄積するため、このmaskはsoftware rasterで
+ * 1枚に確定し、重複区間はmax(alpha)で結合する。
+ */
+export function rasterizeBristleMask(
+  samples: readonly BristleMaskSweepSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  pressureCoverageResponse: number,
+  seed: number,
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+): OffscreenCanvas {
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = getContext(canvas, "bristle swept mask");
+  if (samples.length < 2) return canvas;
+
+  const field = createBristleMaskField(
+    samples,
+    brushSize,
+    dynamics,
+    pressureCoverageResponse,
+    seed,
+  );
+  const target = ctx.createImageData(width, height);
+  const halfWidth = brushSize / 2;
+  const maxV = field.height - 1;
+  for (let index = 1; index < samples.length; index++) {
+    const from = samples[index - 1];
+    const to = samples[index];
+    if (!from || !to || to.breakBefore) continue;
+    if (Math.hypot(to.x - from.x, to.y - from.y) < 0.001) continue;
+
+    const fromLeft: RasterVertex = {
+      x: from.x + from.frameY * halfWidth - originX,
+      y: from.y - from.frameX * halfWidth - originY,
+      u: index - 1,
+      v: 0,
+    };
+    const fromRight: RasterVertex = {
+      x: from.x - from.frameY * halfWidth - originX,
+      y: from.y + from.frameX * halfWidth - originY,
+      u: index - 1,
+      v: maxV,
+    };
+    const toLeft: RasterVertex = {
+      x: to.x + to.frameY * halfWidth - originX,
+      y: to.y - to.frameX * halfWidth - originY,
+      u: index,
+      v: 0,
+    };
+    const toRight: RasterVertex = {
+      x: to.x - to.frameY * halfWidth - originX,
+      y: to.y + to.frameX * halfWidth - originY,
+      u: index,
+      v: maxV,
+    };
+    rasterizeTriangle(
+      field,
+      target,
+      fromLeft,
+      fromRight,
+      toRight,
+      dynamics.depositHardness,
+    );
+    rasterizeTriangle(
+      field,
+      target,
+      fromLeft,
+      toRight,
+      toLeft,
+      dynamics.depositHardness,
+    );
+  }
+  ctx.putImageData(target, 0, 0);
+  return canvas;
+}
+
+function createBristleMaskField(
   samples: readonly BristleMaskSample[],
   brushSize: number,
   dynamics: BristleDynamics,
   pressureCoverageResponse: number,
   seed: number,
-): OffscreenCanvas {
+): BristleMaskField {
   const width = Math.max(1, samples.length);
   const bands = Math.max(
     30,
     Math.ceil(brushSize / Math.max(0.25, dynamics.transverseMaskCellPx)),
   );
-  const canvas = new OffscreenCanvas(width, bands);
-  const ctx = getContext(canvas, "bristle mask atlas");
-  const image = ctx.createImageData(width, bands);
-  const data = image.data;
+  const values = new Float32Array(width * bands);
   const coverageResponse = clamp(pressureCoverageResponse, 0, 1);
 
   for (let band = 0; band < bands; band++) {
@@ -56,7 +158,7 @@ export function createBristleMaskAtlas(
       if (dynamics.edgeTextureAmount > 0) {
         const micro = valueNoise2d(
           sample.distance / Math.max(2, dynamics.edgeTextureLengthPx),
-          crossPx / Math.max(0.5, dynamics.dropoutWidthPx * 0.2),
+          crossPx / Math.max(2, dynamics.dropoutWidthPx * 0.2),
           seed ^ 0x5be0cd19,
         );
         const envelope = 1 - smoothstep(Math.abs(signal - threshold) / 0.34);
@@ -66,23 +168,98 @@ export function createBristleMaskAtlas(
           clamp(dynamics.edgeTextureAmount, 0, 1) *
           envelope;
       }
-      const activation = activationFromDistance(
-        signal - threshold,
-        dynamics.depositHardness,
-      );
-      const repeatFloor = clamp(dynamics.repeatStrength, 0, 1) * 0.06;
-      const alpha = Math.round(
-        Math.max(activation, activation <= 0.001 ? repeatFloor : 0) * 255,
-      );
-      const offset = (band * width + index) * 4;
-      data[offset] = 255;
-      data[offset + 1] = 255;
-      data[offset + 2] = 255;
-      data[offset + 3] = alpha;
+      values[band * width + index] = signal - threshold;
     }
   }
-  ctx.putImageData(image, 0, 0);
-  return canvas;
+  return { width, height: bands, values };
+}
+
+function sampleFieldDistance(
+  field: BristleMaskField,
+  u: number,
+  v: number,
+): number {
+  const clampedU = clamp(u, 0, field.width - 1);
+  const clampedV = clamp(v, 0, field.height - 1);
+  const u0 = Math.floor(clampedU);
+  const v0 = Math.floor(clampedV);
+  const u1 = Math.min(field.width - 1, u0 + 1);
+  const v1 = Math.min(field.height - 1, v0 + 1);
+  const fu = clampedU - u0;
+  const fv = clampedV - v0;
+  const top =
+    (field.values[v0 * field.width + u0] ?? -1) * (1 - fu) +
+    (field.values[v0 * field.width + u1] ?? -1) * fu;
+  const bottom =
+    (field.values[v1 * field.width + u0] ?? -1) * (1 - fu) +
+    (field.values[v1 * field.width + u1] ?? -1) * fu;
+  return top * (1 - fv) + bottom * fv;
+}
+
+function rasterizeTriangle(
+  field: BristleMaskField,
+  target: ImageData,
+  a: RasterVertex,
+  b: RasterVertex,
+  c: RasterVertex,
+  hardness: number,
+): void {
+  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+  if (Math.abs(denominator) < 0.00001) return;
+  const inverseDenominator = 1 / denominator;
+  const weightADx = (b.y - c.y) * inverseDenominator;
+  const weightADy = (c.x - b.x) * inverseDenominator;
+  const weightBDx = (c.y - a.y) * inverseDenominator;
+  const weightBDy = (a.x - c.x) * inverseDenominator;
+  const uDx = weightADx * (a.u - c.u) + weightBDx * (b.u - c.u);
+  const vDx = weightADx * (a.v - c.v) + weightBDx * (b.v - c.v);
+  const vertices = [a, b, c, a] as const;
+  const minY = Math.max(0, Math.floor(Math.min(a.y, b.y, c.y)));
+  const maxY = Math.min(target.height - 1, Math.ceil(Math.max(a.y, b.y, c.y)));
+  for (let y = minY; y <= maxY; y++) {
+    const sampleY = y + 0.5;
+    let fromX = Number.POSITIVE_INFINITY;
+    let toX = Number.NEGATIVE_INFINITY;
+    let intersectionCount = 0;
+    for (let edgeIndex = 0; edgeIndex < 3; edgeIndex++) {
+      const from = vertices[edgeIndex];
+      const to = vertices[edgeIndex + 1];
+      if (!from || !to) continue;
+      const edgeMinY = Math.min(from.y, to.y);
+      const edgeMaxY = Math.max(from.y, to.y);
+      if (sampleY < edgeMinY || sampleY >= edgeMaxY) continue;
+      const progress = (sampleY - from.y) / (to.y - from.y);
+      const intersection = from.x + (to.x - from.x) * progress;
+      fromX = Math.min(fromX, intersection);
+      toX = Math.max(toX, intersection);
+      intersectionCount++;
+    }
+    if (intersectionCount < 2) continue;
+    const minX = Math.max(0, Math.ceil(fromX - 0.5));
+    const maxX = Math.min(target.width - 1, Math.floor(toX - 0.5));
+    const firstSampleX = minX + 0.5;
+    const weightA =
+      weightADx * (firstSampleX - c.x) + weightADy * (sampleY - c.y);
+    const weightB =
+      weightBDx * (firstSampleX - c.x) + weightBDy * (sampleY - c.y);
+    let u = c.u + weightA * (a.u - c.u) + weightB * (b.u - c.u);
+    let v = c.v + weightA * (a.v - c.v) + weightB * (b.v - c.v);
+    for (let x = minX; x <= maxX; x++) {
+      const alpha = Math.round(
+        activationFromDistance(sampleFieldDistance(field, u, v), hardness) *
+          255,
+      );
+      const offset = (y * target.width + x) * 4;
+      if (alpha > (target.data[offset + 3] ?? 0)) {
+        target.data[offset] = 255;
+        target.data[offset + 1] = 255;
+        target.data[offset + 2] = 255;
+        target.data[offset + 3] = alpha;
+      }
+      u += uDx;
+      v += vDx;
+    }
+  }
 }
 
 export function applyDocumentGrain(
@@ -118,7 +295,6 @@ function getGrainTile(
     grain.scalePx,
     grain.amount,
     grain.hardness,
-    dynamics.repeatStrength,
     contact,
   ].join(":");
   const cached = grainCache.get(key);
@@ -130,7 +306,6 @@ function getGrainTile(
   const data = image.data;
   const amount = clamp(grain.amount, 0, 1);
   const softness = 0.01 + (1 - clamp(grain.hardness, 0, 1)) * 0.24;
-  const valleyFloor = clamp(dynamics.repeatStrength, 0, 1) * 0.08;
   const heights = getFineToothHeightTile(grain.seed, grain.scalePx);
   for (let y = 0; y < GRAIN_TILE_SIZE; y++) {
     for (let x = 0; x < GRAIN_TILE_SIZE; x++) {
@@ -139,8 +314,7 @@ function getGrainTile(
       const grainCoverage = smoothstep(
         (contact - height + softness) / (softness * 2),
       );
-      const textured = valleyFloor + (1 - valleyFloor) * grainCoverage;
-      const alpha = Math.round((1 - amount + amount * textured) * 255);
+      const alpha = Math.round((1 - amount + amount * grainCoverage) * 255);
       const offset = pixelIndex * 4;
       data[offset] = 255;
       data[offset + 1] = 255;
@@ -224,10 +398,7 @@ function valueNoise2d(x: number, y: number, seed: number): number {
 }
 
 function hashUnit2d(seed: number, x: number, y: number): number {
-  let value = seed ^ Math.imul(x, 0x45d9f3b) ^ Math.imul(y, 0x119de1f3);
-  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
-  value = Math.imul(value ^ (value >>> 13), 0x45d9f3b);
-  return ((value ^ (value >>> 16)) >>> 0) / 0x100000000;
+  return hashSeed(hashSeed(seed, x), y) / 0x100000000;
 }
 
 function smoothstep(value: number): number {

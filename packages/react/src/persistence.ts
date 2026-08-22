@@ -721,7 +721,6 @@ function parseBristleBrushConfig(
     !isUnitNumber(grain.amount) ||
     !isUnitNumber(grain.hardness) ||
     !Number.isInteger(grain.seed) ||
-    !isUnitNumber(dynamics.repeatStrength) ||
     !isUnitNumber(pressure.coverage)
   ) {
     return null;
@@ -751,7 +750,6 @@ function parseBristleBrushConfig(
         hardness: grain.hardness as number,
         seed: grain.seed as number,
       },
-      repeatStrength: dynamics.repeatStrength as number,
     },
     pressureDynamics: { coverage: pressure.coverage as number },
     mixing: parsedMixing.mixing,

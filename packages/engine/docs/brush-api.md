@@ -40,7 +40,7 @@ StrokeStyle.brush.type
 | `mixing.ts` | 色場のCanvas転送、進行方向付きsampling、有限checkpoint tile |
 | `spray.ts` | spray 描画（`walkEmissions` + 粒子バースト） |
 | `bristle-profile.ts` | seedから決定的な1D毛束断面atlasを生成する純粋計算とcache |
-| `bristle-mask.ts` | stroke-space面掠れとdocument-space紙目を局所maskへ解決する |
+| `bristle-mask.ts` | stroke-spaceの符号付き面掠れ場をswept quadへsoftware rasterizeし、document-space紙目と局所maskへ解決する |
 | `bristle.ts` | 連続掃引、cusp split、短い毛束lag、混色stage、局所合成 |
 
 `@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`isBrushMixingActive`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
@@ -111,14 +111,14 @@ function renderBrushStroke(
    - `brush.dynamics.emissionsPerSecond` が正の有限数なら、`StrokePoint.timestamp` の進行に応じて静止中も粒子バーストを追加する
 5. `"bristle"`: 荒いハケ方式で描画:
    - Catmull-Rom補間後の中心線を`geometryStepPx`間隔で走査し、seed固定の1D毛束断面を連続quadへ掃引する
-   - 毛束数とは独立したstroke-spaceの低解像度面掠れを合成する。筆圧はブラシ幅ではなく着彩率へ作用する
+   - 毛束数とは独立したstroke-spaceの低解像度面掠れを合成する。符号付きpaint fieldを曲面へ補間した後に最終pixelのalphaへ変換し、重複quadは`max(alpha)`で結合する。筆圧はブラシ幅ではなく着彩率へ作用する
    - document座標へ固定したsurface grain（紙目）を面掠れと同じ局所mask解決へ統合する
    - 急な折返しはcuspとして分割し、短いbristle lag（毛束の遅れ）で横断方向を追従させる
-   - 同じ場所への反復接触は`repeatStrength`に応じて未着彩領域を確率的に埋める。顔料厚レイヤーは追加しない
+   - 同じ場所への反復接触は面掠れで着彩可能な領域の低着彩部をsource-overで段階的に埋める。初回の未着彩cellへ半透明の着彩floorは加えず、顔料厚レイヤーも追加しない
    - 混色時は共通の連続色場を毛束断面全体へ適用してからalpha maskを掛ける。毛束単位へ色を固定しない
    - pendingはengine境界でno-opとし、確定済みchunkだけを表示する
 
-bristle rendererは全canvasを再生せず、新しく確定した中心線の周辺だけを局所canvasへ描いて合成する。chunk境界には不透明paint向けの小さな重なりを持たせる。半透明paintでは重なり濃度が見える可能性があるため、初期versionの対象外とする。
+面掠れを先に8-bit alpha atlasへ変換して区間ごとにCanvas合成してはならない。線形補間で生じた薄いalphaが区間境界の`source-over`で蓄積し、低筆圧部が「疎な不透明片」ではなく「薄い全面着彩」へ変わるためである。bristle rendererは全canvasを再生せず、新しく確定した中心線の周辺だけを局所canvasへ描いて合成する。chunk境界には不透明paint向けの小さな重なりを持たせる。半透明paintでは重なり濃度が見える可能性があるため、初期versionの対象外とする。
 
 ---
 

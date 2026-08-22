@@ -29,6 +29,8 @@ export interface StrokeCompleteData {
 export interface StrokeStartOptions {
   readonly pendingOnly?: boolean;
   readonly straightLine?: boolean;
+  /** 決定的な比較・再生でstroke固有のbrush seedを固定する。 */
+  readonly brushSeed?: number;
 }
 
 export interface UseStrokeSessionConfig {
@@ -157,6 +159,7 @@ export function useStrokeSession(
           : compiledFilterPipeline.config,
         expand: expandConfig,
         alphaLocked: layer.meta.alphaLocked,
+        brushSeed: options?.brushSeed,
         pendingOnly: options?.pendingOnly,
         tipRegistry: registry,
       });

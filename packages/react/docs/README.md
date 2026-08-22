@@ -372,6 +372,8 @@ interface StrokeStartOptions {
   readonly pendingOnly?: boolean;
   /** true にすると直線モード（始点→終点の2点に集約、筆圧は中央値）になる */
   readonly straightLine?: boolean;
+  /** 決定的な比較・再生でstroke固有のbrush seedを固定する */
+  readonly brushSeed?: number;
 }
 ```
 

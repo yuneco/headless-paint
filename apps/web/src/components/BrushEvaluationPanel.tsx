@@ -6,12 +6,14 @@ interface BrushEvaluationPanelProps {
   readonly brush: BrushConfig;
   readonly metrics: StrokeCallMetrics;
   readonly onResetMetrics: () => void;
+  readonly onDrawBristleSCurve?: () => void;
 }
 
 function BrushEvaluationPanelComponent({
   brush,
   metrics,
   onResetMetrics,
+  onDrawBristleSCurve,
 }: BrushEvaluationPanelProps) {
   const mode = getEvaluationMode(brush);
   return (
@@ -47,6 +49,20 @@ function BrushEvaluationPanelComponent({
             </ol>
             <div style={{ marginTop: 5 }}>
               面掠れと細い毛束が共存すること、継ぎ目・内周の直線化・掠れ線の分断が目立たないことを確認します。
+              低筆圧端ではstroke全体が薄くなるのではなく、不透明な着彩片の面積が減ることを確認します。
+            </div>
+            <button
+              type="button"
+              onClick={onDrawBristleSCurve}
+              disabled={!onDrawBristleSCurve}
+              data-testid="draw-bristle-s-curve"
+              style={{ width: "100%", marginTop: 8, padding: 7 }}
+            >
+              Draw Lab S-curve sample（Lab固定S字を描画）
+            </button>
+            <div style={{ marginTop: 5, color: "#68727c" }}>
+              現在のRough bristle設定で、Labと同じ121点・8ms間隔・筆圧
+              0.15→1.0→0.15のS字をレイヤー中央へ描きます。通常の履歴へ追加されるためUndoできます。
             </div>
           </>
         )}

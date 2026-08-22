@@ -307,7 +307,6 @@ export interface BristleDynamics {
   readonly cuspDetectionSpanRatio: number;
   readonly lagLengthRatio: number;
   readonly surfaceGrain: BristleSurfaceGrain;
-  readonly repeatStrength: number;
 }
 
 export interface BristlePressureDynamics {
@@ -320,7 +319,7 @@ export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
   bristleWidthVariation: 0.62,
   bristleSpacingVariation: 0.72,
   geometryStepPx: 1,
-  transverseMaskCellPx: 1,
+  transverseMaskCellPx: 0.82,
   dropoutLengthPx: 58,
   dropoutWidthPx: 1,
   depositHardness: 1,
@@ -328,14 +327,13 @@ export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
   edgeTextureLengthPx: 7,
   cuspAngleThresholdDeg: 65,
   cuspDetectionSpanRatio: 0.14,
-  lagLengthRatio: 0.2,
+  lagLengthRatio: 0.3,
   surfaceGrain: {
     scalePx: 4,
     amount: 0.85,
     hardness: 0.82,
     seed: 1,
   },
-  repeatStrength: 0.75,
 };
 
 export const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {

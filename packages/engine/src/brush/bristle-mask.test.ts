@@ -1,8 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRISTLE_DYNAMICS } from "../types";
-import { applyDocumentGrain } from "./bristle-mask";
+import { applyDocumentGrain, rasterizeBristleMask } from "./bristle-mask";
 
 describe("bristle surface grain", () => {
+  it("初回の未着彩cellへalpha floorを加えない", () => {
+    const mask = rasterizeBristleMask(
+      [
+        {
+          x: 10,
+          y: 30,
+          pressure: 0.5,
+          distance: 0,
+          frameX: 1,
+          frameY: 0,
+        },
+        {
+          x: 110,
+          y: 30,
+          pressure: 0.5,
+          distance: 100,
+          frameX: 1,
+          frameY: 0,
+        },
+      ],
+      40,
+      DEFAULT_BRISTLE_DYNAMICS,
+      1,
+      1,
+      0,
+      0,
+      120,
+      60,
+    );
+    const data = pixels(mask);
+    const alpha: number[] = [];
+    for (let y = 10; y < 50; y++) {
+      for (let x = 20; x < 100; x++) {
+        alpha.push(data[(y * mask.width + x) * 4 + 3] ?? 0);
+      }
+    }
+
+    expect(alpha).toContain(0);
+    expect(alpha.some((value) => value > 0)).toBe(true);
+  });
+
   it("uses pressure as contact against the Fine tooth height field", () => {
     const low = opaqueMask(64, 64);
     const high = opaqueMask(64, 64);

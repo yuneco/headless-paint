@@ -11,7 +11,7 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
-import { applyDocumentGrain, createBristleMaskAtlas } from "./bristle-mask";
+import { applyDocumentGrain, rasterizeBristleMask } from "./bristle-mask";
 import { getBristleProfileAtlas } from "./bristle-profile";
 import {
   getActiveMixing,
@@ -342,25 +342,28 @@ function renderSweepRun(
   const height = Math.max(1, maxY - minY);
   const ink = new OffscreenCanvas(width, height);
   const inkCtx = ink.getContext("2d");
-  const mask = new OffscreenCanvas(width, height);
-  const maskCtx = mask.getContext("2d");
-  if (!inkCtx || !maskCtx) throw new Error("Bristle sweep requires Canvas2D");
+  if (!inkCtx) throw new Error("Bristle sweep requires Canvas2D");
 
-  const maskAtlas = createBristleMaskAtlas(
+  const mask = rasterizeBristleMask(
     points,
     style.lineWidth,
     brush.dynamics,
     brush.pressureDynamics.coverage,
     seed,
+    minX,
+    minY,
+    width,
+    height,
   );
-  drawSweep(inkCtx, paintProfile, points, style.lineWidth, minX, minY, false);
+  const maskCtx = mask.getContext("2d");
+  if (!maskCtx) throw new Error("Bristle mask requires Canvas2D");
+  drawSweep(inkCtx, paintProfile, points, style.lineWidth, minX, minY);
   if (!coloredProfile) {
     inkCtx.globalCompositeOperation = "source-in";
     inkCtx.fillStyle = colorToStyle(style.color);
     inkCtx.fillRect(0, 0, width, height);
     inkCtx.globalCompositeOperation = "source-over";
   }
-  drawSweep(maskCtx, maskAtlas, points, style.lineWidth, minX, minY, true);
   applyDocumentGrain(
     maskCtx,
     minX,
@@ -413,7 +416,6 @@ function drawSweep(
   brushSize: number,
   originX: number,
   originY: number,
-  atlasIsMask: boolean,
 ): void {
   ctx.imageSmoothingEnabled = true;
   for (let index = 1; index < points.length; index++) {
@@ -448,29 +450,13 @@ function drawSweep(
       (from.x + to.x) / 2 - originX,
       (from.y + to.y) / 2 - originY,
     );
-    if (atlasIsMask) {
-      const sourceX = Math.max(0, index - 1);
-      const sourceWidth = Math.min(2, atlas.width - sourceX);
-      ctx.drawImage(
-        atlas,
-        sourceX,
-        0,
-        sourceWidth,
-        atlas.height,
-        -length / 2 - overlap,
-        -brushSize / 2,
-        length + overlap * 2,
-        brushSize,
-      );
-    } else {
-      ctx.drawImage(
-        atlas,
-        -length / 2 - overlap,
-        -brushSize / 2,
-        length + overlap * 2,
-        brushSize,
-      );
-    }
+    ctx.drawImage(
+      atlas,
+      -length / 2 - overlap,
+      -brushSize / 2,
+      length + overlap * 2,
+      brushSize,
+    );
   }
   ctx.resetTransform();
 }

@@ -22,6 +22,11 @@ import {
   useWindowSize,
 } from "@headless-paint/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BRISTLE_S_CURVE_FIXTURE_HEIGHT,
+  BRISTLE_S_CURVE_FIXTURE_WIDTH,
+  createBristleSCurveEvaluationPoints,
+} from "./brush-evaluation-fixtures";
 import { registerAppBrushTips } from "./brush-presets";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
@@ -198,6 +203,39 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     measureStrokeCall(engine.onStrokeEnd);
     flushStrokeCallMetrics();
   }, [engine.onStrokeEnd, flushStrokeCallMetrics, measureStrokeCall]);
+
+  const handleDrawBristleSCurve = useCallback(() => {
+    if (
+      penSettings.brush.type !== "bristle" ||
+      !engine.canDraw ||
+      engine.isDrawing
+    ) {
+      return;
+    }
+
+    const points = createBristleSCurveEvaluationPoints(
+      (LAYER_WIDTH - BRISTLE_S_CURVE_FIXTURE_WIDTH) / 2,
+      (LAYER_HEIGHT - BRISTLE_S_CURVE_FIXTURE_HEIGHT) / 2,
+    );
+    const firstPoint = points[0];
+    if (!firstPoint) return;
+
+    resetStrokeCallMetrics();
+    measureStrokeCall(() => engine.onStrokeStart(firstPoint, { brushSeed: 1 }));
+    for (let index = 1; index < points.length; index += 4) {
+      handleMeasuredStrokeMoves(points.slice(index, index + 4));
+    }
+    handleMeasuredStrokeEnd();
+  }, [
+    engine.canDraw,
+    engine.isDrawing,
+    engine.onStrokeStart,
+    handleMeasuredStrokeEnd,
+    handleMeasuredStrokeMoves,
+    penSettings.brush.type,
+    measureStrokeCall,
+    resetStrokeCallMetrics,
+  ]);
 
   const [background, setBackground] = useState<BackgroundSettings>({
     color: restoredSettings?.background.color ?? DEFAULT_BACKGROUND_COLOR,
@@ -489,6 +527,11 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         registryReady={registryReady}
         strokeCallMetrics={strokeCallMetrics}
         onResetStrokeCallMetrics={resetStrokeCallMetrics}
+        onDrawBristleSCurve={
+          !isTransformLocked && penSettings.brush.type === "bristle"
+            ? handleDrawBristleSCurve
+            : undefined
+        }
         entries={engine.entries}
         activeLayerId={engine.activeLayerId}
         background={background}

@@ -719,7 +719,6 @@ interface BristleDynamics {
   readonly cuspDetectionSpanRatio: number;
   readonly lagLengthRatio: number;
   readonly surfaceGrain: BristleSurfaceGrain;
-  readonly repeatStrength: number;
 }
 
 interface BristlePressureDynamics {
@@ -770,10 +769,12 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 | `pressureDynamics` | `BristlePressureDynamics` | 筆圧を着彩率へ反映する強さ。ブラシ幅は変えない |
 | `mixing` | `BrushMixing` | 任意の共通連続色場。毛束ごとの色reservoirではない |
 
-`bristleCount` は概念上の細い毛束数、`bristleFill` は平均毛束幅、2つのvariationは幅と配置の不均一さを表す。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`transverseMaskCellPx`、`dropoutLengthPx`、`dropoutWidthPx` は毛束数から独立した面掠れ場の解像度と相関長を定める。
+`bristleCount` は概念上の細い毛束数、`bristleFill` は平均毛束幅、2つのvariationは幅と配置の不均一さを表す。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`transverseMaskCellPx`、`dropoutLengthPx`、`dropoutWidthPx` は毛束数から独立した面掠れ場の解像度と相関長を定める。既定の`transverseMaskCellPx: 0.82`はLab COMBの横断mask解像度（約0.82px/cell）と一致する。
 
-`depositHardness` と `edgeTexture*` は着彩/無着彩境界、`surfaceGrain` はdocument座標へ固定した
-Fine tooth（細かな紙目）、`repeatStrength` は同じ場所へ再接触したときに隙間が埋まる強さを表す。
+`depositHardness` と `edgeTexture*` は着彩/無着彩境界を定める。面掠れは符号付きpaint fieldのまま
+swept quadへ補間し、最終pixelでalphaへ変換する。これにより低筆圧時にも薄いalphaを全面へ
+積まず、不透明な着彩片の面積だけを減らす。`surfaceGrain` はdocument座標へ固定した
+Fine tooth（細かな紙目）をdocument座標へ固定する。同じ場所への再接触では通常のsource-over蓄積により低着彩部が段階的に埋まるため、専用の反復強度パラメータは持たない。
 Fine toothは2周波のvalue noiseを合成し、描画chunkの平均筆圧を16段階へ量子化したcontactで凹凸への
 接触率を変える。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
 
@@ -786,7 +787,7 @@ const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
   bristleWidthVariation: 0.62,
   bristleSpacingVariation: 0.72,
   geometryStepPx: 1,
-  transverseMaskCellPx: 1,
+  transverseMaskCellPx: 0.82,
   dropoutLengthPx: 58,
   dropoutWidthPx: 1,
   depositHardness: 1,
@@ -794,9 +795,8 @@ const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
   edgeTextureLengthPx: 7,
   cuspAngleThresholdDeg: 65,
   cuspDetectionSpanRatio: 0.14,
-  lagLengthRatio: 0.2,
+  lagLengthRatio: 0.3,
   surfaceGrain: { scalePx: 4, amount: 0.85, hardness: 0.82, seed: 1 },
-  repeatStrength: 0.75,
 };
 
 const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {
@@ -1106,7 +1106,7 @@ interface BrushRenderState {
 - 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
 - 混色有効時はExpand分岐ごとに拾う背景が異なるため、`mixing`に分岐別の色場と有限checkpointを保持する。stampとbristleは同じ色場モデルを使い、sprayは混色非対応。
 - `field`は更新ごとに新しい配列を返す数値状態。Canvas / ImageDataはbranch所有のmutable cacheであり、分岐・pendingへ共有せず`cloneBrushRenderState`でdeep cloneする。
-- bristleの面掠れは毛束ごとの絵の具reservoirではない。決定的な低接触floorとdocument-space grainをsource-overで蓄積し、同じ場所への反復接触で隙間が段階的に埋まる。追加のpigment layerは持たない。
+- bristleの面掠れは毛束ごとの絵の具reservoirではない。初回接触で未着彩と判定されたcellへ半透明の着彩floorは加えない。面掠れで着彩可能と判定された領域のdocument-space grainをsource-overで蓄積し、同じ場所への反復接触で低着彩部が段階的に埋まる。追加のpigment layerは持たない。
 
 **使用例**:
 ```typescript
