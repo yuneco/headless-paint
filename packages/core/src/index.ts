@@ -57,6 +57,7 @@ export {
   renderBrushStroke,
   timeSpacingMsFromRate,
   walkEmissions,
+  type DistanceSpacingAt,
   type EmissionPoint,
 } from "@headless-paint/engine";
 export {

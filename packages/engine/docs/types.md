@@ -517,6 +517,7 @@ const imageTip: ImageTipConfig = { type: "image", imageId: "pastel-grain" };
 ```typescript
 interface BrushDynamics {
   readonly spacing: number;
+  readonly spacingSizeCoupling: number;
   readonly opacityJitter: number;
   readonly sizeJitter: number;
   readonly rotationJitter: number;
@@ -531,6 +532,7 @@ interface BrushDynamics {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `spacing` | `number` | ブラシ直径に対するスタンプ間隔の比率（0.25 = 直径の25%間隔） |
+| `spacingSizeCoupling` | `number` | 距離spacingを筆圧反映後のtip径へ追従させる割合。`0`は基準lineWidth固定、`1`は実効tip径へ完全追従 |
 | `opacityJitter` | `number` | 不透明度のランダム変動 [0, 1] |
 | `sizeJitter` | `number` | サイズのランダム変動 [0, 1] |
 | `rotationJitter` | `number` | 回転のランダム変動 [0, PI] ラジアン |
@@ -543,6 +545,7 @@ interface BrushDynamics {
 ```typescript
 const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
   spacing: 0.25,
+  spacingSizeCoupling: 0,
   opacityJitter: 0,
   sizeJitter: 0,
   rotationJitter: 0,
@@ -941,6 +944,7 @@ interface BrushMixingState {
 interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  readonly distanceEmissionProgress?: number;
   readonly lastTimestamp?: number;
   readonly nextTimeEmissionAt?: number;
   readonly mixing?: BrushMixingState;
@@ -965,6 +969,7 @@ interface BrushRenderState {
 |---|---|---|
 | `accumulatedDistance` | `number` | 分岐ごとの emission 配置累積距離。committed→pending 間で引き継ぎ、ギャップや二重配置を防ぐ |
 | `emissionCount` | `number` | 分岐ごとの emission 通し番号。stamp の dab と spray の粒子バーストで共通に使う |
+| `distanceEmissionProgress` | `number` | 可変spacing時の次回距離emissionまでの正規化進捗（0以上1未満）。未使用時は省略 |
 | `lastTimestamp` | `number` | 時間ベース emission で、この分岐が最後に処理した入力時刻。overlap 再入力区間で二重配置しないために使う |
 | `nextTimeEmissionAt` | `number` | 時間ベース emission で、次に emission を配置する予定時刻 |
 | `mixing` | `BrushMixingState` | stamp + mixing 有効時のみ保持する混色状態 |
@@ -980,7 +985,7 @@ interface BrushRenderState {
 **設計意図**:
 
 - `branches` は常に存在し、Expand の出力 branch 数と一致する。非 Expand は長さ 1。
-- branch ごとに独立した `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、stamp / spray とも branch 間で spacing 位相と時間 emission の位相が揃う。
+- branch ごとに独立した `accumulatedDistance` / `emissionCount` / `distanceEmissionProgress` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、stamp / spray とも branch 間で spacing 位相と時間 emission の位相が揃う。
 - branch の実効 seed は `hashSeed(seed, branchIndex)` で導出する。emission 序数は branch ごとに 0 から数え、各 emission の局所 seed は `hashSeed(branchSeed, emissionIndex)` で導出する。
 - 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
 - 混色有効時は Expand 分岐ごとに拾う背景が異なるため、`mixing` に分岐別の色バッファを保持する。spray は混色非対応のため `mixing` を持たない。

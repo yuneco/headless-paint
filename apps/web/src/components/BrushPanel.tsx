@@ -70,6 +70,7 @@ function isSameBrush(a: BrushConfig, b: BrushConfig): boolean {
   return (
     isSameTip(sa.tip, sb.tip) &&
     sa.dynamics.spacing === sb.dynamics.spacing &&
+    sa.dynamics.spacingSizeCoupling === sb.dynamics.spacingSizeCoupling &&
     sa.dynamics.flow === sb.dynamics.flow &&
     (sa.dynamics.emissionsPerSecond ?? 0) ===
       (sb.dynamics.emissionsPerSecond ?? 0) &&

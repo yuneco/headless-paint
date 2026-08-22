@@ -64,7 +64,7 @@ function renderBrushStroke(
 | `points` | `readonly StrokePoint[]` | ○ | 描画ポイント列（展開済みの単一ストローク） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（`brush` フィールドでブラシ種別を判定） |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
-| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` では `tipCanvas` と `branches[].accumulatedDistance` / `emissionCount`、時間ベース emission 用の `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では無視される |
+| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` では `tipCanvas` と `branches[].accumulatedDistance` / `emissionCount`、可変spacing用の `distanceEmissionProgress`、時間ベース emission 用の `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では無視される |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 
 **戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
@@ -77,6 +77,7 @@ function renderBrushStroke(
    - branch の `accumulatedDistance` と時間 state から、距離 + 時間 emission を発生順に走査
    - 各スタンプ位置で `tipCanvas` を `drawImage` で配置
    - `brush.pressureDynamics.size` でスタンプサイズを決める
+   - `brush.dynamics.spacingSizeCoupling` が正の場合、距離spacingを筆圧反映後のtip径へ追従させる
    - `brush.pressureDynamics.flow` でスタンプごとの flow を筆圧変化させる
    - 混色有効時は、一定距離ごとに描画先 footprint を分岐ごとの `mixing.colorBuffer` へ `pickup` の強さで転写し、元色を `restore` の強さで重ねた後、`tipCanvas` の alpha を適用して描画
    - jitter パラメータは emission 通し番号ベース PRNG で決定
@@ -109,15 +110,18 @@ function walkEmissions(
   startState: {
     readonly accumulatedDistance: number;
     readonly emissionCount: number;
+    readonly distanceEmissionProgress?: number;
     readonly lastTimestamp?: number;
     readonly nextTimeEmissionAt?: number;
   },
   overlapCount: number,
   emit: (point: EmissionPoint) => void,
   timeSpacingMs?: number,
+  spacingAt?: (point: StrokePoint) => number,
 ): {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  readonly distanceEmissionProgress?: number;
   readonly lastTimestamp?: number;
   readonly nextTimeEmissionAt?: number;
 }
@@ -128,12 +132,13 @@ function walkEmissions(
 |------|-----|------|------|
 | `interpolated` | `readonly StrokePoint[]` | ○ | `interpolateStrokePoints` 済みの点列 |
 | `spacingPx` | `number` | ○ | emission 間隔 px |
-| `startState` | `{ accumulatedDistance, emissionCount, lastTimestamp?, nextTimeEmissionAt? }` | ○ | branch ごとの開始状態。時間ベース emission 有効時は最後に処理した時刻と次回予定時刻も含む |
+| `startState` | `{ accumulatedDistance, emissionCount, distanceEmissionProgress?, lastTimestamp?, nextTimeEmissionAt? }` | ○ | branch ごとの開始状態。可変spacing時は正規化進捗、時間ベース emission 有効時は最後に処理した時刻と次回予定時刻も含む |
 | `overlapCount` | `number` | ○ | 先頭のオーバーラップ点数。ストローク開始 emission と spacing 位相を既存差分描画に合わせる |
 | `emit` | `(point: EmissionPoint) => void` | ○ | emission ごとに呼ばれる callback |
 | `timeSpacingMs` | `number` | - | 時間ベース emission の間隔 ms。未指定または `0` 以下の場合は距離ベースのみ |
+| `spacingAt` | `(point: StrokePoint) => number` | - | 各点の局所spacing px。指定時はspacing密度を積分し、`distanceEmissionProgress`で差分描画間の位相を保持する |
 
-**戻り値**: 更新後の branch state。`accumulatedDistance` は次回チャンクの spacing 位相に、`emissionCount` は次回 emission の序数に使う。`lastTimestamp` / `nextTimeEmissionAt` は時間ベース emission の位相に使う。
+**戻り値**: 更新後の branch state。固定spacingでは`accumulatedDistance`、可変spacingでは`distanceEmissionProgress`を次回チャンクの距離emission位相に使う。`emissionCount` は次回 emission の序数、`lastTimestamp` / `nextTimeEmissionAt` は時間ベース emission の位相に使う。
 
 **設計意図**:
 - emission は scheduler が発生させる描画単位。stamp では dab 1個、spray では散布領域1回分の粒子バーストを意味する。
@@ -143,6 +148,7 @@ function walkEmissions(
 - `timeSpacingMs` が有効でも、点列に `timestamp` がない、片側だけ欠落している、または timestamp が非単調なセグメントでは時間 emission を発生させない。距離 emission は従来通り発生する。
 - `lastTimestamp` 以前の overlap 再入力区間は時間 emission の対象外にし、committed→pending 境界や incremental 再描画で二重配置しない。
 - engine は現在時刻を読まない。時間 emission は `StrokePoint.timestamp` と branch state だけで決まる。
+- 可変spacingは局所spacingの逆数（1pxあたりのemission進捗）を点間で積分する。これにより筆圧でtipが細くなっても点線化しにくく、incremental / replayで位相が一致する。局所spacingは安全上0.5pxを下限とし、1回の`walkEmissions`で実描画callbackを4096回までに制限する。
 
 ### timeSpacingMsFromRate
 

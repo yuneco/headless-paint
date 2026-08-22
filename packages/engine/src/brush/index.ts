@@ -13,6 +13,7 @@ export { hashSeed, mulberry32 } from "./prng";
 export {
   timeSpacingMsFromRate,
   walkEmissions,
+  type DistanceSpacingAt,
   type EmissionPoint,
 } from "./scheduler";
 export {

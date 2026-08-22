@@ -103,7 +103,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
-| `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit, timeSpacingMs?)` | 距離ベース + 時間ベース emission を走査（stamp / spray 共有） |
+| `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit, timeSpacingMs?, spacingAt?)` | 固定/局所可変の距離ベース + 時間ベース emission を走査（stamp / spray 共有） |
 | `timeSpacingMsFromRate(emissionsPerSecond)` | 吹きつけレートを時間ベース emission 間隔 ms に変換 |
 | `generateBrushTip(config, size, color, registry?)` | ブラシチップ画像を生成 |
 | `createBrushTipRegistry()` | 画像チップ管理用の `BrushTipRegistry` を作成 |

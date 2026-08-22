@@ -126,6 +126,59 @@ describe("renderBrushStroke", () => {
       expect(result.seed).toBe(42);
     });
 
+    it("低筆圧では実効tip径へのspacing追従により点線化を抑える", () => {
+      const points: StrokePoint[] = [
+        { x: 10, y: 50, pressure: 0.1 },
+        { x: 90, y: 50, pressure: 0.1 },
+      ];
+      const fixedStyle = makeStyle({
+        lineWidth: 20,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 0.25,
+            spacingSizeCoupling: 0,
+          },
+          pressureDynamics: { size: 1, flow: 0 },
+        },
+      });
+      if (fixedStyle.brush.type !== "stamp") {
+        throw new Error("Expected stamp brush");
+      }
+      const coupledStyle = makeStyle({
+        ...fixedStyle,
+        brush: {
+          ...fixedStyle.brush,
+          dynamics: {
+            ...fixedStyle.brush.dynamics,
+            spacingSizeCoupling: 1,
+          },
+        },
+      });
+
+      const fixed = renderBrushStroke(
+        createLayer(100, 100),
+        points,
+        fixedStyle,
+        0,
+        makeInitialState(fixedStyle),
+      );
+      const coupled = renderBrushStroke(
+        createLayer(100, 100),
+        points,
+        coupledStyle,
+        0,
+        makeInitialState(coupledStyle),
+      );
+
+      expect(primaryBranch(coupled).emissionCount).toBeGreaterThan(
+        primaryBranch(fixed).emissionCount,
+      );
+      expect(primaryBranch(coupled).distanceEmissionProgress).toBeDefined();
+    });
+
     it("tipCanvas が null の場合は描画をスキップする", () => {
       const layer = createLayer(100, 100);
       const points = makeLine(10, 50, 90, 50, 5);

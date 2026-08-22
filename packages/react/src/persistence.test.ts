@@ -79,6 +79,7 @@ describe("persistence", () => {
           tip: { type: "circle", hardness: 0.8 },
           dynamics: {
             spacing: 0.12,
+            spacingSizeCoupling: 1,
             flow: 0.7,
             opacityJitter: 0,
             sizeJitter: 0,
@@ -108,12 +109,55 @@ describe("persistence", () => {
     const imported = importPaintSettings(snapshot);
     expect(imported?.pen.brush).toMatchObject({
       type: "stamp",
+      dynamics: { spacingSizeCoupling: 1 },
       mixing: {
         enabled: true,
         pickup: 0.3,
         restore: 0.08,
         updateDistancePx: 8,
       },
+    });
+  });
+
+  it("旧stamp設定でspacingSizeCouplingが欠落した場合は0で補完する", () => {
+    const snapshot = exportPaintSettings({
+      tool: "pen",
+      transform: createViewTransform() as ViewTransform,
+      background: {
+        color: { r: 255, g: 255, b: 255, a: 255 },
+        visible: true,
+      },
+      pen: {
+        color: { r: 10, g: 20, b: 30, a: 255 },
+        lineWidth: 8,
+        pressureCurve: { y1: 0.2, y2: 0.6 },
+        eraser: false,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: {
+            spacing: 0.2,
+            flow: 1,
+            opacityJitter: 0,
+            sizeJitter: 0,
+            rotationJitter: 0,
+            scatter: 0,
+          } as never,
+          pressureDynamics: { size: 1, flow: 0 },
+        },
+      },
+      smoothing: { enabled: false, windowSize: 1 },
+      expand: {
+        levels: [
+          { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
+        ],
+      },
+    });
+
+    const imported = importPaintSettings(snapshot);
+    expect(imported?.pen.brush).toMatchObject({
+      type: "stamp",
+      dynamics: { spacingSizeCoupling: 0 },
     });
   });
 

@@ -90,6 +90,15 @@ export function renderStampBrushStroke(
       lastMixingUpdateDistance = result.lastMixingUpdateDistance;
     },
     timeSpacingMsFromRate(dynamics.emissionsPerSecond),
+    dynamics.spacingSizeCoupling > 0
+      ? (point) =>
+          calculateAdaptiveSpacing(
+            point,
+            spacingPx,
+            style,
+            dynamics.spacingSizeCoupling,
+          )
+      : undefined,
   );
 
   return {
@@ -99,6 +108,7 @@ export function renderStampBrushStroke(
       {
         accumulatedDistance: nextBranch.accumulatedDistance,
         emissionCount: nextBranch.emissionCount,
+        distanceEmissionProgress: nextBranch.distanceEmissionProgress,
         lastTimestamp: nextBranch.lastTimestamp,
         nextTimeEmissionAt: nextBranch.nextTimeEmissionAt,
         mixing:
@@ -112,6 +122,24 @@ export function renderStampBrushStroke(
       },
     ],
   };
+}
+
+function calculateAdaptiveSpacing(
+  point: StrokePoint,
+  baseSpacingPx: number,
+  style: StrokeStyle,
+  coupling: number,
+): number {
+  const effectiveDiameter =
+    calculateRadius(
+      point.pressure,
+      style.lineWidth,
+      style.brush.pressureDynamics.size,
+      style.pressureCurve,
+    ) * 2;
+  const sizeScale = effectiveDiameter / style.lineWidth;
+  const clampedCoupling = Math.min(1, Math.max(0, coupling));
+  return baseSpacingPx * (1 + (sizeScale - 1) * clampedCoupling);
 }
 
 interface StampAtResult {

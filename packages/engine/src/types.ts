@@ -161,6 +161,11 @@ export type BrushTipConfig = CircleTipConfig | ImageTipConfig;
 
 export interface BrushDynamics {
   readonly spacing: number;
+  /**
+   * 距離emissionの間隔を筆圧反映後のtip径へ追従させる割合。
+   * 0は基準lineWidth固定、1は実効tip径へ完全追従する。
+   */
+  readonly spacingSizeCoupling: number;
   readonly opacityJitter: number;
   readonly sizeJitter: number;
   readonly rotationJitter: number;
@@ -172,6 +177,7 @@ export interface BrushDynamics {
 
 export const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
   spacing: 0.25,
+  spacingSizeCoupling: 0,
   opacityJitter: 0,
   sizeJitter: 0,
   rotationJitter: 0,
@@ -331,6 +337,8 @@ export interface BrushMixingState {
 export interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  /** 可変spacing時の、次の距離emissionまでの正規化進捗（0以上1未満） */
+  readonly distanceEmissionProgress?: number;
   /** 時間emission: この分岐で最後に処理した入力時刻 */
   readonly lastTimestamp?: number;
   /** 時間emission: 次にemissionを配置する予定時刻 */

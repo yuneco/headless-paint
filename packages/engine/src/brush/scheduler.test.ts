@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { StrokePoint } from "../types";
-import { timeSpacingMsFromRate, walkEmissions } from "./scheduler";
+import {
+  type EmissionPoint,
+  timeSpacingMsFromRate,
+  walkEmissions,
+} from "./scheduler";
 
 describe("walkEmissions", () => {
   it("ストローク開始 emission を overlap なしの先頭点に出す", () => {
@@ -214,6 +218,99 @@ describe("walkEmissions", () => {
     // 開始 + ts=25, 50 の3つのみ
     expect(emissions).toEqual([0, 1, 2]);
     expect(result.emissionCount).toBe(3);
+  });
+
+  it("局所spacingへ追従して距離emissionを増やす", () => {
+    const emissions: number[] = [];
+    const result = walkEmissions(
+      [
+        { x: 0, y: 0, pressure: 0.25 },
+        { x: 10, y: 0, pressure: 0.25 },
+      ],
+      5,
+      { accumulatedDistance: 0, emissionCount: 0 },
+      0,
+      (point) => emissions.push(point.x),
+      undefined,
+      () => 2.5,
+    );
+
+    expect(emissions).toHaveLength(5);
+    expect(emissions[0]).toBe(0);
+    expect(emissions[1]).toBeCloseTo(2.5, 5);
+    expect(emissions[2]).toBeCloseTo(5, 5);
+    expect(emissions[3]).toBeCloseTo(7.5, 5);
+    expect(emissions[4]).toBeCloseTo(10, 5);
+    expect(result.distanceEmissionProgress).toBe(0);
+  });
+
+  it("可変spacingでもincrementalと一括のemission列が一致する", () => {
+    const p0: StrokePoint = { x: 0, y: 0, pressure: 0.2 };
+    const p1: StrokePoint = { x: 6, y: 0, pressure: 0.5 };
+    const p2: StrokePoint = { x: 14, y: 0, pressure: 1 };
+    const spacingAt = (point: StrokePoint) => 1 + (point.pressure ?? 0.5) * 4;
+    const collect = () => {
+      const values: { x: number; pressure: number | undefined }[] = [];
+      return {
+        values,
+        emit: (point: EmissionPoint) =>
+          values.push({ x: point.x, pressure: point.pressure }),
+      };
+    };
+
+    const batch = collect();
+    const batchState = walkEmissions(
+      [p0, p1, p2],
+      5,
+      { accumulatedDistance: 0, emissionCount: 0 },
+      0,
+      batch.emit,
+      undefined,
+      spacingAt,
+    );
+
+    const incremental = collect();
+    const mid = walkEmissions(
+      [p0, p1],
+      5,
+      { accumulatedDistance: 0, emissionCount: 0 },
+      0,
+      incremental.emit,
+      undefined,
+      spacingAt,
+    );
+    const incrementalState = walkEmissions(
+      [p1, p2],
+      5,
+      mid,
+      1,
+      incremental.emit,
+      undefined,
+      spacingAt,
+    );
+
+    expect(incremental.values).toEqual(batch.values);
+    expect(incrementalState).toEqual(batchState);
+  });
+
+  it("極端な局所spacingでも1回のcallback数を制限する", () => {
+    let callbacks = 0;
+    const result = walkEmissions(
+      [
+        { x: 0, y: 0, pressure: 0 },
+        { x: 3_000, y: 0, pressure: 0 },
+      ],
+      5,
+      { accumulatedDistance: 0, emissionCount: 0 },
+      0,
+      () => callbacks++,
+      undefined,
+      () => 0.01,
+    );
+
+    expect(callbacks).toBe(4096);
+    expect(result.emissionCount).toBe(6001);
+    expect(result.accumulatedDistance).toBe(3000);
   });
 });
 

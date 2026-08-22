@@ -661,6 +661,9 @@ function parseBrushConfig(
       sizeJitter: dynamics.sizeJitter as number,
       rotationJitter: dynamics.rotationJitter as number,
       scatter: dynamics.scatter as number,
+      spacingSizeCoupling: isFiniteNumber(dynamics.spacingSizeCoupling)
+        ? (dynamics.spacingSizeCoupling as number)
+        : 0,
       emissionsPerSecond: parseEmissionsPerSecond(dynamics.emissionsPerSecond),
     },
     pressureDynamics,

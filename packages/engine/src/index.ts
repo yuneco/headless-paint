@@ -60,6 +60,7 @@ export {
   renderBrushStroke,
   timeSpacingMsFromRate,
   walkEmissions,
+  type DistanceSpacingAt,
   type BrushTipRegistry,
   type EmissionPoint,
 } from "./brush";

@@ -81,6 +81,7 @@ export function cloneBrushRenderState(
     branches: state.branches.map((branch) => ({
       accumulatedDistance: branch.accumulatedDistance,
       emissionCount: branch.emissionCount,
+      distanceEmissionProgress: branch.distanceEmissionProgress,
       lastTimestamp: branch.lastTimestamp,
       nextTimeEmissionAt: branch.nextTimeEmissionAt,
       mixing: branch.mixing

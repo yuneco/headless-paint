@@ -42,6 +42,7 @@
 
 - `BrushRenderState.branches` の不足分補完と branch state の生成
 - branch ごとの `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` の merge
+- 可変spacing有効時の `distanceEmissionProgress` の引き継ぎ
 - mixing 有効時の `colorBuffer` / `mixedCanvas` / `lastMixingUpdateDistance` のクローン
 - pending 描画が committed state を汚さないための `PENDING_COLOR_BUFFER_CACHE`
 
@@ -92,7 +93,7 @@ function appendToCommittedLayer(
 | `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
-| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。`tipCanvas` と branch ごとの `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では省略可 |
+| `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。`tipCanvas` と branch ごとの `accumulatedDistance` / `emissionCount` / `distanceEmissionProgress` / `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では省略可 |
 | `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
 | `alphaLocked` | `boolean` | - | 通常描画を既存 alpha に制限するか。省略時は `layer.meta.alphaLocked` を使用する |
 
