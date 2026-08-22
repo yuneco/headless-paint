@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_BRUSH_MIXING } from "../types";
+import { prepareMixingState } from "./mixing";
 import { hashSeed } from "./prng";
 import {
   cloneBrushRenderState,
@@ -68,12 +70,14 @@ describe("brush render state", () => {
     });
   });
 
-  it("pending clone は mixing canvas を別 canvas にコピーする", () => {
-    const colorBuffer = new OffscreenCanvas(2, 2);
-    const colorCtx = colorBuffer.getContext("2d");
-    if (!colorCtx) throw new Error("Failed to get 2d context");
-    colorCtx.fillStyle = "rgb(255, 0, 0)";
-    colorCtx.fillRect(0, 0, 2, 2);
+  it("mixing state clone はnumeric fieldとcanvas ownershipを分離する", () => {
+    const tipCanvas = new OffscreenCanvas(4, 4);
+    const mixing = prepareMixingState(
+      tipCanvas,
+      { r: 255, g: 0, b: 0, a: 255 },
+      DEFAULT_BRUSH_MIXING,
+      undefined,
+    );
 
     const state = {
       tipCanvas: null,
@@ -82,19 +86,20 @@ describe("brush render state", () => {
         {
           accumulatedDistance: 3,
           emissionCount: 4,
-          mixing: {
-            colorBuffer,
-            lastMixingUpdateDistance: 10,
-          },
+          mixing: { ...mixing, lastUpdateDistance: 10 },
         },
       ],
     };
 
     const cloned = cloneBrushRenderState(state);
-    const clonedBuffer = cloned?.branches[0].mixing?.colorBuffer;
-    expect(clonedBuffer).toBeInstanceOf(OffscreenCanvas);
-    expect(clonedBuffer).not.toBe(colorBuffer);
-    expect(cloned?.branches[0].mixing?.lastMixingUpdateDistance).toBe(10);
+    const clonedMixing = cloned?.branches[0].mixing;
+    expect(clonedMixing?.fieldCanvas).toBeInstanceOf(OffscreenCanvas);
+    expect(clonedMixing?.fieldCanvas).not.toBe(mixing.fieldCanvas);
+    expect(clonedMixing?.field).not.toBe(mixing.field);
+    expect(Array.from(clonedMixing?.field ?? [])).toEqual(
+      Array.from(mixing.field),
+    );
+    expect(clonedMixing?.lastUpdateDistance).toBe(10);
   });
 
   it("pending clone は時間 emission 状態も複製する", () => {

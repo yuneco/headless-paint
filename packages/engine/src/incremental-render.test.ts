@@ -9,7 +9,12 @@ import {
 import { clearLayer, createLayer, getPixel } from "./layer";
 import { renderLayers } from "./render";
 import type { ExpandConfig, PendingOverlay, Point, StrokeStyle } from "./types";
-import { DEFAULT_PRESSURE_CURVE, ROUND_PEN } from "./types";
+import {
+  DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_BRUSH_MIXING,
+  DEFAULT_PRESSURE_CURVE,
+  ROUND_PEN,
+} from "./types";
 
 const createTestStyle = (): StrokeStyle => ({
   color: { r: 255, g: 0, b: 0, a: 255 },
@@ -209,6 +214,34 @@ describe("renderPendingLayer", () => {
     appendToCommittedLayer(layer, points, style, compiled);
 
     renderPendingLayer(layer, [], style, compiled);
+
+    expect(getPixel(layer, 50, 50).a).toBe(0);
+  });
+
+  it("mixing有効時はpendingを描かず既存previewもclearする", () => {
+    const layer = createLayer(100, 100);
+    layer.ctx.fillStyle = "rgb(255, 0, 0)";
+    layer.ctx.fillRect(0, 0, 100, 100);
+    const style: StrokeStyle = {
+      ...createTestStyle(),
+      brush: {
+        type: "stamp",
+        tip: { type: "circle", hardness: 1 },
+        dynamics: DEFAULT_BRUSH_DYNAMICS,
+        pressureDynamics: { size: 0, flow: 0 },
+        mixing: { ...DEFAULT_BRUSH_MIXING, enabled: true },
+      },
+    };
+
+    renderPendingLayer(
+      layer,
+      [
+        { x: 10, y: 50, pressure: 1 },
+        { x: 90, y: 50, pressure: 1 },
+      ],
+      style,
+      createNoneExpand(),
+    );
 
     expect(getPixel(layer, 50, 50).a).toBe(0);
   });

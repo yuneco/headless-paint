@@ -7,6 +7,7 @@
 - Lab reference: `experiment/acrylic-lab@4f5a1cd`
 - Sensory result: Simple acrylic / MIX、Rough bristle / COMB、Organic sponge / TEXはいずれも候補として合格
 - Production priority: Acrylic v2とRough bristleを先行し、Organic spongeは後回し
+- Progress: P0 / P1完了、P2実装・WebKit gate完了、P3着手前（2026-08-22）
 
 この計画はLabの比較実装を移植する計画ではない。Labで選んだ表現だけを、productionの`input → stroke → engine → react/web`境界へ再設計して組み込む。
 
@@ -121,7 +122,7 @@ CPU fieldとDownsampled Canvasをproductionへ併存させない。実装途中�
 
 ### Mixing state ownership
 
-`BrushBranchRenderState`のmixing stateは、小さなnumeric field、material更新距離、checkpoint source参照だけを持つ。旧`colorBuffer` / `mixedCanvas`とpending clone cacheは削除する。
+`BrushBranchRenderState`のmixing stateは、小さなnumeric field、material更新距離、描画済みtargetから切り出す有限checkpoint tileだけを持つ。tileは最大tip footprintと次checkpointまでの移動距離を覆い、距離ごとの全canvas copyを行わない。旧`colorBuffer` / `mixedCanvas`とpending clone cacheは削除する。
 
 混色presetはCausal input + pending OFFを標準とする。形状pendingとmaterial rollbackを同じ単位にしない。engine APIへpendingが渡された場合の契約は、stateを汚さない明示的no-opまたは軽量copyのどちらか一つに固定し、UIだけに依存した安全性にしない。
 
@@ -183,6 +184,18 @@ Gate: Acrylicの低pressureが点描化せず、既存非対象brush fixtureが�
 初期官能値はLabの`Pickup 0.10 / Restore 0.06 / update 15px / checkpoint 30–40px`を距離rateへ変換した値から始める。確定presetはweb統合後に調整する。
 
 Gate: 方向性、反復pickup、速度差、live/replay、長時間WebKit安定性を通す。
+
+#### P2 implementation result (2026-08-22)
+
+- 公開設定は上記8 propertyだけに固定し、backend discriminatorと旧mixing schemaは残さなかった
+- `material-field.ts`をCanvas非依存の純粋な数値更新、`mixing.ts`をCanvas sampling / upload adapterとして分離した
+- dabは現在の保持色を先にdepositし、その後に次dab用のPickup / Restore / Diffusionを更新する。進行方向より前方のcanvas色を変更しない
+- 最初はstroke-start snapshot、以後は確定済みtargetから切り出す有限checkpoint tileを参照する。同一strokeの往復でも直前に塗った色を拾える
+- mixing有効時のpendingはengineで明示的no-opとし、material rollbackや仮描画用clone cacheを持たない
+- 低レベル`renderBrushStroke`はmixing時にtargetと別所有の`sourceLayer`を必須とし、同一canvasならerrorにする。production stroke runtimeはstroke開始時にsnapshotを生成する
+- persistenceは新schemaの欠落・旧schema・範囲外値をerrorにする。既存非mixing stampの`spacingSizeCoupling`欠落だけは意味を保てるため`0`で補完する
+- Acrylic初期値は`pickupRatePerPx=0.007`、`restoreRatePerPx=0.004`、`diffusionRatePerPx=0.05`、`updateDistancePx=15`、`checkpointDistancePx=36`、field `18x8`
+- WebKit production demoの576点連続strokeを3回測定し、late / early処理時間比は`0.96 / 0.86 / 1.03`、描画後のpreset往復応答は`42–78ms`。同期入力ベンチの絶対値をFPSとしては扱わず、旧方式の時間軸劣化がないことだけをgateとした
 
 ### P3 — Rough bristle renderer
 

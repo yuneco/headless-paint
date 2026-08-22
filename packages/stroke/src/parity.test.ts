@@ -152,8 +152,9 @@ const cases: readonly ParityCase[] = [
         mixing: {
           ...DEFAULT_BRUSH_MIXING,
           enabled: true,
-          pickup: 1,
-          restore: 0,
+          pickupRatePerPx: 10,
+          restoreRatePerPx: 0,
+          diffusionRatePerPx: 0,
           updateDistancePx: 1,
         },
       },

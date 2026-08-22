@@ -731,32 +731,50 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 
 ### BrushMixing
 
-スタンプブラシの混色設定。一定距離ごとに描画先レイヤーの footprint を分岐ごとのブラシ色バッファへ転写し、元の描画色で復元する強さを制御する。
+スタンプブラシの混色設定。一定距離ごとに描画先レイヤーのfootprintを進行方向へ揃えたtip-local連続RGBA色場へ取り込み、元の描画色への復元と色場内拡散を制御する。
 
 ```typescript
 interface BrushMixing {
   readonly enabled: boolean;
-  readonly pickup: number;
-  readonly restore: number;
+  readonly pickupRatePerPx: number;
+  readonly restoreRatePerPx: number;
+  readonly diffusionRatePerPx: number;
   readonly updateDistancePx: number;
+  readonly checkpointDistancePx: number;
+  readonly fieldColumns: number;
+  readonly fieldRows: number;
 }
+
+const BRUSH_MIXING_MIN_FIELD_DIMENSION = 2;
+const BRUSH_MIXING_MAX_FIELD_DIMENSION = 64;
+const BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX = 256;
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `enabled` | `boolean` | 混色を有効にする |
-| `pickup` | `number` | 描画先 footprint をブラシ色バッファへ転写する強さ [0, 1] |
-| `restore` | `number` | 元の描画色をブラシ色バッファへ戻す強さ [0, 1] |
-| `updateDistancePx` | `number` | 混色状態を更新する距離の下限をpxで指定する。実際の更新間隔は `max(stampSpacing, updateDistancePx)`。型上は必須で、不正値や型を無視した未指定入力は描画時にデフォルト値へフォールバック |
+| `pickupRatePerPx` | `number` | 下地色を拾う距離rate。距離dの係数は`1-exp(-rate*d)` |
+| `restoreRatePerPx` | `number` | 元の描画色へ戻す距離rate。距離dの係数は`1-exp(-rate*d)` |
+| `diffusionRatePerPx` | `number` | 色場内の隣接拡散pass量 / px |
+| `updateDistancePx` | `number` | 色場を更新する最小移動距離 |
+| `checkpointDistancePx` | `number` | 描画済みtargetから局所sampling tileを更新する距離 |
+| `fieldColumns` | `number` | tip-local色場の進行方向解像度 |
+| `fieldRows` | `number` | tip-local色場の横断方向解像度 |
+
+ratesは0以上、距離は正の有限数、field解像度は2〜64の整数、checkpoint距離は256px以下を有効範囲とする。永続化境界では範囲外を暗黙に丸めずrejectする。
 
 **関連定数**:
 
 ```typescript
 const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
-  pickup: 0,
-  restore: 0.15,
-  updateDistancePx: 8,
+  pickupRatePerPx: 0.007,
+  restoreRatePerPx: 0.004,
+  diffusionRatePerPx: 0.05,
+  updateDistancePx: 15,
+  checkpointDistancePx: 36,
+  fieldColumns: 18,
+  fieldRows: 8,
 };
 ```
 
@@ -936,9 +954,16 @@ renderLayers(layers, ctx, transform, {
 
 ```typescript
 interface BrushMixingState {
-  readonly colorBuffer?: OffscreenCanvas;
-  readonly mixedCanvas?: OffscreenCanvas;
-  readonly lastMixingUpdateDistance?: number;
+  readonly field: Float32Array;
+  readonly fieldCanvas: OffscreenCanvas;
+  readonly fieldPixels: ImageData;
+  readonly sampleCanvas: OffscreenCanvas;
+  readonly renderCanvas: OffscreenCanvas;
+  readonly checkpointCanvas?: OffscreenCanvas;
+  readonly checkpointOriginX?: number;
+  readonly checkpointOriginY?: number;
+  readonly lastUpdateDistance?: number;
+  readonly lastCheckpointDistance?: number;
 }
 
 interface BrushBranchRenderState {
@@ -978,9 +1003,14 @@ interface BrushRenderState {
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `colorBuffer` | `OffscreenCanvas` | 混色有効時に使うブラシ色バッファ。`tipCanvas` と同じ最大サイズで、背景転写と復元色転写により更新される |
-| `mixedCanvas` | `OffscreenCanvas` | 混色更新を距離ベースで間引くときに再利用する直近の mixed dab。`colorBuffer` に `tipCanvas` の alpha を適用した結果を保持する |
-| `lastMixingUpdateDistance` | `number` | 最後に `colorBuffer` / `mixedCanvas` を更新したストローク距離。混色更新を距離ベースで制御するために使用 |
+| `field` | `Float32Array` | 連続RGBA色場の正本。更新ごとに新しい配列を返す |
+| `fieldCanvas` / `fieldPixels` | Canvas / ImageData | 小さな数値色場をCanvasへuploadするbranch所有cache |
+| `sampleCanvas` | `OffscreenCanvas` | checkpointを進行方向へ揃えて小領域readbackするscratch |
+| `renderCanvas` | `OffscreenCanvas` | 色場をtip alphaでmaskした再利用可能なdab source |
+| `checkpointCanvas` | `OffscreenCanvas` | 描画済みtargetから切り出した有限範囲のsampling tile |
+| `checkpointOriginX/Y` | `number` | checkpoint tileのdocument座標原点 |
+| `lastUpdateDistance` | `number` | 最後に色場を更新したstroke距離 |
+| `lastCheckpointDistance` | `number` | 最後にcheckpoint tileを更新したstroke距離 |
 
 **設計意図**:
 
@@ -988,7 +1018,8 @@ interface BrushRenderState {
 - branch ごとに独立した `accumulatedDistance` / `emissionCount` / `distanceEmissionProgress` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、stamp / spray とも branch 間で spacing 位相と時間 emission の位相が揃う。
 - branch の実効 seed は `hashSeed(seed, branchIndex)` で導出する。emission 序数は branch ごとに 0 から数え、各 emission の局所 seed は `hashSeed(branchSeed, emissionIndex)` で導出する。
 - 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
-- 混色有効時は Expand 分岐ごとに拾う背景が異なるため、`mixing` に分岐別の色バッファを保持する。spray は混色非対応のため `mixing` を持たない。
+- 混色有効時はExpand分岐ごとに拾う背景が異なるため、`mixing`に分岐別の色場と有限checkpointを保持する。sprayは混色非対応。
+- `field`は更新ごとに新しい配列を返す数値状態。Canvas / ImageDataはbranch所有のmutable cacheであり、分岐・pendingへ共有せず`cloneBrushRenderState`でdeep cloneする。
 
 **使用例**:
 ```typescript

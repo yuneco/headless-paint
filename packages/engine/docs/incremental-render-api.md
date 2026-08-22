@@ -43,8 +43,7 @@
 - `BrushRenderState.branches` の不足分補完と branch state の生成
 - branch ごとの `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` の merge
 - 可変spacing有効時の `distanceEmissionProgress` の引き継ぎ
-- mixing 有効時の `colorBuffer` / `mixedCanvas` / `lastMixingUpdateDistance` のクローン
-- pending 描画が committed state を汚さないための `PENDING_COLOR_BUFFER_CACHE`
+- mixing色場と有限checkpoint resourceのbranch ownership
 
 これにより、stamp / spray / round-pen は同じ branch ループで扱われる。spray は mixing 非対応のため、pending クローンは数値 state と `tipCanvas` 参照だけを引き継ぐ軽い経路になる。
 
@@ -94,13 +93,13 @@ function appendToCommittedLayer(
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`drawVariableWidthPath` にパススルーされ、曲率計算精度を向上させる。デフォルト 0（従来互換） |
 | `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。`tipCanvas` と branch ごとの `accumulatedDistance` / `emissionCount` / `distanceEmissionProgress` / `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では省略可 |
-| `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
+| `sourceLayer` | `Layer` | 条件付き | 混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
 | `alphaLocked` | `boolean` | - | 通常描画を既存 alpha に制限するか。省略時は `layer.meta.alphaLocked` を使用する |
 
 **動作**:
 1. pointsを`expandStrokePoints`で展開（pressure/timestamp保持）
 2. `brush/state.ts` で `BrushRenderState.branches` を展開数に揃え、branch ごとの開始 state を取り出す
-3. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画。混色有効時は展開ストロークごとに独立した `mixing.colorBuffer` / `mixedCanvas` を距離ベースで更新し、`sourceLayer` を指定した場合はストローク開始時のレイヤー状態から背景色を拾う
+3. 各展開ストロークを`renderBrushStroke`で描画。混色有効時は分岐ごとのtip-local色場を更新し、最初は`sourceLayer`、以後は描画済みtargetから切り出した有限checkpointを参照する
 4. 描画後の branch state を `brush/state.ts` で merge する
 5. `alphaLocked` が `true` かつ通常描画の場合は `source-atop` で描画し、既存 alpha のある範囲にだけ反映する
 6. 既存の描画は保持される（追加描画のみ）
@@ -157,13 +156,13 @@ function renderPendingLayer(
 | `style` | `StrokeStyle` | ○ | 描画スタイル（brush.pressureDynamics含む） |
 | `compiledExpand` | `CompiledExpand` | ○ | コンパイル済み展開設定 |
 | `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。committed 描画から引き継いだ branch ごとの `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` と混色更新状態を使用し、境界での emission と混色の連続性を保つ |
-| `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
-| `previewBaseLayer` | `Layer` | - | 混色プレビュー用の表示ベース。指定時は pending レイヤーにこのレイヤーをコピーしてから pending 点を描画する |
+| `sourceLayer` | `Layer` | - | 非混色pendingで必要な場合のみ参照。混色pendingはno-op |
+| `previewBaseLayer` | `Layer` | - | 互換引数。stateful mixingのpendingはno-opのため参照しない |
 
 **動作**:
 1. レイヤーをクリア
 2. pointsを`expandStrokePoints`で展開（pressure/timestamp保持）
-3. `brush/state.ts` で pending 描画用の `BrushRenderState` を複製する。時間ベース emission 用の `lastTimestamp` / `nextTimeEmissionAt` も複製し、pending 再描画が committed state を直接進めない。混色有効時は `colorBuffer` / `mixedCanvas` も複製する
+3. 非混色brushでは`BrushRenderState`を複製してpendingを描画する。混色brushは色場rollbackを行わず、この時点でno-opとする
 4. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画（`compositeOperation` は適用しない、常に `source-over`）
 
 **時間ベース emission と境界処理**:
@@ -172,7 +171,7 @@ function renderPendingLayer(
 `renderPendingLayer` は alpha lock を評価しない。alpha lock 有効時の live preview は `renderLayers` / `composeLayers` の pending overlay 合成で committed レイヤーの alpha を使ってマスクする。pending レイヤー自体は従来通り、未確定点の pixels だけを保持する。
 
 **混色プレビュー**:
-混色ブラシでは、ストローク開始時点の committed レイヤーをコピーした `sourceLayer` を渡す。これにより、透明領域へ移動した後に同一ストローク内で描いた dab を背景として拾い続けることを避け、`restore` による元色への復元を安定させる。React 統合では pending レイヤーに pending 差分のみを描画し、通常の `source-over` 合成で committed レイヤーと重ねる。`previewBaseLayer` によるフルレイヤーコピーは Safari で極端に遅くなるため、通常のライブ描画では使用しない。
+混色ブラシはCausal input（過去情報だけの入力補正）とcommitted描画を標準とし、pending layerへ仮のmaterial結果を描かない。これにより形状pendingと色場rollbackのライフサイクルを分離する。ストローク開始時の`sourceLayer`は最初のpickupだけに使い、一定距離後は描画済みtargetの局所checkpointへ切り替わる。同一strokeの往復でも開始時の原色を毎回再導入しない。
 
 **消しゴムモードの注意**:
 pendingレイヤーは毎回クリアされるため、`destination-out` で描画しても不可視になる。消しゴムのpendingプレビューは `LayerMeta.compositeOperation` によるレイヤー合成時に実現される（→ renderLayers / composeLayers を参照）。

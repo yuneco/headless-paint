@@ -89,9 +89,13 @@ describe("persistence", () => {
           pressureDynamics: { size: 0.4, flow: 0.7 },
           mixing: {
             enabled: true,
-            pickup: 0.3,
-            restore: 0.08,
-            updateDistancePx: 8,
+            pickupRatePerPx: 0.007,
+            restoreRatePerPx: 0.004,
+            diffusionRatePerPx: 0.05,
+            updateDistancePx: 15,
+            checkpointDistancePx: 36,
+            fieldColumns: 18,
+            fieldRows: 8,
           },
         },
       },
@@ -112,11 +116,33 @@ describe("persistence", () => {
       dynamics: { spacingSizeCoupling: 1 },
       mixing: {
         enabled: true,
-        pickup: 0.3,
-        restore: 0.08,
-        updateDistancePx: 8,
+        pickupRatePerPx: 0.007,
+        restoreRatePerPx: 0.004,
+        diffusionRatePerPx: 0.05,
+        updateDistancePx: 15,
+        checkpointDistancePx: 36,
+        fieldColumns: 18,
+        fieldRows: 8,
       },
     });
+
+    const invalidField = JSON.parse(JSON.stringify(snapshot)) as {
+      pen: { brush: { mixing: { fieldColumns: number } } };
+    };
+    invalidField.pen.brush.mixing.fieldColumns = 1;
+    expect(importPaintSettings(invalidField)).toBeNull();
+
+    const invalidRate = JSON.parse(JSON.stringify(snapshot)) as {
+      pen: { brush: { mixing: { pickupRatePerPx: number } } };
+    };
+    invalidRate.pen.brush.mixing.pickupRatePerPx = -0.1;
+    expect(importPaintSettings(invalidRate)).toBeNull();
+
+    const invalidCheckpoint = JSON.parse(JSON.stringify(snapshot)) as {
+      pen: { brush: { mixing: { checkpointDistancePx: number } } };
+    };
+    invalidCheckpoint.pen.brush.mixing.checkpointDistancePx = 257;
+    expect(importPaintSettings(invalidCheckpoint)).toBeNull();
   });
 
   it("旧stamp設定でspacingSizeCouplingが欠落した場合は0で補完する", () => {
@@ -161,7 +187,7 @@ describe("persistence", () => {
     });
   });
 
-  it("rejects stamp brush mixing settings without updateDistancePx", () => {
+  it("旧mixing propertyだけのstamp設定は専用変換せずrejectする", () => {
     const legacyRatioOnly = {
       version: 1,
       tool: "pen",

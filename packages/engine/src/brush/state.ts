@@ -1,11 +1,6 @@
 import type { BrushBranchRenderState, BrushRenderState } from "../types";
 import { hashSeed } from "./prng";
 
-export const PENDING_COLOR_BUFFER_CACHE = new WeakMap<
-  OffscreenCanvas,
-  OffscreenCanvas
->();
-
 const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
@@ -86,35 +81,40 @@ export function cloneBrushRenderState(
       nextTimeEmissionAt: branch.nextTimeEmissionAt,
       mixing: branch.mixing
         ? {
-            colorBuffer: branch.mixing.colorBuffer
-              ? copyToPendingColorBuffer(branch.mixing.colorBuffer)
+            field: new Float32Array(branch.mixing.field),
+            fieldCanvas: copyCanvas(branch.mixing.fieldCanvas),
+            fieldPixels: copyImageData(branch.mixing.fieldPixels),
+            sampleCanvas: copyCanvas(branch.mixing.sampleCanvas),
+            renderCanvas: copyCanvas(branch.mixing.renderCanvas),
+            checkpointCanvas: branch.mixing.checkpointCanvas
+              ? copyCanvas(branch.mixing.checkpointCanvas)
               : undefined,
-            mixedCanvas: branch.mixing.mixedCanvas
-              ? copyToPendingColorBuffer(branch.mixing.mixedCanvas)
-              : undefined,
-            lastMixingUpdateDistance: branch.mixing.lastMixingUpdateDistance,
+            checkpointOriginX: branch.mixing.checkpointOriginX,
+            checkpointOriginY: branch.mixing.checkpointOriginY,
+            lastUpdateDistance: branch.mixing.lastUpdateDistance,
+            lastCheckpointDistance: branch.mixing.lastCheckpointDistance,
           }
         : undefined,
     })),
   };
 }
 
-function copyToPendingColorBuffer(source: OffscreenCanvas): OffscreenCanvas {
-  let buffer = PENDING_COLOR_BUFFER_CACHE.get(source);
-  if (
-    !buffer ||
-    buffer.width !== source.width ||
-    buffer.height !== source.height
-  ) {
-    buffer = new OffscreenCanvas(source.width, source.height);
-    PENDING_COLOR_BUFFER_CACHE.set(source, buffer);
-  }
-  const ctx = getCached2dContext(buffer, "pending color buffer");
+function copyCanvas(source: OffscreenCanvas): OffscreenCanvas {
+  const buffer = new OffscreenCanvas(source.width, source.height);
+  const ctx = getCached2dContext(buffer, "brush state canvas clone");
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "copy";
   ctx.drawImage(source, 0, 0);
   ctx.globalCompositeOperation = "source-over";
   return buffer;
+}
+
+function copyImageData(source: ImageData): ImageData {
+  const canvas = new OffscreenCanvas(source.width, source.height);
+  const ctx = getCached2dContext(canvas, "mixing image data clone");
+  const copy = ctx.createImageData(source.width, source.height);
+  copy.data.set(source.data);
+  return copy;
 }
 
 function getCached2dContext(

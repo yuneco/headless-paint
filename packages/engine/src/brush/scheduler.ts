@@ -4,6 +4,9 @@ export interface EmissionPoint {
   readonly x: number;
   readonly y: number;
   readonly pressure: number | undefined;
+  /** emission位置での正規化した進行方向 */
+  readonly directionX: number;
+  readonly directionY: number;
   readonly distance: number;
   readonly emissionIndex: number;
 }
@@ -118,10 +121,13 @@ function walkFixedEmissions(
 
   if (totalDistance === 0 && overlapCount === 0) {
     const first = interpolated[0];
+    const direction = findInitialDirection(interpolated);
     emit({
       x: first.x,
       y: first.y,
       pressure: first.pressure,
+      directionX: direction.x,
+      directionY: direction.y,
       distance: 0,
       emissionIndex: emissionCount,
     });
@@ -151,6 +157,7 @@ function walkFixedEmissions(
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const segmentLength = Math.sqrt(dx * dx + dy * dy);
+    const direction = normalizeDirection(dx, dy);
 
     const segmentStart = totalDistance;
     const segmentEnd = totalDistance + segmentLength;
@@ -199,6 +206,8 @@ function walkFixedEmissions(
           x: p1.x + dx * fracDist,
           y: p1.y + dy * fracDist,
           pressure: pressure1 + (pressure2 - pressure1) * fracDist,
+          directionX: direction.x,
+          directionY: direction.y,
           distance: nextEmissionDistance,
           emissionIndex: emissionCount,
         });
@@ -209,6 +218,8 @@ function walkFixedEmissions(
           x: p1.x + dx * fracTime,
           y: p1.y + dy * fracTime,
           pressure: pressure1 + (pressure2 - pressure1) * fracTime,
+          directionX: direction.x,
+          directionY: direction.y,
           distance: segmentStart + segmentLength * fracTime,
           emissionIndex: emissionCount,
         });
@@ -288,10 +299,13 @@ function walkAdaptiveEmissions(
 
   if (totalDistance === 0 && overlapCount === 0) {
     const first = interpolated[0];
+    const direction = findInitialDirection(interpolated);
     emitCapped({
       x: first.x,
       y: first.y,
       pressure: first.pressure,
+      directionX: direction.x,
+      directionY: direction.y,
       distance: 0,
       emissionIndex: emissionCount,
     });
@@ -303,6 +317,7 @@ function walkAdaptiveEmissions(
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const segmentLength = Math.hypot(dx, dy);
+    const direction = normalizeDirection(dx, dy);
     const segmentStart = totalDistance;
 
     const spacing1 = sanitizeSpacing(spacingAt(p1), fallbackSpacingPx);
@@ -370,6 +385,8 @@ function walkAdaptiveEmissions(
         x: p1.x + dx * fraction,
         y: p1.y + dy * fraction,
         pressure: pressure1 + (pressure2 - pressure1) * fraction,
+        directionX: direction.x,
+        directionY: direction.y,
         distance: segmentStart + segmentLength * fraction,
         emissionIndex: emissionCount,
       });
@@ -396,6 +413,30 @@ function walkAdaptiveEmissions(
     lastTimestamp,
     nextTimeEmissionAt,
   };
+}
+
+function findInitialDirection(points: readonly StrokePoint[]): {
+  readonly x: number;
+  readonly y: number;
+} {
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1];
+    const current = points[i];
+    if (!previous || !current) continue;
+    const dx = current.x - previous.x;
+    const dy = current.y - previous.y;
+    if (Math.hypot(dx, dy) > 1e-9) return normalizeDirection(dx, dy);
+  }
+  return { x: 1, y: 0 };
+}
+
+function normalizeDirection(
+  x: number,
+  y: number,
+): { readonly x: number; readonly y: number } {
+  const length = Math.hypot(x, y);
+  if (length <= 1e-9) return { x: 1, y: 0 };
+  return { x: x / length, y: y / length };
 }
 
 function sanitizeSpacing(value: number, fallback: number): number {

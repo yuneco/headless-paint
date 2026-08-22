@@ -51,7 +51,7 @@ export function appendToCommittedLayer(
         committedStyle,
         overlapCount,
         branchState,
-        sourceLayer ?? layer,
+        sourceLayer,
       );
       const renderedBranch = stateToBranch(renderedState);
       nextBranches[i] = renderedBranch;
@@ -94,16 +94,12 @@ export function renderPendingLayer(
   compiledExpand: CompiledExpand,
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
-  previewBaseLayer?: Layer,
+  _previewBaseLayer?: Layer,
 ): void {
   clearLayer(layer);
-  const rendersFullPreview = shouldRenderFullMixedPreview(
-    style,
-    previewBaseLayer,
-  );
-  if (rendersFullPreview && previewBaseLayer) {
-    layer.ctx.drawImage(previewBaseLayer.canvas, 0, 0);
-  }
+  // Stateful mixingは確定済みmaterialだけを表示する。pendingで色場を複製・
+  // rollbackしないため、engine境界でも明示的なno-opに固定する。
+  if (hasActiveMixing(style)) return;
 
   if (points.length === 0) return;
 
@@ -137,16 +133,8 @@ export function renderPendingLayer(
   }
 }
 
-function shouldRenderFullMixedPreview(
-  style: StrokeStyle,
-  previewBaseLayer: Layer | undefined,
-): boolean {
-  return (
-    !!previewBaseLayer &&
-    style.compositeOperation === "source-over" &&
-    style.brush.type === "stamp" &&
-    !!style.brush.mixing?.enabled
-  );
+function hasActiveMixing(style: StrokeStyle): boolean {
+  return style.brush.type === "stamp" && !!style.brush.mixing?.enabled;
 }
 
 /**

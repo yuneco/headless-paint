@@ -234,16 +234,31 @@ export const DEFAULT_SPRAY_PRESSURE_DYNAMICS: SprayPressureDynamics = {
 
 export interface BrushMixing {
   readonly enabled: boolean;
-  readonly pickup: number;
-  readonly restore: number;
+  /** 1px進むごとの下地色pickup rate。距離dの係数は1-exp(-rate*d) */
+  readonly pickupRatePerPx: number;
+  /** 1px進むごとの元色restore rate。距離dの係数は1-exp(-rate*d) */
+  readonly restoreRatePerPx: number;
+  /** 1px進むごとの色場diffusion pass量 */
+  readonly diffusionRatePerPx: number;
   readonly updateDistancePx: number;
+  readonly checkpointDistancePx: number;
+  readonly fieldColumns: number;
+  readonly fieldRows: number;
 }
+
+export const BRUSH_MIXING_MIN_FIELD_DIMENSION = 2;
+export const BRUSH_MIXING_MAX_FIELD_DIMENSION = 64;
+export const BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX = 256;
 
 export const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
-  pickup: 0,
-  restore: 0.15,
-  updateDistancePx: 8,
+  pickupRatePerPx: 0.007,
+  restoreRatePerPx: 0.004,
+  diffusionRatePerPx: 0.05,
+  updateDistancePx: 15,
+  checkpointDistancePx: 36,
+  fieldColumns: 18,
+  fieldRows: 8,
 };
 
 /** 現在の circle+trapezoid 方式 */
@@ -329,9 +344,16 @@ export const MARKER: StampBrushConfig = {
 };
 
 export interface BrushMixingState {
-  readonly colorBuffer?: OffscreenCanvas;
-  readonly mixedCanvas?: OffscreenCanvas;
-  readonly lastMixingUpdateDistance?: number;
+  readonly field: Float32Array;
+  readonly fieldCanvas: OffscreenCanvas;
+  readonly fieldPixels: ImageData;
+  readonly sampleCanvas: OffscreenCanvas;
+  readonly renderCanvas: OffscreenCanvas;
+  readonly checkpointCanvas?: OffscreenCanvas;
+  readonly checkpointOriginX?: number;
+  readonly checkpointOriginY?: number;
+  readonly lastUpdateDistance?: number;
+  readonly lastCheckpointDistance?: number;
 }
 
 export interface BrushBranchRenderState {

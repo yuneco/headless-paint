@@ -14,6 +14,9 @@ import type {
   SpraySizeJitterMode,
 } from "@headless-paint/core";
 import {
+  BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX,
+  BRUSH_MIXING_MAX_FIELD_DIMENSION,
+  BRUSH_MIXING_MIN_FIELD_DIMENSION,
   DEFAULT_PRESSURE_DYNAMICS,
   DEFAULT_RADIAL_DISTRIBUTION,
   DEFAULT_SPRAY_PRESSURE_DYNAMICS,
@@ -432,6 +435,22 @@ function isPositiveInteger(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) > 0;
 }
 
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 0;
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0;
+}
+
+function isBoundedFieldDimension(value: unknown): value is number {
+  return (
+    Number.isInteger(value) &&
+    (value as number) >= BRUSH_MIXING_MIN_FIELD_DIMENSION &&
+    (value as number) <= BRUSH_MIXING_MAX_FIELD_DIMENSION
+  );
+}
+
 function isToolType(value: unknown): value is ToolType {
   return (
     value === "pen" ||
@@ -635,9 +654,15 @@ function parseBrushConfig(
     if (!isRecord(value.mixing)) return null;
     if (
       typeof value.mixing.enabled !== "boolean" ||
-      !isFiniteNumber(value.mixing.pickup) ||
-      !isFiniteNumber(value.mixing.restore) ||
-      !isFiniteNumber(value.mixing.updateDistancePx)
+      !isNonNegativeFiniteNumber(value.mixing.pickupRatePerPx) ||
+      !isNonNegativeFiniteNumber(value.mixing.restoreRatePerPx) ||
+      !isNonNegativeFiniteNumber(value.mixing.diffusionRatePerPx) ||
+      !isPositiveFiniteNumber(value.mixing.updateDistancePx) ||
+      !isPositiveFiniteNumber(value.mixing.checkpointDistancePx) ||
+      value.mixing.checkpointDistancePx >
+        BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX ||
+      !isBoundedFieldDimension(value.mixing.fieldColumns) ||
+      !isBoundedFieldDimension(value.mixing.fieldRows)
     ) {
       return null;
     }
@@ -646,9 +671,13 @@ function parseBrushConfig(
   const mixing = value.mixing
     ? {
         enabled: value.mixing.enabled as boolean,
-        pickup: value.mixing.pickup as number,
-        restore: value.mixing.restore as number,
+        pickupRatePerPx: value.mixing.pickupRatePerPx as number,
+        restoreRatePerPx: value.mixing.restoreRatePerPx as number,
+        diffusionRatePerPx: value.mixing.diffusionRatePerPx as number,
         updateDistancePx: value.mixing.updateDistancePx as number,
+        checkpointDistancePx: value.mixing.checkpointDistancePx as number,
+        fieldColumns: value.mixing.fieldColumns as number,
+        fieldRows: value.mixing.fieldRows as number,
       }
     : undefined;
   return {

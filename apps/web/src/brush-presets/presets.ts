@@ -48,14 +48,20 @@ const ACRYLIC: StampBrushConfig = {
   dynamics: {
     ...DEFAULT_BRUSH_DYNAMICS,
     spacing: 0.12,
+    spacingSizeCoupling: 1,
     flow: 0.72,
   },
   pressureDynamics: { size: 0.3, flow: 0.4 },
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
     enabled: true,
-    pickup: 0.28,
-    restore: 0.08,
+    pickupRatePerPx: 0.007,
+    restoreRatePerPx: 0.004,
+    diffusionRatePerPx: 0.05,
+    updateDistancePx: 15,
+    checkpointDistancePx: 36,
+    fieldColumns: 18,
+    fieldRows: 8,
   },
 };
 

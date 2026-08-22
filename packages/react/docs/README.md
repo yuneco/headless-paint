@@ -912,6 +912,9 @@ function importPaintDocument(value: unknown): Promise<PaintInitialDocument | nul
 - zod 等のスキーマライブラリは使わず、手書きの軽量チェックで安全に失敗させる
 - 旧設定の `pen.pressureSensitivity` は `pen.brush.pressureDynamics.size` に補完する。`pressureDynamics.flow` は `0` として扱う
 - 旧 `BrushConfig` に `pressureDynamics` がない場合は `DEFAULT_PRESSURE_DYNAMICS` で補完する
+- stampの`dynamics.spacingSizeCoupling`欠落は既存spacingを維持する`0`で補完する
+- mixingは新しい距離rate + tip-local色場schemaを全項目必須とする。旧`pickup` / `restore`形式や新schemaの一部欠落は専用変換せず`null`を返す
+- mixingのrate負値、非正距離、2〜64外のfield解像度、256px超のcheckpoint距離は暗黙に丸めず`null`を返す
 - `pen.brush.dynamics.emissionsPerSecond` は stamp / spray の両方で正の有限数のみ復元する。未指定、非有限、`0` 以下は `undefined` として扱い、吹きつけOFFにする
 
 ### 使い方（保存先はアプリ側で選択）
@@ -972,7 +975,7 @@ const documentSnapshot = await exportPaintDocument({
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
 | `SprayDynamics` | engine | spray ブラシの動的パラメータ |
 | `SprayPressureDynamics` | engine | 筆圧を spray の散布径/flow/密度へ反映する強さ |
-| `BrushMixing` | engine | スタンプブラシの混色パラメータ（pickup / restore / updateDistancePx） |
+| `BrushMixing` | engine | スタンプブラシの距離正規化された色場混色設定 |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
 | `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
 | `ViewTransform` | input | ビュー変換行列 |

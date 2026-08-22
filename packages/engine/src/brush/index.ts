@@ -24,7 +24,6 @@ export {
   ensureBrushRenderState,
   getBranchBrushState,
   mergeBrushState,
-  PENDING_COLOR_BUFFER_CACHE,
   stateToBranch,
 } from "./state";
 export {
@@ -58,6 +57,14 @@ export function renderBrushStroke(
       );
       return state ?? DEFAULT_BRUSH_RENDER_STATE;
     case "stamp":
+      if (
+        style.brush.mixing?.enabled &&
+        (!sourceLayer || sourceLayer.canvas === layer.canvas)
+      ) {
+        throw new Error(
+          "Stamp mixing requires a distinct stroke-start sourceLayer snapshot",
+        );
+      }
       return renderStampBrushStroke(
         layer,
         points,

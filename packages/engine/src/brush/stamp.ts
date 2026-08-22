@@ -3,6 +3,7 @@ import { interpolateStrokePointsCentripetal } from "../stroke-interpolation";
 import type {
   BrushDynamics,
   BrushMixing,
+  BrushMixingState,
   BrushRenderState,
   Layer,
   StampBrushConfig,
@@ -11,13 +12,16 @@ import type {
 } from "../types";
 import {
   getActiveMixing,
-  getMixingUpdateSpacing,
-  renderMixedTip,
-  shouldUpdateMixedTip,
+  prepareMixingState,
+  updateMixingAfterDeposit,
 } from "./mixing";
 import { calculatePressureFlow } from "./pressure";
 import { hashSeed, mulberry32 } from "./prng";
-import { timeSpacingMsFromRate, walkEmissions } from "./scheduler";
+import {
+  type EmissionPoint,
+  timeSpacingMsFromRate,
+  walkEmissions,
+} from "./scheduler";
 
 /**
  * スタンプ用の補間。
@@ -54,14 +58,8 @@ export function renderStampBrushStroke(
   const interpolated = interpolateStampStrokePoints(points, overlapCount);
   if (interpolated.length === 0) return state;
 
-  const ctx = layer.ctx;
   const mixing = getActiveMixing(brush.mixing);
-  let colorBuffer = branch.mixing?.colorBuffer;
-  let mixedCanvas = branch.mixing?.mixedCanvas;
-  let lastMixingUpdateDistance = branch.mixing?.lastMixingUpdateDistance;
-  const mixingUpdateSpacing = mixing
-    ? getMixingUpdateSpacing(spacingPx, mixing)
-    : spacingPx;
+  let mixingState = branch.mixing;
 
   const nextBranch = walkEmissions(
     interpolated,
@@ -70,7 +68,7 @@ export function renderStampBrushStroke(
     overlapCount,
     (emission) => {
       const result = stampAt(
-        ctx,
+        layer,
         state.tipCanvas as OffscreenCanvas,
         emission,
         style,
@@ -79,15 +77,9 @@ export function renderStampBrushStroke(
         emission.emissionIndex,
         sourceLayer,
         mixing,
-        colorBuffer,
-        mixedCanvas,
-        emission.distance,
-        lastMixingUpdateDistance,
-        mixingUpdateSpacing,
+        mixingState,
       );
-      colorBuffer = result.colorBuffer;
-      mixedCanvas = result.mixedCanvas;
-      lastMixingUpdateDistance = result.lastMixingUpdateDistance;
+      mixingState = result.mixing;
     },
     timeSpacingMsFromRate(dynamics.emissionsPerSecond),
     dynamics.spacingSizeCoupling > 0
@@ -111,14 +103,7 @@ export function renderStampBrushStroke(
         distanceEmissionProgress: nextBranch.distanceEmissionProgress,
         lastTimestamp: nextBranch.lastTimestamp,
         nextTimeEmissionAt: nextBranch.nextTimeEmissionAt,
-        mixing:
-          colorBuffer || mixedCanvas || lastMixingUpdateDistance !== undefined
-            ? {
-                colorBuffer,
-                mixedCanvas,
-                lastMixingUpdateDistance,
-              }
-            : undefined,
+        mixing: mixingState,
       },
     ],
   };
@@ -143,26 +128,20 @@ function calculateAdaptiveSpacing(
 }
 
 interface StampAtResult {
-  readonly colorBuffer?: OffscreenCanvas;
-  readonly mixedCanvas?: OffscreenCanvas;
-  readonly lastMixingUpdateDistance?: number;
+  readonly mixing?: BrushMixingState;
 }
 
 function stampAt(
-  ctx: OffscreenCanvasRenderingContext2D,
+  layer: Layer,
   tipCanvas: OffscreenCanvas,
-  point: StrokePoint,
+  point: EmissionPoint,
   style: StrokeStyle,
   dynamics: BrushDynamics,
   seed: number,
   emissionIndex: number,
   sourceLayer: Layer,
   mixing: BrushMixing | null,
-  colorBuffer: OffscreenCanvas | undefined,
-  mixedCanvas: OffscreenCanvas | undefined,
-  stampDistance: number,
-  lastMixingUpdateDistance: number | undefined,
-  mixingUpdateSpacing: number,
+  mixingState: BrushMixingState | undefined,
 ): StampAtResult {
   const localSeed = hashSeed(seed, emissionIndex);
   const rng = mulberry32(localSeed);
@@ -178,7 +157,7 @@ function stampAt(
   const sizeScale = 1 - dynamics.sizeJitter * rng();
   const stampSize = diameter * sizeScale;
   if (stampSize <= 0) {
-    return { colorBuffer, mixedCanvas, lastMixingUpdateDistance };
+    return { mixing: mixingState };
   }
 
   const pressureFlow = calculatePressureFlow(
@@ -189,10 +168,10 @@ function stampAt(
   );
   const opacity = pressureFlow * (1 - dynamics.opacityJitter * rng());
   if (opacity <= 0) {
-    return { colorBuffer, mixedCanvas, lastMixingUpdateDistance };
+    return { mixing: mixingState };
   }
 
-  const rotation = dynamics.rotationJitter * (rng() * 2 - 1);
+  const rotationJitter = dynamics.rotationJitter * (rng() * 2 - 1);
   const scatterRange = dynamics.scatter * diameter;
   const scatterX = scatterRange * (rng() * 2 - 1);
   const scatterY = scatterRange * (rng() * 2 - 1);
@@ -200,41 +179,23 @@ function stampAt(
   const x = point.x + scatterX;
   const y = point.y + scatterY;
 
+  const ctx = layer.ctx;
   ctx.save();
   ctx.globalAlpha = opacity;
   ctx.globalCompositeOperation = style.compositeOperation;
 
   let drawCanvas = tipCanvas;
-  let nextColorBuffer = colorBuffer;
-  let nextMixedCanvas = mixedCanvas;
-  let nextLastMixingUpdateDistance = lastMixingUpdateDistance;
+  let nextMixingState = mixingState;
+  let rotation = rotationJitter;
   if (mixing) {
-    const shouldUpdate = shouldUpdateMixedTip(
-      colorBuffer,
-      mixedCanvas,
-      stampDistance,
-      lastMixingUpdateDistance,
-      mixingUpdateSpacing,
+    nextMixingState = prepareMixingState(
+      tipCanvas,
+      style.color,
+      mixing,
+      mixingState,
     );
-    if (shouldUpdate) {
-      const mixed = renderMixedTip(
-        tipCanvas,
-        style.color,
-        x,
-        y,
-        stampSize,
-        sourceLayer,
-        mixing,
-        colorBuffer,
-        mixedCanvas,
-      );
-      drawCanvas = mixed.canvas;
-      nextColorBuffer = mixed.colorBuffer;
-      nextMixedCanvas = mixed.mixedCanvas;
-      nextLastMixingUpdateDistance = stampDistance;
-    } else {
-      drawCanvas = mixedCanvas ?? tipCanvas;
-    }
+    drawCanvas = nextMixingState.renderCanvas;
+    rotation += Math.atan2(point.directionY, point.directionX);
   }
 
   if (rotation !== 0) {
@@ -258,9 +219,24 @@ function stampAt(
   }
 
   ctx.restore();
+  if (mixing && nextMixingState) {
+    nextMixingState = updateMixingAfterDeposit({
+      tipCanvas,
+      baseColor: style.color,
+      x,
+      y,
+      directionX: point.directionX,
+      directionY: point.directionY,
+      stampSize,
+      checkpointFootprintSize: Math.max(style.lineWidth, stampSize),
+      stampDistance: point.distance,
+      sourceLayer,
+      targetLayer: layer,
+      mixing,
+      state: nextMixingState,
+    });
+  }
   return {
-    colorBuffer: nextColorBuffer,
-    mixedCanvas: nextMixedCanvas,
-    lastMixingUpdateDistance: nextLastMixingUpdateDistance,
+    mixing: nextMixingState,
   };
 }

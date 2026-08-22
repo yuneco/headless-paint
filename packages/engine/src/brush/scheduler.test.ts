@@ -69,6 +69,48 @@ describe("walkEmissions", () => {
     expect(result).toEqual({ accumulatedDistance: 10, emissionCount: 3 });
   });
 
+  it("開始点を含め全emissionへ実際の進行方向を渡す", () => {
+    const directions: [number, number][] = [];
+
+    walkEmissions(
+      [
+        { x: 0, y: 0, pressure: 1 },
+        { x: 10, y: 0, pressure: 1 },
+      ],
+      5,
+      { accumulatedDistance: 0, emissionCount: 0 },
+      0,
+      (point) => {
+        directions.push([point.directionX, point.directionY]);
+      },
+    );
+
+    expect(directions).toEqual([
+      [1, 0],
+      [1, 0],
+      [1, 0],
+    ]);
+  });
+
+  it("停止点を飛ばして最初の移動方向を開始emissionへ使う", () => {
+    const directions: [number, number][] = [];
+
+    walkEmissions(
+      [
+        { x: 4, y: 8, pressure: 1 },
+        { x: 4, y: 8, pressure: 1 },
+        { x: 4, y: 18, pressure: 1 },
+      ],
+      20,
+      { accumulatedDistance: 0, emissionCount: 0 },
+      0,
+      (point) => directions.push([point.directionX, point.directionY]),
+    );
+
+    expect(directions[0]?.[0]).toBeCloseTo(0);
+    expect(directions[0]?.[1]).toBeCloseTo(1);
+  });
+
   it("同一座標で timestamp が進むと時間 emission を出す", () => {
     const points: StrokePoint[] = [
       { x: 10, y: 10, pressure: 0.8, timestamp: 0 },

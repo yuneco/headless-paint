@@ -50,7 +50,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `SprayPressureDynamics` | 筆圧を spray の散布径/flow/密度へ反映する強さ `{ size, flow, density }` |
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
 | `SprayDynamics` | spray ブラシの動的パラメータ（spacing, density, particleSize など） |
-| `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore, updateDistancePx }` |
+| `BrushMixing` | 距離rate、更新距離、checkpoint距離、tip-local色場解像度を持つスタンプ混色設定 |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, alphaLocked, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
@@ -150,7 +150,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `appendToCommittedLayer(layer, points, style, expand, overlapCount?, brushState?, sourceLayer?, alphaLocked?)` | 確定レイヤーに追加描画。`alphaLocked` 有効時の通常描画は既存 alpha に制限する。`BrushRenderState` を返す |
-| `renderPendingLayer(layer, points, style, expand, brushState?, sourceLayer?, previewBaseLayer?)` | 作業レイヤーを再描画。混色有効時は `sourceLayer` を背景転写元にできる |
+| `renderPendingLayer(layer, points, style, expand, brushState?, sourceLayer?, previewBaseLayer?)` | 作業レイヤーを再描画。stateful mixing有効時はclear後no-op |
 | `composeLayers(target, layers, transform?)` | レイヤーを合成 |
 
 ### Pattern Preview

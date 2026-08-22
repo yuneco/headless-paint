@@ -21,7 +21,7 @@ StrokeStyle.brush.type
 
 ### チップ生成の責務分離
 
-チップ画像の生成は呼び出し側（`useStrokeSession` 等）の責務。`renderBrushStroke` は事前生成された `tipCanvas` を `BrushRenderState` 経由で受け取る。stamp では dab の元画像、spray では粒子チップとして使う。混色有効時は `tipCanvas` を alpha mask として使い、分岐ごとの `mixing.colorBuffer` に背景 footprint と復元色を転写してから、tip alpha が適用された dab を描画する。
+チップ画像の生成は呼び出し側（`useStrokeSession` 等）の責務。`renderBrushStroke` は事前生成された `tipCanvas` を `BrushRenderState` 経由で受け取る。stamp では dab の元画像、spray では粒子チップとして使う。混色有効時は低解像度のtip-local色場を拡大し、`tipCanvas` をalpha maskとして適用する。
 
 ### モジュール構成
 
@@ -35,7 +35,8 @@ StrokeStyle.brush.type
 | `state.ts` | `BrushRenderState` の生成・branch 分解・merge・pending クローン |
 | `tip.ts` | `generateBrushTip` / `BrushTipRegistry` |
 | `stamp.ts` | stamp 描画（`walkEmissions` + dab 配置） |
-| `mixing.ts` | stamp 混色チップ生成と color buffer 更新 |
+| `material-field.ts` | 距離正規化したPickup / Restore / Diffusionの純粋な数値計算 |
+| `mixing.ts` | 色場のCanvas転送、進行方向付きsampling、有限checkpoint tile |
 | `spray.ts` | spray 描画（`walkEmissions` + 粒子バースト） |
 
 `@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
@@ -65,7 +66,7 @@ function renderBrushStroke(
 | `style` | `StrokeStyle` | ○ | 描画スタイル（`brush` フィールドでブラシ種別を判定） |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
 | `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` では `tipCanvas` と `branches[].accumulatedDistance` / `emissionCount`、可変spacing用の `distanceEmissionProgress`、時間ベース emission 用の `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では無視される |
-| `sourceLayer` | `Layer` | - | 混色有効時に背景転写元として参照するレイヤー。省略時は `layer` を参照する |
+| `sourceLayer` | `Layer` | 条件付き | 混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
 
 **戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 
@@ -75,11 +76,13 @@ function renderBrushStroke(
 3. `"stamp"`: スタンプ方式で描画:
    - ポイント列を Catmull-Rom 補間
    - branch の `accumulatedDistance` と時間 state から、距離 + 時間 emission を発生順に走査
+
+混色有効時に`sourceLayer`がない、または`layer.canvas`と同一の場合は例外にする。現在dabをsampling sourceへ再帰的に混ぜる曖昧な低レベル呼び出しは補完しない。通常のstroke実行経路は開始時にsnapshotを作成して渡す。
    - 各スタンプ位置で `tipCanvas` を `drawImage` で配置
    - `brush.pressureDynamics.size` でスタンプサイズを決める
    - `brush.dynamics.spacingSizeCoupling` が正の場合、距離spacingを筆圧反映後のtip径へ追従させる
    - `brush.pressureDynamics.flow` でスタンプごとの flow を筆圧変化させる
-   - 混色有効時は、一定距離ごとに描画先 footprint を分岐ごとの `mixing.colorBuffer` へ `pickup` の強さで転写し、元色を `restore` の強さで重ねた後、`tipCanvas` の alpha を適用して描画
+   - 混色有効時は、保持色を現在dabへ先にdepositし、確定checkpointから進行方向付きで下地を取得して次位置用の色場を更新する
    - jitter パラメータは emission 通し番号ベース PRNG で決定
    - `brush.dynamics.emissionsPerSecond` が正の有限数なら、`StrokePoint.timestamp` の進行に応じて静止中も emission を追加する
 4. `"spray"`: 散布方式で描画:
@@ -100,6 +103,8 @@ interface EmissionPoint {
   readonly x: number;
   readonly y: number;
   readonly pressure: number | undefined;
+  readonly directionX: number;
+  readonly directionY: number;
   readonly distance: number;
   readonly emissionIndex: number;
 }
@@ -210,28 +215,38 @@ const sprayAirbrush: SprayBrushConfig = {
 const acrylic: StampBrushConfig = {
   type: "stamp",
   tip: { type: "circle", hardness: 0.75 },
-  dynamics: { ...DEFAULT_BRUSH_DYNAMICS, spacing: 0.12, flow: 0.8 },
+  dynamics: {
+    ...DEFAULT_BRUSH_DYNAMICS,
+    spacing: 0.12,
+    spacingSizeCoupling: 1,
+    flow: 0.8,
+  },
   pressureDynamics: { size: 0.3, flow: 0.4 },
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
     enabled: true,
-    pickup: 0.35,
-    restore: 0.08,
-    updateDistancePx: 8,
+    pickupRatePerPx: 0.007,
+    restoreRatePerPx: 0.004,
+    diffusionRatePerPx: 0.05,
+    updateDistancePx: 15,
+    checkpointDistancePx: 36,
+    fieldColumns: 18,
+    fieldRows: 8,
   },
 };
 ```
 
-混色は平均色を `getImageData` で計算する方式ではない。ブラウザごとの差が大きいピクセル走査を避けるため、初期実装では Canvas2D の `drawImage` / `globalAlpha` / `globalCompositeOperation` で、分岐ごとのブラシ色バッファへ背景 footprint を転写する。
-
 動作:
 
-1. 初回 dab 配置時に `tipCanvas` と同じ最大サイズの `colorBuffer` を分岐ごとに作成し、`style.color` で初期化する
-2. 一定距離ごとに描画先 footprint を `pickup` の強さで `colorBuffer` へ転写する
-3. 同じ混色更新タイミングで `style.color` を `restore` の強さで `colorBuffer` へ重ね、透明領域へ移動したときに元色へ戻す
-4. `colorBuffer` に `tipCanvas` の alpha を適用し、dab として描画する。混色更新を行わない stamp では直近の mixed dab を再利用する
+1. `fieldColumns × fieldRows`の連続RGBA色場を`style.color`で初期化する
+2. 保持中の色場へtip alphaを適用し、現在dabを先にdepositする
+3. `updateDistancePx`ごとに、前回の確定checkpointを進行方向へ回転して小さな色場へsampleする
+4. 距離`d`に対し`1 - exp(-rate * d)`でPickup / Restoreを適用し、`diffusionRatePerPx * d` passだけ隣接色を拡散する
+5. `checkpointDistancePx`ごとに、描画済みtargetの局所tileだけを次のsampling sourceとして更新する
 
-この方式では、大きいブラシが赤/青の境界をまたいだときに tip 全体を単一の紫へ平均化せず、`colorBuffer` 内に赤寄り・青寄りの局所差を保持できる。Expand 使用時は分岐ごとに `colorBuffer` を持つため、分岐ごとに異なる背景色を拾う。混色状態はスタンプごとではなく `mixing.updateDistancePx` を下限とする距離ベースで更新されるため、ブラシサイズに依存せず pickup / restore / mask の頻度を制御できる。実際の更新間隔は `max(stampSpacing, mixing.updateDistancePx)` で、スタンプ配置より高頻度にはならない。時間ベース emission で静止中に dab が追加されても、距離が進まない間は混色更新は発生せず、直近の混色状態が使われる。
+現在dabをsampleより先にdepositするため、接触前方へ色が漏れない。checkpoint更新はdeposit後だが、そのcheckpointを使うのは次のmaterial更新からであり、同じdabを即座に再pickupしない。最初のmaterial更新だけは`updateDistancePx`を接触距離として使い、stroke開始直後のpickupを初期化する。tileは最大tip footprintとcheckpoint距離を覆う有限サイズで、全レイヤーを距離ごとにコピーしない。Expandでは分岐ごとに色場とcheckpointを持つ。時間emissionで距離が進まない間はmaterial更新しない。
+
+色場更新では小領域の`getImageData`と`putImageData`を使う。mutableなtip全体をdabごとに更新する旧方式は残さない。WebKitではJS計時だけでなく長時間stroke後のUI応答と実機安定性を別途確認する。
 
 ### Spray の描画モデル
 
@@ -269,7 +284,7 @@ const theta = 2 * Math.PI * v;
 
 `"lognormal"` は最大4倍の粒子を描けるため、ストローク開始時と replay 時に粒子チップを `particleSize * 4` で生成し、描画時に目的サイズへ縮小する。
 
-spray は mixing 非対応。`SprayBrushConfig` は `mixing` を持たず、pickup 用の `sourceLayer` / `colorBuffer` / `mixedCanvas` を使わない。
+spray は mixing 非対応。`SprayBrushConfig` は `mixing` を持たず、stroke-start `sourceLayer`やtip-local色場を参照しない。
 
 ### 決定論と Expand
 

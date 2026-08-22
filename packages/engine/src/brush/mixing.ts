@@ -1,121 +1,287 @@
-import { colorToStyle } from "../layer";
-import { DEFAULT_BRUSH_MIXING } from "../types";
-import type { BrushMixing, Color, Layer } from "../types";
+import type { BrushMixing, BrushMixingState, Color, Layer } from "../types";
+import {
+  BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX,
+  BRUSH_MIXING_MAX_FIELD_DIMENSION,
+  BRUSH_MIXING_MIN_FIELD_DIMENSION,
+  DEFAULT_BRUSH_MIXING,
+} from "../types";
+import {
+  advanceMaterialField,
+  createMaterialField,
+  writeMaterialFieldPixels,
+} from "./material-field";
 
 const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
 >();
 
+export interface MixingUpdateInput {
+  readonly tipCanvas: OffscreenCanvas;
+  readonly baseColor: Color;
+  readonly x: number;
+  readonly y: number;
+  readonly directionX: number;
+  readonly directionY: number;
+  readonly stampSize: number;
+  readonly checkpointFootprintSize: number;
+  readonly stampDistance: number;
+  readonly sourceLayer: Layer;
+  readonly targetLayer: Layer;
+  readonly mixing: BrushMixing;
+  readonly state: BrushMixingState | undefined;
+}
+
 export function getActiveMixing(
   mixing: BrushMixing | undefined,
 ): BrushMixing | null {
   if (!mixing?.enabled) return null;
-  const pickup = clamp01(mixing.pickup);
-  const restore = clamp01(mixing.restore);
-  if (pickup <= 0 && restore <= 0) return null;
-  const updateDistancePx =
-    Number.isFinite(mixing.updateDistancePx) && mixing.updateDistancePx > 0
-      ? mixing.updateDistancePx
-      : DEFAULT_BRUSH_MIXING.updateDistancePx;
-  return { enabled: true, pickup, restore, updateDistancePx };
-}
-
-export function getMixingUpdateSpacing(
-  stampSpacing: number,
-  mixing: BrushMixing,
-): number {
-  return Math.max(stampSpacing, mixing.updateDistancePx);
-}
-
-export function shouldUpdateMixedTip(
-  colorBuffer: OffscreenCanvas | undefined,
-  mixedCanvas: OffscreenCanvas | undefined,
-  stampDistance: number,
-  lastMixingUpdateDistance: number | undefined,
-  mixingUpdateSpacing: number,
-): boolean {
-  if (!colorBuffer) return true;
-  if (!mixedCanvas) return true;
-  if (lastMixingUpdateDistance === undefined) return true;
-  return stampDistance - lastMixingUpdateDistance >= mixingUpdateSpacing;
-}
-
-export function renderMixedTip(
-  tipCanvas: OffscreenCanvas,
-  baseColor: Color,
-  x: number,
-  y: number,
-  stampSize: number,
-  sourceLayer: Layer,
-  mixing: BrushMixing,
-  colorBuffer: OffscreenCanvas | undefined,
-  mixedCanvas: OffscreenCanvas | undefined,
-): {
-  readonly canvas: OffscreenCanvas;
-  readonly colorBuffer: OffscreenCanvas;
-  readonly mixedCanvas: OffscreenCanvas;
-} {
-  const buffer =
-    colorBuffer ??
-    createColorBuffer(tipCanvas.width, tipCanvas.height, baseColor);
-  const bufferCtx = getCached2dContext(buffer, "mixed brush color buffer");
-  const workCanvas = mixedCanvas ?? createMixedWorkCanvas(tipCanvas);
-  const workCtx = getCached2dContext(workCanvas, "mixed brush work canvas");
-
-  bufferCtx.globalCompositeOperation = "source-over";
-  if (mixing.pickup > 0) {
-    bufferCtx.globalAlpha = mixing.pickup;
-    bufferCtx.drawImage(
-      sourceLayer.canvas,
-      x - stampSize / 2,
-      y - stampSize / 2,
-      stampSize,
-      stampSize,
-      0,
-      0,
-      buffer.width,
-      buffer.height,
-    );
+  const pickupRatePerPx = sanitizeRate(
+    mixing.pickupRatePerPx,
+    DEFAULT_BRUSH_MIXING.pickupRatePerPx,
+  );
+  const restoreRatePerPx = sanitizeRate(
+    mixing.restoreRatePerPx,
+    DEFAULT_BRUSH_MIXING.restoreRatePerPx,
+  );
+  const diffusionRatePerPx = sanitizeRate(
+    mixing.diffusionRatePerPx,
+    DEFAULT_BRUSH_MIXING.diffusionRatePerPx,
+  );
+  if (
+    pickupRatePerPx <= 0 &&
+    restoreRatePerPx <= 0 &&
+    diffusionRatePerPx <= 0
+  ) {
+    return null;
   }
-  if (mixing.restore > 0) {
-    bufferCtx.globalAlpha = mixing.restore;
-    bufferCtx.fillStyle = colorToStyle(baseColor);
-    bufferCtx.fillRect(0, 0, buffer.width, buffer.height);
-  }
-  bufferCtx.globalAlpha = 1;
-
-  workCtx.globalCompositeOperation = "copy";
-  workCtx.globalAlpha = 1;
-  workCtx.drawImage(buffer, 0, 0);
-  workCtx.globalCompositeOperation = "destination-in";
-  workCtx.drawImage(tipCanvas, 0, 0);
-  workCtx.globalCompositeOperation = "source-over";
-  workCtx.globalAlpha = 1;
-
   return {
-    canvas: workCanvas,
-    colorBuffer: buffer,
-    mixedCanvas: workCanvas,
+    enabled: true,
+    pickupRatePerPx,
+    restoreRatePerPx,
+    diffusionRatePerPx,
+    updateDistancePx: sanitizeDistance(
+      mixing.updateDistancePx,
+      DEFAULT_BRUSH_MIXING.updateDistancePx,
+    ),
+    checkpointDistancePx: Math.min(
+      BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX,
+      sanitizeDistance(
+        mixing.checkpointDistancePx,
+        DEFAULT_BRUSH_MIXING.checkpointDistancePx,
+      ),
+    ),
+    fieldColumns: sanitizeFieldDimension(
+      mixing.fieldColumns,
+      DEFAULT_BRUSH_MIXING.fieldColumns,
+    ),
+    fieldRows: sanitizeFieldDimension(
+      mixing.fieldRows,
+      DEFAULT_BRUSH_MIXING.fieldRows,
+    ),
   };
 }
 
-function createColorBuffer(
-  width: number,
-  height: number,
-  color: Color,
-): OffscreenCanvas {
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = getCached2dContext(canvas, "brush color buffer");
-  ctx.fillStyle = colorToStyle(color);
-  ctx.fillRect(0, 0, width, height);
-  return canvas;
+export function prepareMixingState(
+  tipCanvas: OffscreenCanvas,
+  baseColor: Color,
+  mixing: BrushMixing,
+  state: BrushMixingState | undefined,
+): BrushMixingState {
+  if (
+    state &&
+    state.fieldCanvas.width === mixing.fieldColumns &&
+    state.fieldCanvas.height === mixing.fieldRows &&
+    state.renderCanvas.width === tipCanvas.width &&
+    state.renderCanvas.height === tipCanvas.height
+  ) {
+    return state;
+  }
+
+  const field = createMaterialField(
+    mixing.fieldColumns,
+    mixing.fieldRows,
+    baseColor,
+  );
+  const fieldCanvas = new OffscreenCanvas(
+    mixing.fieldColumns,
+    mixing.fieldRows,
+  );
+  const sampleCanvas = new OffscreenCanvas(
+    mixing.fieldColumns,
+    mixing.fieldRows,
+  );
+  const renderCanvas = new OffscreenCanvas(tipCanvas.width, tipCanvas.height);
+  const fieldCtx = getCached2dContext(fieldCanvas, "material field");
+  const fieldPixels = fieldCtx.createImageData(
+    mixing.fieldColumns,
+    mixing.fieldRows,
+  );
+  const next: BrushMixingState = {
+    field,
+    fieldCanvas,
+    fieldPixels,
+    sampleCanvas,
+    renderCanvas,
+    lastCheckpointDistance: 0,
+  };
+  uploadMaterialCanvas(next, tipCanvas);
+  return next;
 }
 
-function createMixedWorkCanvas(tipCanvas: OffscreenCanvas): OffscreenCanvas {
-  const canvas = new OffscreenCanvas(tipCanvas.width, tipCanvas.height);
-  getCached2dContext(canvas, "mixed brush work canvas");
-  return canvas;
+/**
+ * 現在dabのdeposit完了後に、次のdab用の保持色とpickup checkpointを更新する。
+ */
+export function updateMixingAfterDeposit(
+  input: MixingUpdateInput,
+): BrushMixingState {
+  let state = prepareMixingState(
+    input.tipCanvas,
+    input.baseColor,
+    input.mixing,
+    input.state,
+  );
+  const lastUpdate = state.lastUpdateDistance;
+  if (
+    lastUpdate === undefined ||
+    input.stampDistance - lastUpdate >= input.mixing.updateDistancePx
+  ) {
+    const sample = sampleCheckpointFootprint(input, state);
+    const distancePx =
+      lastUpdate === undefined
+        ? input.mixing.updateDistancePx
+        : input.stampDistance - lastUpdate;
+    const field = advanceMaterialField(
+      state.field,
+      sample,
+      input.mixing.fieldColumns,
+      input.mixing.fieldRows,
+      input.baseColor,
+      {
+        pickupRatePerPx: input.mixing.pickupRatePerPx,
+        restoreRatePerPx: input.mixing.restoreRatePerPx,
+        diffusionRatePerPx: input.mixing.diffusionRatePerPx,
+        distancePx,
+      },
+    );
+    state = {
+      ...state,
+      field,
+      lastUpdateDistance: input.stampDistance,
+    };
+    uploadMaterialCanvas(state, input.tipCanvas);
+  }
+
+  const lastCheckpoint = state.lastCheckpointDistance ?? 0;
+  if (
+    input.stampDistance - lastCheckpoint >=
+    input.mixing.checkpointDistancePx
+  ) {
+    state = captureCheckpoint(input, state);
+  }
+  return state;
+}
+
+function sampleCheckpointFootprint(
+  input: MixingUpdateInput,
+  state: BrushMixingState,
+): Uint8ClampedArray {
+  const sourceCanvas = state.checkpointCanvas ?? input.sourceLayer.canvas;
+  const sourceOriginX = state.checkpointOriginX ?? 0;
+  const sourceOriginY = state.checkpointOriginY ?? 0;
+  const ctx = getCached2dContext(state.sampleCanvas, "material sample");
+  const angle = Math.atan2(input.directionY, input.directionX);
+  const sampleSize = Math.max(1, input.stampSize);
+
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "copy";
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, state.sampleCanvas.width, state.sampleCanvas.height);
+  ctx.translate(state.sampleCanvas.width / 2, state.sampleCanvas.height / 2);
+  ctx.scale(
+    state.sampleCanvas.width / sampleSize,
+    state.sampleCanvas.height / sampleSize,
+  );
+  ctx.rotate(-angle);
+  ctx.translate(-input.x, -input.y);
+  ctx.drawImage(sourceCanvas, sourceOriginX, sourceOriginY);
+  ctx.restore();
+
+  return ctx.getImageData(
+    0,
+    0,
+    state.sampleCanvas.width,
+    state.sampleCanvas.height,
+  ).data;
+}
+
+function captureCheckpoint(
+  input: MixingUpdateInput,
+  state: BrushMixingState,
+): BrushMixingState {
+  const margin = input.mixing.checkpointDistancePx;
+  const tileSize = Math.max(
+    1,
+    Math.ceil(input.checkpointFootprintSize * Math.SQRT2 + margin * 2 + 4),
+  );
+  const checkpointCanvas = ensureCanvasSize(
+    state.checkpointCanvas,
+    tileSize,
+    tileSize,
+  );
+  const originX = input.x - tileSize / 2;
+  const originY = input.y - tileSize / 2;
+  const ctx = getCached2dContext(checkpointCanvas, "material checkpoint");
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "copy";
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, tileSize, tileSize);
+  ctx.drawImage(input.targetLayer.canvas, -originX, -originY);
+  ctx.restore();
+  return {
+    ...state,
+    checkpointCanvas,
+    checkpointOriginX: originX,
+    checkpointOriginY: originY,
+    lastCheckpointDistance: input.stampDistance,
+  };
+}
+
+function uploadMaterialCanvas(
+  state: BrushMixingState,
+  tipCanvas: OffscreenCanvas,
+): void {
+  writeMaterialFieldPixels(state.field, state.fieldPixels.data);
+  const fieldCtx = getCached2dContext(state.fieldCanvas, "material field");
+  fieldCtx.putImageData(state.fieldPixels, 0, 0);
+
+  const renderCtx = getCached2dContext(state.renderCanvas, "material tip");
+  renderCtx.save();
+  renderCtx.globalAlpha = 1;
+  renderCtx.globalCompositeOperation = "copy";
+  renderCtx.imageSmoothingEnabled = true;
+  renderCtx.drawImage(
+    state.fieldCanvas,
+    0,
+    0,
+    state.renderCanvas.width,
+    state.renderCanvas.height,
+  );
+  renderCtx.globalCompositeOperation = "destination-in";
+  renderCtx.drawImage(tipCanvas, 0, 0);
+  renderCtx.restore();
+}
+
+function ensureCanvasSize(
+  canvas: OffscreenCanvas | undefined,
+  width: number,
+  height: number,
+): OffscreenCanvas {
+  if (canvas && canvas.width === width && canvas.height === height)
+    return canvas;
+  return new OffscreenCanvas(width, height);
 }
 
 function getCached2dContext(
@@ -130,6 +296,18 @@ function getCached2dContext(
   return ctx;
 }
 
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
+function sanitizeFieldDimension(value: number, fallback: number): number {
+  const resolved = Number.isFinite(value) ? value : fallback;
+  return Math.max(
+    BRUSH_MIXING_MIN_FIELD_DIMENSION,
+    Math.min(BRUSH_MIXING_MAX_FIELD_DIMENSION, Math.round(resolved)),
+  );
+}
+
+function sanitizeDistance(value: number, fallback: number): number {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function sanitizeRate(value: number, fallback: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : fallback;
 }
