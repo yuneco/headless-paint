@@ -1,11 +1,13 @@
 import type { BrushConfig } from "@headless-paint/engine";
 import { memo } from "react";
 import type { StrokeCallMetrics } from "../hooks/useStrokeCallMetrics";
+import { BristleGrainEvaluation } from "./BristleGrainEvaluation";
 
 interface BrushEvaluationPanelProps {
   readonly brush: BrushConfig;
   readonly metrics: StrokeCallMetrics;
   readonly onResetMetrics: () => void;
+  readonly onBrushChange: (brush: BrushConfig) => void;
   readonly onDrawBristleSCurve?: () => void;
 }
 
@@ -13,6 +15,7 @@ function BrushEvaluationPanelComponent({
   brush,
   metrics,
   onResetMetrics,
+  onBrushChange,
   onDrawBristleSCurve,
 }: BrushEvaluationPanelProps) {
   const mode = getEvaluationMode(brush);
@@ -64,6 +67,12 @@ function BrushEvaluationPanelComponent({
               現在のRough bristle設定で、Labと同じ121点・8ms間隔・筆圧
               0.15→1.0→0.15のS字をレイヤー中央へ描きます。通常の履歴へ追加されるためUndoできます。
             </div>
+            {brush.type === "bristle" && (
+              <BristleGrainEvaluation
+                brush={brush}
+                onBrushChange={onBrushChange}
+              />
+            )}
           </>
         )}
         {mode === "other" &&

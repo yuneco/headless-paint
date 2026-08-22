@@ -120,6 +120,7 @@ const BrushSection = memo(function BrushSection({
 
 interface EvaluationSectionProps {
   readonly brush: BrushConfig;
+  readonly onBrushChange: (brush: BrushConfig) => void;
   readonly metrics: StrokeCallMetrics;
   readonly onResetMetrics: () => void;
   readonly onDrawBristleSCurve?: () => void;
@@ -127,6 +128,7 @@ interface EvaluationSectionProps {
 
 const EvaluationSection = memo(function EvaluationSection({
   brush,
+  onBrushChange,
   metrics,
   onResetMetrics,
   onDrawBristleSCurve,
@@ -140,6 +142,7 @@ const EvaluationSection = memo(function EvaluationSection({
     >
       <BrushEvaluationPanel
         brush={brush}
+        onBrushChange={onBrushChange}
         metrics={metrics}
         onResetMetrics={onResetMetrics}
         onDrawBristleSCurve={onDrawBristleSCurve}
@@ -320,6 +323,7 @@ function SidebarPanelComponent({
       />
       <EvaluationSection
         brush={brush}
+        onBrushChange={onBrushChange}
         metrics={strokeCallMetrics}
         onResetMetrics={onResetStrokeCallMetrics}
         onDrawBristleSCurve={onDrawBristleSCurve}

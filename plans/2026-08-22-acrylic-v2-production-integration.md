@@ -255,6 +255,7 @@ Gate: ユーザーがwebデモだけでまとめて官能評価できる。
 - mixing Stamp / Bristle選択時だけ、汎用`causal-adaptive` input pipelineへ切り替える。共通Smoothing設定は保持するが、この2系統ではpendingを使わず各入力を即時確定する
 - Brush panelへ混色rate / update distance / checkpointの調整を統合し、追加fieldを手書き比較し続けない再帰的な設定同値比較へ置換した
 - 左sidebarを独立scroll領域にし、Acrylicの境界・spot・往復とRoughのS字・8の字・高速zoom操作を案内する折り畳み評価panelを追加した
+- Roughの評価panelへFine tooth surface grainの単体previewを追加した。既存の`scalePx`、`hardness`（UI上はContrast）、`amount`、`seed`だけを評価用に編集し、rangeのdrag中はpreviewのみ、pointer確定時に以後のstrokeへ反映する。2周波value noiseの比率は固定し、評価UIのための公開engine APIは増やさない
 - 評価panelのCall p50 / p95 / maxは同期engine callback時間だけを最大240sampleで表示する。500msごととstroke終端だけpublishし、計測UI自身のReact再描画をstrokeごとに増やさない。Canvas合成や非同期GPU完了は含まないため実機官能gateの代替にはしない
 - ローカルWebKitのRough 50px / 384点固定入力は、最終2runでsample p95 `16.1 / 16.2ms`、後半/前半比 `0.94 / 0.96`。Undoでcanvasが変化し、Redo後はdata URL完全一致、reload後もRough設定を復元した
 - Acrylic 576点連続strokeの最終2runは後半/前半比 `0.80 / 0.61`、描画直後のPen→Acrylic切替は`56 / 52ms`。絶対値は同期Playwright入力のためFPS換算せず、時間経過で悪化しないことだけを確認した
