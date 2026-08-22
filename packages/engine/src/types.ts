@@ -284,10 +284,76 @@ export interface SprayBrushConfig {
   readonly pressureDynamics: SprayPressureDynamics;
 }
 
+export interface BristleSurfaceGrain {
+  readonly scalePx: number;
+  readonly amount: number;
+  readonly hardness: number;
+  readonly seed: number;
+}
+
+export interface BristleDynamics {
+  readonly bristleCount: number;
+  readonly bristleFill: number;
+  readonly bristleWidthVariation: number;
+  readonly bristleSpacingVariation: number;
+  readonly geometryStepPx: number;
+  readonly transverseMaskCellPx: number;
+  readonly dropoutLengthPx: number;
+  readonly dropoutWidthPx: number;
+  readonly depositHardness: number;
+  readonly edgeTextureAmount: number;
+  readonly edgeTextureLengthPx: number;
+  readonly cuspAngleThresholdDeg: number;
+  readonly cuspDetectionSpanRatio: number;
+  readonly lagLengthRatio: number;
+  readonly surfaceGrain: BristleSurfaceGrain;
+  readonly repeatStrength: number;
+}
+
+export interface BristlePressureDynamics {
+  readonly coverage: number;
+}
+
+export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
+  bristleCount: 57,
+  bristleFill: 1.8,
+  bristleWidthVariation: 0.62,
+  bristleSpacingVariation: 0.72,
+  geometryStepPx: 1,
+  transverseMaskCellPx: 1,
+  dropoutLengthPx: 58,
+  dropoutWidthPx: 1,
+  depositHardness: 1,
+  edgeTextureAmount: 0.12,
+  edgeTextureLengthPx: 7,
+  cuspAngleThresholdDeg: 65,
+  cuspDetectionSpanRatio: 0.14,
+  lagLengthRatio: 0.2,
+  surfaceGrain: {
+    scalePx: 4,
+    amount: 0.85,
+    hardness: 0.82,
+    seed: 1,
+  },
+  repeatStrength: 0.75,
+};
+
+export const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {
+  coverage: 1,
+};
+
+export interface BristleBrushConfig {
+  readonly type: "bristle";
+  readonly dynamics: BristleDynamics;
+  readonly pressureDynamics: BristlePressureDynamics;
+  readonly mixing?: BrushMixing;
+}
+
 export type BrushConfig =
   | RoundPenBrushConfig
   | StampBrushConfig
-  | SprayBrushConfig;
+  | SprayBrushConfig
+  | BristleBrushConfig;
 
 export const ROUND_PEN: RoundPenBrushConfig = {
   type: "round-pen",
@@ -343,6 +409,40 @@ export const MARKER: StampBrushConfig = {
   pressureDynamics: { size: 0.2, flow: 0.5 },
 };
 
+export const ROUGH_BRISTLE: BristleBrushConfig = {
+  type: "bristle",
+  dynamics: DEFAULT_BRISTLE_DYNAMICS,
+  pressureDynamics: DEFAULT_BRISTLE_PRESSURE_DYNAMICS,
+  mixing: {
+    ...DEFAULT_BRUSH_MIXING,
+    enabled: true,
+  },
+};
+
+export interface BristleSweepPointState {
+  readonly x: number;
+  readonly y: number;
+  readonly pressure: number;
+  readonly directionX: number;
+  readonly directionY: number;
+  readonly frameX: number;
+  readonly frameY: number;
+  readonly distance: number;
+}
+
+export interface BristleLagState {
+  readonly startDistance: number;
+  readonly fromAngle: number;
+}
+
+export interface BristleBranchRenderState {
+  readonly lastSweepPoint?: BristleSweepPointState;
+  readonly incomingDirectionX?: number;
+  readonly incomingDirectionY?: number;
+  readonly frameSign?: 1 | -1;
+  readonly lag?: BristleLagState;
+}
+
 export interface BrushMixingState {
   readonly field: Float32Array;
   readonly fieldCanvas: OffscreenCanvas;
@@ -366,6 +466,7 @@ export interface BrushBranchRenderState {
   /** 時間emission: 次にemissionを配置する予定時刻 */
   readonly nextTimeEmissionAt?: number;
   readonly mixing?: BrushMixingState;
+  readonly bristle?: BristleBranchRenderState;
 }
 
 export interface BrushRenderState {

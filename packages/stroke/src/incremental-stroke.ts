@@ -135,6 +135,16 @@ export function createInitialBrushState(
   if (style.brush.type === "round-pen") {
     return { brushState: undefined, brushSeed: seed };
   }
+  if (style.brush.type === "bristle") {
+    return {
+      brushState: {
+        tipCanvas: null,
+        seed,
+        branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
+      },
+      brushSeed: seed,
+    };
+  }
   const tipCanvas =
     style.brush.type === "stamp"
       ? generateBrushTip(
@@ -169,7 +179,10 @@ function createSamplingLayer(
   layer: Layer,
   style: StrokeStyle,
 ): Layer | undefined {
-  if (style.brush.type !== "stamp" || !style.brush.mixing?.enabled) {
+  if (
+    (style.brush.type !== "stamp" && style.brush.type !== "bristle") ||
+    !style.brush.mixing?.enabled
+  ) {
     return undefined;
   }
   const samplingLayer = createLayer(layer.width, layer.height);

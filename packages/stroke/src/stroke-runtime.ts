@@ -412,12 +412,17 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
 }
 
 function getEmissionIntervalMs(style: StrokeStyle): number | undefined {
-  if (style.brush.type === "round-pen") return undefined;
+  if (style.brush.type === "round-pen" || style.brush.type === "bristle") {
+    return undefined;
+  }
   return timeSpacingMsFromRate(style.brush.dynamics.emissionsPerSecond);
 }
 
 function needsSamplingLayer(style: StrokeStyle): boolean {
-  return style.brush.type === "stamp" && !!style.brush.mixing?.enabled;
+  return (
+    (style.brush.type === "stamp" || style.brush.type === "bristle") &&
+    !!style.brush.mixing?.enabled
+  );
 }
 
 function cloneLayerContent(layer: Layer): Layer {

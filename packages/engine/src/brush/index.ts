@@ -5,6 +5,7 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
+import { renderBristleBrushStroke } from "./bristle";
 import { renderSprayBrushStroke } from "./spray";
 import { renderStampBrushStroke } from "./stamp";
 import { DEFAULT_BRUSH_RENDER_STATE } from "./state";
@@ -82,6 +83,24 @@ export function renderBrushStroke(
         style.brush,
         state ?? DEFAULT_BRUSH_RENDER_STATE,
         overlapCount,
+      );
+    case "bristle":
+      if (
+        style.brush.mixing?.enabled &&
+        (!sourceLayer || sourceLayer.canvas === layer.canvas)
+      ) {
+        throw new Error(
+          "Bristle mixing requires a distinct stroke-start sourceLayer snapshot",
+        );
+      }
+      return renderBristleBrushStroke(
+        layer,
+        points,
+        style,
+        style.brush,
+        state ?? DEFAULT_BRUSH_RENDER_STATE,
+        overlapCount,
+        sourceLayer ?? layer,
       );
   }
 }

@@ -968,14 +968,15 @@ const documentSnapshot = await exportPaintDocument({
 | `ExpandConfig` | engine | 対称展開の設定 |
 | `CompiledExpand` | engine | 構築済み対称展開変換 |
 | `ExpandMode` | engine | `"none" \| "axial" \| "radial" \| "kaleidoscope"` |
-| `BrushConfig` | engine | ブラシ設定（`RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig`） |
+| `BrushConfig` | engine | ブラシ設定（`RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig \| BristleBrushConfig`） |
 | `StampBrushConfig` | engine | スタンプベースブラシの設定 |
 | `SprayBrushConfig` | engine | spray ブラシの設定 |
+| `BristleBrushConfig` | engine | 連続掃引する荒いハケブラシの設定 |
 | `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
 | `SprayDynamics` | engine | spray ブラシの動的パラメータ |
 | `SprayPressureDynamics` | engine | 筆圧を spray の散布径/flow/密度へ反映する強さ |
-| `BrushMixing` | engine | スタンプブラシの距離正規化された色場混色設定 |
+| `BrushMixing` | engine | stamp / bristleで共有する距離正規化された色場混色設定 |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
 | `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
 | `ViewTransform` | input | ビュー変換行列 |

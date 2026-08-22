@@ -7,7 +7,7 @@
 - Lab reference: `experiment/acrylic-lab@4f5a1cd`
 - Sensory result: Simple acrylic / MIX、Rough bristle / COMB、Organic sponge / TEXはいずれも候補として合格
 - Production priority: Acrylic v2とRough bristleを先行し、Organic spongeは後回し
-- Progress: P0 / P1完了、P2実装・WebKit gate完了、P3着手前（2026-08-22）
+- Progress: P0〜P3実装・ローカルWebKit gate完了、P4実装中（2026-08-22）
 
 この計画はLabの比較実装を移植する計画ではない。Labで選んだ表現だけを、productionの`input → stroke → engine → react/web`境界へ再設計して組み込む。
 
@@ -139,13 +139,15 @@ interface BristleBrushConfig {
 }
 ```
 
+公開する`BristleDynamics`は、毛束断面（count / fill / width variation / spacing variation）、連続掃引間隔、毛束数から独立した面掠れの横断cellと縦横相関長、境界hardness / texture、cusp検出 / lag、document-space grain、反復接触強度に限定する。筆圧は`BristlePressureDynamics.coverage`で着彩率だけへ作用し、幅を変えない。初期版は不透明またはほぼ不透明なpaintだけを契約とし、半透明chunk overlapの厳密性は対象外とする。
+
 初期production rendererはLabの次の採用部分だけを再構成する。
 
 - swept continuous bristle geometry
 - coarse broad dropout mask
 - document-space surface grain
 - cusp split + short bristle lag
-- packed repeated contact
+- 低接触floor + source-over蓄積による軽量なrepeated contact
 - internal pending OFF
 - bounded incremental work
 
@@ -206,6 +208,16 @@ Gate: 方向性、反復pickup、速度差、live/replay、長時間WebKit安定
 - Rough bristle presetを追加する
 
 Gate: Lab referenceに対する構造的な官能一致、incremental/replay parity、iPad 30fps gate、backlog有限化。
+
+#### P3 implementation result (2026-08-22)
+
+- `bristle-profile.ts`（決定的な細い毛束断面）、`bristle-mask.ts`（毛束数と独立したstroke-space面掠れ + document-space紙目）、`bristle.ts`（連続掃引・cusp split・短い毛束lag・共通混色）へ責務を分離した
+- 筆圧はbrush幅を変えず面掠れのcoverageへ作用する。混色は毛束ごとのreservoirを持たず、stampと同じ連続RGBA色場を毛束alphaへ適用する
+- 反復接触は追加pigment canvasを持たず、決定的な低接触floorを面掠れと紙目へ残してsource-overで蓄積する。Labの高コストなper-pixel packed stateは移植しなかった
+- bristle pendingはengineで常にno-opとし、汎用input plugin `causal-adaptive`を製品デモのAcrylic / Rough bristleへ適用した。各入力を即時確定し、低速の微細な揺れだけを過去情報で抑える
+- Live / replay、Undo、RedoをRough bristle + mixingでピクセル完全一致させた。保存形式は全bristle propertyを必須検証し、欠落・範囲外を黙って丸めない
+- 50px、384点のローカルWebKit同期入力ベンチはsample p50 `12.1ms`、p95 `16.9ms`、後半/前半比 `0.95`。絶対値は合成的な1入力1同期callなのでFPS換算せず、時間軸劣化がないことをgateとした
+- 初期版は不透明paint専用。chunkの小さな重なりで継ぎ目を防ぐため、半透明paintでは重なり濃度を保証しない。iPad 30fpsとズームアウト高速操作はP4/P5の統合官能gateで確認する
 
 ### P4 — Web integration and combined sensory gate
 

@@ -8,6 +8,7 @@ export type {
   // Filter types
   InputPoint,
   FilterType,
+  CausalAdaptiveConfig,
   SmoothingConfig,
   StraightLineConfig,
   FilterConfig,

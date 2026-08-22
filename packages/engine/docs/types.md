@@ -696,7 +696,48 @@ interface SprayBrushConfig {
   readonly pressureDynamics: SprayPressureDynamics;
 }
 
-type BrushConfig = RoundPenBrushConfig | StampBrushConfig | SprayBrushConfig;
+interface BristleSurfaceGrain {
+  readonly scalePx: number;
+  readonly amount: number;
+  readonly hardness: number;
+  readonly seed: number;
+}
+
+interface BristleDynamics {
+  readonly bristleCount: number;
+  readonly bristleFill: number;
+  readonly bristleWidthVariation: number;
+  readonly bristleSpacingVariation: number;
+  readonly geometryStepPx: number;
+  readonly transverseMaskCellPx: number;
+  readonly dropoutLengthPx: number;
+  readonly dropoutWidthPx: number;
+  readonly depositHardness: number;
+  readonly edgeTextureAmount: number;
+  readonly edgeTextureLengthPx: number;
+  readonly cuspAngleThresholdDeg: number;
+  readonly cuspDetectionSpanRatio: number;
+  readonly lagLengthRatio: number;
+  readonly surfaceGrain: BristleSurfaceGrain;
+  readonly repeatStrength: number;
+}
+
+interface BristlePressureDynamics {
+  readonly coverage: number;
+}
+
+interface BristleBrushConfig {
+  readonly type: "bristle";
+  readonly dynamics: BristleDynamics;
+  readonly pressureDynamics: BristlePressureDynamics;
+  readonly mixing?: BrushMixing;
+}
+
+type BrushConfig =
+  | RoundPenBrushConfig
+  | StampBrushConfig
+  | SprayBrushConfig
+  | BristleBrushConfig;
 ```
 
 **StampBrushConfig**:
@@ -720,6 +761,46 @@ type BrushConfig = RoundPenBrushConfig | StampBrushConfig | SprayBrushConfig;
 
 spray ブラシは混色非対応。`mixing` フィールドは持たず、pickup 経路を通らない。
 
+**BristleBrushConfig**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"bristle"` | 連続掃引する荒いハケ方式 |
+| `dynamics` | `BristleDynamics` | 毛束断面、面掠れ、紙目、折返し追従の設定 |
+| `pressureDynamics` | `BristlePressureDynamics` | 筆圧を着彩率へ反映する強さ。ブラシ幅は変えない |
+| `mixing` | `BrushMixing` | 任意の共通連続色場。毛束ごとの色reservoirではない |
+
+`bristleCount` は概念上の細い毛束数、`bristleFill` は平均毛束幅、2つのvariationは幅と配置の不均一さを表す。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`transverseMaskCellPx`、`dropoutLengthPx`、`dropoutWidthPx` は毛束数から独立した面掠れ場の解像度と相関長を定める。
+
+`depositHardness` と `edgeTexture*` は着彩/無着彩境界、`surfaceGrain` はdocument座標へ固定した紙目、`repeatStrength` は同じ場所へ再接触したときに隙間が埋まる強さを表す。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
+
+初期版は不透明またはほぼ不透明なpaintを対象とする。掃引chunk間の重なりはこの契約の下で継ぎ目を防ぐために使い、半透明paintの厳密な重なり濃度は保証しない。pending描画は常にno-opで、確定描画だけを表示する。
+
+```typescript
+const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
+  bristleCount: 57,
+  bristleFill: 1.8,
+  bristleWidthVariation: 0.62,
+  bristleSpacingVariation: 0.72,
+  geometryStepPx: 1,
+  transverseMaskCellPx: 1,
+  dropoutLengthPx: 58,
+  dropoutWidthPx: 1,
+  depositHardness: 1,
+  edgeTextureAmount: 0.12,
+  edgeTextureLengthPx: 7,
+  cuspAngleThresholdDeg: 65,
+  cuspDetectionSpanRatio: 0.14,
+  lagLengthRatio: 0.2,
+  surfaceGrain: { scalePx: 4, amount: 0.85, hardness: 0.82, seed: 1 },
+  repeatStrength: 0.75,
+};
+
+const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {
+  coverage: 1,
+};
+```
+
 **RoundPenBrushConfig**:
 
 | フィールド | 型 | 説明 |
@@ -731,7 +812,7 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 
 ### BrushMixing
 
-スタンプブラシの混色設定。一定距離ごとに描画先レイヤーのfootprintを進行方向へ揃えたtip-local連続RGBA色場へ取り込み、元の描画色への復元と色場内拡散を制御する。
+stamp / bristleで共有する混色設定。一定距離ごとに描画先レイヤーのfootprintを進行方向へ揃えたbrush-local連続RGBA色場へ取り込み、元の描画色への復元と色場内拡散を制御する。
 
 ```typescript
 interface BrushMixing {
@@ -973,6 +1054,7 @@ interface BrushBranchRenderState {
   readonly lastTimestamp?: number;
   readonly nextTimeEmissionAt?: number;
   readonly mixing?: BrushMixingState;
+  readonly bristle?: BristleBranchRenderState;
 }
 
 interface BrushRenderState {
@@ -985,7 +1067,7 @@ interface BrushRenderState {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
-| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。`round-pen` では `null` |
+| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。bristleは内部の決定的profile cacheを使うため`null` |
 | `branches` | `readonly BrushBranchRenderState[]` | Expand 分岐ごとの状態。非 Expand でも長さ 1 の配列を持つ |
 
 **BrushBranchRenderState**:
@@ -997,7 +1079,8 @@ interface BrushRenderState {
 | `distanceEmissionProgress` | `number` | 可変spacing時の次回距離emissionまでの正規化進捗（0以上1未満）。未使用時は省略 |
 | `lastTimestamp` | `number` | 時間ベース emission で、この分岐が最後に処理した入力時刻。overlap 再入力区間で二重配置しないために使う |
 | `nextTimeEmissionAt` | `number` | 時間ベース emission で、次に emission を配置する予定時刻 |
-| `mixing` | `BrushMixingState` | stamp + mixing 有効時のみ保持する混色状態 |
+| `mixing` | `BrushMixingState` | stamp / bristle + mixing 有効時のみ保持する混色状態 |
+| `bristle` | `BristleBranchRenderState` | bristleの直前掃引断面、進入方向、折返し時の短い毛束lagを保持する状態 |
 
 **BrushMixingState**:
 
@@ -1018,8 +1101,9 @@ interface BrushRenderState {
 - branch ごとに独立した `accumulatedDistance` / `emissionCount` / `distanceEmissionProgress` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、stamp / spray とも branch 間で spacing 位相と時間 emission の位相が揃う。
 - branch の実効 seed は `hashSeed(seed, branchIndex)` で導出する。emission 序数は branch ごとに 0 から数え、各 emission の局所 seed は `hashSeed(branchSeed, emissionIndex)` で導出する。
 - 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
-- 混色有効時はExpand分岐ごとに拾う背景が異なるため、`mixing`に分岐別の色場と有限checkpointを保持する。sprayは混色非対応。
+- 混色有効時はExpand分岐ごとに拾う背景が異なるため、`mixing`に分岐別の色場と有限checkpointを保持する。stampとbristleは同じ色場モデルを使い、sprayは混色非対応。
 - `field`は更新ごとに新しい配列を返す数値状態。Canvas / ImageDataはbranch所有のmutable cacheであり、分岐・pendingへ共有せず`cloneBrushRenderState`でdeep cloneする。
+- bristleの面掠れは毛束ごとの絵の具reservoirではない。決定的な低接触floorとdocument-space grainをsource-overで蓄積し、同じ場所への反復接触で隙間が段階的に埋まる。追加のpigment layerは持たない。
 
 **使用例**:
 ```typescript

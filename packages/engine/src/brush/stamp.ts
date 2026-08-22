@@ -73,6 +73,8 @@ export function renderStampBrushStroke(
         emission,
         style,
         dynamics,
+        brush.pressureDynamics.size,
+        brush.pressureDynamics.flow,
         state.seed,
         emission.emissionIndex,
         sourceLayer,
@@ -88,6 +90,7 @@ export function renderStampBrushStroke(
             point,
             spacingPx,
             style,
+            brush.pressureDynamics.size,
             dynamics.spacingSizeCoupling,
           )
       : undefined,
@@ -113,13 +116,14 @@ function calculateAdaptiveSpacing(
   point: StrokePoint,
   baseSpacingPx: number,
   style: StrokeStyle,
+  pressureSize: number,
   coupling: number,
 ): number {
   const effectiveDiameter =
     calculateRadius(
       point.pressure,
       style.lineWidth,
-      style.brush.pressureDynamics.size,
+      pressureSize,
       style.pressureCurve,
     ) * 2;
   const sizeScale = effectiveDiameter / style.lineWidth;
@@ -137,6 +141,8 @@ function stampAt(
   point: EmissionPoint,
   style: StrokeStyle,
   dynamics: BrushDynamics,
+  pressureSize: number,
+  pressureFlowResponse: number,
   seed: number,
   emissionIndex: number,
   sourceLayer: Layer,
@@ -149,7 +155,7 @@ function stampAt(
   const radius = calculateRadius(
     point.pressure,
     style.lineWidth,
-    style.brush.pressureDynamics.size,
+    pressureSize,
     style.pressureCurve,
   );
   const diameter = radius * 2;
@@ -163,7 +169,7 @@ function stampAt(
   const pressureFlow = calculatePressureFlow(
     point.pressure,
     dynamics.flow,
-    style.brush.pressureDynamics.flow,
+    pressureFlowResponse,
     style.pressureCurve,
   );
   const opacity = pressureFlow * (1 - dynamics.opacityJitter * rng());

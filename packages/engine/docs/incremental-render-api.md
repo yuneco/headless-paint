@@ -45,7 +45,7 @@
 - 可変spacing有効時の `distanceEmissionProgress` の引き継ぎ
 - mixing色場と有限checkpoint resourceのbranch ownership
 
-これにより、stamp / spray / round-pen は同じ branch ループで扱われる。spray は mixing 非対応のため、pending クローンは数値 state と `tipCanvas` 参照だけを引き継ぐ軽い経路になる。
+これにより、stamp / spray / bristle / round-pen は同じ branch ループで扱われる。spray は mixing 非対応のため、pending クローンは数値 state と `tipCanvas` 参照だけを引き継ぐ軽い経路になる。bristle は毛束断面と面掠れの因果状態を持つため、pending 描画を常に no-op とする。
 
 ---
 
@@ -162,7 +162,7 @@ function renderPendingLayer(
 **動作**:
 1. レイヤーをクリア
 2. pointsを`expandStrokePoints`で展開（pressure/timestamp保持）
-3. 非混色brushでは`BrushRenderState`を複製してpendingを描画する。混色brushは色場rollbackを行わず、この時点でno-opとする
+3. 非混色のround-pen / stamp / sprayでは`BrushRenderState`を複製してpendingを描画する。混色brushとbristleは状態rollbackを行わず、この時点でno-opとする
 4. 各展開ストロークを`renderBrushStroke`でブラシ種別に応じて描画（`compositeOperation` は適用しない、常に `source-over`）
 
 **時間ベース emission と境界処理**:
@@ -171,7 +171,7 @@ function renderPendingLayer(
 `renderPendingLayer` は alpha lock を評価しない。alpha lock 有効時の live preview は `renderLayers` / `composeLayers` の pending overlay 合成で committed レイヤーの alpha を使ってマスクする。pending レイヤー自体は従来通り、未確定点の pixels だけを保持する。
 
 **混色プレビュー**:
-混色ブラシはCausal input（過去情報だけの入力補正）とcommitted描画を標準とし、pending layerへ仮のmaterial結果を描かない。これにより形状pendingと色場rollbackのライフサイクルを分離する。ストローク開始時の`sourceLayer`は最初のpickupだけに使い、一定距離後は描画済みtargetの局所checkpointへ切り替わる。同一strokeの往復でも開始時の原色を毎回再導入しない。
+混色ブラシとbristleはCausal input（過去情報だけの入力補正）とcommitted描画を標準とし、pending layerへ仮のmaterial結果を描かない。これにより形状pendingと色場・毛束状態rollbackのライフサイクルを分離する。ストローク開始時の`sourceLayer`は最初のpickupだけに使い、一定距離後は描画済みtargetの局所checkpointへ切り替わる。同一strokeの往復でも開始時の原色を毎回再導入しない。
 
 **消しゴムモードの注意**:
 pendingレイヤーは毎回クリアされるため、`destination-out` で描画しても不可視になる。消しゴムのpendingプレビューは `LayerMeta.compositeOperation` によるレイヤー合成時に実現される（→ renderLayers / composeLayers を参照）。

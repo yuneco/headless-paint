@@ -13,6 +13,7 @@ import {
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
+  ROUGH_BRISTLE,
   ROUND_PEN,
 } from "./types";
 
@@ -230,6 +231,32 @@ describe("renderPendingLayer", () => {
         dynamics: DEFAULT_BRUSH_DYNAMICS,
         pressureDynamics: { size: 0, flow: 0 },
         mixing: { ...DEFAULT_BRUSH_MIXING, enabled: true },
+      },
+    };
+
+    renderPendingLayer(
+      layer,
+      [
+        { x: 10, y: 50, pressure: 1 },
+        { x: 90, y: 50, pressure: 1 },
+      ],
+      style,
+      createNoneExpand(),
+    );
+
+    expect(getPixel(layer, 50, 50).a).toBe(0);
+  });
+
+  it("bristleはmixing設定に関係なくpendingを描かない", () => {
+    const layer = createLayer(100, 100);
+    layer.ctx.fillStyle = "rgb(255, 0, 0)";
+    layer.ctx.fillRect(0, 0, 100, 100);
+    const style: StrokeStyle = {
+      ...createTestStyle(),
+      lineWidth: 30,
+      brush: {
+        ...ROUGH_BRISTLE,
+        mixing: { ...DEFAULT_BRUSH_MIXING, enabled: false },
       },
     };
 

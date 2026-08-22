@@ -99,7 +99,7 @@ export function renderPendingLayer(
   clearLayer(layer);
   // Stateful mixingは確定済みmaterialだけを表示する。pendingで色場を複製・
   // rollbackしないため、engine境界でも明示的なno-opに固定する。
-  if (hasActiveMixing(style)) return;
+  if (hasStatefulPendingDisabled(style)) return;
 
   if (points.length === 0) return;
 
@@ -133,8 +133,11 @@ export function renderPendingLayer(
   }
 }
 
-function hasActiveMixing(style: StrokeStyle): boolean {
-  return style.brush.type === "stamp" && !!style.brush.mixing?.enabled;
+function hasStatefulPendingDisabled(style: StrokeStyle): boolean {
+  return (
+    style.brush.type === "bristle" ||
+    (style.brush.type === "stamp" && !!style.brush.mixing?.enabled)
+  );
 }
 
 /**

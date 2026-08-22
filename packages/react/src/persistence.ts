@@ -2,6 +2,7 @@ import { createLayer } from "@headless-paint/core";
 import type {
   BackgroundSettings,
   BrushConfig,
+  BrushMixing,
   BrushTipConfig,
   Color,
   DensityProfileCurve,
@@ -346,6 +347,17 @@ function cloneBrushConfig(brush: BrushConfig): BrushConfig {
       pressureDynamics: clonePressureDynamics(brush.pressureDynamics),
     };
   }
+  if (brush.type === "bristle") {
+    return {
+      type: "bristle",
+      dynamics: {
+        ...brush.dynamics,
+        surfaceGrain: { ...brush.dynamics.surfaceGrain },
+      },
+      pressureDynamics: { ...brush.pressureDynamics },
+      mixing: brush.mixing ? { ...brush.mixing } : undefined,
+    };
+  }
   if (brush.type === "spray") {
     const particle =
       brush.particle.type === "circle"
@@ -568,6 +580,9 @@ function parseBrushConfig(
     if (!pressureDynamics) return null;
     return { type: "round-pen", pressureDynamics };
   }
+  if (value.type === "bristle") {
+    return parseBristleBrushConfig(value);
+  }
   if (value.type === "spray") {
     if (!isRecord(value.particle) || !isRecord(value.dynamics)) return null;
     const pressureDynamics = parseSprayPressureDynamics(
@@ -650,36 +665,8 @@ function parseBrushConfig(
     return null;
   }
 
-  if (value.mixing !== undefined) {
-    if (!isRecord(value.mixing)) return null;
-    if (
-      typeof value.mixing.enabled !== "boolean" ||
-      !isNonNegativeFiniteNumber(value.mixing.pickupRatePerPx) ||
-      !isNonNegativeFiniteNumber(value.mixing.restoreRatePerPx) ||
-      !isNonNegativeFiniteNumber(value.mixing.diffusionRatePerPx) ||
-      !isPositiveFiniteNumber(value.mixing.updateDistancePx) ||
-      !isPositiveFiniteNumber(value.mixing.checkpointDistancePx) ||
-      value.mixing.checkpointDistancePx >
-        BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX ||
-      !isBoundedFieldDimension(value.mixing.fieldColumns) ||
-      !isBoundedFieldDimension(value.mixing.fieldRows)
-    ) {
-      return null;
-    }
-  }
-
-  const mixing = value.mixing
-    ? {
-        enabled: value.mixing.enabled as boolean,
-        pickupRatePerPx: value.mixing.pickupRatePerPx as number,
-        restoreRatePerPx: value.mixing.restoreRatePerPx as number,
-        diffusionRatePerPx: value.mixing.diffusionRatePerPx as number,
-        updateDistancePx: value.mixing.updateDistancePx as number,
-        checkpointDistancePx: value.mixing.checkpointDistancePx as number,
-        fieldColumns: value.mixing.fieldColumns as number,
-        fieldRows: value.mixing.fieldRows as number,
-      }
-    : undefined;
+  const parsedMixing = parseBrushMixing(value.mixing);
+  if (!parsedMixing) return null;
   return {
     type: "stamp",
     tip,
@@ -696,8 +683,115 @@ function parseBrushConfig(
       emissionsPerSecond: parseEmissionsPerSecond(dynamics.emissionsPerSecond),
     },
     pressureDynamics,
-    mixing,
+    mixing: parsedMixing.mixing,
   };
+}
+
+function parseBristleBrushConfig(
+  value: Record<string, unknown>,
+): BrushConfig | null {
+  if (
+    !isRecord(value.dynamics) ||
+    !isRecord(value.pressureDynamics) ||
+    !isRecord(value.dynamics.surfaceGrain)
+  ) {
+    return null;
+  }
+  const dynamics = value.dynamics;
+  const grain = dynamics.surfaceGrain as Record<string, unknown>;
+  const pressure = value.pressureDynamics;
+  if (
+    !Number.isInteger(dynamics.bristleCount) ||
+    (dynamics.bristleCount as number) < 1 ||
+    (dynamics.bristleCount as number) > 128 ||
+    !isFiniteInRange(dynamics.bristleFill, 0.1, 2.4) ||
+    !isUnitNumber(dynamics.bristleWidthVariation) ||
+    !isUnitNumber(dynamics.bristleSpacingVariation) ||
+    !isFiniteInRange(dynamics.geometryStepPx, 0.5, 16) ||
+    !isFiniteInRange(dynamics.transverseMaskCellPx, 0.25, 32) ||
+    !isFiniteInRange(dynamics.dropoutLengthPx, 1, 2048) ||
+    !isFiniteInRange(dynamics.dropoutWidthPx, 0.25, 2048) ||
+    !isUnitNumber(dynamics.depositHardness) ||
+    !isUnitNumber(dynamics.edgeTextureAmount) ||
+    !isFiniteInRange(dynamics.edgeTextureLengthPx, 0.5, 2048) ||
+    !isFiniteInRange(dynamics.cuspAngleThresholdDeg, 0, 180) ||
+    !isUnitNumber(dynamics.cuspDetectionSpanRatio) ||
+    !isUnitNumber(dynamics.lagLengthRatio) ||
+    !isFiniteInRange(grain.scalePx, 0.5, 512) ||
+    !isUnitNumber(grain.amount) ||
+    !isUnitNumber(grain.hardness) ||
+    !Number.isInteger(grain.seed) ||
+    !isUnitNumber(dynamics.repeatStrength) ||
+    !isUnitNumber(pressure.coverage)
+  ) {
+    return null;
+  }
+  const parsedMixing = parseBrushMixing(value.mixing);
+  if (!parsedMixing) return null;
+  return {
+    type: "bristle",
+    dynamics: {
+      bristleCount: dynamics.bristleCount as number,
+      bristleFill: dynamics.bristleFill as number,
+      bristleWidthVariation: dynamics.bristleWidthVariation as number,
+      bristleSpacingVariation: dynamics.bristleSpacingVariation as number,
+      geometryStepPx: dynamics.geometryStepPx as number,
+      transverseMaskCellPx: dynamics.transverseMaskCellPx as number,
+      dropoutLengthPx: dynamics.dropoutLengthPx as number,
+      dropoutWidthPx: dynamics.dropoutWidthPx as number,
+      depositHardness: dynamics.depositHardness as number,
+      edgeTextureAmount: dynamics.edgeTextureAmount as number,
+      edgeTextureLengthPx: dynamics.edgeTextureLengthPx as number,
+      cuspAngleThresholdDeg: dynamics.cuspAngleThresholdDeg as number,
+      cuspDetectionSpanRatio: dynamics.cuspDetectionSpanRatio as number,
+      lagLengthRatio: dynamics.lagLengthRatio as number,
+      surfaceGrain: {
+        scalePx: grain.scalePx as number,
+        amount: grain.amount as number,
+        hardness: grain.hardness as number,
+        seed: grain.seed as number,
+      },
+      repeatStrength: dynamics.repeatStrength as number,
+    },
+    pressureDynamics: { coverage: pressure.coverage as number },
+    mixing: parsedMixing.mixing,
+  };
+}
+
+function parseBrushMixing(
+  value: unknown,
+): { readonly mixing?: BrushMixing } | null {
+  if (value === undefined) return {};
+  if (
+    !isRecord(value) ||
+    typeof value.enabled !== "boolean" ||
+    !isNonNegativeFiniteNumber(value.pickupRatePerPx) ||
+    !isNonNegativeFiniteNumber(value.restoreRatePerPx) ||
+    !isNonNegativeFiniteNumber(value.diffusionRatePerPx) ||
+    !isPositiveFiniteNumber(value.updateDistancePx) ||
+    !isPositiveFiniteNumber(value.checkpointDistancePx) ||
+    value.checkpointDistancePx > BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX ||
+    !isBoundedFieldDimension(value.fieldColumns) ||
+    !isBoundedFieldDimension(value.fieldRows)
+  ) {
+    return null;
+  }
+  return {
+    mixing: {
+      enabled: value.enabled,
+      pickupRatePerPx: value.pickupRatePerPx,
+      restoreRatePerPx: value.restoreRatePerPx,
+      diffusionRatePerPx: value.diffusionRatePerPx,
+      updateDistancePx: value.updateDistancePx,
+      checkpointDistancePx: value.checkpointDistancePx,
+      fieldColumns: value.fieldColumns,
+      fieldRows: value.fieldRows,
+    },
+  };
+}
+
+function isFiniteInRange(value: unknown, min: number, max: number): boolean {
+  return isFiniteNumber(value) && value >= min && value <= max;
 }
 
 /** 吹きつけレート。正の有限数のみ有効、それ以外は undefined（OFF） */

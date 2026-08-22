@@ -74,6 +74,11 @@ const compiled = compileFilterPipeline({
   ]
 });
 
+// 未来点を待たない適応補正。各入力をその場で確定する
+const causal = compileFilterPipeline({
+  filters: [{ type: "causal-adaptive", config: {} }]
+});
+
 // フィルタなし（通常ペイント）
 const noFilter = compileFilterPipeline({ filters: [] });
 ```
@@ -266,15 +271,29 @@ function onPointerUp() {
 ### FilterType / FilterConfig
 
 ```typescript
-type FilterType = "smoothing" | "straight-line";
+type FilterType = "smoothing" | "causal-adaptive" | "straight-line";
 
 type FilterConfig =
   | { type: "smoothing"; config: SmoothingConfig }
+  | { type: "causal-adaptive"; config: CausalAdaptiveConfig }
   | { type: "straight-line"; config: StraightLineConfig };
 
 interface FilterPipelineConfig {
   readonly filters: readonly FilterConfig[];
 }
+```
+
+### causal-adaptive（過去情報だけを使う適応補正）
+
+`causal-adaptive` は未来の入力点を待たず、現在点を必ず `committed` として返す。低速時は細かな座標揺れを強めに抑え、高速時と急旋回時は入力へ近づく固定応答を使う。筆圧と timestamp は現在の入力値をそのまま保持する。
+
+色場や毛束状態を持つブラシでは、pending（後から座標が変わる未確定点）を巻き戻すと描画状態も巻き戻す必要がある。このフィルタは形状補正を保ちながら pending を作らない選択肢として使える。設定値は現時点ではない。
+
+```typescript
+const causal: FilterConfig = {
+  type: "causal-adaptive",
+  config: {},
+};
 ```
 
 ---

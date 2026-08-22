@@ -79,6 +79,17 @@ export function cloneBrushRenderState(
       distanceEmissionProgress: branch.distanceEmissionProgress,
       lastTimestamp: branch.lastTimestamp,
       nextTimeEmissionAt: branch.nextTimeEmissionAt,
+      bristle: branch.bristle
+        ? {
+            lastSweepPoint: branch.bristle.lastSweepPoint
+              ? { ...branch.bristle.lastSweepPoint }
+              : undefined,
+            incomingDirectionX: branch.bristle.incomingDirectionX,
+            incomingDirectionY: branch.bristle.incomingDirectionY,
+            frameSign: branch.bristle.frameSign,
+            lag: branch.bristle.lag ? { ...branch.bristle.lag } : undefined,
+          }
+        : undefined,
       mixing: branch.mixing
         ? {
             field: new Float32Array(branch.mixing.field),

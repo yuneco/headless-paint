@@ -16,7 +16,8 @@
 StrokeStyle.brush.type
   ├── "round-pen" → drawVariableWidthPath（従来方式）
   ├── "stamp"     → renderStampBrushStroke（スタンプ方式）
-  └── "spray"     → renderSprayBrushStroke（散布方式）
+  ├── "spray"     → renderSprayBrushStroke（散布方式）
+  └── "bristle"   → renderBristleBrushStroke（連続掃引する荒いハケ方式）
 ```
 
 ### チップ生成の責務分離
@@ -38,6 +39,9 @@ StrokeStyle.brush.type
 | `material-field.ts` | 距離正規化したPickup / Restore / Diffusionの純粋な数値計算 |
 | `mixing.ts` | 色場のCanvas転送、進行方向付きsampling、有限checkpoint tile |
 | `spray.ts` | spray 描画（`walkEmissions` + 粒子バースト） |
+| `bristle-profile.ts` | seedから決定的な1D毛束断面atlasを生成する純粋計算とcache |
+| `bristle-mask.ts` | stroke-space面掠れとdocument-space紙目を局所maskへ解決する |
+| `bristle.ts` | 連続掃引、cusp split、短い毛束lag、混色stage、局所合成 |
 
 `@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
 
@@ -65,8 +69,8 @@ function renderBrushStroke(
 | `points` | `readonly StrokePoint[]` | ○ | 描画ポイント列（展開済みの単一ストローク） |
 | `style` | `StrokeStyle` | ○ | 描画スタイル（`brush` フィールドでブラシ種別を判定） |
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
-| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` では `tipCanvas` と `branches[].accumulatedDistance` / `emissionCount`、可変spacing用の `distanceEmissionProgress`、時間ベース emission 用の `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では無視される |
-| `sourceLayer` | `Layer` | 条件付き | 混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
+| `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` / `bristle` の共通scheduler位相、混色状態、bristleの直前断面と短いlag stateをbranchごとに保持する。`round-pen` では無視される |
+| `sourceLayer` | `Layer` | 条件付き | stamp / bristleの混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
 
 **戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 
@@ -91,6 +95,16 @@ function renderBrushStroke(
    - 各 emission で散布領域内に複数の粒子を確率配置する
    - `brush.pressureDynamics.size` で散布径、`flow` で粒子不透明度、`density` で粒子数を筆圧変化させる
    - `brush.dynamics.emissionsPerSecond` が正の有限数なら、`StrokePoint.timestamp` の進行に応じて静止中も粒子バーストを追加する
+5. `"bristle"`: 荒いハケ方式で描画:
+   - Catmull-Rom補間後の中心線を`geometryStepPx`間隔で走査し、seed固定の1D毛束断面を連続quadへ掃引する
+   - 毛束数とは独立したstroke-spaceの低解像度面掠れを合成する。筆圧はブラシ幅ではなく着彩率へ作用する
+   - document座標へ固定したsurface grain（紙目）を面掠れと同じ局所mask解決へ統合する
+   - 急な折返しはcuspとして分割し、短いbristle lag（毛束の遅れ）で横断方向を追従させる
+   - 同じ場所への反復接触は`repeatStrength`に応じて未着彩領域を確率的に埋める。顔料厚レイヤーは追加しない
+   - 混色時は共通の連続色場を毛束断面全体へ適用してからalpha maskを掛ける。毛束単位へ色を固定しない
+   - pendingはengine境界でno-opとし、確定済みchunkだけを表示する
+
+bristle rendererは全canvasを再生せず、新しく確定した中心線の周辺だけを局所canvasへ描いて合成する。chunk境界には不透明paint向けの小さな重なりを持たせる。半透明paintでは重なり濃度が見える可能性があるため、初期versionの対象外とする。
 
 ---
 
@@ -209,7 +223,7 @@ const sprayAirbrush: SprayBrushConfig = {
 
 ### 混色
 
-`StampBrushConfig.mixing` を指定すると、スタンプブラシは一定距離ごとに描画先レイヤーの色を拾う。
+`StampBrushConfig.mixing` または `BristleBrushConfig.mixing` を指定すると、ブラシは一定距離ごとに描画先レイヤーの色を拾う。両方式は同じbrush-local連続RGBA色場を共有し、bristleでも毛束ごとに色を固定しない。
 
 ```typescript
 const acrylic: StampBrushConfig = {

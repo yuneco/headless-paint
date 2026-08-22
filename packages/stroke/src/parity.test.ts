@@ -12,6 +12,7 @@ import {
   DEFAULT_RADIAL_DISTRIBUTION,
   DEFAULT_SPRAY_DYNAMICS,
   DEFAULT_SPRAY_PRESSURE_DYNAMICS,
+  ROUGH_BRISTLE,
   ROUND_PEN,
   SPRAY_AIRBRUSH,
   clearLayer,
@@ -47,6 +48,9 @@ const HISTORY_CONFIG: HistoryConfig = {
 const FILTER_PIPELINE: FilterPipelineConfig = {
   filters: [{ type: "smoothing", config: { windowSize: 3 } }],
 };
+const CAUSAL_FILTER_PIPELINE: FilterPipelineConfig = {
+  filters: [{ type: "causal-adaptive", config: {} }],
+};
 const EXPAND: ExpandConfig = {
   levels: [
     {
@@ -79,6 +83,7 @@ interface ParityCase {
   readonly style: StrokeStyle;
   readonly alphaLocked: boolean;
   readonly paintBase?: (layer: Layer) => void;
+  readonly filterPipeline?: FilterPipelineConfig;
 }
 
 const cases: readonly ParityCase[] = [
@@ -161,6 +166,17 @@ const cases: readonly ParityCase[] = [
     }),
     alphaLocked: false,
     paintBase: paintOpaqueBands,
+  },
+  {
+    name: "rough bristle mixing",
+    style: makeStyle({
+      color: WHITE,
+      lineWidth: 34,
+      brush: ROUGH_BRISTLE,
+    }),
+    alphaLocked: false,
+    paintBase: paintOpaqueBands,
+    filterPipeline: CAUSAL_FILTER_PIPELINE,
   },
   {
     name: "spray lognormal",
@@ -288,7 +304,7 @@ function runParityCase(parityCase: ParityCase): ParityRun {
     layer: liveLayer,
     inputPoints: INPUT_POINTS,
     style: parityCase.style,
-    filterPipeline: FILTER_PIPELINE,
+    filterPipeline: parityCase.filterPipeline ?? FILTER_PIPELINE,
     expand: EXPAND,
     brushSeed: BRUSH_SEED,
     alphaLocked: parityCase.alphaLocked,

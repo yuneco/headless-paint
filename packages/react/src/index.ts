@@ -74,11 +74,16 @@ export type { WindowSize } from "./useWindowSize";
 export type {
   BrushBranchRenderState,
   BrushConfig,
+  BristleBrushConfig,
+  BristleDynamics,
+  BristlePressureDynamics,
+  BristleSurfaceGrain,
   BrushDynamics,
   BrushMixing,
   BrushRenderState,
   BrushTipConfig,
   BrushTipRegistry,
+  CausalAdaptiveConfig,
   Color,
   Command,
   CompiledExpand,
@@ -113,6 +118,8 @@ export type {
 export {
   AIRBRUSH,
   DEFAULT_BRUSH_DYNAMICS,
+  DEFAULT_BRISTLE_DYNAMICS,
+  DEFAULT_BRISTLE_PRESSURE_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_DYNAMICS,
   DEFAULT_RADIAL_DISTRIBUTION,
@@ -121,6 +128,7 @@ export {
   MARKER,
   PENCIL,
   ROUND_PEN,
+  ROUGH_BRISTLE,
   SPRAY_AIRBRUSH,
   SPRAY_MAX_PARTICLES_PER_EMISSION,
 } from "@headless-paint/core";

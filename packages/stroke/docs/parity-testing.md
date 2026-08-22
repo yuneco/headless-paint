@@ -26,6 +26,7 @@
   （react 層のタイマーが行う合成点注入と同じ形。タイマー自体はここではテストしない）
 - **フィルタ**: live/replay とも `processPoint` + `finalizePipeline` の逐次処理に統一する。
   replay は `processAllPoints` による一括処理を使わない。
+  Rough bristle は製品既定と同じ `causal-adaptive` を使い、各入力がpendingを経ず確定する経路を検証する。
 
 ## 構成
 
@@ -71,6 +72,7 @@ expectPixelEqual(actual: Layer, expected: Layer, label: string): void
 | round-pen アルファロック | ROUND_PEN | alphaLocked: true、下地あり |
 | stamp ジッター | AIRBRUSH（stamp） | sizeJitter/opacityJitter/scatter あり |
 | stamp mixing | stamp + mixing | sourceLayer に下地色 |
+| rough bristle mixing | ROUGH_BRISTLE | causal-adaptive、sourceLayerに下地色、連続毛束と面掠れ |
 | spray lognormal | SPRAY_AIRBRUSH | sizeJitterMode: "lognormal" |
 | spray bimodal | SPRAY_AIRBRUSH | sizeJitterMode: "bimodal" |
 

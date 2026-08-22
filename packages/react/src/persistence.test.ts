@@ -1,5 +1,6 @@
 import {
   DEFAULT_RADIAL_DISTRIBUTION,
+  ROUGH_BRISTLE,
   createLayer,
   createViewTransform,
 } from "@headless-paint/core";
@@ -185,6 +186,44 @@ describe("persistence", () => {
       type: "stamp",
       dynamics: { spacingSizeCoupling: 0 },
     });
+  });
+
+  it("exports and imports the complete bristle brush contract", () => {
+    const snapshot = exportPaintSettings({
+      tool: "pen",
+      transform: createViewTransform() as ViewTransform,
+      background: {
+        color: { r: 255, g: 255, b: 255, a: 255 },
+        visible: true,
+      },
+      pen: {
+        color: { r: 20, g: 50, b: 80, a: 255 },
+        lineWidth: 64,
+        pressureCurve: { y1: 0.15, y2: 0.8 },
+        eraser: false,
+        brush: ROUGH_BRISTLE,
+      },
+      smoothing: { enabled: false, windowSize: 1 },
+      expand: {
+        levels: [
+          { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
+        ],
+      },
+    });
+
+    expect(importPaintSettings(snapshot)?.pen.brush).toEqual(ROUGH_BRISTLE);
+
+    const missingGeometryStep = JSON.parse(JSON.stringify(snapshot)) as {
+      pen: { brush: { dynamics: { geometryStepPx?: number } } };
+    };
+    missingGeometryStep.pen.brush.dynamics.geometryStepPx = undefined;
+    expect(importPaintSettings(missingGeometryStep)).toBeNull();
+
+    const invalidGrain = JSON.parse(JSON.stringify(snapshot)) as {
+      pen: { brush: { dynamics: { surfaceGrain: { scalePx: number } } } };
+    };
+    invalidGrain.pen.brush.dynamics.surfaceGrain.scalePx = 0;
+    expect(importPaintSettings(invalidGrain)).toBeNull();
   });
 
   it("旧mixing propertyだけのstamp設定は専用変換せずrejectする", () => {

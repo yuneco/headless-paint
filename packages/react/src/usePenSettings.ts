@@ -1,4 +1,5 @@
 import type {
+  BristlePressureDynamics,
   BrushConfig,
   Color,
   PressureCurve,
@@ -34,7 +35,10 @@ export interface UsePenSettingsResult {
   readonly setEraser: (eraser: boolean) => void;
   readonly setBrush: (brush: BrushConfig) => void;
   readonly setBrushPressureDynamics: (
-    dynamics: PressureDynamics | SprayPressureDynamics,
+    dynamics:
+      | PressureDynamics
+      | SprayPressureDynamics
+      | BristlePressureDynamics,
   ) => void;
 }
 
@@ -60,6 +64,12 @@ function normalizeSprayPressureDynamics(
   };
 }
 
+function normalizeBristlePressureDynamics(
+  value: BristlePressureDynamics,
+): BristlePressureDynamics {
+  return { coverage: value.coverage };
+}
+
 function normalizeBrushConfig(brush: BrushConfig): BrushConfig {
   if (brush.type === "round-pen") {
     return {
@@ -71,6 +81,14 @@ function normalizeBrushConfig(brush: BrushConfig): BrushConfig {
     return {
       ...brush,
       pressureDynamics: normalizeSprayPressureDynamics(brush.pressureDynamics),
+    };
+  }
+  if (brush.type === "bristle") {
+    return {
+      ...brush,
+      pressureDynamics: normalizeBristlePressureDynamics(
+        brush.pressureDynamics,
+      ),
     };
   }
   return {
@@ -128,9 +146,26 @@ export function usePenSettings(
   }, []);
 
   const handleSetBrushPressureDynamics = useCallback(
-    (dynamics: PressureDynamics | SprayPressureDynamics) => {
+    (
+      dynamics:
+        | PressureDynamics
+        | SprayPressureDynamics
+        | BristlePressureDynamics,
+    ) => {
       setBrush((current) => {
+        if (current.type === "bristle") {
+          return normalizeBrushConfig({
+            ...current,
+            pressureDynamics: {
+              coverage:
+                "coverage" in dynamics
+                  ? dynamics.coverage
+                  : current.pressureDynamics.coverage,
+            },
+          });
+        }
         if (current.type === "spray") {
+          if (!("size" in dynamics) || !("flow" in dynamics)) return current;
           return normalizeBrushConfig({
             ...current,
             pressureDynamics: {
@@ -143,6 +178,7 @@ export function usePenSettings(
             },
           });
         }
+        if (!("size" in dynamics) || !("flow" in dynamics)) return current;
         return normalizeBrushConfig({
           ...current,
           pressureDynamics: {
