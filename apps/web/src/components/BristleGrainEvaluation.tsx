@@ -55,10 +55,6 @@ export function BristleGrainEvaluation({
       </summary>
       <div style={{ display: "grid", gap: 8, marginTop: 7 }}>
         <GrainPreview grain={draft} />
-        <div style={{ color: "#68727c" }}>
-          Fine tooth（細かな紙目）の適用maskを、接触率50%固定で表示します。
-          2周波Value noise（値ノイズ）の比率は固定です。
-        </div>
         <GrainRange
           label="Scale（粒の大きさ）"
           value={draft.scalePx}
@@ -97,9 +93,6 @@ export function BristleGrainEvaluation({
           onChange={(value) => updateDraft("seed", value)}
           onCommit={commitDraft}
         />
-        <div style={{ color: "#68727c" }}>
-          ドラッグ中はpreviewだけを更新し、Pencil・pointerを離した時に以後のstrokeへ反映します。既存の描画は再レンダリングしません。
-        </div>
       </div>
     </details>
   );

@@ -136,9 +136,6 @@ function BrushPanelComponent({
     brush.type === "round-pen" || brush.type === "bristle"
       ? undefined
       : (brush.dynamics.emissionsPerSecond ?? undefined);
-  const usesCausalInput =
-    brush.type === "bristle" ||
-    (brush.type === "stamp" && !!brush.mixing?.enabled);
 
   const updateMixing = (
     field:
@@ -173,21 +170,6 @@ function BrushPanelComponent({
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      {usesCausalInput && (
-        <div
-          style={{
-            padding: "7px 8px",
-            borderRadius: 4,
-            background: "#f3f6f8",
-            color: "#48515a",
-            fontSize: 11,
-            lineHeight: 1.45,
-          }}
-        >
-          Causal adaptive（過去情報だけの速度適応補正）で入力を即時確定します。
-          このブラシでは共通Smoothingのpending（未来点待ち）は使用しません。
-        </div>
-      )}
       <div
         style={{
           display: "grid",

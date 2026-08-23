@@ -16,7 +16,7 @@ import type {
   UsePenSettingsResult,
   UseSmoothingResult,
 } from "@headless-paint/react";
-import type { GUI } from "lil-gui";
+import type { Controller, GUI } from "lil-gui";
 import { memo, useEffect, useRef } from "react";
 import type { UsePatternPreviewResult } from "../hooks/usePatternPreview";
 import { BezierCurveEditor } from "./BezierCurveEditor";
@@ -43,6 +43,13 @@ function getPrimaryPressureResponse(brush: BrushConfig): number {
   return brush.type === "bristle"
     ? brush.pressureDynamics.coverage
     : brush.pressureDynamics.size;
+}
+
+function supportsCommonSmoothing(brush: BrushConfig): boolean {
+  return !(
+    brush.type === "bristle" ||
+    (brush.type === "stamp" && brush.mixing?.enabled)
+  );
 }
 
 function DebugPanelComponent({
@@ -87,6 +94,7 @@ function DebugPanelComponent({
     enabled: smoothing.enabled,
     windowSize: smoothing.windowSize,
   });
+  const smoothingControllerRefs = useRef<readonly Controller[]>([]);
 
   const penDataRef = useRef({
     lineWidth: penSettings.lineWidth,
@@ -300,7 +308,7 @@ function DebugPanelComponent({
 
       const smoothingFolder = gui.addFolder("Smoothing");
 
-      smoothingFolder
+      const smoothingEnabledController = smoothingFolder
         .add(smoothingDataRef.current, "enabled")
         .name("Enable")
         .listen()
@@ -308,13 +316,27 @@ function DebugPanelComponent({
           smoothingRef.current.setEnabled(value);
         });
 
-      smoothingFolder
+      const smoothingWindowController = smoothingFolder
         .add(smoothingDataRef.current, "windowSize", 3, 13, 2)
         .name("Window Size")
         .listen()
         .onChange((value: number) => {
           smoothingRef.current.setWindowSize(value);
         });
+
+      smoothingControllerRefs.current = [
+        smoothingEnabledController,
+        smoothingWindowController,
+      ];
+      const smoothingSupported = supportsCommonSmoothing(
+        penSettingsRef.current.brush,
+      );
+      smoothingDataRef.current.enabled = smoothingSupported
+        ? smoothingRef.current.enabled
+        : false;
+      for (const controller of smoothingControllerRefs.current) {
+        controller.disable(!smoothingSupported);
+      }
 
       smoothingFolder.open();
 
@@ -583,6 +605,7 @@ function DebugPanelComponent({
       mounted = false;
       guiRef.current?.destroy();
       guiRef.current = null;
+      smoothingControllerRefs.current = [];
     };
   }, []);
 
@@ -620,9 +643,15 @@ function DebugPanelComponent({
   }, [expand.config, expand.subEnabled]);
 
   useEffect(() => {
-    smoothingDataRef.current.enabled = smoothing.enabled;
+    const smoothingSupported = supportsCommonSmoothing(penSettings.brush);
+    smoothingDataRef.current.enabled = smoothingSupported
+      ? smoothing.enabled
+      : false;
     smoothingDataRef.current.windowSize = smoothing.windowSize;
-  }, [smoothing.enabled, smoothing.windowSize]);
+    for (const controller of smoothingControllerRefs.current) {
+      controller.disable(!smoothingSupported);
+    }
+  }, [smoothing.enabled, smoothing.windowSize, penSettings.brush]);
 
   useEffect(() => {
     penDataRef.current.lineWidth = penSettings.lineWidth;

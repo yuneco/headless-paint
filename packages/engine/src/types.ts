@@ -330,8 +330,8 @@ export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
   lagLengthRatio: 0.3,
   surfaceGrain: {
     scalePx: 4,
-    amount: 0.85,
-    hardness: 0.82,
+    amount: 1,
+    hardness: 0.75,
     seed: 1,
   },
 };
