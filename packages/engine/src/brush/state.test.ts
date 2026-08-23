@@ -86,7 +86,11 @@ describe("brush render state", () => {
         {
           accumulatedDistance: 3,
           emissionCount: 4,
-          mixing: { ...mixing, lastUpdateDistance: 10 },
+          mixing: {
+            ...mixing,
+            checkpointPixels: new ImageData(3, 2),
+            lastUpdateDistance: 10,
+          },
         },
       ],
     };
@@ -95,6 +99,10 @@ describe("brush render state", () => {
     const clonedMixing = cloned?.branches[0].mixing;
     expect(clonedMixing?.fieldCanvas).toBeInstanceOf(OffscreenCanvas);
     expect(clonedMixing?.fieldCanvas).not.toBe(mixing.fieldCanvas);
+    expect(clonedMixing?.checkpointPixels).toBeInstanceOf(ImageData);
+    expect(clonedMixing?.checkpointPixels).not.toBe(
+      state.branches[0]?.mixing?.checkpointPixels,
+    );
     expect(clonedMixing?.field).not.toBe(mixing.field);
     expect(Array.from(clonedMixing?.field ?? [])).toEqual(
       Array.from(mixing.field),

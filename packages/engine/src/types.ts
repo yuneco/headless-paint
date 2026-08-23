@@ -445,9 +445,9 @@ export interface BrushMixingState {
   readonly field: Float32Array;
   readonly fieldCanvas: OffscreenCanvas;
   readonly fieldPixels: ImageData;
-  readonly sampleCanvas: OffscreenCanvas;
   readonly renderCanvas: OffscreenCanvas;
   readonly checkpointCanvas?: OffscreenCanvas;
+  readonly checkpointPixels?: ImageData;
   readonly checkpointOriginX?: number;
   readonly checkpointOriginY?: number;
   readonly lastUpdateDistance?: number;

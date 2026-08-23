@@ -268,13 +268,13 @@ const acrylic: StampBrushConfig = {
 
 1. `fieldColumns × fieldRows`の連続RGBA色場を`style.color`で初期化する
 2. 保持中の色場へtip alphaを適用し、現在dabを先にdepositする
-3. `updateDistancePx`ごとに、前回の確定checkpointを進行方向へ回転して小さな色場へsampleする
+3. `updateDistancePx`ごとに、前回の確定checkpoint pixelsをCPU上で進行方向へ回転して小さな色場へsampleする
 4. 距離`d`に対し`1 - exp(-rate * d)`でPickup / Restoreを適用し、`diffusionRatePerPx * d` passだけ隣接色を拡散する
 5. `checkpointDistancePx`ごとに、描画済みtargetの局所tileだけを次のsampling sourceとして更新する
 
 現在dabをsampleより先にdepositするため、接触前方へ色が漏れない。checkpoint更新はdeposit後だが、そのcheckpointを使うのは次のmaterial更新からであり、同じdabを即座に再pickupしない。最初のmaterial更新だけは`updateDistancePx`を接触距離として使い、stroke開始直後のpickupを初期化する。tileは最大tip footprintとcheckpoint距離を覆う有限サイズで、全レイヤーを距離ごとにコピーしない。Expandでは分岐ごとに色場とcheckpointを持つ。時間emissionで距離が進まない間はmaterial更新しない。
 
-色場更新では小領域の`getImageData`と`putImageData`を使う。mutableなtip全体をdabごとに更新する旧方式は残さない。WebKitではJS計時だけでなく長時間stroke後のUI応答と実機安定性を別途確認する。
+GPU→CPUの`getImageData`はcheckpoint更新時の有限tileに限定する。その間の色場更新はcached pixelsからCPU samplingし、18×8のreadbackを毎回発生させない。`putImageData`は低解像度色場のtip転写時だけ使う。mutableなtip全体をdabごとに更新する旧方式は残さない。WebKitではJS計時だけでなく長時間stroke後のUI応答と実機安定性を別途確認する。
 
 ### Spray の描画モデル
 

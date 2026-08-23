@@ -95,10 +95,12 @@ export function cloneBrushRenderState(
             field: new Float32Array(branch.mixing.field),
             fieldCanvas: copyCanvas(branch.mixing.fieldCanvas),
             fieldPixels: copyImageData(branch.mixing.fieldPixels),
-            sampleCanvas: copyCanvas(branch.mixing.sampleCanvas),
             renderCanvas: copyCanvas(branch.mixing.renderCanvas),
             checkpointCanvas: branch.mixing.checkpointCanvas
               ? copyCanvas(branch.mixing.checkpointCanvas)
+              : undefined,
+            checkpointPixels: branch.mixing.checkpointPixels
+              ? copyImageData(branch.mixing.checkpointPixels)
               : undefined,
             checkpointOriginX: branch.mixing.checkpointOriginX,
             checkpointOriginY: branch.mixing.checkpointOriginY,

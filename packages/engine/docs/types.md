@@ -1042,9 +1042,9 @@ interface BrushMixingState {
   readonly field: Float32Array;
   readonly fieldCanvas: OffscreenCanvas;
   readonly fieldPixels: ImageData;
-  readonly sampleCanvas: OffscreenCanvas;
   readonly renderCanvas: OffscreenCanvas;
   readonly checkpointCanvas?: OffscreenCanvas;
+  readonly checkpointPixels?: ImageData;
   readonly checkpointOriginX?: number;
   readonly checkpointOriginY?: number;
   readonly lastUpdateDistance?: number;
@@ -1092,9 +1092,9 @@ interface BrushRenderState {
 |---|---|---|
 | `field` | `Float32Array` | 連続RGBA色場の正本。更新ごとに新しい配列を返す |
 | `fieldCanvas` / `fieldPixels` | Canvas / ImageData | 小さな数値色場をCanvasへuploadするbranch所有cache |
-| `sampleCanvas` | `OffscreenCanvas` | checkpointを進行方向へ揃えて小領域readbackするscratch |
 | `renderCanvas` | `OffscreenCanvas` | 色場をtip alphaでmaskした再利用可能なdab source |
 | `checkpointCanvas` | `OffscreenCanvas` | 描画済みtargetから切り出した有限範囲のsampling tile |
+| `checkpointPixels` | `ImageData` | checkpoint更新時に一度だけreadbackしたCPU sampling source |
 | `checkpointOriginX/Y` | `number` | checkpoint tileのdocument座標原点 |
 | `lastUpdateDistance` | `number` | 最後に色場を更新したstroke距離 |
 | `lastCheckpointDistance` | `number` | 最後にcheckpoint tileを更新したstroke距離 |
@@ -1106,7 +1106,7 @@ interface BrushRenderState {
 - branch の実効 seed は `hashSeed(seed, branchIndex)` で導出する。emission 序数は branch ごとに 0 から数え、各 emission の局所 seed は `hashSeed(branchSeed, emissionIndex)` で導出する。
 - 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
 - 混色有効時はExpand分岐ごとに拾う背景が異なるため、`mixing`に分岐別の色場と有限checkpointを保持する。stampとbristleは同じ色場モデルを使い、sprayは混色非対応。
-- `field`は更新ごとに新しい配列を返す数値状態。Canvas / ImageDataはbranch所有のmutable cacheであり、分岐・pendingへ共有せず`cloneBrushRenderState`でdeep cloneする。
+- `field`は更新ごとに新しい配列を返す数値状態。Canvas / ImageDataはbranch所有のmutable cacheであり、分岐・pendingへ共有せず`cloneBrushRenderState`でdeep cloneする。進行方向付きの18×8 samplingは`checkpointPixels`からCPUで行い、WebKitのGPU→CPU同期をmaterial更新ごとに発生させない。
 - bristleの面掠れは毛束ごとの絵の具reservoirではない。初回接触で未着彩と判定されたcellへ半透明の着彩floorは加えない。面掠れで着彩可能と判定された領域では、document-space grainの谷に確率的な再接触を与え、同じ場所への反復で不透明な着彩片の面積を段階的に増やす。追加のpigment layerは持たない。
 
 **使用例**:

@@ -108,10 +108,6 @@ export function prepareMixingState(
     mixing.fieldColumns,
     mixing.fieldRows,
   );
-  const sampleCanvas = new OffscreenCanvas(
-    mixing.fieldColumns,
-    mixing.fieldRows,
-  );
   const renderCanvas = new OffscreenCanvas(tipCanvas.width, tipCanvas.height);
   const fieldCtx = getCached2dContext(fieldCanvas, "material field");
   const fieldPixels = fieldCtx.createImageData(
@@ -122,7 +118,6 @@ export function prepareMixingState(
     field,
     fieldCanvas,
     fieldPixels,
-    sampleCanvas,
     renderCanvas,
     lastCheckpointDistance: 0,
   };
@@ -147,6 +142,9 @@ export function updateMixingAfterDeposit(
     lastUpdate === undefined ||
     input.stampDistance - lastUpdate >= input.mixing.updateDistancePx
   ) {
+    if (!state.checkpointPixels) {
+      state = captureCheckpoint(input, state, input.sourceLayer.canvas, false);
+    }
     const sample = sampleCheckpointFootprint(input, state);
     const distancePx =
       lastUpdate === undefined
@@ -187,39 +185,30 @@ function sampleCheckpointFootprint(
   input: MixingUpdateInput,
   state: BrushMixingState,
 ): Uint8ClampedArray {
-  const sourceCanvas = state.checkpointCanvas ?? input.sourceLayer.canvas;
+  const source = state.checkpointPixels;
+  if (!source) throw new Error("Brush mixing checkpoint pixels are missing");
   const sourceOriginX = state.checkpointOriginX ?? 0;
   const sourceOriginY = state.checkpointOriginY ?? 0;
-  const ctx = getCached2dContext(state.sampleCanvas, "material sample");
   const angle = Math.atan2(input.directionY, input.directionX);
   const sampleSize = Math.max(1, input.stampSize);
-
-  ctx.save();
-  ctx.globalAlpha = 1;
-  ctx.globalCompositeOperation = "copy";
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, state.sampleCanvas.width, state.sampleCanvas.height);
-  ctx.translate(state.sampleCanvas.width / 2, state.sampleCanvas.height / 2);
-  ctx.scale(
-    state.sampleCanvas.width / sampleSize,
-    state.sampleCanvas.height / sampleSize,
+  return sampleRotatedCheckpoint(
+    source,
+    sourceOriginX,
+    sourceOriginY,
+    input.x,
+    input.y,
+    angle,
+    sampleSize,
+    input.mixing.fieldColumns,
+    input.mixing.fieldRows,
   );
-  ctx.rotate(-angle);
-  ctx.translate(-input.x, -input.y);
-  ctx.drawImage(sourceCanvas, sourceOriginX, sourceOriginY);
-  ctx.restore();
-
-  return ctx.getImageData(
-    0,
-    0,
-    state.sampleCanvas.width,
-    state.sampleCanvas.height,
-  ).data;
 }
 
 function captureCheckpoint(
   input: MixingUpdateInput,
   state: BrushMixingState,
+  sourceCanvas: OffscreenCanvas = input.targetLayer.canvas,
+  updateCheckpointDistance = true,
 ): BrushMixingState {
   const margin = input.mixing.checkpointDistancePx;
   const tileSize = Math.max(
@@ -239,15 +228,90 @@ function captureCheckpoint(
   ctx.globalCompositeOperation = "copy";
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, tileSize, tileSize);
-  ctx.drawImage(input.targetLayer.canvas, -originX, -originY);
+  ctx.drawImage(sourceCanvas, -originX, -originY);
   ctx.restore();
+  const checkpointPixels = ctx.getImageData(0, 0, tileSize, tileSize);
   return {
     ...state,
     checkpointCanvas,
+    checkpointPixels,
     checkpointOriginX: originX,
     checkpointOriginY: originY,
-    lastCheckpointDistance: input.stampDistance,
+    lastCheckpointDistance: updateCheckpointDistance
+      ? input.stampDistance
+      : state.lastCheckpointDistance,
   };
+}
+
+function sampleRotatedCheckpoint(
+  source: ImageData,
+  sourceOriginX: number,
+  sourceOriginY: number,
+  centerX: number,
+  centerY: number,
+  angle: number,
+  sampleSize: number,
+  columns: number,
+  rows: number,
+): Uint8ClampedArray {
+  const result = new Uint8ClampedArray(columns * rows * 4);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  let outputOffset = 0;
+
+  for (let row = 0; row < rows; row++) {
+    const localY = ((row + 0.5) / rows - 0.5) * sampleSize;
+    for (let column = 0; column < columns; column++) {
+      const localX = ((column + 0.5) / columns - 0.5) * sampleSize;
+      const sourceX =
+        centerX + localX * cos - localY * sin - sourceOriginX - 0.5;
+      const sourceY =
+        centerY + localX * sin + localY * cos - sourceOriginY - 0.5;
+      sampleBilinear(source, sourceX, sourceY, result, outputOffset);
+      outputOffset += 4;
+    }
+  }
+  return result;
+}
+
+function sampleBilinear(
+  source: ImageData,
+  x: number,
+  y: number,
+  output: Uint8ClampedArray,
+  outputOffset: number,
+): void {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
+  const tx = x - x0;
+  const ty = y - y0;
+  const w00 = (1 - tx) * (1 - ty);
+  const w10 = tx * (1 - ty);
+  const w01 = (1 - tx) * ty;
+  const w11 = tx * ty;
+  const inside00 =
+    x0 >= 0 && y0 >= 0 && x0 < source.width && y0 < source.height;
+  const inside10 =
+    x1 >= 0 && y0 >= 0 && x1 < source.width && y0 < source.height;
+  const inside01 =
+    x0 >= 0 && y1 >= 0 && x0 < source.width && y1 < source.height;
+  const inside11 =
+    x1 >= 0 && y1 >= 0 && x1 < source.width && y1 < source.height;
+  const offset00 = (y0 * source.width + x0) * 4;
+  const offset10 = (y0 * source.width + x1) * 4;
+  const offset01 = (y1 * source.width + x0) * 4;
+  const offset11 = (y1 * source.width + x1) * 4;
+
+  for (let channel = 0; channel < 4; channel++) {
+    let value = 0;
+    if (inside00) value += (source.data[offset00 + channel] ?? 0) * w00;
+    if (inside10) value += (source.data[offset10 + channel] ?? 0) * w10;
+    if (inside01) value += (source.data[offset01 + channel] ?? 0) * w01;
+    if (inside11) value += (source.data[offset11 + channel] ?? 0) * w11;
+    output[outputOffset + channel] = value;
+  }
 }
 
 function uploadMaterialCanvas(

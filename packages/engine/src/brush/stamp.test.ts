@@ -660,8 +660,12 @@ describe("renderBrushStroke", () => {
         source,
       );
       const checkpoint = result.branches[0]?.mixing?.checkpointCanvas;
+      const checkpointPixels = result.branches[0]?.mixing?.checkpointPixels;
 
       expect(checkpoint).toBeDefined();
+      expect(checkpointPixels).toBeDefined();
+      expect(checkpointPixels?.width).toBe(checkpoint?.width);
+      expect(checkpointPixels?.height).toBe(checkpoint?.height);
       expect(checkpoint?.width).toBeLessThan(source.width);
       expect(checkpoint?.height).toBeLessThan(source.height);
     });
