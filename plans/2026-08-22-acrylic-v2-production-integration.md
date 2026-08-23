@@ -7,7 +7,8 @@
 - Lab reference: `experiment/acrylic-lab@4f5a1cd`
 - Sensory result: Simple acrylic / MIX、Rough bristle / COMB、Organic sponge / TEXはいずれも候補として合格
 - Production priority: Acrylic v2とRough bristleを先行し、Organic spongeは後回し
-- Progress: P0〜P4実装・ローカル検収完了。P5のiPad実機総合官能gate待ち（2026-08-22）
+- Rough bristle production gate: 固定紙目、pixel-local pressure、反復接触を統合し、ユーザー官能評価で合格（2026-08-23）
+- Progress: P0〜P4実装・ローカル検収完了。Rough bristleはProduction官能gate通過。P5のAcrylic v2を含む最終統合gateは継続する
 
 この計画はLabの比較実装を移植する計画ではない。Labで選んだ表現だけを、productionの`input → stroke → engine → react/web`境界へ再設計して組み込む。
 

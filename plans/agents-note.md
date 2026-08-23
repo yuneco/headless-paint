@@ -4,6 +4,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 発見した課題・改善候補
 
+- **Rough bristleの固定紙目＋反復接触はProduction官能gate通過（2026-08-23）**: `4db92c8`で、Fine toothをdocument座標へ固定したsoftware raster、pixel-local pressureによる0/1寄りの面掠れ、同じ場所を擦るほど未着彩部が埋まるstochastic repeated contactをProductionへ統合した。ユーザー評価は合格であり、これをRough bristleの現行Production基準とする。共通Paper Surface、半透明塗料、紙の摩耗・顔料厚モデルは含まず、必要なら別課題として扱う。
 - **Apple Pencil実機評価はHTTPS必須（2026-08-22）**: LAN上の平文HTTPではSafariの`getCoalescedEvents()`が露出せず入力点密度が下がり、補間・ブラシ性能の評価を誤る。rootの`pnpm dev:https:setup`で現在のLAN IPをSANへ含むignored証明書を生成し、`pnpm dev:https`で起動する。iPadでは生成したlocal CAをインストールして完全信頼を有効にする。
 - **Production web統合後の最終実機gate（2026-08-22）**: Acrylic v2 / Rough bristleは`apps/web`でまとめて評価できる。Labで採取した461点・約1.92秒の固定入力をcoalesced batchごと再生した最終WebKit値は、Rough混色OFFでCall p50 / p95 `6 / 15ms`、batch wall p50 / p95 `5 / 15ms`（Lab p95 `15ms`と同等）。max `78ms`のcold resource生成は残る。Acrylicはlate / early `0.61–0.80`で時間軸劣化なし。残件はiPad Safariで長時間stroke、描画直後UI、tab安定性、cold first stroke、25〜100% zoom高速操作を官能確認すること。webのCall metricは同期engine callbackだけで非同期GPU完了を含まない。
 - **Rough bristleのLab textureはprocedural Fine tooth（2026-08-23更新）**: 外部画像assetではなく、2周波value noiseによるdocument-spaceの高さ場だった。Lab参照値はscale 4px / amount 0.85 / hardness 0.82 / seed 1、Production既定値は官能評価によりscale 4px / amount 1 / hardness（UI上のContrast）0.75 / seed 1へ決定した。Productionでは高さ場をseed / scale単位で共有し、swept quadのsoftware raster内でpixel-local pressureと接触させる。追加ライセンスはない。TEX-03で収集した外部CC0画像はOrganic sponge向け監査素材であり、Roughのreferenceとしてproductionへ入れない。

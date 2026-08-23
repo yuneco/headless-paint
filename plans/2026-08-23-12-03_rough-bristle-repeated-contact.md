@@ -4,7 +4,7 @@
 
 - Branch: `feature/acrylic-v2-production`
 - Lab references: `GRAIN-02`, `COMB-02`, `COMB-03`
-- State: Phase 4 complete; Production実装・検収済み
+- State: Phase 4 complete; Production実装・検収・ユーザー官能gate通過
 
 ## Problem
 
@@ -79,6 +79,7 @@ Production fixtureで決める。
 - 固定S字はWebKit Call p50 / p95 `1 / 9ms`。低筆圧端はalpha floorではなく疎な着彩片として残る。
 - `pnpm build`、`pnpm test`（39 files / 468 tests）、`pnpm lint`を通過した。
 - Library usage review: 公開`BristleBrushConfig` / persistence schema / preset利用方法は不変。旧`applyDocumentGrain`と平均筆圧mask経路の参照は残っていない。public renderer経由の反復接触testとsoftware raster単体testの両方を持つ。
+- 2026-08-23のユーザー官能評価で合格。固定紙目、低筆圧時の0/1寄りの面掠れ、反復接触による着彩増加を、Rough bristleのProduction基準として確定した。
 
 ## Deferred
 
