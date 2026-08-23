@@ -31,11 +31,24 @@ const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
 >();
-const GRAIN_CACHE_LIMIT = 32;
 const GRAIN_HEIGHT_CACHE_LIMIT = 8;
 const GRAIN_TILE_SIZE = 128;
-const grainCache = new Map<string, OffscreenCanvas>();
+const REPEAT_CONTACT_STRENGTH = 0.75;
+const REPEAT_CONTACT_REACH = 0.18;
+const REPEAT_CONTACT_EXPOSURE_PER_PASS = 0.24;
+const FIXED_CONTACT_HASH_SALT = 0x243f6a88;
+const REPEAT_CONTACT_HASH_SALT = 0x85a308d3;
 const grainHeightCache = new Map<string, Float32Array<ArrayBuffer>>();
+
+interface SurfaceContactRaster {
+  readonly amount: number;
+  readonly softness: number;
+  readonly grainSeed: number;
+  readonly strokeSeed: number;
+  readonly heights: Float32Array<ArrayBuffer>;
+  readonly originX: number;
+  readonly originY: number;
+}
 
 /**
  * LabのCOMB実験と同じ順序で、stroke-spaceの符号付きpaint fieldを
@@ -43,7 +56,8 @@ const grainHeightCache = new Map<string, Float32Array<ArrayBuffer>>();
  *
  * atlasを先にalpha化してCanvasで重ねると、区間境界のsource-overにより
  * 低筆圧の未着彩部へ薄いalphaが蓄積するため、このmaskはsoftware rasterで
- * 1枚に確定し、重複区間はmax(alpha)で結合する。
+ * 1枚に確定する。Fine toothとのpixel-local contactも同じ走査内で0/1判定し、
+ * 重複区間はcanonical trialごとの再接触を評価してmax(alpha)で結合する。
  */
 export function rasterizeBristleMask(
   samples: readonly BristleMaskSweepSample[],
@@ -70,11 +84,16 @@ export function rasterizeBristleMask(
   const target = ctx.createImageData(width, height);
   const halfWidth = brushSize / 2;
   const maxV = field.height - 1;
+  const surface = createSurfaceContactRaster(dynamics, seed, originX, originY);
   for (let index = 1; index < samples.length; index++) {
     const from = samples[index - 1];
     const to = samples[index];
     if (!from || !to || to.breakBefore) continue;
     if (Math.hypot(to.x - from.x, to.y - from.y) < 0.001) continue;
+    const trialId = Math.round(
+      ((from.distance + to.distance) * 0.5) /
+        Math.max(0.5, dynamics.geometryStepPx),
+    );
 
     const fromLeft: RasterVertex = {
       x: from.x + from.frameY * halfWidth - originX,
@@ -107,6 +126,9 @@ export function rasterizeBristleMask(
       fromRight,
       toRight,
       dynamics.depositHardness,
+      samples,
+      surface,
+      trialId,
     );
     rasterizeTriangle(
       field,
@@ -115,6 +137,9 @@ export function rasterizeBristleMask(
       toRight,
       toLeft,
       dynamics.depositHardness,
+      samples,
+      surface,
+      trialId,
     );
   }
   ctx.putImageData(target, 0, 0);
@@ -203,6 +228,9 @@ function rasterizeTriangle(
   b: RasterVertex,
   c: RasterVertex,
   hardness: number,
+  samples: readonly BristleMaskSample[],
+  surface: SurfaceContactRaster | undefined,
+  trialId: number,
 ): void {
   const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
   if (Math.abs(denominator) < 0.00001) return;
@@ -245,11 +273,18 @@ function rasterizeTriangle(
     let u = c.u + weightA * (a.u - c.u) + weightB * (b.u - c.u);
     let v = c.v + weightA * (a.v - c.v) + weightB * (b.v - c.v);
     for (let x = minX; x <= maxX; x++) {
-      const alpha = Math.round(
+      let alpha = Math.round(
         activationFromDistance(sampleFieldDistance(field, u, v), hardness) *
           255,
       );
       const offset = (y * target.width + x) * 4;
+      if (
+        alpha > (target.data[offset + 3] ?? 0) &&
+        surface &&
+        !hasSurfaceContact(surface, x, y, samplePressure(samples, u), trialId)
+      ) {
+        alpha = 0;
+      }
       if (alpha > (target.data[offset + 3] ?? 0)) {
         target.data[offset] = 255;
         target.data[offset + 1] = 255;
@@ -262,73 +297,89 @@ function rasterizeTriangle(
   }
 }
 
-export function applyDocumentGrain(
-  ctx: OffscreenCanvasRenderingContext2D,
-  localOriginX: number,
-  localOriginY: number,
-  width: number,
-  height: number,
+function createSurfaceContactRaster(
   dynamics: BristleDynamics,
-  pressure: number,
-): void {
-  if (dynamics.surfaceGrain.amount <= 0) return;
-  const tile = getGrainTile(dynamics, pressure);
-  const pattern = ctx.createPattern(tile, "repeat");
-  if (!pattern)
-    throw new Error("Failed to create bristle surface grain pattern");
-  ctx.save();
-  ctx.globalCompositeOperation = "destination-in";
-  ctx.translate(-localOriginX, -localOriginY);
-  ctx.fillStyle = pattern;
-  ctx.fillRect(localOriginX, localOriginY, width, height);
-  ctx.restore();
+  strokeSeed: number,
+  originX: number,
+  originY: number,
+): SurfaceContactRaster | undefined {
+  const grain = dynamics.surfaceGrain;
+  const amount = clamp(grain.amount, 0, 1);
+  if (amount <= 0) return undefined;
+  return {
+    amount,
+    softness: 0.01 + (1 - clamp(grain.hardness, 0, 1)) * 0.24,
+    grainSeed: grain.seed,
+    strokeSeed,
+    heights: getFineToothHeightTile(grain.seed, grain.scalePx),
+    originX,
+    originY,
+  };
 }
 
-function getGrainTile(
-  dynamics: BristleDynamics,
+function hasSurfaceContact(
+  surface: SurfaceContactRaster,
+  localX: number,
+  localY: number,
   pressure: number,
-): OffscreenCanvas {
-  const grain = dynamics.surfaceGrain;
-  const contact = Math.round(clamp(pressure, 0, 1) * 16) / 16;
-  const key = [
-    grain.seed,
-    grain.scalePx,
-    grain.amount,
-    grain.hardness,
-    contact,
-  ].join(":");
-  const cached = grainCache.get(key);
-  if (cached) return cached;
+  trialId: number,
+): boolean {
+  const documentX = surface.originX + localX;
+  const documentY = surface.originY + localY;
+  const tileX = positiveModulo(documentX, GRAIN_TILE_SIZE);
+  const tileY = positiveModulo(documentY, GRAIN_TILE_SIZE);
+  const height = surface.heights[tileY * GRAIN_TILE_SIZE + tileX] ?? 0;
+  const contact = clamp(pressure, 0, 1);
+  const directCoverage = smoothstep(
+    (contact - height + surface.softness) / (surface.softness * 2),
+  );
+  const directProbability =
+    1 - surface.amount + surface.amount * directCoverage;
+  if (
+    documentHashUnit(
+      surface.grainSeed ^ FIXED_CONTACT_HASH_SALT,
+      documentX,
+      documentY,
+    ) < directProbability
+  ) {
+    return true;
+  }
 
-  const canvas = new OffscreenCanvas(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
-  const ctx = getContext(canvas, "bristle surface grain");
-  const image = ctx.createImageData(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
-  const data = image.data;
-  const amount = clamp(grain.amount, 0, 1);
-  const softness = 0.01 + (1 - clamp(grain.hardness, 0, 1)) * 0.24;
-  const heights = getFineToothHeightTile(grain.seed, grain.scalePx);
-  for (let y = 0; y < GRAIN_TILE_SIZE; y++) {
-    for (let x = 0; x < GRAIN_TILE_SIZE; x++) {
-      const pixelIndex = y * GRAIN_TILE_SIZE + x;
-      const height = heights[pixelIndex] ?? 0;
-      const grainCoverage = smoothstep(
-        (contact - height + softness) / (softness * 2),
-      );
-      const alpha = Math.round((1 - amount + amount * grainCoverage) * 255);
-      const offset = pixelIndex * 4;
-      data[offset] = 255;
-      data[offset + 1] = 255;
-      data[offset + 2] = 255;
-      data[offset + 3] = alpha;
-    }
-  }
-  ctx.putImageData(image, 0, 0);
-  grainCache.set(key, canvas);
-  if (grainCache.size > GRAIN_CACHE_LIMIT) {
-    const oldest = grainCache.keys().next().value;
-    if (oldest !== undefined) grainCache.delete(oldest);
-  }
-  return canvas;
+  const gap = Math.max(0, height - contact);
+  const rate =
+    surface.amount *
+    REPEAT_CONTACT_STRENGTH *
+    Math.exp(-gap / REPEAT_CONTACT_REACH);
+  const probability = 1 - Math.exp(-rate * REPEAT_CONTACT_EXPOSURE_PER_PASS);
+  return (
+    documentHashUnit(
+      hashSeed(surface.strokeSeed ^ REPEAT_CONTACT_HASH_SALT, trialId),
+      documentX,
+      documentY,
+    ) < probability
+  );
+}
+
+function samplePressure(
+  samples: readonly BristleMaskSample[],
+  u: number,
+): number {
+  const clampedU = clamp(u, 0, samples.length - 1);
+  const fromIndex = Math.floor(clampedU);
+  const toIndex = Math.min(samples.length - 1, fromIndex + 1);
+  const progress = clampedU - fromIndex;
+  const from = samples[fromIndex]?.pressure ?? 0;
+  const to = samples[toIndex]?.pressure ?? from;
+  return from + (to - from) * progress;
+}
+
+function documentHashUnit(seed: number, x: number, y: number): number {
+  return hashSeed(hashSeed(seed, x), y) / 0x100000000;
+}
+
+function positiveModulo(value: number, modulus: number): number {
+  const remainder = value % modulus;
+  return remainder < 0 ? remainder + modulus : remainder;
 }
 
 function getFineToothHeightTile(

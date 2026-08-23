@@ -774,9 +774,10 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 `depositHardness` と `edgeTexture*` は着彩/無着彩境界を定める。面掠れは符号付きpaint fieldのまま
 swept quadへ補間し、最終pixelでalphaへ変換する。これにより低筆圧時にも薄いalphaを全面へ
 積まず、不透明な着彩片の面積だけを減らす。`surfaceGrain` はdocument座標へ固定した
-Fine tooth（細かな紙目）をdocument座標へ固定する。同じ場所への再接触では通常のsource-over蓄積により低着彩部が段階的に埋まるため、専用の反復強度パラメータは持たない。
-Fine toothは2周波のvalue noiseを合成し、描画chunkの平均筆圧を16段階へ量子化したcontactで凹凸への
-接触率を変える。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
+Fine tooth（細かな紙目）を表す。接触判定はswept quad内のpixel-local pressureと紙目の高さを使い、
+描画chunkの平均筆圧には丸めない。初回に接触しなかった谷にも固定の再接触transferを適用するため、
+同じ場所を繰り返すと不透明な着彩片の面積が徐々に増える。専用の反復強度パラメータや
+顔料厚layerは持たない。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
 
 初期版は不透明またはほぼ不透明なpaintを対象とする。掃引chunk間の重なりはこの契約の下で継ぎ目を防ぐために使い、半透明paintの厳密な重なり濃度は保証しない。pending描画は常にno-opで、確定描画だけを表示する。
 
@@ -1106,7 +1107,7 @@ interface BrushRenderState {
 - 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
 - 混色有効時はExpand分岐ごとに拾う背景が異なるため、`mixing`に分岐別の色場と有限checkpointを保持する。stampとbristleは同じ色場モデルを使い、sprayは混色非対応。
 - `field`は更新ごとに新しい配列を返す数値状態。Canvas / ImageDataはbranch所有のmutable cacheであり、分岐・pendingへ共有せず`cloneBrushRenderState`でdeep cloneする。
-- bristleの面掠れは毛束ごとの絵の具reservoirではない。初回接触で未着彩と判定されたcellへ半透明の着彩floorは加えない。面掠れで着彩可能と判定された領域のdocument-space grainをsource-overで蓄積し、同じ場所への反復接触で低着彩部が段階的に埋まる。追加のpigment layerは持たない。
+- bristleの面掠れは毛束ごとの絵の具reservoirではない。初回接触で未着彩と判定されたcellへ半透明の着彩floorは加えない。面掠れで着彩可能と判定された領域では、document-space grainの谷に確率的な再接触を与え、同じ場所への反復で不透明な着彩片の面積を段階的に増やす。追加のpigment layerは持たない。
 
 **使用例**:
 ```typescript

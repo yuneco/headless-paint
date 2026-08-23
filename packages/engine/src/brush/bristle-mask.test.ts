@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRISTLE_DYNAMICS } from "../types";
-import { applyDocumentGrain, rasterizeBristleMask } from "./bristle-mask";
+import { rasterizeBristleMask } from "./bristle-mask";
 
 describe("bristle surface grain", () => {
   it("初回の未着彩cellへalpha floorを加えない", () => {
@@ -44,58 +44,70 @@ describe("bristle surface grain", () => {
     expect(alpha.some((value) => value > 0)).toBe(true);
   });
 
-  it("uses pressure as contact against the Fine tooth height field", () => {
-    const low = opaqueMask(64, 64);
-    const high = opaqueMask(64, 64);
+  it("uses pixel-local pressure as contact against the Fine tooth height field", () => {
+    const low = straightMask(0.2, 7, 0);
+    const high = straightMask(0.9, 7, 0);
 
-    applyDocumentGrain(low.ctx, 0, 0, 64, 64, DEFAULT_BRISTLE_DYNAMICS, 0.2);
-    applyDocumentGrain(high.ctx, 0, 0, 64, 64, DEFAULT_BRISTLE_DYNAMICS, 0.9);
-
-    expect(alphaCoverage(high.canvas)).toBeGreaterThan(
-      alphaCoverage(low.canvas) * 1.5,
-    );
+    expect(alphaCoverage(high)).toBeGreaterThan(alphaCoverage(low) * 1.5);
   });
 
-  it("is deterministic for the same document origin and pressure", () => {
-    const first = opaqueMask(64, 64);
-    const second = opaqueMask(64, 64);
+  it("is deterministic for the same document origin, seed, and pressure", () => {
+    const first = straightMask(0.55, 11, 12);
+    const second = straightMask(0.55, 11, 12);
 
-    applyDocumentGrain(
-      first.ctx,
-      12,
-      7,
-      64,
-      64,
+    expect(pixels(second)).toEqual(pixels(first));
+  });
+
+  it("adds opaque contact opportunities when one stroke revisits a surface", () => {
+    const once = straightMask(0.28, 13, 0);
+    const repeated = rasterizeBristleMask(
+      [
+        sample(10, 30, 0, 0.28),
+        sample(110, 30, 100, 0.28),
+        { ...sample(110, 30, 101, 0.28), breakBefore: true },
+        sample(10, 30, 201, 0.28),
+      ],
+      40,
       DEFAULT_BRISTLE_DYNAMICS,
-      0.55,
-    );
-    applyDocumentGrain(
-      second.ctx,
-      12,
-      7,
-      64,
-      64,
-      DEFAULT_BRISTLE_DYNAMICS,
-      0.55,
+      1,
+      13,
+      0,
+      0,
+      120,
+      60,
     );
 
-    expect(pixels(second.canvas)).toEqual(pixels(first.canvas));
+    expect(alphaCoverage(repeated)).toBeGreaterThan(alphaCoverage(once) * 1.03);
   });
 });
 
-function opaqueMask(
-  width: number,
-  height: number,
-): {
-  readonly canvas: OffscreenCanvas;
-  readonly ctx: OffscreenCanvasRenderingContext2D;
-} {
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas2D unavailable");
-  ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, width, height);
-  return { canvas, ctx };
+function straightMask(
+  pressure: number,
+  seed: number,
+  originX: number,
+): OffscreenCanvas {
+  return rasterizeBristleMask(
+    [sample(10, 30, 0, pressure), sample(110, 30, 100, pressure)],
+    40,
+    DEFAULT_BRISTLE_DYNAMICS,
+    1,
+    seed,
+    originX,
+    7,
+    120,
+    60,
+  );
+}
+
+function sample(x: number, y: number, distance: number, pressure: number) {
+  return {
+    x,
+    y,
+    pressure,
+    distance,
+    frameX: 1,
+    frameY: 0,
+  } as const;
 }
 
 function pixels(canvas: OffscreenCanvas): number[] {

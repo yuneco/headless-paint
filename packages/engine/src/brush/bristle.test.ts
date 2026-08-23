@@ -190,18 +190,13 @@ describe("bristle brush", () => {
 
   it("反復接触で同じgrainの低着彩部が段階的に埋まる", () => {
     const layer = createLayer(200, 120);
-    const brush = makeBrush({
-      surfaceGrain: {
-        ...DEFAULT_BRISTLE_DYNAMICS.surfaceGrain,
-        amount: 0.85,
-      },
-    });
+    const brush = makeBrush();
     renderBrushStroke(layer, line(0.5), makeStyle(brush), 0, initialState(23));
     const once = alphaStats(layer).sum;
-    renderBrushStroke(layer, line(0.5), makeStyle(brush), 0, initialState(23));
+    renderBrushStroke(layer, line(0.5), makeStyle(brush), 0, initialState(24));
     const twice = alphaStats(layer).sum;
 
-    expect(twice).toBeGreaterThan(once * 1.08);
+    expect(twice).toBeGreaterThan(once * 1.03);
   });
 
   it("mixing有効時は描画先と異なるstroke開始snapshotを要求する", () => {

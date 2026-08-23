@@ -11,7 +11,7 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
-import { applyDocumentGrain, rasterizeBristleMask } from "./bristle-mask";
+import { rasterizeBristleMask } from "./bristle-mask";
 import { getBristleProfileAtlas } from "./bristle-profile";
 import {
   getActiveMixing,
@@ -355,8 +355,6 @@ function renderSweepRun(
     width,
     height,
   );
-  const maskCtx = mask.getContext("2d");
-  if (!maskCtx) throw new Error("Bristle mask requires Canvas2D");
   drawSweep(inkCtx, paintProfile, points, style.lineWidth, minX, minY);
   if (!coloredProfile) {
     inkCtx.globalCompositeOperation = "source-in";
@@ -364,15 +362,6 @@ function renderSweepRun(
     inkCtx.fillRect(0, 0, width, height);
     inkCtx.globalCompositeOperation = "source-over";
   }
-  applyDocumentGrain(
-    maskCtx,
-    minX,
-    minY,
-    width,
-    height,
-    brush.dynamics,
-    averagePressure(points),
-  );
   inkCtx.globalCompositeOperation = "destination-in";
   inkCtx.drawImage(mask, 0, 0);
   inkCtx.globalCompositeOperation = "source-over";
@@ -382,12 +371,6 @@ function renderSweepRun(
   layer.ctx.globalCompositeOperation = style.compositeOperation;
   layer.ctx.drawImage(ink, minX, minY);
   layer.ctx.restore();
-}
-
-function averagePressure(points: readonly ResolvedSweepPoint[]): number {
-  let total = 0;
-  for (const point of points) total += point.pressure;
-  return points.length > 0 ? total / points.length : 0;
 }
 
 function resolvePointBounds(points: readonly ResolvedSweepPoint[]): {

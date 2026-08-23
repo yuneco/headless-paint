@@ -147,7 +147,7 @@ interface BristleBrushConfig {
 - coarse broad dropout mask
 - document-space surface grain
 - cusp split + short bristle lag
-- 着彩可能領域内の低alpha紙目をsource-over蓄積する軽量なrepeated contact
+- document固定の高さ場へpixel-local pressureで接触し、谷を確率的な再接触で埋める軽量なrepeated contact
 - internal pending OFF
 - bounded incremental work
 
@@ -213,7 +213,7 @@ Gate: Lab referenceに対する構造的な官能一致、incremental/replay par
 
 - `bristle-profile.ts`（決定的な細い毛束断面）、`bristle-mask.ts`（毛束数と独立したstroke-space面掠れ + document-space紙目）、`bristle.ts`（連続掃引・cusp split・短い毛束lag・共通混色）へ責務を分離した
 - 筆圧はbrush幅を変えず面掠れのcoverageへ作用する。混色は毛束ごとのreservoirを持たず、stampと同じ連続RGBA色場を毛束alphaへ適用する
-- 反復接触は追加pigment canvasを持たず、面掠れで着彩可能な領域の低alpha紙目をsource-overで蓄積する。初回の未着彩cellへfloorは加えず、Labの高コストなper-pixel packed stateは移植しなかった
+- 反復接触は追加pigment canvasを持たず、document固定の高さ場とpixel-local pressureから0/1接触を解決する。初回に接触しなかった谷は確率的な再接触で段階的に埋め、初回の未着彩cellへalpha floorは加えない。詳細は`plans/2026-08-23-12-03_rough-bristle-repeated-contact.md`
 - bristle pendingはengineで常にno-opとし、汎用input plugin `causal-adaptive`を製品デモのAcrylic / Rough bristleへ適用した。各入力を即時確定し、低速の微細な揺れだけを過去情報で抑える
 - Live / replay、Undo、RedoをRough bristle + mixingでピクセル完全一致させた。保存形式は全bristle propertyを必須検証し、欠落・範囲外を黙って丸めない
 - 50px、384点のローカルWebKit同期入力ベンチはsample p50 `12.1ms`、p95 `16.9ms`、後半/前半比 `0.95`だったが、これはLabの実入力fixtureと同じgateではなかった。さらにLab COMBは混色を含まず、production presetの混色ONと比較していたため、統合性能の根拠には使わない
@@ -227,7 +227,7 @@ Gate: Lab referenceに対する構造的な官能一致、incremental/replay par
 - Rough bristleの既定値は混色OFFとする。`pickupRatePerPx <= 0`もmaterial stage全体のno-opとし、restore / diffusionだけで高コスト経路へ入らない。ハケ混色の追加最適化は非混色経路がLab同等になった後の別gateとする
 - React入力境界からstroke runtimeまで`getCoalescedEvents()`の全採用点をbatchで渡す。bristle rendererはpointer event境界ではなく、入力時刻32msまたは累積移動距離1.5B（B=brush幅）で決定的にflushする。caller batchを変えてもlive/replayの出力pixelが一致するテストを追加した
 - Lab Roughのtextureは外部画像ではなく、`scalePx=4 / amount=0.85 / hardness=0.82 / seed=1`のprocedural Fine tooth（2周波value noise）だった。同じ式をdocument座標固定のsurface grainとして移植したため追加ライセンスはない。TEX-03で収集した外部CC0画像はRoughのLab referenceではないためproductionへ混入させない
-- Fine toothの高さ場はseed / scale単位で共有し、筆圧16段階では接触maskだけを再計算する。固定fixtureの最終WebKitはCall p50 / p95 `6 / 15ms`、batch wall p50 / p95 `5 / 15ms`、61 engine callsでLab p95と同等。max `78ms`は最初の毛束・紙目resource生成を含むcold spikeとして残る
+- Fine toothの高さ場はseed / scale単位で共有する。当初は描画chunkの平均筆圧を16段階へ丸めた接触maskを再計算していたが、2026-08-23にswept quad内のpixel-local pressure判定へ統合した。統合後の461点fixture（mixing OFF）WebKitはCall / batch wall p50 / p95とも`4 / 16ms`で、Lab p95 `15ms`と同水準。max `69ms`のcold spikeは残る
 - 固定fixtureの画像ではcoalesced input欠落時の急曲線短絡が消え、低接触部の細かな紙目欠け、高筆圧部のベタ着彩、交差の連続性を同時に維持した。最終的な色・zoomを含む官能判断はproduction webの実機gateへ渡す
 
 #### P3 expression parity re-audit (2026-08-22)
@@ -236,7 +236,7 @@ Gate: Lab referenceに対する構造的な官能一致、incremental/replay par
 - 比較入力の差を除くため、Labと同じ900×360 / 121点 / 8ms間隔の`S curve pressure wave`をproductionの評価panelから現在のbrush設定で履歴付き再生できるようにする。固定strokeでLab / productionのcoverage分布と見た目を比較する
 - 重点監査箇所は、(1) Labのpixel単位pressure fieldに対するproductionのchunk平均pressure、(2) Labの0/1寄りmaskに対するproductionのrepeat floor、(3) committed chunk overlapによる欠けの再着彩、(4) transverse mask解像度とedge noise相関長、(5) packed repeated-contactを低コスト近似へ置換した影響とする
 - パラメータ調整で一致するかを先に固定fixtureで確認し、上記の合成順・評価単位に起因する差はrendererのロジック不一致として扱う
-- 固定S字の初回比較で、productionの面掠れ0 cellへ`repeatStrength * 0.06`、紙目谷へ`repeatStrength * 0.08`を無条件に加えるfloorが薄い全面着彩の直接原因と判明した。Labの反復接触はcoreの着彩可能領域内だけを後段蓄積しており意味が異なる。初回floorと専用`repeatStrength`をproduction APIから除き、着彩可能領域内の低alpha紙目は通常のsource-overで再接触時に蓄積する単純な仕様へ寄せる
+- 固定S字の初回比較で、productionの面掠れ0 cellへ`repeatStrength * 0.06`、紙目谷へ`repeatStrength * 0.08`を無条件に加えるfloorが薄い全面着彩の直接原因と判明した。初回floorと専用`repeatStrength`をproduction APIから除いた。その後、`amount: 1`では固定紙目のalpha 0が反復しても永久に埋まらないことが判明したため、2026-08-23にLab GRAIN-02 / COMB-02の確率的再接触を顔料stateなしでsoftware rasterへ統合する方針へ更新した
 - floor除去後も残った差はmaskの評価順序だった。Labは低解像度cellを符号付きpaint fieldのままswept quadへbilinear補間し、最終pixelでhardnessを適用して重複quadを`max(alpha)`結合する。productionは先に8-bit alpha atlasへ変換して各区間をCanvas `source-over`していたため、補間で生じた薄いalphaが区間境界へ蓄積していた。`bristle-mask.ts`をLabと同じsoftware raster順序へ変更し、固定S字のWebKit Call p50 / p95 `1 / 10ms`を確認した
 - 極低筆圧の外形回帰は、Lab既定の`edgeTextureAmount: 0.12`を含み、`dropoutLengthPx`を十分に跨ぐ代表長ストロークで確認する。境界textureを無効化した短区間では確率場の上側tailが不足し、外形比較自体が代表条件にならない
 
