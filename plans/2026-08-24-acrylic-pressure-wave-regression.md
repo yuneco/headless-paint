@@ -65,3 +65,9 @@ Deterministic WebKit reproduction, same 300-point stroke with every coalesced ba
 This reproduces and removes the failure mechanism present in the production capture. `smoothingMs: 50` remains a separate candidate mitigation until the Apple Pencil gate determines whether it is still needed. Do not use pressure smoothing to hide replayed coordinate input.
 
 Final gate remains an iPad refresh followed by the same fast straight-stroke check. A new capture must contain a monotonic accepted timestamp sequence without repeated coalesced groups, and the visual width wave must be absent before this regression is closed.
+
+## Final result (2026-08-25)
+
+The refreshed iPad + Apple Pencil production demo no longer shows the unintended width oscillation. The user accepted the result, so the regression is closed at `40c76e8`.
+
+`smoothingMs: 50` remains the accepted Acrylic preset value for now, but it is not considered the root-cause correction. Any future change to that value is a brush-feel adjustment and must not reintroduce tolerance for stale coalesced input.
