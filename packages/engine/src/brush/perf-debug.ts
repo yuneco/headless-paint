@@ -67,6 +67,12 @@ export interface BrushPerfSnapshot {
 
 export interface BrushPerfDebug {
   enabled: boolean;
+  experiments: {
+    spacingScale: number;
+    checkpointScale: number;
+    updateScale: number;
+    bitmapDab: boolean;
+  };
   nullStages: BrushPerfNullStages;
   recordStage(name: BrushPerfStageName, startedAt: number): void;
   recordElapsed(name: BrushPerfStageName, elapsedMs: number): void;
@@ -118,6 +124,12 @@ function createBrushPerfDebug(): BrushPerfDebug {
   ) as Record<BrushPerfStageName, number[]>;
   return {
     enabled: false,
+    experiments: {
+      spacingScale: 1,
+      checkpointScale: 1,
+      updateScale: 1,
+      bitmapDab: false,
+    },
     nullStages: createNullStages(),
     recordStage(name, startedAt) {
       if (!this.enabled) return;

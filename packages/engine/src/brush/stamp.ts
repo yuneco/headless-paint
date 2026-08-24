@@ -13,8 +13,7 @@ import type {
 import {
   getActiveMixing,
   prepareMixingState,
-  updateMixingAfterDeposit,
-} from "./mixing";
+  updateMixingAfterDeposit, getDabSource } from "./mixing";
 import { brushPerfDebug } from "./perf-debug";
 import { calculatePressureFlow } from "./pressure";
 import { smoothStampPressure } from "./pressure-smoothing";
@@ -51,7 +50,7 @@ export function renderStampBrushStroke(
 ): BrushRenderState {
   if (brushPerfDebug.nullStages.nullRender) return state;
   const { dynamics } = brush;
-  const spacingPx = style.lineWidth * dynamics.spacing;
+  const spacingPx = style.lineWidth * dynamics.spacing * brushPerfDebug.experiments.spacingScale;
   const branch = state.branches[0];
 
   if (spacingPx <= 0 || !state.tipCanvas || points.length === 0 || !branch) {
@@ -203,7 +202,7 @@ function stampAt(
   ctx.globalAlpha = opacity;
   ctx.globalCompositeOperation = style.compositeOperation;
 
-  let drawCanvas = tipCanvas;
+  let drawCanvas: OffscreenCanvas | ImageBitmap = tipCanvas;
   let nextMixingState = mixingState;
   let rotation = rotationJitter;
   if (mixing) {
@@ -213,7 +212,7 @@ function stampAt(
       mixing,
       mixingState,
     );
-    drawCanvas = nextMixingState.renderCanvas;
+    drawCanvas = getDabSource(nextMixingState.renderCanvas);
     if (!brushPerfDebug.nullStages.nullRotate) {
       rotation += Math.atan2(point.directionY, point.directionX);
     }

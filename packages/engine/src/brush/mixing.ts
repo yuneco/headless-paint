@@ -17,6 +17,13 @@ const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvasRenderingContext2D
 >();
 const nullCheckpointCache = new Map<string, ImageData>();
+const dabBitmapCache = new WeakMap<OffscreenCanvas, ImageBitmap>();
+
+export function getDabSource(
+  renderCanvas: OffscreenCanvas,
+): OffscreenCanvas | ImageBitmap {
+  return dabBitmapCache.get(renderCanvas) ?? renderCanvas;
+}
 
 export interface MixingUpdateInput {
   readonly tipCanvas: OffscreenCanvas;
@@ -154,7 +161,8 @@ export function updateMixingAfterDeposit(
   const lastUpdate = state.lastUpdateDistance;
   if (
     lastUpdate === undefined ||
-    input.stampDistance - lastUpdate >= input.mixing.updateDistancePx
+    input.stampDistance - lastUpdate >=
+      input.mixing.updateDistancePx * brushPerfDebug.experiments.updateScale
   ) {
     if (!state.checkpointPixels) {
       state = captureCheckpoint(input, state, input.sourceLayer.canvas, false);
@@ -192,7 +200,7 @@ export function updateMixingAfterDeposit(
   const lastCheckpoint = state.lastCheckpointDistance ?? 0;
   if (
     input.stampDistance - lastCheckpoint >=
-    input.mixing.checkpointDistancePx
+    input.mixing.checkpointDistancePx * brushPerfDebug.experiments.checkpointScale
   ) {
     state = captureCheckpoint(input, state);
   }
@@ -369,6 +377,10 @@ function uploadMaterialCanvas(
   renderCtx.globalCompositeOperation = "destination-in";
   renderCtx.drawImage(tipCanvas, 0, 0);
   renderCtx.restore();
+  if (brushPerfDebug.experiments.bitmapDab) {
+    dabBitmapCache.get(state.renderCanvas)?.close();
+    dabBitmapCache.set(state.renderCanvas, state.renderCanvas.transferToImageBitmap());
+  }
   if (brushPerfDebug.enabled) {
     brushPerfDebug.recordStage("materialUpload", startedAt);
   }

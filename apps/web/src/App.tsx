@@ -41,8 +41,11 @@ import { usePatternPreview } from "./hooks/usePatternPreview";
 import { useStrokeCallMetrics } from "./hooks/useStrokeCallMetrics";
 import { useTransformMode } from "./hooks/useTransformMode";
 
-const LAYER_WIDTH = 1024 * 2;
-const LAYER_HEIGHT = 1024 * 2;
+const EXPERIMENT_LAYER_SIZE = Number(
+  new URLSearchParams(window.location.search).get("layerSize") ?? "0",
+);
+const LAYER_WIDTH = EXPERIMENT_LAYER_SIZE > 0 ? EXPERIMENT_LAYER_SIZE : 1024 * 2;
+const LAYER_HEIGHT = LAYER_WIDTH;
 const SETTINGS_STORAGE_KEY = "headless-paint:settings";
 
 type InputCaptureStatus = "idle" | "armed" | "capturing" | "captured";
@@ -68,6 +71,10 @@ function configureBrushPerfDebugFromUrl(): void {
   if (!perf) return;
   const params = new URLSearchParams(window.location.search);
   perf.enabled = params.get("perfDebug") === "1";
+  perf.experiments.spacingScale = Number(params.get("spacingScale") ?? "1") || 1;
+  perf.experiments.checkpointScale = Number(params.get("checkpointScale") ?? "1") || 1;
+  perf.experiments.updateScale = Number(params.get("updateScale") ?? "1") || 1;
+  perf.experiments.bitmapDab = params.get("bitmapDab") === "1";
   for (const name of Object.keys(perf.nullStages) as Array<
     keyof typeof perf.nullStages
   >) {

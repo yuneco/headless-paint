@@ -6,7 +6,7 @@
 - Revised: 2026-08-25（Claude + codex review round 1 を反映。GPU一択の計画から「候補群を安く切り分ける実験計画」へ再構成）
 - Branch at creation: `feature/acrylic-v2-production`
 - HEAD at creation: `9ccff0c docs: close acrylic width regression`
-- State: **E0a/E0b完了（2026-08-25）。Section 15に結果と判断。次はE1b（C4）とE2（bridge benchmark）**
+- State: **E0〜E2完了、E1b（C4）棄却（2026-08-25）。Section 15/16に結果。次はユーザー採用判断（GPU spikeへ進むか）**
 - Scope: Acrylic v2 / Rough bristle **renderer自体**の高速化。CPU最適化・WASM・WebGL2・WebGPUを候補として、有効性を素早く安く切り分ける
 - Out of scope（ユーザー決定 2026-08-25）: Undo checkpoint戦略、遅延を目立たなくするUI/非同期化など「重さを隠す」方向の検討
 - Work branch: `experiment/brush-acceleration`（`feature/acrylic-v2-production@9ccff0c`から分岐）。実験はすべてこのbranchで行い、自由にcommitを積んでよい
@@ -484,3 +484,34 @@ Stop時は実験rendererを削除または実験commitへ隔離し、CPU product
 2. E2: standalone bridge benchmark（Rough chunk代表size 150×150 / 250×150、Acrylic dab batch）
 3. Acrylic upload短縮（C19: tip×fieldをCPUで合成し`putImageData`1回）は小実験として可
 4. C14 / C13 / C16 / null-checkpoint系は棄却。plans/notes参照
+
+## 16. E1b / E2 / Acrylic追加実験の結果 (2026-08-25)
+
+### 16.1 E1b: C4 Rough fused ink CPU raster → **棄却**（commit `fa2d7dc`、revert `e5b1c0b`）
+- Chromium: renderer合計 250→164ms（−34%）、wall p95 22.9→15.9。**WebKit: 221/230→201/218ms（−8%）**、wall p95 20→19。WebKit gate（20%）未達
+- 表現差: legacyのinkはsegmentごとのatlas重ね塗りで毛束の隙間が埋まるが、fusedは1D profileそのままなので白い筋が残る（coverage差4%、|Δα|>0.1が11.5%）。表現を変えてまで採る価値なし
+
+### 16.2 E2: GPU→Canvas2D bridge（`work.local/bridge-bench/`、`benchmark-bridge.mjs`）
+- WebKit webgl2 direct `drawImage`: production-like warm p95 ≈1ms（1ms粒度下限）、sync 1〜2ms。ImageBitmap系 2ms。Chromium production-like 1.7〜2.3ms、sync 0.3〜1ms
+- **WebGPUはPlaywright WebKit/Chromium headlessで無効**（`navigator.gpu`なし）。実機Safari/iPadでの再計測が必要
+- Rough判断: chunk≈3.3msに対しGPU化後は geometry + bridge ≈1.5〜2.5ms → **改善25〜50%、Go条件「bridge ≤ baseline chunkの25%」未達**。backend分岐の複雑性に見合わない → **Hold**
+
+### 16.3 Acrylic追加実験（WebKit、backlog fixture）
+| 実験 | dispatch p50/p95 | 所見 |
+|---|---|---|
+| baseline | 8/11 | 同期合計≈1.7s/1920 samples |
+| spacingScale 3（dab 27,404→9,135） | 7/11 | **dab数に比例しない** |
+| checkpointScale 2/4/8（997→502/253/127回） | 7/10, 6/9, 3/8 | 回数を減らすと1回あたりが増え、総量は−7%/−26%/−62%。「同期点で溜まったGPU仕事を払う」だけ |
+| updateScale 2/4（2,347→1,193/602回） | 6/9, 6/8 | update回数に≈25%依存 |
+| layerSize 512/1024/2048 | 2/5, 4/7, 8/12 | **checkpoint単価1.75msはlayerサイズに無関係**（stroke長に比例して回数が変わるだけ） |
+| bitmapDab（`transferToImageBitmap`をdab source） | 11/17、undo9 2倍 | **悪化・棄却** |
+| null-dabdraw（再掲） | 4/6 | dabを1つでも描くと≈50%増える |
+- `moveMany`（engine内）とdispatchが一致。表示側（React/PaintCanvas）の関与なし
+- 解釈: 「dab数」「checkpoint数」「layerサイズ」に比例せず「update回数」に部分依存、「dab有無」に強く依存 → **material updateで書き換えたrenderCanvasを最初にdab sourceとして使う際のWebKit内部flush/snapshot**（updateごと≈0.4ms相当）が主因という仮説が最も整合する。2026-05の「Canvas間copy/キュー飽和」「source ring無効」の記録とも一致
+- Canvas2D内で回避する手段は見つからず（ring・ImageBitmapとも無効）。残る手段は (a) `updateDistancePx`拡大（C12・目視、≈−25%上限）、(b) **GPU instanced dab + field texture常駐（C11）で「小canvasの書き換え→source利用」を根絶**
+
+### 16.4 総括と採用判断のための材料
+- **Rough**: CPU候補に20%超のものなし（C4 −8%）。GPU化は25〜50%見込みで複雑性に見合わずHold。WASMはfield+raster（WebKitで≈70%）を2.5×以上にできれば−45%だが、toolchain導入costが高くbyte-identical不可
+- **Acrylic**: 本命はGPU（C11）。Canvas2D内で得られる大幅改善はない。パラメタ（updateDistancePx / spacing）は目視評価前提で最大−25%程度
+- **Undo replay**: rendererの総和がそのままreplay単価（Rough ≈250ms、Acrylic ≈1s per 2秒stroke）。Acrylic GPU化が最もUndoに効く
+- 次の判断（ユーザー）: (1) Acrylic GPU-resident spike（E4b、WebGL2 first。WebGPUは実機Safariで別途bridge確認）へ進むか、(2) Acrylicはパラメタ調整で妥協するか、(3) Roughは現状維持か
