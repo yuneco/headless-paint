@@ -45,6 +45,8 @@ const LAYER_WIDTH = 1024 * 2;
 const LAYER_HEIGHT = 1024 * 2;
 const SETTINGS_STORAGE_KEY = "headless-paint:settings";
 
+type InputCaptureStatus = "idle" | "armed" | "capturing" | "captured";
+
 function saveSettingsSnapshot(snapshot: PaintSettingsSnapshot): void {
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(snapshot));
@@ -175,6 +177,60 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     compiledExpand: expand.compiled,
     registry: registryRef.current,
   });
+  const inputCaptureArmedRef = useRef(false);
+  const inputCaptureActiveRef = useRef(false);
+  const inputCapturePointsRef = useRef<InputPoint[]>([]);
+  const inputCaptureBatchSizesRef = useRef<number[]>([]);
+  const inputCaptureSettingsRef = useRef<{
+    readonly brush: typeof penSettings.brush;
+    readonly lineWidth: number;
+    readonly pressureCurve: typeof penSettings.pressureCurve;
+    readonly filterPipeline:
+      | { readonly type: "causal-adaptive" }
+      | {
+          readonly type: "common-smoothing" | "none";
+          readonly windowSize: number;
+        };
+  } | null>(null);
+  const [inputCaptureStatus, setInputCaptureStatus] =
+    useState<InputCaptureStatus>("idle");
+  const [inputCaptureJson, setInputCaptureJson] = useState<string | null>(null);
+
+  const handleArmInputCapture = useCallback(() => {
+    inputCaptureArmedRef.current = true;
+    inputCaptureActiveRef.current = false;
+    inputCapturePointsRef.current = [];
+    inputCaptureBatchSizesRef.current = [];
+    inputCaptureSettingsRef.current = null;
+    setInputCaptureJson(null);
+    setInputCaptureStatus("armed");
+  }, []);
+
+  const appendCapturedInput = useCallback((points: readonly InputPoint[]) => {
+    if (!inputCaptureActiveRef.current) return;
+    inputCapturePointsRef.current.push(...points);
+    inputCaptureBatchSizesRef.current.push(points.length);
+  }, []);
+
+  const finalizeInputCapture = useCallback(() => {
+    if (!inputCaptureActiveRef.current) return;
+    inputCaptureActiveRef.current = false;
+    const json = JSON.stringify({
+      format: "headless-paint-production-input",
+      version: 1,
+      settings: inputCaptureSettingsRef.current,
+      batchSizes: inputCaptureBatchSizesRef.current,
+      points: inputCapturePointsRef.current,
+    });
+    setInputCaptureJson(json);
+    setInputCaptureStatus("captured");
+    console.log(`[ProductionInputCapture] ${json}`);
+  }, []);
+
+  const handleCopyInputCapture = useCallback(async () => {
+    if (!inputCaptureJson) return;
+    await navigator.clipboard.writeText(inputCaptureJson);
+  }, [inputCaptureJson]);
   const {
     metrics: strokeCallMetrics,
     measure: measureStrokeCall,
@@ -183,15 +239,17 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   } = useStrokeCallMetrics();
   const handleMeasuredStrokeMove = useCallback(
     (point: InputPoint) => {
+      appendCapturedInput([point]);
       measureStrokeCall(() => engine.onStrokeMove(point));
     },
-    [engine.onStrokeMove, measureStrokeCall],
+    [appendCapturedInput, engine.onStrokeMove, measureStrokeCall],
   );
   const handleMeasuredStrokeMoves = useCallback(
     (points: readonly InputPoint[]) => {
+      appendCapturedInput(points);
       measureStrokeCall(() => engine.onStrokeMoves(points));
     },
-    [engine.onStrokeMoves, measureStrokeCall],
+    [appendCapturedInput, engine.onStrokeMoves, measureStrokeCall],
   );
   const handleMeasuredTouchStrokeStart = useCallback(
     (point: InputPoint) => {
@@ -202,7 +260,13 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   const handleMeasuredStrokeEnd = useCallback(() => {
     measureStrokeCall(engine.onStrokeEnd);
     flushStrokeCallMetrics();
-  }, [engine.onStrokeEnd, flushStrokeCallMetrics, measureStrokeCall]);
+    finalizeInputCapture();
+  }, [
+    engine.onStrokeEnd,
+    finalizeInputCapture,
+    flushStrokeCallMetrics,
+    measureStrokeCall,
+  ]);
 
   const handleDrawBristleSCurve = useCallback(() => {
     if (
@@ -392,11 +456,39 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   // Shift+ドラッグで直線モード
   const handleStrokeStart = useCallback(
     (point: InputPoint) => {
+      if (inputCaptureArmedRef.current) {
+        inputCaptureArmedRef.current = false;
+        inputCaptureActiveRef.current = true;
+        inputCapturePointsRef.current = [point];
+        inputCaptureBatchSizesRef.current = [1];
+        inputCaptureSettingsRef.current = {
+          brush: penSettings.brush,
+          lineWidth: penSettings.lineWidth,
+          pressureCurve: penSettings.pressureCurve,
+          filterPipeline: usesStatefulMaterial
+            ? { type: "causal-adaptive" }
+            : {
+                type: smoothing.enabled ? "common-smoothing" : "none",
+                windowSize: smoothing.windowSize,
+              },
+        };
+        setInputCaptureStatus("capturing");
+      }
       measureStrokeCall(() =>
         engine.onStrokeStart(point, { straightLine: shiftHeld.current }),
       );
     },
-    [engine.onStrokeStart, measureStrokeCall, shiftHeld],
+    [
+      engine.onStrokeStart,
+      measureStrokeCall,
+      penSettings.brush,
+      penSettings.lineWidth,
+      penSettings.pressureCurve,
+      shiftHeld,
+      smoothing.enabled,
+      smoothing.windowSize,
+      usesStatefulMaterial,
+    ],
   );
 
   const strokeCount = engine.historyState.currentIndex + 1;
@@ -531,6 +623,12 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
           !isTransformLocked && penSettings.brush.type === "bristle"
             ? handleDrawBristleSCurve
             : undefined
+        }
+        inputCaptureStatus={inputCaptureStatus}
+        inputCapturePointCount={inputCapturePointsRef.current.length}
+        onArmInputCapture={handleArmInputCapture}
+        onCopyInputCapture={
+          inputCaptureJson ? handleCopyInputCapture : undefined
         }
         entries={engine.entries}
         activeLayerId={engine.activeLayerId}

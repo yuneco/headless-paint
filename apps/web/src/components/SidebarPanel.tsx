@@ -35,6 +35,10 @@ interface SidebarPanelProps {
   strokeCallMetrics: StrokeCallMetrics;
   onResetStrokeCallMetrics: () => void;
   onDrawBristleSCurve?: () => void;
+  inputCaptureStatus: "idle" | "armed" | "capturing" | "captured";
+  inputCapturePointCount: number;
+  onArmInputCapture: () => void;
+  onCopyInputCapture?: () => void;
   // Layer panel props
   entries: readonly LayerEntry[];
   activeLayerId: string | null;
@@ -124,6 +128,10 @@ interface EvaluationSectionProps {
   readonly metrics: StrokeCallMetrics;
   readonly onResetMetrics: () => void;
   readonly onDrawBristleSCurve?: () => void;
+  readonly inputCaptureStatus: "idle" | "armed" | "capturing" | "captured";
+  readonly inputCapturePointCount: number;
+  readonly onArmInputCapture: () => void;
+  readonly onCopyInputCapture?: () => void;
 }
 
 const EvaluationSection = memo(function EvaluationSection({
@@ -132,6 +140,10 @@ const EvaluationSection = memo(function EvaluationSection({
   metrics,
   onResetMetrics,
   onDrawBristleSCurve,
+  inputCaptureStatus,
+  inputCapturePointCount,
+  onArmInputCapture,
+  onCopyInputCapture,
 }: EvaluationSectionProps) {
   return (
     <AccordionPanel
@@ -146,6 +158,10 @@ const EvaluationSection = memo(function EvaluationSection({
         metrics={metrics}
         onResetMetrics={onResetMetrics}
         onDrawBristleSCurve={onDrawBristleSCurve}
+        inputCaptureStatus={inputCaptureStatus}
+        inputCapturePointCount={inputCapturePointCount}
+        onArmInputCapture={onArmInputCapture}
+        onCopyInputCapture={onCopyInputCapture}
       />
     </AccordionPanel>
   );
@@ -277,6 +293,10 @@ function SidebarPanelComponent({
   strokeCallMetrics,
   onResetStrokeCallMetrics,
   onDrawBristleSCurve,
+  inputCaptureStatus,
+  inputCapturePointCount,
+  onArmInputCapture,
+  onCopyInputCapture,
   entries,
   activeLayerId,
   background,
@@ -327,6 +347,10 @@ function SidebarPanelComponent({
         metrics={strokeCallMetrics}
         onResetMetrics={onResetStrokeCallMetrics}
         onDrawBristleSCurve={onDrawBristleSCurve}
+        inputCaptureStatus={inputCaptureStatus}
+        inputCapturePointCount={inputCapturePointCount}
+        onArmInputCapture={onArmInputCapture}
+        onCopyInputCapture={onCopyInputCapture}
       />
       <LayersSection
         entries={entries}

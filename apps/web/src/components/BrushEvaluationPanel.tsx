@@ -9,6 +9,10 @@ interface BrushEvaluationPanelProps {
   readonly onResetMetrics: () => void;
   readonly onBrushChange: (brush: BrushConfig) => void;
   readonly onDrawBristleSCurve?: () => void;
+  readonly inputCaptureStatus: "idle" | "armed" | "capturing" | "captured";
+  readonly inputCapturePointCount: number;
+  readonly onArmInputCapture: () => void;
+  readonly onCopyInputCapture?: () => void;
 }
 
 function BrushEvaluationPanelComponent({
@@ -17,7 +21,13 @@ function BrushEvaluationPanelComponent({
   onResetMetrics,
   onBrushChange,
   onDrawBristleSCurve,
+  inputCaptureStatus,
+  inputCapturePointCount,
+  onArmInputCapture,
+  onCopyInputCapture,
 }: BrushEvaluationPanelProps) {
+  const pressureSmoothingMs =
+    brush.type === "stamp" ? (brush.pressureDynamics.smoothingMs ?? 0) : null;
   return (
     <div style={{ display: "grid", gap: 8, fontSize: 11, lineHeight: 1.45 }}>
       {brush.type === "bristle" && (
@@ -33,6 +43,36 @@ function BrushEvaluationPanelComponent({
           </button>
           <BristleGrainEvaluation brush={brush} onBrushChange={onBrushChange} />
         </>
+      )}
+
+      {brush.type === "stamp" && (
+        <div style={{ display: "grid", gap: 5 }}>
+          <div>
+            Applied pressure smoothing: <strong>{pressureSmoothingMs}ms</strong>
+          </div>
+          <button
+            type="button"
+            onClick={onArmInputCapture}
+            disabled={inputCaptureStatus === "capturing"}
+            style={{ padding: 6 }}
+          >
+            {inputCaptureStatus === "armed"
+              ? "Draw the next stroke（次の1本を描いてください）"
+              : inputCaptureStatus === "capturing"
+                ? "Capturing…"
+                : "Capture next input stroke（次の実入力を採取）"}
+          </button>
+          {inputCaptureStatus === "captured" && (
+            <button
+              type="button"
+              onClick={onCopyInputCapture}
+              disabled={!onCopyInputCapture}
+              style={{ padding: 6 }}
+            >
+              Copy captured JSON（{inputCapturePointCount} points）
+            </button>
+          )}
+        </div>
       )}
 
       <div

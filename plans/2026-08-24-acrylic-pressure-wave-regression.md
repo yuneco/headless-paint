@@ -37,7 +37,7 @@ interface PressureDynamics {
 - Causal smoothing necessarily delays very fast intentional pressure changes. Acrylic should use a short preset-specific value and requires final Apple Pencil sensory confirmation.
 - This does not change the common temporal smoothing/pending policy. Rough bristle remains on its coverage-pressure model; pencil and pen retain raw pressure.
 
-## Verification result (2026-08-24)
+## Verification result (2026-08-24, reopened)
 
 - Acrylic preset uses `smoothingMs: 50`.
 - The React settings normalizer and persistence clone/parser retain the optional field. Missing old data keeps smoothing disabled; a negative/non-finite persisted value is rejected.
@@ -46,4 +46,7 @@ interface PressureDynamics {
   - main reference: `1.575 / 1.693 / 1.607px`
   - corrected integration: `1.100 / 1.010 / 0.999px`
 - Mixing ON keeps the corrected geometry (`1.156 / 1.004 / 1.000px`), although the already-known long-stroke Acrylic mixing stall is a separate performance issue.
-- Remaining gate: Apple Pencilで一定筆圧の直線と、意図的に筆圧を上下させる線を比較し、周期的な膨縮が消えつつ意図した太さ変化が鈍すぎないことを確認する。
+- The deterministic fixture only proved that 50ms smoothing attenuates the synthetic pressure series. It did not reproduce the Apple Pencil failure strongly enough to establish its root cause.
+- Apple Pencil sensory verification failed: the unwanted width oscillation remains. Therefore `smoothingMs: 50` is a candidate mitigation, not an accepted fix.
+- The investigation is reopened. Production can capture the next accepted input stroke as replay JSON, including callback batch boundaries, the active brush config, and the input filter. The captured failing stroke must be replayed through geometry, pressure, and effective-size spacing variants before another correction is accepted.
+- Do not close this regression from horizontal synthetic width statistics alone. The final gate is a fixed replay of an actual failing Apple Pencil stroke plus Apple Pencil confirmation.
