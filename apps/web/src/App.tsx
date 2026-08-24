@@ -68,6 +68,7 @@ function configureBrushPerfDebugFromUrl(): void {
   if (!perf) return;
   const params = new URLSearchParams(window.location.search);
   perf.enabled = params.get("perfDebug") === "1";
+  perf.experiments.fusedInk = params.get("fusedInk") === "1";
   for (const name of Object.keys(perf.nullStages) as Array<
     keyof typeof perf.nullStages
   >) {

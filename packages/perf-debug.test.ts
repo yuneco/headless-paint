@@ -18,6 +18,7 @@ import { createIncrementalStrokeRenderer } from "./stroke/src/incremental-stroke
 
 afterEach(() => {
   brushPerfDebug.enabled = false;
+  brushPerfDebug.experiments.fusedInk = false;
   for (const name of Object.keys(brushPerfDebug.nullStages) as Array<
     keyof typeof brushPerfDebug.nullStages
   >) {

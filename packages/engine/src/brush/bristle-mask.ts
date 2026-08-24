@@ -1,4 +1,5 @@
-import type { BristleDynamics } from "../types";
+import type { BristleDynamics, Color } from "../types";
+import type { BristleProfileRaster } from "./bristle-profile";
 import { brushPerfDebug } from "./perf-debug";
 import { hashSeed } from "./prng";
 
@@ -52,6 +53,11 @@ interface SurfaceContactRaster {
   readonly originY: number;
 }
 
+export interface BristleFusedInk {
+  readonly color: Color;
+  readonly profile: BristleProfileRaster;
+}
+
 /**
  * LabのCOMB実験と同じ順序で、stroke-spaceの符号付きpaint fieldを
  * swept quadへ補間してから最終pixelのalphaへ変換する。
@@ -71,6 +77,7 @@ export function rasterizeBristleMask(
   originY: number,
   width: number,
   height: number,
+  fusedInk?: BristleFusedInk,
 ): OffscreenCanvas {
   const canvasAllocStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const canvas = new OffscreenCanvas(width, height);
@@ -143,6 +150,7 @@ export function rasterizeBristleMask(
         samples,
         surface,
         trialId,
+        fusedInk,
       );
       rasterizeTriangle(
         field,
@@ -154,6 +162,7 @@ export function rasterizeBristleMask(
         samples,
         surface,
         trialId,
+        fusedInk,
       );
     }
   }
@@ -268,6 +277,7 @@ function rasterizeTriangle(
   samples: readonly BristleMaskSample[],
   surface: SurfaceContactRaster | undefined,
   trialId: number,
+  fusedInk: BristleFusedInk | undefined,
 ): void {
   const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
   if (Math.abs(denominator) < 0.00001) return;
@@ -310,11 +320,18 @@ function rasterizeTriangle(
     let u = c.u + weightA * (a.u - c.u) + weightB * (b.u - c.u);
     let v = c.v + weightA * (a.v - c.v) + weightB * (b.v - c.v);
     for (let x = minX; x <= maxX; x++) {
-      let alpha = Math.round(
+      const maskAlpha = Math.round(
         activationFromDistance(sampleFieldDistance(field, u, v), hardness) *
           255,
       );
       const offset = (y * target.width + x) * 4;
+      let alpha = fusedInk
+        ? Math.round(
+            maskAlpha *
+              sampleProfile(fusedInk.profile, v, field.height) *
+              (fusedInk.color.a / 255),
+          )
+        : maskAlpha;
       if (
         alpha > (target.data[offset + 3] ?? 0) &&
         surface &&
@@ -323,15 +340,36 @@ function rasterizeTriangle(
         alpha = 0;
       }
       if (alpha > (target.data[offset + 3] ?? 0)) {
-        target.data[offset] = 255;
-        target.data[offset + 1] = 255;
-        target.data[offset + 2] = 255;
+        // ImageDataのRGBはunpremultiplied表現。putImageData時に、上で求めた
+        // 最終alphaとともにCanvas backing storeのpremultiplied RGBAになる。
+        target.data[offset] = fusedInk?.color.r ?? 255;
+        target.data[offset + 1] = fusedInk?.color.g ?? 255;
+        target.data[offset + 2] = fusedInk?.color.b ?? 255;
         target.data[offset + 3] = alpha;
       }
       u += uDx;
       v += vDx;
     }
   }
+}
+
+function sampleProfile(
+  profile: BristleProfileRaster,
+  v: number,
+  fieldHeight: number,
+): number {
+  const maxV = Math.max(1, fieldHeight - 1);
+  const position = clamp(
+    clamp(v / maxV, 0, 1) * profile.height - 0.5,
+    0,
+    profile.height - 1,
+  );
+  const fromIndex = Math.floor(position);
+  const toIndex = Math.min(profile.height - 1, fromIndex + 1);
+  const progress = position - fromIndex;
+  const from = profile.values[fromIndex] ?? 0;
+  const to = profile.values[toIndex] ?? from;
+  return from + (to - from) * progress;
 }
 
 function createSurfaceContactRaster(
