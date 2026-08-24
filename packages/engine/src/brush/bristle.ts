@@ -40,6 +40,7 @@ export function renderBristleBrushStroke(
 ): BrushRenderState {
   const branch = state.branches[0];
   if (!branch || points.length === 0 || style.lineWidth <= 0) return state;
+  if (brushPerfDebug.nullStages.nullRender) return state;
 
   const interpolateStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const interpolated = interpolateStrokePointsCentripetal(points, {

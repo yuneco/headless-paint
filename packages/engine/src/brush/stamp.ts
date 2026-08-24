@@ -49,6 +49,7 @@ export function renderStampBrushStroke(
   overlapCount: number,
   sourceLayer: Layer,
 ): BrushRenderState {
+  if (brushPerfDebug.nullStages.nullRender) return state;
   const { dynamics } = brush;
   const spacingPx = style.lineWidth * dynamics.spacing;
   const branch = state.branches[0];
@@ -216,7 +217,9 @@ function stampAt(
     rotation += Math.atan2(point.directionY, point.directionX);
   }
 
-  if (rotation !== 0) {
+  if (brushPerfDebug.nullStages.nullDabDraw) {
+    // skip deposit
+  } else if (rotation !== 0) {
     ctx.translate(x, y);
     ctx.rotate(rotation);
     ctx.drawImage(

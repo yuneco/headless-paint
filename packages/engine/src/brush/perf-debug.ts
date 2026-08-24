@@ -38,6 +38,8 @@ export interface BrushPerfNullStages {
   nullCheckpoint: boolean;
   nullFieldAdvance: boolean;
   nullMaterialUpload: boolean;
+  nullRender: boolean;
+  nullDabDraw: boolean;
 }
 
 export interface BrushPerfStageSnapshot {
@@ -72,6 +74,8 @@ function createNullStages(): BrushPerfNullStages {
     nullCheckpoint: false,
     nullFieldAdvance: false,
     nullMaterialUpload: false,
+    nullRender: false,
+    nullDabDraw: false,
   };
 }
 

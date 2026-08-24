@@ -103,6 +103,13 @@ function configureBrushPerfDebugFromUrl(): void {
       case "material-upload":
         perf.nullStages.nullMaterialUpload = true;
         break;
+      case "render":
+        perf.nullStages.nullRender = true;
+        break;
+      case "dabdraw":
+      case "dab-draw":
+        perf.nullStages.nullDabDraw = true;
+        break;
     }
   }
   perf.reset();
