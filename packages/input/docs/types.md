@@ -95,7 +95,7 @@ interface SamplingState {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `lastPoint` | `Point \| null` | 最後に採用された座標。初期状態は `null` |
-| `lastTimestamp` | `number \| null` | 最後に採用された時刻（ms）。初期状態は `null` |
+| `lastTimestamp` | `number \| null` | 最後に採用された時刻（ms）。これより古い候補は評価しない |
 
 **使用例**:
 ```typescript

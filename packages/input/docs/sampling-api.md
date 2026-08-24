@@ -40,9 +40,12 @@ function shouldAcceptPoint(
 
 **判定ロジック**:
 1. `state.lastPoint` が `null` → 最初の点なので採用
-2. 前回の点からの距離が `minDistance` 以上 → 採用
-3. 前回からの経過時間が `minTimeInterval` 以上 → 採用
-4. いずれも満たさない → 不採用
+2. timestampが最後の採用点より古い、または同時刻・同座標 → 既に処理済みのcoalesced入力として不採用
+3. 前回の点からの距離が `minDistance` 以上 → 採用
+4. 前回からの経過時間が `minTimeInterval` 以上 → 採用
+5. いずれも満たさない → 不採用
+
+Safariなどで、連続する`pointermove`が一部または全部同じ`getCoalescedEvents()`を再提示する場合があります。処理済み時刻への逆行と同一sampleの再提示をsampling stateで拒否し、同じ座標列を「戻って再度進む経路」としてエンジンへ渡さないようにします。同時刻でも座標が異なるsampleは、低精度timer環境での正当な入力として距離判定へ進みます。
 
 ---
 

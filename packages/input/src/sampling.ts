@@ -34,6 +34,21 @@ export function shouldAcceptPoint(
     return [true, { lastPoint: point, lastTimestamp: timestamp }];
   }
 
+  // Safari等では連続するpointermoveで同じcoalesced sample群が
+  // 再提示されることがある。既に処理済みの時刻へ戻る点を距離だけで
+  // 採用すると、経路が後退してから再び進むため輪郭が周期的に乱れる。
+  if (state.lastTimestamp !== null && timestamp < state.lastTimestamp) {
+    return [false, state];
+  }
+  if (
+    state.lastTimestamp !== null &&
+    timestamp === state.lastTimestamp &&
+    point.x === state.lastPoint.x &&
+    point.y === state.lastPoint.y
+  ) {
+    return [false, state];
+  }
+
   // 距離チェック
   const dist = distance(state.lastPoint, point);
   if (dist >= minDistance) {

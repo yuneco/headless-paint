@@ -50,3 +50,18 @@ interface PressureDynamics {
 - Apple Pencil sensory verification failed: the unwanted width oscillation remains. Therefore `smoothingMs: 50` is a candidate mitigation, not an accepted fix.
 - The investigation is reopened. Production can capture the next accepted input stroke as replay JSON, including callback batch boundaries, the active brush config, and the input filter. The captured failing stroke must be replayed through geometry, pressure, and effective-size spacing variants before another correction is accepted.
 - Do not close this regression from horizontal synthetic width statistics alone. The final gate is a fixed replay of an actual failing Apple Pencil stroke plus Apple Pencil confirmation.
+
+## Root cause update (2026-08-25)
+
+The captured failing Apple Pencil stroke changed the diagnosis. Safari repeatedly returned an overlapping `getCoalescedEvents()` group on consecutive `pointermove` callbacks. The accepted point sequence therefore contained patterns such as `37792, 37796, 37792, 37796`: geometry moved backwards to an already rendered point and then forwards again. The resulting contour wave is not primarily a pressure-response artifact.
+
+Input sampling now rejects candidates whose timestamp is older than the last accepted sample, and rejects an identical point repeated at the same timestamp. Different coordinates sharing one timestamp remain valid for coarse-clock environments.
+
+Deterministic WebKit reproduction, same 300-point stroke with every coalesced batch deliberately presented twice:
+
+- before stale-sample rejection: `599` accepted points; width standard deviation `1.513 / 1.442 / 1.456px` at brightness thresholds `240 / 200 / 128`
+- after stale-sample rejection: `300` accepted points; `1.156 / 1.004 / 1.000px`
+
+This reproduces and removes the failure mechanism present in the production capture. `smoothingMs: 50` remains a separate candidate mitigation until the Apple Pencil gate determines whether it is still needed. Do not use pressure smoothing to hide replayed coordinate input.
+
+Final gate remains an iPad refresh followed by the same fast straight-stroke check. A new capture must contain a monotonic accepted timestamp sequence without repeated coalesced groups, and the visual width wave must be absent before this regression is closed.
