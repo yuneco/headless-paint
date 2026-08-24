@@ -52,10 +52,6 @@ export interface BrushPerfNullStages {
   nullRotate: boolean;
 }
 
-export interface BrushPerfExperiments {
-  fusedInk: boolean;
-}
-
 export interface BrushPerfStageSnapshot {
   readonly count: number;
   readonly totalMs: number;
@@ -64,7 +60,6 @@ export interface BrushPerfStageSnapshot {
 export interface BrushPerfSnapshot {
   readonly enabled: boolean;
   readonly nullStages: Readonly<BrushPerfNullStages>;
-  readonly experiments: Readonly<BrushPerfExperiments>;
   readonly stages: Readonly<Record<BrushPerfStageName, BrushPerfStageSnapshot>>;
   readonly samples: Readonly<Record<BrushPerfSampleName, readonly number[]>>;
   readonly stageSeries: Readonly<Record<BrushPerfStageName, readonly number[]>>;
@@ -73,7 +68,6 @@ export interface BrushPerfSnapshot {
 export interface BrushPerfDebug {
   enabled: boolean;
   nullStages: BrushPerfNullStages;
-  experiments: BrushPerfExperiments;
   recordStage(name: BrushPerfStageName, startedAt: number): void;
   recordElapsed(name: BrushPerfStageName, elapsedMs: number): void;
   recordSample(name: BrushPerfSampleName, value: number): void;
@@ -95,10 +89,6 @@ function createNullStages(): BrushPerfNullStages {
     nullDabDraw: false,
     nullRotate: false,
   };
-}
-
-function createExperiments(): BrushPerfExperiments {
-  return { fusedInk: false };
 }
 
 function createStageCounters(): Record<
@@ -129,7 +119,6 @@ function createBrushPerfDebug(): BrushPerfDebug {
   return {
     enabled: false,
     nullStages: createNullStages(),
-    experiments: createExperiments(),
     recordStage(name, startedAt) {
       if (!this.enabled) return;
       this.recordElapsed(name, performance.now() - startedAt);
@@ -156,7 +145,6 @@ function createBrushPerfDebug(): BrushPerfDebug {
       return {
         enabled: this.enabled,
         nullStages: { ...this.nullStages },
-        experiments: { ...this.experiments },
         stages: Object.fromEntries(
           BRUSH_PERF_STAGE_NAMES.map((name) => [name, { ...stages[name] }]),
         ) as Record<BrushPerfStageName, BrushPerfStageSnapshot>,

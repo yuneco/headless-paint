@@ -12,10 +12,7 @@ import type {
   StrokeStyle,
 } from "../types";
 import { rasterizeBristleMask } from "./bristle-mask";
-import {
-  getBristleProfileAtlas,
-  getBristleProfileRaster,
-} from "./bristle-profile";
+import { getBristleProfileAtlas } from "./bristle-profile";
 import {
   getActiveMixing,
   prepareMixingState,
@@ -92,15 +89,15 @@ export function renderBristleBrushStroke(
   if (brushPerfDebug.enabled) {
     brushPerfDebug.recordStage("sweepResolve", resolveStartedAt);
   }
+  const profile = getBristleProfileAtlas(
+    style.lineWidth,
+    brush.dynamics,
+    state.seed,
+  );
   const mixing = getActiveMixing(brush.mixing);
-  const fusedInk = brushPerfDebug.experiments.fusedInk && !mixing;
-  const profile = fusedInk
-    ? undefined
-    : getBristleProfileAtlas(style.lineWidth, brush.dynamics, state.seed);
-  let mixingState =
-    mixing && profile
-      ? prepareMixingState(profile, style.color, mixing, branch.mixing)
-      : undefined;
+  let mixingState = mixing
+    ? prepareMixingState(profile, style.color, mixing, branch.mixing)
+    : undefined;
   const renderResult = renderRuns(
     layer,
     resolved.points,
@@ -275,7 +272,7 @@ function renderRuns(
   points: readonly ResolvedSweepPoint[],
   style: StrokeStyle,
   brush: BristleBrushConfig,
-  profile: OffscreenCanvas | undefined,
+  profile: OffscreenCanvas,
   seed: number,
   sourceLayer: Layer,
   mixing: BrushMixing | null,
@@ -303,7 +300,7 @@ function renderRuns(
       seed,
       !!mixing,
     );
-    if (mixing && mixingState && profile) {
+    if (mixing && mixingState) {
       mixingState = updateMixingAfterDeposit({
         tipCanvas: profile,
         baseColor: style.color,
@@ -345,7 +342,7 @@ function renderSweepRun(
   points: readonly ResolvedSweepPoint[],
   style: StrokeStyle,
   brush: BristleBrushConfig,
-  paintProfile: OffscreenCanvas | undefined,
+  paintProfile: OffscreenCanvas,
   seed: number,
   coloredProfile: boolean,
 ): void {
@@ -361,26 +358,6 @@ function renderSweepRun(
   if (brushPerfDebug.enabled) {
     brushPerfDebug.recordSample("bboxAreas", width * height);
   }
-  if (brushPerfDebug.experiments.fusedInk && !coloredProfile) {
-    const mask = rasterizeBristleMask(
-      points,
-      style.lineWidth,
-      brush.dynamics,
-      brush.pressureDynamics.coverage,
-      seed,
-      minX,
-      minY,
-      width,
-      height,
-      {
-        color: style.color,
-        profile: getBristleProfileRaster(style.lineWidth, brush.dynamics, seed),
-      },
-    );
-    drawSweepCanvasToLayer(layer, mask, style, minX, minY);
-    return;
-  }
-
   const inkAllocStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const ink = new OffscreenCanvas(width, height);
   if (brushPerfDebug.enabled) {
@@ -388,7 +365,6 @@ function renderSweepRun(
   }
   const inkCtx = ink.getContext("2d");
   if (!inkCtx) throw new Error("Bristle sweep requires Canvas2D");
-  if (!paintProfile) throw new Error("Bristle sweep requires a paint profile");
 
   const mask = rasterizeBristleMask(
     points,
@@ -425,21 +401,11 @@ function renderSweepRun(
     brushPerfDebug.recordStage("composite", compositeStartedAt);
   }
 
-  drawSweepCanvasToLayer(layer, ink, style, minX, minY);
-}
-
-function drawSweepCanvasToLayer(
-  layer: Layer,
-  canvas: OffscreenCanvas,
-  style: StrokeStyle,
-  x: number,
-  y: number,
-): void {
   const layerDrawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   layer.ctx.save();
   layer.ctx.globalAlpha = 1;
   layer.ctx.globalCompositeOperation = style.compositeOperation;
-  layer.ctx.drawImage(canvas, x, y);
+  layer.ctx.drawImage(ink, minX, minY);
   layer.ctx.restore();
   if (brushPerfDebug.enabled) {
     brushPerfDebug.recordStage("layerDraw", layerDrawStartedAt);

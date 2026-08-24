@@ -9,12 +9,6 @@ interface BristleLane {
 const PROFILE_CACHE_LIMIT = 32;
 const PROFILE_WIDTH = 2;
 const profileCache = new Map<string, OffscreenCanvas>();
-const profileRasterCache = new Map<string, BristleProfileRaster>();
-
-export interface BristleProfileRaster {
-  readonly height: number;
-  readonly values: Float32Array<ArrayBuffer>;
-}
 
 export function getBristleProfileAtlas(
   brushSize: number,
@@ -22,7 +16,14 @@ export function getBristleProfileAtlas(
   seed: number,
 ): OffscreenCanvas {
   const height = Math.max(8, Math.ceil(brushSize * 2));
-  const key = profileKey(height, dynamics, seed);
+  const key = [
+    height,
+    seed,
+    dynamics.bristleCount,
+    dynamics.bristleFill,
+    dynamics.bristleWidthVariation,
+    dynamics.bristleSpacingVariation,
+  ].join(":");
   const cached = profileCache.get(key);
   if (cached) return cached;
 
@@ -41,57 +42,6 @@ export function getBristleProfileAtlas(
     if (oldest !== undefined) profileCache.delete(oldest);
   }
   return atlas;
-}
-
-export function getBristleProfileRaster(
-  brushSize: number,
-  dynamics: BristleDynamics,
-  seed: number,
-): BristleProfileRaster {
-  const height = Math.max(8, Math.ceil(brushSize * 2));
-  const key = profileKey(height, dynamics, seed);
-  const cached = profileRasterCache.get(key);
-  if (cached) return cached;
-
-  const values = new Float32Array(height);
-  for (const lane of createBristleProfile(dynamics, seed)) {
-    const top = (lane.offset - lane.width / 2 + 0.5) * height;
-    const bottom = top + Math.max(1, lane.width * height);
-    const firstRow = Math.max(0, Math.floor(top));
-    const lastRow = Math.min(height - 1, Math.ceil(bottom) - 1);
-    for (let row = firstRow; row <= lastRow; row++) {
-      const coverage = clamp(
-        Math.min(row + 1, bottom) - Math.max(row, top),
-        0,
-        1,
-      );
-      const existing = values[row] ?? 0;
-      values[row] = existing + coverage * (1 - existing);
-    }
-  }
-
-  const raster = { height, values };
-  profileRasterCache.set(key, raster);
-  if (profileRasterCache.size > PROFILE_CACHE_LIMIT) {
-    const oldest = profileRasterCache.keys().next().value;
-    if (oldest !== undefined) profileRasterCache.delete(oldest);
-  }
-  return raster;
-}
-
-function profileKey(
-  height: number,
-  dynamics: BristleDynamics,
-  seed: number,
-): string {
-  return [
-    height,
-    seed,
-    dynamics.bristleCount,
-    dynamics.bristleFill,
-    dynamics.bristleWidthVariation,
-    dynamics.bristleSpacingVariation,
-  ].join(":");
 }
 
 function createBristleProfile(
