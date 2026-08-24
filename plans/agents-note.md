@@ -31,4 +31,4 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 ## ユーザーに覚えておいて欲しいこと
 
 - spray ブラシの `lineWidth` は「散布領域の直径」。粒子サイズは `dynamics.particleSize`（絶対px）で独立。
-- 非 mixing stamp + Expand の dab 配置・jitter は branch state 統一（2026-07-03）で意図的に変わった（branch ごと独立 seed・位相）。過去データの見た目互換はない（プロジェクト方針通り）。
+- 非 mixing stamp + Expand の dab 配置・jitter は branch state 統一（2026-07-03）で意図的に変わった（branch ごと独立 seed・位相）。過去データの見た目互換はない（プロジェクト方針通り）。- **brush高速化調査E0〜E2の結論（2026-08-25、branch `experiment/brush-acceleration`）**: Roughはchunk≈3.3ms（≈26µs/px-arc@60px）で一定、CPU候補に20%超なし（C4 fused inkはWebKit−8%かつ毛束の隙間が残る表現差で棄却、`fa2d7dc`→revert）。GPU→Canvas2D bridgeはWebKit≈1ms/chunkでRough GPU化は25〜50%見込みに留まりHold。Acrylicは同期コストがdab数・checkpoint数・layerサイズに比例せず、material updateで書き換えた小canvasをsourceに使う際のWebKit内部flushが主因と推定。Canvas2D内の回避策（source ring、ImageBitmap）は無効で、本命はGPU instanced dab + field常駐（C11）。C14（full-copy除去）は4M pxでも1msで効果なし。詳細は`plans/2026-08-25-00-29_brush-gpu-acceleration-investigation.md` Section 15/16。
