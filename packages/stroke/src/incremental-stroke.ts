@@ -263,7 +263,29 @@ function createSamplingLayer(
   ) {
     return undefined;
   }
+  const perf = (
+    globalThis as typeof globalThis & {
+      __hpBrushPerf?: {
+        readonly enabled: boolean;
+        readonly nullStages: { readonly nullFullCopy: boolean };
+        recordStage(name: "samplingLayerCopy", startedAt: number): void;
+        recordSample(name: "samplingCopyPixels", value: number): void;
+      };
+    }
+  ).__hpBrushPerf;
+  const startedAt = perf?.enabled ? performance.now() : 0;
+  if (perf?.nullStages.nullFullCopy) {
+    if (perf.enabled) {
+      perf.recordStage("samplingLayerCopy", startedAt);
+      perf.recordSample("samplingCopyPixels", 0);
+    }
+    return layer;
+  }
   const samplingLayer = createLayer(layer.width, layer.height);
   copyLayerPixels(layer, samplingLayer);
+  if (perf?.enabled) {
+    perf.recordStage("samplingLayerCopy", startedAt);
+    perf.recordSample("samplingCopyPixels", layer.width * layer.height);
+  }
   return samplingLayer;
 }

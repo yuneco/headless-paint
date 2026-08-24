@@ -10,11 +10,13 @@ import {
   createMaterialField,
   writeMaterialFieldPixels,
 } from "./material-field";
+import { brushPerfDebug } from "./perf-debug";
 
 const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
 >();
+const nullCheckpointCache = new Map<string, ImageData>();
 
 export interface MixingUpdateInput {
   readonly tipCanvas: OffscreenCanvas;
@@ -104,11 +106,23 @@ export function prepareMixingState(
     mixing.fieldRows,
     baseColor,
   );
+  const fieldCanvasAllocStartedAt = brushPerfDebug.enabled
+    ? performance.now()
+    : 0;
   const fieldCanvas = new OffscreenCanvas(
     mixing.fieldColumns,
     mixing.fieldRows,
   );
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("canvasAlloc", fieldCanvasAllocStartedAt);
+  }
+  const renderCanvasAllocStartedAt = brushPerfDebug.enabled
+    ? performance.now()
+    : 0;
   const renderCanvas = new OffscreenCanvas(tipCanvas.width, tipCanvas.height);
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("canvasAlloc", renderCanvasAllocStartedAt);
+  }
   const fieldCtx = getCached2dContext(fieldCanvas, "material field");
   const fieldPixels = fieldCtx.createImageData(
     mixing.fieldColumns,
@@ -145,7 +159,11 @@ export function updateMixingAfterDeposit(
     if (!state.checkpointPixels) {
       state = captureCheckpoint(input, state, input.sourceLayer.canvas, false);
     }
+    const sampleStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const sample = sampleCheckpointFootprint(input, state);
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("materialSample", sampleStartedAt);
+    }
     const distancePx =
       lastUpdate === undefined
         ? input.mixing.updateDistancePx
@@ -230,7 +248,14 @@ function captureCheckpoint(
   ctx.clearRect(0, 0, tileSize, tileSize);
   ctx.drawImage(sourceCanvas, -originX, -originY);
   ctx.restore();
-  const checkpointPixels = ctx.getImageData(0, 0, tileSize, tileSize);
+  const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  const checkpointPixels = brushPerfDebug.nullStages.nullCheckpoint
+    ? getNullCheckpointImageData(ctx, tileSize, tileSize)
+    : ctx.getImageData(0, 0, tileSize, tileSize);
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("checkpointReadback", readbackStartedAt);
+    brushPerfDebug.recordSample("checkpoints", 1);
+  }
   return {
     ...state,
     checkpointCanvas,
@@ -318,6 +343,13 @@ function uploadMaterialCanvas(
   state: BrushMixingState,
   tipCanvas: OffscreenCanvas,
 ): void {
+  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  if (brushPerfDebug.nullStages.nullMaterialUpload) {
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("materialUpload", startedAt);
+    }
+    return;
+  }
   writeMaterialFieldPixels(state.field, state.fieldPixels.data);
   const fieldCtx = getCached2dContext(state.fieldCanvas, "material field");
   fieldCtx.putImageData(state.fieldPixels, 0, 0);
@@ -337,6 +369,9 @@ function uploadMaterialCanvas(
   renderCtx.globalCompositeOperation = "destination-in";
   renderCtx.drawImage(tipCanvas, 0, 0);
   renderCtx.restore();
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("materialUpload", startedAt);
+  }
 }
 
 function ensureCanvasSize(
@@ -346,7 +381,25 @@ function ensureCanvasSize(
 ): OffscreenCanvas {
   if (canvas && canvas.width === width && canvas.height === height)
     return canvas;
-  return new OffscreenCanvas(width, height);
+  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  const next = new OffscreenCanvas(width, height);
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("canvasAlloc", startedAt);
+  }
+  return next;
+}
+
+function getNullCheckpointImageData(
+  ctx: OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+): ImageData {
+  const key = `${width}x${height}`;
+  const cached = nullCheckpointCache.get(key);
+  if (cached) return cached;
+  const image = ctx.createImageData(width, height);
+  nullCheckpointCache.set(key, image);
+  return image;
 }
 
 function getCached2dContext(

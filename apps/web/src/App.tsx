@@ -47,6 +47,85 @@ const SETTINGS_STORAGE_KEY = "headless-paint:settings";
 
 type InputCaptureStatus = "idle" | "armed" | "capturing" | "captured";
 
+interface UndoTimingEntry {
+  readonly sequence: number;
+  readonly durationMs: number;
+  readonly drainMs: number;
+}
+
+interface UndoTimingDebug {
+  readonly entries: UndoTimingEntry[];
+  reset(): void;
+  snapshot(): readonly UndoTimingEntry[];
+}
+
+declare global {
+  var __hpUndoTiming: UndoTimingDebug | undefined;
+}
+
+function configureBrushPerfDebugFromUrl(): void {
+  const perf = globalThis.__hpBrushPerf;
+  if (!perf) return;
+  const params = new URLSearchParams(window.location.search);
+  perf.enabled = params.get("perfDebug") === "1";
+  for (const name of Object.keys(perf.nullStages) as Array<
+    keyof typeof perf.nullStages
+  >) {
+    perf.nullStages[name] = false;
+  }
+  for (const name of (params.get("nullStages") ?? "").split(",")) {
+    switch (name.trim().toLowerCase()) {
+      case "field":
+        perf.nullStages.nullField = true;
+        break;
+      case "contact":
+        perf.nullStages.nullContact = true;
+        break;
+      case "raster":
+        perf.nullStages.nullRaster = true;
+        break;
+      case "drawsweep":
+      case "draw-sweep":
+        perf.nullStages.nullDrawSweep = true;
+        break;
+      case "fullcopy":
+      case "full-copy":
+        perf.nullStages.nullFullCopy = true;
+        break;
+      case "checkpoint":
+        perf.nullStages.nullCheckpoint = true;
+        break;
+      case "fieldadvance":
+      case "field-advance":
+        perf.nullStages.nullFieldAdvance = true;
+        break;
+      case "upload":
+      case "material-upload":
+        perf.nullStages.nullMaterialUpload = true;
+        break;
+    }
+  }
+  perf.reset();
+}
+
+function ensureUndoTimingDebug(): UndoTimingDebug {
+  if (globalThis.__hpUndoTiming) return globalThis.__hpUndoTiming;
+  const entries: UndoTimingEntry[] = [];
+  globalThis.__hpUndoTiming = {
+    entries,
+    reset() {
+      entries.length = 0;
+    },
+    snapshot() {
+      return entries.map((entry) => ({ ...entry }));
+    },
+  };
+  return globalThis.__hpUndoTiming;
+}
+
+configureBrushPerfDebugFromUrl();
+ensureUndoTimingDebug();
+
 function saveSettingsSnapshot(snapshot: PaintSettingsSnapshot): void {
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(snapshot));
@@ -492,6 +571,35 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   );
 
   const strokeCount = engine.historyState.currentIndex + 1;
+  const handleTimedUndo = useCallback(() => {
+    const timing = ensureUndoTimingDebug();
+    const sequence = timing.entries.length;
+    const startMark = `hp-undo-${sequence}-start`;
+    const endMark = `hp-undo-${sequence}-end`;
+    const measureName = `hp-undo-${sequence}`;
+    performance.mark(startMark);
+    engine.undo();
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const drainStartedAt = performance.now();
+        const canvas = document.querySelector<HTMLCanvasElement>(
+          "canvas[data-headless-paint-main]",
+        );
+        canvas?.getContext("2d")?.getImageData(0, 0, 1, 1);
+        const drainMs = performance.now() - drainStartedAt;
+        performance.mark(endMark);
+        const measure = performance.measure(measureName, startMark, endMark);
+        timing.entries.push({
+          sequence,
+          durationMs: measure.duration,
+          drainMs,
+        });
+        performance.clearMarks(startMark);
+        performance.clearMarks(endMark);
+        performance.clearMeasures(measureName);
+      }),
+    );
+  }, [engine.undo]);
 
   // レイヤーID→表示名の解決関数
   const layerIdToName = useCallback(
@@ -592,7 +700,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         <Toolbar
           currentTool={tool}
           onToolChange={handleToolChange}
-          onUndo={engine.undo}
+          onUndo={handleTimedUndo}
           onRedo={engine.redo}
           canUndo={engine.canUndo}
           canRedo={engine.canRedo}
@@ -609,7 +717,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         mainCanvasHeight={viewHeight}
         renderVersion={engine.renderVersion}
         historyState={engine.historyState}
-        onUndo={engine.undo}
+        onUndo={handleTimedUndo}
         onRedo={engine.redo}
         canUndo={engine.canUndo}
         canRedo={engine.canRedo}

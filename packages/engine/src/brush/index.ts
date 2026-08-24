@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import { renderBristleBrushStroke } from "./bristle";
 import { isBrushMixingActive } from "./mixing";
+import { brushPerfDebug } from "./perf-debug";
 import { renderSprayBrushStroke } from "./spray";
 import { renderStampBrushStroke } from "./stamp";
 import { DEFAULT_BRUSH_RENDER_STATE } from "./state";
@@ -62,7 +63,8 @@ export function renderBrushStroke(
     case "stamp":
       if (
         isBrushMixingActive(style.brush.mixing) &&
-        (!sourceLayer || sourceLayer.canvas === layer.canvas)
+        (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !brushPerfDebug.nullStages.nullFullCopy
       ) {
         throw new Error(
           "Stamp mixing requires a distinct stroke-start sourceLayer snapshot",
@@ -89,7 +91,8 @@ export function renderBrushStroke(
     case "bristle":
       if (
         isBrushMixingActive(style.brush.mixing) &&
-        (!sourceLayer || sourceLayer.canvas === layer.canvas)
+        (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !brushPerfDebug.nullStages.nullFullCopy
       ) {
         throw new Error(
           "Bristle mixing requires a distinct stroke-start sourceLayer snapshot",

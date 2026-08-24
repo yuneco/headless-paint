@@ -18,6 +18,7 @@ import {
   prepareMixingState,
   updateMixingAfterDeposit,
 } from "./mixing";
+import { brushPerfDebug } from "./perf-debug";
 import { type EmissionPoint, walkEmissions } from "./scheduler";
 
 interface ResolvedSweepPoint extends BristleSweepPointState {
@@ -40,13 +41,18 @@ export function renderBristleBrushStroke(
   const branch = state.branches[0];
   if (!branch || points.length === 0 || style.lineWidth <= 0) return state;
 
+  const interpolateStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const interpolated = interpolateStrokePointsCentripetal(points, {
     overlapCount,
     futureIndependentTail: true,
   });
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("interpolate", interpolateStartedAt);
+  }
   if (interpolated.length === 0) return state;
 
   const emissions: EmissionPoint[] = [];
+  const walkStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const nextScheduler = walkEmissions(
     interpolated,
     Math.max(0.5, brush.dynamics.geometryStepPx),
@@ -54,6 +60,10 @@ export function renderBristleBrushStroke(
     overlapCount,
     (point) => emissions.push(point),
   );
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("walkEmissions", walkStartedAt);
+    brushPerfDebug.recordSample("emissions", emissions.length);
+  }
   if (emissions.length === 0) {
     return {
       tipCanvas: state.tipCanvas,
@@ -68,12 +78,16 @@ export function renderBristleBrushStroke(
     };
   }
 
+  const resolveStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const resolved = resolveSweepPoints(
     emissions,
     branch.bristle,
     style.lineWidth,
     brush,
   );
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("sweepResolve", resolveStartedAt);
+  }
   const profile = getBristleProfileAtlas(
     style.lineWidth,
     brush.dynamics,
@@ -340,7 +354,14 @@ function renderSweepRun(
   const maxY = Math.ceil(bounds.maxY + margin);
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordSample("bboxAreas", width * height);
+  }
+  const inkAllocStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const ink = new OffscreenCanvas(width, height);
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("canvasAlloc", inkAllocStartedAt);
+  }
   const inkCtx = ink.getContext("2d");
   if (!inkCtx) throw new Error("Bristle sweep requires Canvas2D");
 
@@ -355,7 +376,17 @@ function renderSweepRun(
     width,
     height,
   );
-  drawSweep(inkCtx, paintProfile, points, style.lineWidth, minX, minY);
+  const drawSweepStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  if (brushPerfDebug.nullStages.nullDrawSweep) {
+    inkCtx.fillStyle = "#000";
+    inkCtx.fillRect(0, 0, width, height);
+  } else {
+    drawSweep(inkCtx, paintProfile, points, style.lineWidth, minX, minY);
+  }
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("drawSweep", drawSweepStartedAt);
+  }
+  const compositeStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   if (!coloredProfile) {
     inkCtx.globalCompositeOperation = "source-in";
     inkCtx.fillStyle = colorToStyle(style.color);
@@ -365,12 +396,19 @@ function renderSweepRun(
   inkCtx.globalCompositeOperation = "destination-in";
   inkCtx.drawImage(mask, 0, 0);
   inkCtx.globalCompositeOperation = "source-over";
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("composite", compositeStartedAt);
+  }
 
+  const layerDrawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   layer.ctx.save();
   layer.ctx.globalAlpha = 1;
   layer.ctx.globalCompositeOperation = style.compositeOperation;
   layer.ctx.drawImage(ink, minX, minY);
   layer.ctx.restore();
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("layerDraw", layerDrawStartedAt);
+  }
 }
 
 function resolvePointBounds(points: readonly ResolvedSweepPoint[]): {

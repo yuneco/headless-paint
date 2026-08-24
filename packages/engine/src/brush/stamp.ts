@@ -15,6 +15,7 @@ import {
   prepareMixingState,
   updateMixingAfterDeposit,
 } from "./mixing";
+import { brushPerfDebug } from "./perf-debug";
 import { calculatePressureFlow } from "./pressure";
 import { smoothStampPressure } from "./pressure-smoothing";
 import { hashSeed, mulberry32 } from "./prng";
@@ -196,6 +197,7 @@ function stampAt(
   const y = point.y + scatterY;
 
   const ctx = layer.ctx;
+  const dabDrawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   ctx.save();
   ctx.globalAlpha = opacity;
   ctx.globalCompositeOperation = style.compositeOperation;
@@ -235,6 +237,9 @@ function stampAt(
   }
 
   ctx.restore();
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("dabDraw", dabDrawStartedAt);
+  }
   if (mixing && nextMixingState) {
     nextMixingState = updateMixingAfterDeposit({
       tipCanvas,
