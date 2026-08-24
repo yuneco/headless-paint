@@ -90,6 +90,15 @@ export function createIncrementalStrokeRenderer(
         : [],
       committedOverlapCount: hasNewCommitted ? overlapCount : 0,
     };
+    const perfDebug = (
+      globalThis as typeof globalThis & {
+        __hpBrushPerf?: {
+          readonly enabled: boolean;
+          recordStage(name: string, startedAt: number): void;
+        };
+      }
+    ).__hpBrushPerf;
+    const appendStartedAt = perfDebug?.enabled ? performance.now() : 0;
     if (hasNewCommitted) {
       brushState = appendToCommittedLayer(
         config.layer,
@@ -103,14 +112,30 @@ export function createIncrementalStrokeRenderer(
       );
       renderedCommittedCount = nextCommittedCount;
     }
+    if (perfDebug?.enabled) {
+      perfDebug.recordStage("appendCommitted", appendStartedAt);
+    }
+    const callbackStartedAt = perfDebug?.enabled ? performance.now() : 0;
     config.onRenderUpdate?.({
       session: nextSession,
       renderUpdate: batchUpdate,
       brushState,
     });
+    if (perfDebug?.enabled) {
+      perfDebug.recordStage("renderUpdateCallback", callbackStartedAt);
+    }
   }
 
   function processBatch(points: readonly InputPoint[]): void {
+    const perfDebugBatch = (
+      globalThis as typeof globalThis & {
+        __hpBrushPerf?: {
+          readonly enabled: boolean;
+          recordStage(name: string, startedAt: number): void;
+        };
+      }
+    ).__hpBrushPerf;
+    const batchStartedAt = perfDebugBatch?.enabled ? performance.now() : 0;
     let lastUpdate: RenderUpdate | null = null;
     for (const point of points) {
       const filterResult = processPoint(
@@ -127,6 +152,9 @@ export function createIncrementalStrokeRenderer(
     }
     if (strokeSession && lastUpdate) {
       appendProcessedBatch(strokeSession, lastUpdate);
+    }
+    if (perfDebugBatch?.enabled) {
+      perfDebugBatch.recordStage("processBatch", batchStartedAt);
     }
   }
 
@@ -268,7 +296,7 @@ function createSamplingLayer(
       __hpBrushPerf?: {
         readonly enabled: boolean;
         readonly nullStages: { readonly nullFullCopy: boolean };
-        recordStage(name: "samplingLayerCopy", startedAt: number): void;
+        recordStage(name: string, startedAt: number): void;
         recordSample(name: "samplingCopyPixels", value: number): void;
       };
     }

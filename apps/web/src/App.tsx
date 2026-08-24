@@ -110,6 +110,9 @@ function configureBrushPerfDebugFromUrl(): void {
       case "dab-draw":
         perf.nullStages.nullDabDraw = true;
         break;
+      case "rotate":
+        perf.nullStages.nullRotate = true;
+        break;
     }
   }
   perf.reset();

@@ -6,7 +6,7 @@
 - Revised: 2026-08-25（Claude + codex review round 1 を反映。GPU一択の計画から「候補群を安く切り分ける実験計画」へ再構成）
 - Branch at creation: `feature/acrylic-v2-production`
 - HEAD at creation: `9ccff0c docs: close acrylic width regression`
-- State: **実験計画作成済み・実験実装未着手**
+- State: **E0a/E0b完了（2026-08-25）。Section 15に結果と判断。次はE1b（C4）とE2（bridge benchmark）**
 - Scope: Acrylic v2 / Rough bristle **renderer自体**の高速化。CPU最適化・WASM・WebGL2・WebGPUを候補として、有効性を素早く安く切り分ける
 - Out of scope（ユーザー決定 2026-08-25）: Undo checkpoint戦略、遅延を目立たなくするUI/非同期化など「重さを隠す」方向の検討
 - Work branch: `experiment/brush-acceleration`（`feature/acrylic-v2-production@9ccff0c`から分岐）。実験はすべてこのbranchで行い、自由にcommitを積んでよい
@@ -457,3 +457,30 @@ Stop時は実験rendererを削除または実験commitへ隔離し、CPU product
 - **WebGPU**: Safari versionではなく、WebGL2とのbridge / end-to-end比較（20%以上優位）で選ぶ。Acrylic residentはWebGPU優先比較。
 - **WASM**: Node/browser同一経路の利点は大きいが、kernel 2.5×が出なければ導入しない。
 - **Undo**: renderer高速化の効果はreplay単価×最大9として積み上がる。checkpoint戦略の見直しは本計画の対象外。
+
+## 15. E0 results (2026-08-25, work branch `experiment/brush-acceleration`)
+
+### 15.1 Harness
+- `packages/engine/src/brush/perf-debug.ts`（`globalThis.__hpBrushPerf`）: stage counter + per-chunk series + null toggles（field / contact / raster / drawSweep / fullCopy / checkpoint / fieldAdvance / materialUpload / render / dabDraw / rotate）。`?perfDebug=1&nullStages=...`で接続
+- `work.local/benchmark-rough-production-capture.mjs`（`ENGINE=chromium|webkit`, `PERF_VARIANT`, raw per-batch出力）、`work.local/benchmark-acrylic-backlog.mjs`（`PERF_VARIANT`、合成eventに単調timeStampを付与。**`40c76e8`の再提示拒否により旧scriptは全点が捨てられていた**）
+- 計測妥当性: instrumented vs baselineでCall p50/p95・Undoに差なし（gate通過）。**WebKitの`performance.now()`は1ms粒度**のためstage内訳はChromiumで取り、WebKitはend-to-endのみ信用する
+- Undo fixture（8 move合成stroke × 2/10本）は短すぎて代表性なし。Undo評価は実fixtureのreplay総和（renderer合計）で行う
+
+### 15.2 Rough bristle（comb-06、60px、mixing OFF）
+- chunk: 80個、emission p50 125 / max 175、field cell ≈9k、bbox ≈21k px²。**chunkあたり≈3.3ms（Chromium）で stroke を通じて一定**。batch wallの後半増加（5→20ms）はfixtureのbatch間隔が疎になり1 batchに5〜7 chunk入るためで、rendererの劣化ではない（`moveMany`合計≈252ms ≒ `processBatch`合計≈264ms）
+- renderer合計 ≈ 250ms / 約10,000px stroke ≈ **26µs per px-arc**。実機60Hzの速いstroke（≈90px/frame）で≈2.3ms/frame → liveは軽い。**重さの本体はreplay（Undo 9 ≈ 9 × 250ms）**
+- Chromium内訳（合計258ms）: maskField 23% / maskRaster 28% / drawSweep 4% + **layerDraw 43%**（≈120回/chunkの`drawImage`の遅延精算がchunk末の`drawImage(ink→layer)`に帰属。`null-drawsweep`でlayerDraw 110→9ms）/ maskUpload・composite・alloc ≈1%
+- WebKit end-to-end（batch wall p95）: baseline 20 / null-field 16-18 / null-raster 17-19 / null-contact 18-19 / null-drawsweep 17-18 / null-render 2。単独stageで25%を超えるものはない
+- 判断: **C4（ink融合CPU raster）が最有力**（drawSweep+精算≈45%を除去見込み）。C15/C5はfield 23%の一部。GPU fused（C7）はCPU側≈95%を除去できるが、80 chunk/strokeなのでbridgeが≈1ms/chunk未満でないと利益が薄い → E2必須。**C14はRoughに無関係、C13/C16は対象外（bbox関連costは≈1%）**
+
+### 15.3 Acrylic（backlog fixture 1920 samples ≈ 34,500px、8 samples/frame）
+- dispatch p50/p95 8/11ms、合計≈1.9s / 1920 samples ≈ **1ms/sample ≈ 55µs per px-arc**（Roughの2倍。lineWidth小のため27,404 dab、14 dab/sample）
+- null-stage end-to-end（dispatch p50/p95、undo9）: **null-dabdraw 4/6（−50%）、undo9 −43%** / **null-upload 6/8（−25%）、undo9 −40%** / null-checkpoint 1/1 だが frame p95 12→18（**readbackを消してもGPU仕事はframeへ移るだけ**）/ null-fullcopy 差なし（4M px copy = 1ms）/ null-fieldadvance 差なし / null-rotate 差なし
+- stage timer: checkpointReadback 997回・1700ms（=同期点に全queueが帰属）、CPU計算（sample/advance）合計36ms
+- 判断: 本体は**Canvas2Dコマンド量**（dab `drawImage` 50% + material upload 25% + checkpoint tile draw/readback ≈15%）。CPU計算最適化（C3/C15相当）は無意味。**C14棄却**。CPU候補で20%を超えるのは「upload 3コマンド→CPU合成1 putImageData」（≤25%、要検証）と dab数削減（C12・目視）のみ。**GPU側でdabをinstanced描画＋fieldをGPU常駐（C11）が唯一の大幅改善候補**
+
+### 15.4 Next
+1. E1b: C4（Rough ink融合CPU raster、mixing OFF）→ Chromium stage合計・WebKit end-to-end・Tier B parity
+2. E2: standalone bridge benchmark（Rough chunk代表size 150×150 / 250×150、Acrylic dab batch）
+3. Acrylic upload短縮（C19: tip×fieldをCPUで合成し`putImageData`1回）は小実験として可
+4. C14 / C13 / C16 / null-checkpoint系は棄却。plans/notes参照

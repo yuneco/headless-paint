@@ -214,7 +214,9 @@ function stampAt(
       mixingState,
     );
     drawCanvas = nextMixingState.renderCanvas;
-    rotation += Math.atan2(point.directionY, point.directionX);
+    if (!brushPerfDebug.nullStages.nullRotate) {
+      rotation += Math.atan2(point.directionY, point.directionX);
+    }
   }
 
   if (brushPerfDebug.nullStages.nullDabDraw) {

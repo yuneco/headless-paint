@@ -96,6 +96,19 @@ interface PendingStart {
 
 const DEFAULT_RANDOM_SEED = (): number => (Math.random() * 0xffffffff) | 0;
 
+function getPerfDebug():
+  | { readonly enabled: boolean; recordStage(name: string, startedAt: number): void }
+  | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      __hpBrushPerf?: {
+        readonly enabled: boolean;
+        recordStage(name: string, startedAt: number): void;
+      };
+    }
+  ).__hpBrushPerf;
+}
+
 export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   const randomSeed = deps.randomSeed ?? DEFAULT_RANDOM_SEED;
 
@@ -136,12 +149,21 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     },
     moveMany(points) {
       if (disposed || machine.phase !== "active" || !strokeSession) return;
+      const perf = getPerfDebug();
+      const moveStartedAt = perf?.enabled ? performance.now() : 0;
       let lastResult: ReturnType<typeof transition> | null = null;
+      const feedStartedAt = perf?.enabled ? performance.now() : 0;
       for (const point of points) {
         feedPoint(point);
         lastResult = transition({ type: "move" });
       }
+      if (perf?.enabled) perf.recordStage("feedPoint", feedStartedAt);
+      const effectsStartedAt = perf?.enabled ? performance.now() : 0;
       if (lastResult) executeEffects(lastResult.effects, "move");
+      if (perf?.enabled) {
+        perf.recordStage("executeEffects", effectsStartedAt);
+        perf.recordStage("moveMany", moveStartedAt);
+      }
     },
     confirm() {
       if (disposed) return;
@@ -180,16 +202,20 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     effects: readonly StrokeMachineEffect[],
     eventType: StrokeMachineEvent["type"],
   ): void {
+    const perf = getPerfDebug();
     for (const effect of effects) {
+      const fxStartedAt = perf?.enabled ? performance.now() : 0;
       switch (effect.type) {
         case "snapshot-layer":
           snapshotLayer();
           break;
         case "append-committed":
           appendCommitted(eventType);
+          if (perf?.enabled) perf.recordStage("fxAppendCommitted", fxStartedAt);
           break;
         case "render-pending":
           renderPending();
+          if (perf?.enabled) perf.recordStage("fxRenderPending", fxStartedAt);
           break;
         case "schedule-emission":
           scheduleEmission();

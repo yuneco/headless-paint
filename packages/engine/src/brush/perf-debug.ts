@@ -15,6 +15,15 @@ export const BRUSH_PERF_STAGE_NAMES = [
   "materialUpload",
   "checkpointReadback",
   "samplingLayerCopy",
+  "appendCommitted",
+  "renderUpdateCallback",
+  "processBatch",
+  "feedPoint",
+  "executeEffects",
+  "moveMany",
+  "fxAppendCommitted",
+  "fxRenderPending",
+  "fxOther",
 ] as const;
 
 export type BrushPerfStageName = (typeof BRUSH_PERF_STAGE_NAMES)[number];
@@ -40,6 +49,7 @@ export interface BrushPerfNullStages {
   nullMaterialUpload: boolean;
   nullRender: boolean;
   nullDabDraw: boolean;
+  nullRotate: boolean;
 }
 
 export interface BrushPerfStageSnapshot {
@@ -52,6 +62,7 @@ export interface BrushPerfSnapshot {
   readonly nullStages: Readonly<BrushPerfNullStages>;
   readonly stages: Readonly<Record<BrushPerfStageName, BrushPerfStageSnapshot>>;
   readonly samples: Readonly<Record<BrushPerfSampleName, readonly number[]>>;
+  readonly stageSeries: Readonly<Record<BrushPerfStageName, readonly number[]>>;
 }
 
 export interface BrushPerfDebug {
@@ -76,6 +87,7 @@ function createNullStages(): BrushPerfNullStages {
     nullMaterialUpload: false,
     nullRender: false,
     nullDabDraw: false,
+    nullRotate: false,
   };
 }
 
@@ -101,6 +113,9 @@ function createSamples(): Record<BrushPerfSampleName, number[]> {
 function createBrushPerfDebug(): BrushPerfDebug {
   let stages = createStageCounters();
   let samples = createSamples();
+  let stageSeries = Object.fromEntries(
+    BRUSH_PERF_STAGE_NAMES.map((name) => [name, [] as number[]]),
+  ) as Record<BrushPerfStageName, number[]>;
   return {
     enabled: false,
     nullStages: createNullStages(),
@@ -113,6 +128,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
       const counter = stages[name];
       counter.count++;
       counter.totalMs += elapsedMs;
+      stageSeries[name].push(Number(elapsedMs.toFixed(3)));
     },
     recordSample(name, value) {
       if (!this.enabled) return;
@@ -121,6 +137,9 @@ function createBrushPerfDebug(): BrushPerfDebug {
     reset() {
       stages = createStageCounters();
       samples = createSamples();
+      stageSeries = Object.fromEntries(
+        BRUSH_PERF_STAGE_NAMES.map((name) => [name, [] as number[]]),
+      ) as Record<BrushPerfStageName, number[]>;
     },
     snapshot() {
       return {
@@ -136,6 +155,9 @@ function createBrushPerfDebug(): BrushPerfDebug {
           samplingCopyPixels: [...samples.samplingCopyPixels],
           checkpoints: [...samples.checkpoints],
         },
+        stageSeries: Object.fromEntries(
+          BRUSH_PERF_STAGE_NAMES.map((name) => [name, [...stageSeries[name]]]),
+        ) as unknown as Record<BrushPerfStageName, readonly number[]>,
       };
     },
   };
