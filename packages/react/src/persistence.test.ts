@@ -87,7 +87,7 @@ describe("persistence", () => {
             rotationJitter: 0,
             scatter: 0,
           },
-          pressureDynamics: { size: 0.4, flow: 0.7 },
+          pressureDynamics: { size: 0.4, flow: 0.7, smoothingMs: 50 },
           mixing: {
             enabled: true,
             pickupRatePerPx: 0.007,
@@ -115,6 +115,7 @@ describe("persistence", () => {
     expect(imported?.pen.brush).toMatchObject({
       type: "stamp",
       dynamics: { spacingSizeCoupling: 1 },
+      pressureDynamics: { size: 0.4, flow: 0.7, smoothingMs: 50 },
       mixing: {
         enabled: true,
         pickupRatePerPx: 0.007,
@@ -144,6 +145,12 @@ describe("persistence", () => {
     };
     invalidCheckpoint.pen.brush.mixing.checkpointDistancePx = 257;
     expect(importPaintSettings(invalidCheckpoint)).toBeNull();
+
+    const invalidSmoothing = JSON.parse(JSON.stringify(snapshot)) as {
+      pen: { brush: { pressureDynamics: { smoothingMs: number } } };
+    };
+    invalidSmoothing.pen.brush.pressureDynamics.smoothingMs = -1;
+    expect(importPaintSettings(invalidSmoothing)).toBeNull();
   });
 
   it("旧stamp設定でspacingSizeCouplingが欠落した場合は0で補完する", () => {

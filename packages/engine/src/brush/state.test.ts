@@ -128,4 +128,23 @@ describe("brush render state", () => {
     expect(cloned?.branches[0].lastTimestamp).toBe(120);
     expect(cloned?.branches[0].nextTimeEmissionAt).toBe(145);
   });
+
+  it("pending clone はstampの筆圧平滑化状態も複製する", () => {
+    const pressure = { value: 0.42, timestamp: 120 };
+    const state = {
+      tipCanvas: null,
+      seed: 1,
+      branches: [
+        {
+          accumulatedDistance: 3,
+          emissionCount: 4,
+          pressure,
+        },
+      ],
+    };
+
+    const cloned = cloneBrushRenderState(state);
+    expect(cloned?.branches[0].pressure).toEqual(pressure);
+    expect(cloned?.branches[0].pressure).not.toBe(pressure);
+  });
 });

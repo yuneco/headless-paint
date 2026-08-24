@@ -134,6 +134,8 @@ export const DEFAULT_PRESSURE_CURVE: PressureCurve = {
 export interface PressureDynamics {
   readonly size: number;
   readonly flow: number;
+  /** stampでsize / flowへ反映する前の因果的な筆圧平滑化時定数(ms) */
+  readonly smoothingMs?: number;
 }
 
 export const DEFAULT_PRESSURE_DYNAMICS: PressureDynamics = {
@@ -454,6 +456,11 @@ export interface BrushMixingState {
   readonly lastCheckpointDistance?: number;
 }
 
+export interface BrushPressureState {
+  readonly value: number;
+  readonly timestamp: number;
+}
+
 export interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
@@ -463,6 +470,8 @@ export interface BrushBranchRenderState {
   readonly lastTimestamp?: number;
   /** 時間emission: 次にemissionを配置する予定時刻 */
   readonly nextTimeEmissionAt?: number;
+  /** stampの因果的な筆圧平滑化状態 */
+  readonly pressure?: BrushPressureState;
   readonly mixing?: BrushMixingState;
   readonly bristle?: BristleBranchRenderState;
 }

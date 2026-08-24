@@ -79,6 +79,7 @@ export function cloneBrushRenderState(
       distanceEmissionProgress: branch.distanceEmissionProgress,
       lastTimestamp: branch.lastTimestamp,
       nextTimeEmissionAt: branch.nextTimeEmissionAt,
+      pressure: branch.pressure ? { ...branch.pressure } : undefined,
       bristle: branch.bristle
         ? {
             lastSweepPoint: branch.bristle.lastSweepPoint

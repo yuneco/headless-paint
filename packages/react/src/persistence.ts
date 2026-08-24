@@ -401,6 +401,9 @@ function clonePressureDynamics(dynamics: PressureDynamics): PressureDynamics {
   return {
     size: dynamics.size,
     flow: dynamics.flow,
+    ...(dynamics.smoothingMs === undefined
+      ? {}
+      : { smoothingMs: dynamics.smoothingMs }),
   };
 }
 
@@ -536,11 +539,20 @@ function parsePressureDynamics(
     return { size: sizeFallback, flow: DEFAULT_PRESSURE_DYNAMICS.flow };
   }
   if (!isRecord(value)) return null;
+  if (
+    value.smoothingMs !== undefined &&
+    (!isFiniteNumber(value.smoothingMs) || value.smoothingMs < 0)
+  ) {
+    return null;
+  }
   return {
     size: isFiniteNumber(value.size) ? value.size : sizeFallback,
     flow: isFiniteNumber(value.flow)
       ? value.flow
       : DEFAULT_PRESSURE_DYNAMICS.flow,
+    ...(value.smoothingMs === undefined
+      ? {}
+      : { smoothingMs: value.smoothingMs }),
   };
 }
 

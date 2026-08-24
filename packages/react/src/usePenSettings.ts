@@ -51,6 +51,9 @@ function normalizePressureDynamics(
   return {
     size: value?.size ?? DEFAULT_PRESSURE_DYNAMICS.size,
     flow: value?.flow ?? DEFAULT_PRESSURE_DYNAMICS.flow,
+    ...(value?.smoothingMs === undefined
+      ? {}
+      : { smoothingMs: value.smoothingMs }),
   };
 }
 
@@ -184,6 +187,15 @@ export function usePenSettings(
           pressureDynamics: {
             size: dynamics.size,
             flow: dynamics.flow,
+            ...(current.pressureDynamics.smoothingMs === undefined &&
+            !("smoothingMs" in dynamics)
+              ? {}
+              : {
+                  smoothingMs:
+                    "smoothingMs" in dynamics
+                      ? dynamics.smoothingMs
+                      : current.pressureDynamics.smoothingMs,
+                }),
           },
         });
       });

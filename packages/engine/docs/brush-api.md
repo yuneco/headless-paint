@@ -131,6 +131,7 @@ interface EmissionPoint {
   readonly x: number;
   readonly y: number;
   readonly pressure: number | undefined;
+  readonly timestamp: number | undefined;
   readonly directionX: number;
   readonly directionY: number;
   readonly distance: number;
@@ -176,7 +177,7 @@ function walkEmissions(
 **設計意図**:
 - emission は scheduler が発生させる描画単位。stamp では dab 1個、spray では散布領域1回分の粒子バーストを意味する。
 - ストローク開始 emission（`distance=0`）と `nextStampDist` 相当の位相計算は `walkEmissions` に集約する。
-- 距離 emission と時間 emission は、同一セグメント内の発生位置順に merge される。時間 emission の位置は両端の `timestamp` から線形比率を求め、同じ比率で座標・筆圧を補間する。
+- 距離 emission と時間 emission は、同一セグメント内の発生位置順に merge される。両方とも両端の `timestamp` を位置比率で補間して保持する。時間 emission の位置は時刻比率から求め、同じ比率で座標・筆圧を補間する。
 - 両方が同じ位置で発生可能な場合は距離 emission を先に処理し、次に時間 emission を処理する。どちらも単一の `emissionIndex` / `emissionCount` 空間を消費する。
 - `timeSpacingMs` が有効でも、点列に `timestamp` がない、片側だけ欠落している、または timestamp が非単調なセグメントでは時間 emission を発生させない。距離 emission は従来通り発生する。
 - `lastTimestamp` 以前の overlap 再入力区間は時間 emission の対象外にし、committed→pending 境界や incremental 再描画で二重配置しない。
@@ -235,6 +236,8 @@ const sprayAirbrush: SprayBrushConfig = {
 
 `spray` は `SprayPressureDynamics` を使い、`size` は散布径、`flow` は粒子不透明度、`density` は粒子数へ反映する。`DEFAULT_SPRAY_PRESSURE_DYNAMICS.density` は `0` で、密度筆圧はプリセット側で明示的に有効化する。
 
+`stamp`では`pressureDynamics.smoothingMs`を指定すると、入力点を失わずにsize / flowへ使う筆圧だけを過去情報で平滑化する。省略または`0`以下では無効。状態はExpand分岐ごとに保持し、incrementalとreplayで同じ結果になる。
+
 ### 混色
 
 `StampBrushConfig.mixing` または `BristleBrushConfig.mixing` を指定すると、ブラシは一定距離ごとに描画先レイヤーの色を拾う。両方式は同じbrush-local連続RGBA色場を共有し、bristleでも毛束ごとに色を固定しない。
@@ -249,7 +252,7 @@ const acrylic: StampBrushConfig = {
     spacingSizeCoupling: 1,
     flow: 0.8,
   },
-  pressureDynamics: { size: 0.3, flow: 0.4 },
+  pressureDynamics: { size: 0.3, flow: 0.4, smoothingMs: 50 },
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
     enabled: true,

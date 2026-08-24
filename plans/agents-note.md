@@ -4,6 +4,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 発見した課題・改善候補
 
+- **Acrylicのcoalesced筆圧波形はbrush側で因果平滑化する（2026-08-24）**: ProductionがApple Pencilの`getCoalescedEvents()`を全点保持するようになった結果、mainが入力点ごと捨てていた短周期の筆圧変動もsize / flowへ現れ、一定意図の直線が周期的に膨縮した。高頻度座標は急曲線品質に必要なためinputでは丸めず、stamp `PressureDynamics.smoothingMs`を追加してAcrylicだけ50msに設定した。WebKit固定300点fixtureの幅標準偏差は無効時`1.858 / 1.827 / 1.786px`、main`1.575 / 1.693 / 1.607px`に対し、修正後`1.100 / 1.010 / 0.999px`（閾値240 / 200 / 128）。raw input・他brushは変更しない。React正規化とpersistenceも設定を保持する。最終gateはApple Pencilで一定筆圧線と意図的な筆圧rampを官能確認する。
 - **Rough bristleの固定紙目＋反復接触はProduction官能gate通過（2026-08-23）**: `4db92c8`で、Fine toothをdocument座標へ固定したsoftware raster、pixel-local pressureによる0/1寄りの面掠れ、同じ場所を擦るほど未着彩部が埋まるstochastic repeated contactをProductionへ統合した。ユーザー評価は合格であり、これをRough bristleの現行Production基準とする。共通Paper Surface、半透明塗料、紙の摩耗・顔料厚モデルは含まず、必要なら別課題として扱う。
 - **Apple Pencil実機評価はHTTPS必須（2026-08-22）**: LAN上の平文HTTPではSafariの`getCoalescedEvents()`が露出せず入力点密度が下がり、補間・ブラシ性能の評価を誤る。rootの`pnpm dev:https:setup`で現在のLAN IPをSANへ含むignored証明書を生成し、`pnpm dev:https`で起動する。iPadでは生成したlocal CAをインストールして完全信頼を有効にする。
 - **Production web統合後の最終実機gate（2026-08-23更新）**: Acrylic v2 / Rough bristleは`apps/web`でまとめて評価できる。Labで採取した461点・約1.92秒の固定入力をcoalesced batchごと再生した最終WebKit値は、Rough混色OFFでCall p50 / p95 `6 / 15ms`、batch wall p50 / p95 `5 / 15ms`（Lab p95 `15ms`と同等）。max `78ms`のcold resource生成は残る。Acrylicの旧late / early値はPlaywrightが1点ずつawaitするfixtureでGPU/同期負荷を隠していたため破棄する。残件はiPad Safariで長時間stroke、描画直後UI、tab安定性、cold first stroke、25〜100% zoom高速操作を官能確認すること。webのCall metricは同期engine callbackだけで非同期GPU完了を含まない。

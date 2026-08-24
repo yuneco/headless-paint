@@ -52,7 +52,7 @@ const ACRYLIC: StampBrushConfig = {
     spacingSizeCoupling: 1,
     flow: 0.72,
   },
-  pressureDynamics: { size: 0.3, flow: 0.4 },
+  pressureDynamics: { size: 0.3, flow: 0.4, smoothingMs: 50 },
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
     enabled: true,

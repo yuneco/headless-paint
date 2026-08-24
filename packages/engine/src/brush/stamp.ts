@@ -16,6 +16,7 @@ import {
   updateMixingAfterDeposit,
 } from "./mixing";
 import { calculatePressureFlow } from "./pressure";
+import { smoothStampPressure } from "./pressure-smoothing";
 import { hashSeed, mulberry32 } from "./prng";
 import {
   type EmissionPoint,
@@ -60,6 +61,7 @@ export function renderStampBrushStroke(
 
   const mixing = getActiveMixing(brush.mixing);
   let mixingState = branch.mixing;
+  let pressureState = branch.pressure;
 
   const nextBranch = walkEmissions(
     interpolated,
@@ -67,10 +69,17 @@ export function renderStampBrushStroke(
     branch,
     overlapCount,
     (emission) => {
+      const smoothed = smoothStampPressure(
+        emission.pressure,
+        emission.timestamp,
+        brush.pressureDynamics.smoothingMs,
+        pressureState,
+      );
+      pressureState = smoothed.state;
       const result = stampAt(
         layer,
         state.tipCanvas as OffscreenCanvas,
-        emission,
+        { ...emission, pressure: smoothed.value },
         style,
         dynamics,
         brush.pressureDynamics.size,
@@ -106,6 +115,7 @@ export function renderStampBrushStroke(
         distanceEmissionProgress: nextBranch.distanceEmissionProgress,
         lastTimestamp: nextBranch.lastTimestamp,
         nextTimeEmissionAt: nextBranch.nextTimeEmissionAt,
+        pressure: pressureState,
         mixing: mixingState,
       },
     ],

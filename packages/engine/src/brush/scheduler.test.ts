@@ -49,7 +49,12 @@ describe("walkEmissions", () => {
       { x: 0, y: 0, pressure: 0 },
       { x: 10, y: 0, pressure: 1 },
     ];
-    const mutableEmissions: [number, number, number | undefined][] = [];
+    const mutableEmissions: [
+      number,
+      number,
+      number | undefined,
+      number | undefined,
+    ][] = [];
 
     const result = walkEmissions(
       points,
@@ -57,14 +62,19 @@ describe("walkEmissions", () => {
       { accumulatedDistance: 0, emissionCount: 0 },
       0,
       (point) => {
-        mutableEmissions.push([point.emissionIndex, point.x, point.pressure]);
+        mutableEmissions.push([
+          point.emissionIndex,
+          point.x,
+          point.pressure,
+          point.timestamp,
+        ]);
       },
     );
 
     expect(mutableEmissions).toEqual([
-      [0, 0, 0],
-      [1, 5, 0.5],
-      [2, 10, 1],
+      [0, 0, 0, undefined],
+      [1, 5, 0.5, undefined],
+      [2, 10, 1, undefined],
     ]);
     expect(result).toEqual({ accumulatedDistance: 10, emissionCount: 3 });
   });

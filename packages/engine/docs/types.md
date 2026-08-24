@@ -436,6 +436,7 @@ interface StrokeStyle {
 interface PressureDynamics {
   readonly size: number;
   readonly flow: number;
+  readonly smoothingMs?: number;
 }
 ```
 
@@ -443,6 +444,7 @@ interface PressureDynamics {
 |---|---|---|
 | `size` | `number` | 筆圧を描画サイズへ反映する強さ。`0` は均一サイズ、`1` は筆圧比例 |
 | `flow` | `number` | 筆圧をスタンプブラシの flow へ反映する強さ。`0` は均一 flow、`1` は筆圧比例 |
+| `smoothingMs` | `number` | stampでsize / flowへ反映する前の因果的な筆圧平滑化時定数（ms）。省略または`0`以下で無効 |
 
 **関連定数**:
 
@@ -460,6 +462,7 @@ const DEFAULT_PRESSURE_DYNAMICS: PressureDynamics = {
 - `0〜1` の中間値は、均一値と筆圧比例値の線形補間
 - 入力筆圧が `undefined` の場合は `0.5` を使う
 - `pressureCurve` がある場合は、`size` と `flow` の両方に同じ変換済み筆圧を使う
+- `stamp`の`smoothingMs`は未来点を待たず、emission timestampと分岐状態だけで筆圧を平滑化する。入力座標や生の筆圧記録は変更しない
 
 **設計意図**:
 
@@ -1057,8 +1060,14 @@ interface BrushBranchRenderState {
   readonly distanceEmissionProgress?: number;
   readonly lastTimestamp?: number;
   readonly nextTimeEmissionAt?: number;
+  readonly pressure?: BrushPressureState;
   readonly mixing?: BrushMixingState;
   readonly bristle?: BristleBranchRenderState;
+}
+
+interface BrushPressureState {
+  readonly value: number;
+  readonly timestamp: number;
 }
 
 interface BrushRenderState {
@@ -1083,6 +1092,7 @@ interface BrushRenderState {
 | `distanceEmissionProgress` | `number` | 可変spacing時の次回距離emissionまでの正規化進捗（0以上1未満）。未使用時は省略 |
 | `lastTimestamp` | `number` | 時間ベース emission で、この分岐が最後に処理した入力時刻。overlap 再入力区間で二重配置しないために使う |
 | `nextTimeEmissionAt` | `number` | 時間ベース emission で、次に emission を配置する予定時刻 |
+| `pressure` | `BrushPressureState` | stampの因果的な筆圧平滑化状態。有効時のみ保持する |
 | `mixing` | `BrushMixingState` | stamp / bristle + mixing 有効時のみ保持する混色状態 |
 | `bristle` | `BristleBranchRenderState` | bristleの直前掃引断面、進入方向、折返し時の短い毛束lagを保持する状態 |
 

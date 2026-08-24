@@ -4,6 +4,7 @@ export interface EmissionPoint {
   readonly x: number;
   readonly y: number;
   readonly pressure: number | undefined;
+  readonly timestamp: number | undefined;
   /** emission位置での正規化した進行方向 */
   readonly directionX: number;
   readonly directionY: number;
@@ -126,6 +127,7 @@ function walkFixedEmissions(
       x: first.x,
       y: first.y,
       pressure: first.pressure,
+      timestamp: first.timestamp,
       directionX: direction.x,
       directionY: direction.y,
       distance: 0,
@@ -206,6 +208,7 @@ function walkFixedEmissions(
           x: p1.x + dx * fracDist,
           y: p1.y + dy * fracDist,
           pressure: pressure1 + (pressure2 - pressure1) * fracDist,
+          timestamp: interpolateTimestamp(p1.timestamp, p2.timestamp, fracDist),
           directionX: direction.x,
           directionY: direction.y,
           distance: nextEmissionDistance,
@@ -218,6 +221,7 @@ function walkFixedEmissions(
           x: p1.x + dx * fracTime,
           y: p1.y + dy * fracTime,
           pressure: pressure1 + (pressure2 - pressure1) * fracTime,
+          timestamp: interpolateTimestamp(p1.timestamp, p2.timestamp, fracTime),
           directionX: direction.x,
           directionY: direction.y,
           distance: segmentStart + segmentLength * fracTime,
@@ -304,6 +308,7 @@ function walkAdaptiveEmissions(
       x: first.x,
       y: first.y,
       pressure: first.pressure,
+      timestamp: first.timestamp,
       directionX: direction.x,
       directionY: direction.y,
       distance: 0,
@@ -385,6 +390,7 @@ function walkAdaptiveEmissions(
         x: p1.x + dx * fraction,
         y: p1.y + dy * fraction,
         pressure: pressure1 + (pressure2 - pressure1) * fraction,
+        timestamp: interpolateTimestamp(p1.timestamp, p2.timestamp, fraction),
         directionX: direction.x,
         directionY: direction.y,
         distance: segmentStart + segmentLength * fraction,
@@ -413,6 +419,15 @@ function walkAdaptiveEmissions(
     lastTimestamp,
     nextTimeEmissionAt,
   };
+}
+
+function interpolateTimestamp(
+  from: number | undefined,
+  to: number | undefined,
+  fraction: number,
+): number | undefined {
+  if (from === undefined || to === undefined) return undefined;
+  return from + (to - from) * fraction;
 }
 
 function findInitialDirection(points: readonly StrokePoint[]): {

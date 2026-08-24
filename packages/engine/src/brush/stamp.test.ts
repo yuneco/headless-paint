@@ -498,6 +498,64 @@ describe("renderBrushStroke", () => {
       expect(relError).toBeLessThan(0.01);
     });
 
+    it("筆圧平滑化状態はincrementalとreplayで一致する", () => {
+      const style = makeStyle({
+        lineWidth: 20,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 0.1,
+          },
+          pressureDynamics: { size: 1, flow: 0.5, smoothingMs: 50 },
+        },
+      });
+      const points: StrokePoint[] = Array.from({ length: 25 }, (_, index) => ({
+        x: 20 + index * 5,
+        y: 60,
+        pressure: 0.45 + Math.sin(index * 0.7) * 0.25,
+        timestamp: index * 4,
+      }));
+
+      const incrementalLayer = createLayer(160, 120);
+      const first = renderBrushStroke(
+        incrementalLayer,
+        points.slice(0, 14),
+        style,
+        0,
+        makeInitialState(style),
+      );
+      const incremental = renderBrushStroke(
+        incrementalLayer,
+        points.slice(11),
+        style,
+        3,
+        first,
+      );
+
+      const replayLayer = createLayer(160, 120);
+      const replay = renderBrushStroke(
+        replayLayer,
+        points,
+        style,
+        0,
+        makeInitialState(style),
+      );
+
+      expect(primaryBranch(incremental).pressure?.value).toBeCloseTo(
+        primaryBranch(replay).pressure?.value ?? 0,
+        6,
+      );
+      expect(primaryBranch(incremental).pressure?.timestamp).toBeCloseTo(
+        primaryBranch(replay).pressure?.timestamp ?? 0,
+        6,
+      );
+      expect(incrementalLayer.ctx.getImageData(0, 0, 160, 120).data).toEqual(
+        replayLayer.ctx.getImageData(0, 0, 160, 120).data,
+      );
+    });
+
     it("混色は現在dabを元色でdepositし、次位置用fieldへ局所色差を保持する", () => {
       const source = createLayer(100, 100);
       source.ctx.fillStyle = "rgb(255, 0, 0)";
