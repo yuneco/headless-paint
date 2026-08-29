@@ -523,3 +523,37 @@ Stop時は実験rendererを削除または実験commitへ隔離し、CPU product
 - WebGPUの効果も評価する。測定はChromium優先、効果が出そうならWebKit系（Safari TP）でも確認。最後はiPad実測
 - 自動測定にApple公式Safari MCP（`safaridriver --mcp`、Safari Technology Preview Release 251）を導入。`.mcp.json`に`safari-mcp-stp`として登録済み。stdioクライアント `work.local/safari-mcp-client.py`（`bridge` / `eval`モード）で計測を駆動できる。要件: STPの Developer › "Enable remote automation and external agents"（`safaridriver --enable`）
 - G0 texture方式はfull-layer 1枚、pickupは1 checkpoint遅れの非同期readback、と**シンプルで性能が出る方式を優先**（数字が出なければ先に進まない）
+
+### 17.1 Safari Technology Preview（実Safari）でのbridge結果（2026-08-29、Safari MCP経由）
+- `navigator.gpu` はSTP / 通常Safariとも true。**WebGPU・WebGL2ともbridge warm p95 ≈1〜3ms**（1ms粒度）。sync: webgl2 direct 1-2 / webgpu direct 1、production-like: webgl2 direct 1-2 / webgpu direct 2-3。ImageBitmap系は2-4。errorsなし → WebGPUにbridge面での不利はない
+- **Safari MCP運用の注意**: 自動化ウィンドウは起動直後 `document.visibilityState === "hidden"` でrAFが止まり、timerも約1秒後に十数秒ストールする（計測不能）。ユーザーがSTPウィンドウを一度アクティブにすると `visible` になり60fpsで動く。計測前に `work.local/safari-mcp-client.py hold` 等でrAF probeを確認すること。AppleScript（activate / System Events）はAutomation権限とタイムアウトの問題で当てにしない
+- `work.local/safari-mcp-client.py`: `bridge <url> <out.json>` / `eval <url> <js>` / `hold <url> <sec>`。repo rootの静的配信は `python3 -m http.server 5184 --bind 127.0.0.1`
+
+## 18. G1 spike設計: Acrylic GPU-resident dab（WebGL2 first）
+
+### 18.1 狙い
+E0で判明した主因（material updateで書き換えた小canvasをdab sourceに使う際のCanvas2D内部flush、および checkpoint `getImageData` の同期）を、**strokeの間はGPU textureに常駐させてCanvas2Dに触れない**ことで根絶する。目標はbacklog fixtureのdispatch p50/p95 8/11ms → 3ms以下、Undo replay同等以上の短縮。
+
+### 18.2 構成（実験モジュール `packages/engine/src/brush/gpu/`、public exportしない）
+- `GpuStrokeSurface`（runtime単位で1つをcache。stroke開始時に `acquire(layerWidth, layerHeight)`）
+  - WebGL2 OffscreenCanvas（layer同寸）。`accum` texture（RGBA8, premultiplied）をFBOに付ける
+  - stroke開始: `sourceLayer.canvas`（既存のstroke-start snapshot）を `texImage2D` で `accum` に1回upload
+  - `tip` texture: tipCanvasをupload（tip size変更時のみ）
+  - `field` texture: 18×8 RGBA8。material updateごとに `texSubImage2D`（576 byte）で更新。dab batchは「fieldのバージョン」を持つため、batch内でfieldが変わる場合は**その時点でdrawを分割**（instance配列をflushしてから更新）
+  - `depositDabs(instances)`: instanced draw（1 instance = 1 dab: x, y, size, rotation, alpha(opacity)）。fragment = tip(uv).a × bilinear(field, uv) → premultiplied、blend = ONE, ONE_MINUS_SRC_ALPHA（source-over premultiplied）。`style.compositeOperation` は source-over のみ対応
+  - `readCheckpoint(x, y, size)`: 同期版は `readPixels` で `Uint8ClampedArray`（tile origin/寸法は現行`captureCheckpoint`と同一）。**async版**: PBOへ `readPixels` + `fenceSync`、次のcheckpoint時に前回分を取り出す（1 checkpoint遅れ、距離で決まるので決定的）。まず同期版で計測し、次にasync版
+  - `commitToLayer(layer, dirtyRect)`: `layer.ctx.drawImage(glCanvas, sx, sy, w, h, sx, sy, w, h)` を**pointer batchごとに1回**（点ごとではない）。dirtyRectはbatch内のdab bboxの和
+- 切替: `brushPerfDebug.experiments.gpuDab = "off" | "webgl2"`、URL `?gpuDab=webgl2`。stamp + mixing ON + Expand無効（branch 1）+ source-over のときだけGPU経路。それ以外は既存CPU経路
+- Node/headless・WebGL2取得失敗・context lost: CPU経路へfallback（spikeでは「stroke開始時に判定」で十分）
+
+### 18.3 差し込み点
+- `stamp.ts` `stampAt`: GPU経路では `ctx.drawImage` の代わりに instance を積む（`state.mixing` に GPU surface参照は持たせず、runtime scratchで管理）
+- `mixing.ts` `captureCheckpoint`: GPU経路では `surface.readCheckpoint` の結果を `checkpointPixels` として使う。`uploadMaterialCanvas` はfield textureのupdateに置換（renderCanvasは触らない）
+- `incremental-stroke.ts` `feedMany` 末尾 / `finalize`: `surface.flush()` → `commitToLayer`
+- stroke終了: 最終commit後にsurfaceをrelease（textureは再利用のためruntime cacheに残す）
+
+### 18.4 計測とgate
+- `work.local/benchmark-acrylic-backlog.mjs` に env `GPU_DAB=webgl2`。WebKit（Playwright）→ Chromium → STP（Safari MCP）の順
+- Go: dispatch p50/p95が**CPU比50%以上改善**、Undo replay（fixture strokes）も同等改善、late/early ≤1.2、screenshot目視で破綻なし。Tier B metric（CPU vs GPU）は記録のみ（この段階では合否にしない）
+- Stop: readPixels同期がgetImageDataと同等に遅い／drawImage(glCanvas→layer)がbatchごと3ms超／WebKitでcontext不安定
+- G2（WebGPU版）はG1 GoのあとChromiumで同interface実装 → STPで確認
