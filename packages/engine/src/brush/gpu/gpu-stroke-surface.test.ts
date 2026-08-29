@@ -224,7 +224,7 @@ describe("GpuStrokeSurface", () => {
     expectPixelNear(layer, 32, 24, [51, 0, 204, 239]);
   });
 
-  it("全 branch の field を 2D strip 上で branch 順に独立更新する", () => {
+  it("全 branch の snapshot を参照して 2D strip を 1 pass で更新する", () => {
     brushPerfDebug.enabled = true;
     brushPerfDebug.reset();
     const source = new OffscreenCanvas(64, 32);
@@ -247,9 +247,10 @@ describe("GpuStrokeSurface", () => {
     for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
       surface.selectBranch(branchIndex);
       surface.initializeMaterialField(columns, rows, baseColor);
-      surface.initializeMaterialCheckpoint(0, 0, source.width);
+      surface.initializeMaterialCheckpoint(branchIndex * 32, 0, 32);
     }
 
+    surface.beginBranchBatch();
     for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
       surface.selectBranch(branchIndex);
       surface.updateMaterialField({
@@ -266,6 +267,7 @@ describe("GpuStrokeSurface", () => {
         distancePx: 1,
       });
     }
+    surface.endBranchBatch();
 
     const branch0 = surface.readMaterialFieldForTest(0);
     const branch1 = surface.readMaterialFieldForTest(1);
@@ -275,7 +277,7 @@ describe("GpuStrokeSurface", () => {
     expectChannelNear(branch1[0], 20);
     expectChannelNear(branch1[1], 50);
     expectChannelNear(branch1[2], 230);
-    expect(brushPerfDebug.snapshot().stages.gpuFieldUpdate.count).toBe(2);
+    expect(brushPerfDebug.snapshot().stages.gpuFieldUpdate.count).toBe(1);
   });
 
   it("field update は live accum ではなく直近の checkpoint snapshot を読む", () => {

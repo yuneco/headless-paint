@@ -44,23 +44,28 @@ export function appendToCommittedLayer(
   let currentState = ensureBrushRenderState(brushState, strokes.length);
   const nextBranches: BrushBranchRenderState[] = [...currentState.branches];
   const gpuSurface = getActiveGpuStrokeSurface();
-  for (let i = 0; i < strokes.length; i++) {
-    const stroke = strokes[i];
-    if (stroke.length > 0) {
-      gpuSurface?.selectBranch(i);
-      const branchState = getBranchBrushState(currentState, i);
-      const renderedState = renderBrushStroke(
-        layer,
-        stroke,
-        committedStyle,
-        overlapCount,
-        branchState,
-        sourceLayer,
-      );
-      const renderedBranch = stateToBranch(renderedState);
-      nextBranches[i] = renderedBranch;
-      currentState = mergeBrushState(currentState, nextBranches);
+  gpuSurface?.beginBranchBatch();
+  try {
+    for (let i = 0; i < strokes.length; i++) {
+      const stroke = strokes[i];
+      if (stroke.length > 0) {
+        gpuSurface?.selectBranch(i);
+        const branchState = getBranchBrushState(currentState, i);
+        const renderedState = renderBrushStroke(
+          layer,
+          stroke,
+          committedStyle,
+          overlapCount,
+          branchState,
+          sourceLayer,
+        );
+        const renderedBranch = stateToBranch(renderedState);
+        nextBranches[i] = renderedBranch;
+        currentState = mergeBrushState(currentState, nextBranches);
+      }
     }
+  } finally {
+    gpuSurface?.endBranchBatch();
   }
   return currentState;
 }

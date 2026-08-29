@@ -433,6 +433,7 @@ describe("GPU mixing Expand parity", () => {
     expectAlphaTierB(cpuLayer, gpuLayer);
     const snapshot = perf.snapshot();
     expect(snapshot.samples.gpuBranches).toEqual([4]);
+    expect(snapshot.stages.gpuFieldUpdate.count).toBe(15);
     expect(snapshot.stages.checkpointReadback.count).toBe(0);
   });
 
