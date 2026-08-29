@@ -644,3 +644,15 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 ### 18.15 レイヤーサイズと常駐方式（ユーザー決定 2026-08-29）
 - **製品の上限は4K程度**。8Kは積極的に考慮しない。4K = accum RGBA8 64MB/レイヤー
 - タイル化は2種を区別する: **A. 描画/samplingをタイル単位にする**（atlas方式、継ぎ目処理が必要で複雑）と **B. textureは1枚のまま有効領域だけタイル単位で管理する**（lazy residency、継ぎ目なし、転送量がstroke範囲に比例）。Bを本線候補とし、メモリ上限は「常駐は直近レイヤーのみ」で切る。A/Bのコスパは常駐化と4K計測の数字が出た時点で整理する
+
+### 18.16 accum常駐と4K（2026-08-29、WebKit、gpu-field）
+| 条件 | dispatch p50/p95 | undo1 / undo9（短stroke×10） | undoLong | 備考 |
+|---|---|---|---|---|
+| 2K CPU | 8/12 | 153 / 489 | 2710 | checkpointReadback 997回1760ms |
+| 2K GPU 常駐OFF | 1/1 | 134 / 367 | 682 | upload 9ms/stroke |
+| **2K GPU 常駐ON** | 1/2 | 138 / **239** | 704 | upload 1回15ms、以降hit |
+| 4K CPU | **16/19** | 508 / 1216 | 5749 | readback 1994回3398ms |
+| **4K GPU 常駐ON** | **1/2** | 510 / 699 | **1579（−73%）** | upload 1回42ms（64MB） |
+- 常駐の無効化hook: `clearLayer`/`copyLayerPixels`/`setPixel`、draw.ts各関数、CPU brush dispatch、merge/transform/wrap-shift、非GPU incremental stroke、checkpoint復元、command executorのUndo/Redo rebuild。外部利用者の`layer.ctx`直接操作は検出不可（正式設計の論点）
+- 常駐は直近1 layerのみ。parity不変（F1 0.0118 / 0%）。テスト497件green
+- 4KではCPU経路が2Kの2倍重くなる一方、GPU経路は一定（1/2ms）。**4Kこそ効果が大きい**
