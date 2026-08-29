@@ -4,7 +4,7 @@
 
 - Created: 2026-08-30 02:00 JST
 - Base: `experiment/brush-acceleration`（spike結果は `plans/2026-08-25-00-29_brush-gpu-acceleration-investigation.md` Section 18〜19）
-- State: **計画草案（Phase 0）**。ユーザー承認後にPhase 1へ
+- State: **Phase 2承認済み（2026-08-30）。Phase 3 実装中**（3-A engine公開API化 → 3-B stroke注入点 → 3-C react/apps/web → 3-D テスト移植・整理）
 - Scope: Acrylic（stamp + mixing）のGPU経路（WebGL2）を engine の内部acceleratorとして正式化する。Rough bristleは第2フェーズ（本計画ではplug-in点の定義のみ）
 
 ## 1. 要求（spikeで確定した事実）
