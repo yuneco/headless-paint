@@ -622,3 +622,14 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - replayはcheckpointごとにGPU完了待ち（≈1ms/回の往復レイテンシ）が必要で、Nを上げても待ち回数は減らない。tileを(N+1)倍にした分の帯域増でNが大きいほど遅い
 - 結論: **CPUへpixelを戻す設計は「同期回数×レイテンシ」が床**。高速stroke・replayでは利得が消える。batch方式（1/2ms）は非決定的で採用不可
 - **方式転換**: pickup sampling（回転付きbilinear）と material field 更新（pickup/restore/diffusion）をGPU shaderで実行し、18×8 fieldをGPU常駐にする → readbackゼロ、同期点ゼロ、GPU実行順で決定的（live/replay一致）、lagなし。C11の本来形
+
+### 18.13 GPU常駐field（readbackゼロ）の結果（2026-08-29、`gpuReadback=gpu-field` 既定）
+| 環境 | CPU dispatch p50/p95 | GPU dispatch | CPU undoLong | GPU undoLong | parity（F1 RGB MAE / |Δ|>0.1） |
+|---|---|---|---|---|---|
+| **WebKit** | 9/13 | **1/1** | 2713ms | **667ms（−75%）** | 0.0117 / 0%（F2 0.0073 / 0.4%、F3 0.0056 / 0%） |
+| Chromium | 1/1.5 | 3.9/5 | 498 | 1327 | — |
+- 内訳（WebKit GPU）: `gpuFieldUpdate` 2,347回24ms、`gpuFlush` 2,563回8ms、`gpuCommit` 241回74ms。**同期点ゼロ**、`checkpointReadback` 0回。undo9（短stroke×10）も495→380
+- parityはsync readback版より良い（CPUの「直前checkpoint tile」より、accumを直接samplingする方が「現在の下地」に近いため。順序は「field更新pass → pending dabを旧fieldでflush → diffusion → field切替」で、更新を誘発したdabを即再pickupしない規則を維持）
+- live/replay byte一致テスト（gpu-field / sync）green。テスト494件green
+- Chromiumは `gpuCommit` 241回×4ms=967msが支配しCPU経路に劣る → **backend選択はWebKit系のみGPU**が現時点の結論。Chromium向けにはWebGPU版のcommit経路を評価する余地
+- 残課題: Expand、stroke開始full-layer upload（短stroke連打・undo9）、compositeOperation≠source-over、context loss、field texture format（RGBA16F/8）差の扱い、Tier B閾値の正式化
