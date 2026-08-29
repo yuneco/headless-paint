@@ -724,3 +724,9 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - **採用前提**で進める。iPadのstallは正式化前の要改善項目
 - 順序: iPad stall診断・修正 → **F1 正式設計**（GPU backendをbrush非依存契約にする: accum / commit / 常駐 / branch / field。backend選択、lifecycle、context loss、Tier B契約、常駐のopt-in/契約）→ F2 → F3（Acrylic正式実装、実験コード整理）→ F4 → **第2フェーズでBristle GPU**（Rough mixing ONも同時）
 - Bristleは「Acrylic = 毛束1・かすれなし・mask恒等の単純化ケース」と見なす。差分はmask（MAX蓄積の別texture、Fine tooth/反復接触のhashをfragmentで）とink passの追加で、accum以降の契約は共通。F1でplug-in点（chunk単位のmask+ink pass）を定義し、契約が不明瞭なら1〜2日のcontract-check spikeで確認
+
+### 19.6 iPad stallの根本原因と解消（2026-08-30、`a2a4e32`）
+- stall記録（`perfDebug=1`、評価パネルの Stalls / Copy JSON）で特定: stallしたbatchは全て `branchCount 12`（kaleido 6）で `checkpointReadback` が点ごとに12回＝**CPU経路にfallback**していた。原因は cancel/dispose 系パス（`releaseSession`）で `finalize` が呼ばれず GPU の `endStroke` が走らないため `activeOwner` が残り、以降の全strokeで `beginStroke` が false を返していたこと
+- 修正: renderer に `cancel()` を追加し `releaseSession` から呼ぶ。`beginStroke` は古い owner が残っていれば強制終了して回復（`gpuStaleOwnerRecovered` イベントを記録）
+- 再テスト（kaleido 6）: stall は最初のstrokeの初期化（surface作成＋16MB upload＝60ms、1回）のみ。**正式設計で「Acrylic選択時のwarm-up（surface確保＋accum upload）」を入れて解消する**
+- branch上限: 12 は実装上の定数（uniform配列長・snapshot array layer数・field strip高さ）で本質的制約ではない。**64へ引き上げ**、UIの最大（≈144）は担保対象外としCPU fallback（ユーザー決定）
