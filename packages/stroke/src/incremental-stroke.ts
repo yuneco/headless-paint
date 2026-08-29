@@ -58,19 +58,29 @@ export function createIncrementalStrokeRenderer(
 ): IncrementalStrokeRenderer {
   const compiledFilterPipeline = compileFilterPipeline(config.filterPipeline);
   const compiledExpand = compileExpand(config.expand);
-  const samplingLayer =
-    config.sourceLayer ?? createSamplingLayer(config.layer, config.style);
   const gpuRuntime = getGpuStrokeRuntime();
   const gpuOwner = {};
-  const gpuStrokeActive =
+  const gpuStrokeEligible =
     brushPerfGpuDabEnabled() &&
     config.style.brush.type === "stamp" &&
     isBrushMixingActive(config.style.brush.mixing) &&
     config.style.compositeOperation === "source-over" &&
     !config.alphaLocked &&
-    compiledExpand.outputCount === 1 &&
-    !!samplingLayer &&
-    !!gpuRuntime?.beginStroke(gpuOwner, samplingLayer.canvas);
+    compiledExpand.outputCount === 1;
+  const gpuResidencyHit =
+    gpuStrokeEligible && !!gpuRuntime?.isLayerResident(config.layer);
+  const samplingLayer =
+    config.sourceLayer ??
+    (gpuResidencyHit
+      ? undefined
+      : createSamplingLayer(config.layer, config.style));
+  const gpuStrokeActive =
+    gpuStrokeEligible &&
+    !!gpuRuntime?.beginStroke(
+      gpuOwner,
+      config.layer,
+      gpuResidencyHit ? undefined : samplingLayer?.canvas,
+    );
 
   let filterState: FilterPipelineState = createFilterPipelineState(
     compiledFilterPipeline,
@@ -123,6 +133,9 @@ export function createIncrementalStrokeRenderer(
           samplingLayer,
           config.alphaLocked,
         );
+        if (!gpuStrokeActive) {
+          gpuRuntime?.invalidateLayerResidency(config.layer);
+        }
       } finally {
         if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
       }
@@ -232,12 +245,18 @@ export function createIncrementalStrokeRenderer(
 }
 
 interface GpuStrokeRuntimeBridge {
-  beginStroke(owner: object, sourceCanvas: OffscreenCanvas): boolean;
+  beginStroke(
+    owner: object,
+    layer: Layer,
+    sourceCanvas?: OffscreenCanvas,
+  ): boolean;
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
   issuePendingReadbacks(owner: object): void;
   endStroke(owner: object): void;
+  invalidateLayerResidency(layer: Layer): void;
+  isLayerResident(layer: Layer): boolean;
 }
 
 function getGpuStrokeRuntime(): GpuStrokeRuntimeBridge | undefined {

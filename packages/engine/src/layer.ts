@@ -1,3 +1,4 @@
+import { invalidateGpuLayerResidency } from "./brush/gpu/gpu-layer-residency";
 import type { Color, Layer, LayerMeta } from "./types";
 
 const DEFAULT_META: LayerMeta = {
@@ -35,6 +36,7 @@ export function createLayer(
 }
 
 export function clearLayer(layer: Layer): void {
+  invalidateGpuLayerResidency(layer);
   layer.ctx.clearRect(0, 0, layer.width, layer.height);
 }
 
@@ -59,6 +61,7 @@ export function cloneLayer(source: Layer, options?: CloneLayerOptions): Layer {
 }
 
 export function copyLayerPixels(source: Layer, target: Layer): void {
+  invalidateGpuLayerResidency(target);
   clearLayer(target);
   target.ctx.save();
   target.ctx.globalAlpha = 1;
@@ -92,6 +95,7 @@ export function setPixel(
   if (ix < 0 || ix >= layer.width || iy < 0 || iy >= layer.height) {
     return;
   }
+  invalidateGpuLayerResidency(layer);
   layer.ctx.fillStyle = colorToStyle(color);
   layer.ctx.fillRect(ix, iy, 1, 1);
 }

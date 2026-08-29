@@ -4,6 +4,7 @@ import type {
   LayerMeta,
 } from "@headless-paint/engine";
 import { createLayer, wrapShiftLayer } from "@headless-paint/engine";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import {
   canRedo,
   canUndo,
@@ -254,6 +255,7 @@ function executeLayerDraw<TCustom>(
         persistence,
       );
     }
+    invalidateGpuLayerResidency(layer);
     if (!layer.meta.visible) visibilityFixLayerIds.push(layer.id);
   }
 
@@ -306,6 +308,16 @@ function executeCustom<TCustom>(
     );
   }
 
+  const dirty = outcome.dirty ?? DIRTY_NONE;
+  if (dirty.type === "all") {
+    for (const layer of deps.layers) invalidateGpuLayerResidency(layer);
+  } else if (dirty.type === "layers") {
+    for (const layerId of dirty.layerIds) {
+      const layer = deps.layers.find((candidate) => candidate.id === layerId);
+      if (layer) invalidateGpuLayerResidency(layer);
+    }
+  }
+
   return {
     ok: true,
     next,
@@ -313,7 +325,7 @@ function executeCustom<TCustom>(
     layerListOps: outcome.layerListOps ?? EMPTY_LAYER_LIST_OPS,
     activeLayerIdHint: outcome.activeLayerIdHint,
     visibilityFixLayerIds: outcome.visibilityFixLayerIds ?? EMPTY_LAYER_IDS,
-    dirty: outcome.dirty ?? DIRTY_NONE,
+    dirty,
     persistence,
   };
 }
@@ -575,6 +587,7 @@ function executeStructural<TCustom>(
           persistence,
         );
       }
+      invalidateGpuLayerResidency(targetLayer);
 
       return {
         ok: true,

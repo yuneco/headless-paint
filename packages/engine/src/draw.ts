@@ -1,3 +1,4 @@
+import { invalidateGpuLayerResidency } from "./brush/gpu/gpu-layer-residency";
 import { colorToStyle } from "./layer";
 import { interpolateStrokePointsCentripetal } from "./stroke-interpolation";
 import type {
@@ -18,6 +19,7 @@ export function drawLine(
   color: Color,
   lineWidth = 1,
 ): void {
+  invalidateGpuLayerResidency(layer);
   const { ctx } = layer;
   ctx.strokeStyle = colorToStyle(color);
   ctx.lineWidth = lineWidth;
@@ -35,6 +37,7 @@ export function drawCircle(
   radius: number,
   color: Color,
 ): void {
+  invalidateGpuLayerResidency(layer);
   const { ctx } = layer;
   ctx.fillStyle = colorToStyle(color);
 
@@ -51,6 +54,7 @@ export function drawPath(
 ): void {
   if (points.length === 0) return;
 
+  invalidateGpuLayerResidency(layer);
   const { ctx } = layer;
   ctx.strokeStyle = colorToStyle(color);
   ctx.lineWidth = lineWidth;
@@ -121,6 +125,7 @@ export function drawVariableWidthPath(
 ): void {
   if (points.length === 0) return;
 
+  invalidateGpuLayerResidency(layer);
   const { ctx } = layer;
   const style = colorToStyle(color);
   ctx.fillStyle = style;

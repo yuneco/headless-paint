@@ -1,4 +1,5 @@
 import type { mat3 } from "gl-matrix";
+import { invalidateGpuLayerResidency } from "./brush/gpu/gpu-layer-residency";
 import type { Layer } from "./types";
 
 /**
@@ -15,6 +16,7 @@ export function transformLayer(
   matrix: mat3,
   temp?: OffscreenCanvas,
 ): void {
+  invalidateGpuLayerResidency(layer);
   const w = layer.width;
   const h = layer.height;
 

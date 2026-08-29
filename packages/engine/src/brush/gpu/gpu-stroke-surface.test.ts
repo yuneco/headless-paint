@@ -21,6 +21,7 @@ afterEach(() => {
   brushPerfDebug.experiments.gpuDab = "off";
   brushPerfDebug.experiments.gpuReadback = "gpu-field";
   brushPerfDebug.experiments.checkpointLagSteps = 1;
+  brushPerfDebug.experiments.gpuResident = true;
 });
 
 describe("GpuStrokeSurface", () => {
@@ -316,9 +317,11 @@ describe("GpuStrokeSurface", () => {
   it('gpuDab: "off" では runtime が surface を生成しない', () => {
     brushPerfDebug.experiments.gpuDab = "off";
     const creationsBefore = getGpuStrokeSurfaceCreationCountForTest();
+    const layer = createLayer(80, 60);
     const began = globalThis.__hpGpuStrokeRuntime?.beginStroke(
       {},
-      new OffscreenCanvas(80, 60),
+      layer,
+      layer.canvas,
     );
 
     expect(began).toBe(false);

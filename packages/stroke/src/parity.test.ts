@@ -76,6 +76,7 @@ afterEach(() => {
   perf.experiments.gpuDab = "off";
   perf.experiments.gpuReadback = "gpu-field";
   perf.experiments.checkpointLagSteps = 1;
+  perf.experiments.gpuResident = true;
 });
 
 const INPUT_POINTS: readonly InputPoint[] = [
@@ -365,6 +366,7 @@ function getBrushPerfTestBridge():
         gpuDab: "off" | "webgl2";
         gpuReadback: "gpu-field" | "sync";
         checkpointLagSteps: number;
+        gpuResident: boolean;
       };
       reset(): void;
       snapshot(): {
@@ -384,6 +386,7 @@ function getBrushPerfTestBridge():
           gpuDab: "off" | "webgl2";
           gpuReadback: "gpu-field" | "sync";
           checkpointLagSteps: number;
+          gpuResident: boolean;
         };
         reset(): void;
         snapshot(): {

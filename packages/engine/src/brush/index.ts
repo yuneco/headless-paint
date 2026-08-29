@@ -6,6 +6,8 @@ import type {
   StrokeStyle,
 } from "../types";
 import { renderBristleBrushStroke } from "./bristle";
+import { invalidateGpuLayerResidency } from "./gpu/gpu-layer-residency";
+import { getActiveGpuStrokeSurface } from "./gpu/gpu-stroke-surface";
 import { isBrushMixingActive } from "./mixing";
 import { brushPerfDebug } from "./perf-debug";
 import { renderSprayBrushStroke } from "./spray";
@@ -47,6 +49,10 @@ export function renderBrushStroke(
   state?: BrushRenderState,
   sourceLayer?: Layer,
 ): BrushRenderState {
+  const gpuSurface = getActiveGpuStrokeSurface();
+  if (points.length > 0 && style.brush.type !== "round-pen" && !gpuSurface) {
+    invalidateGpuLayerResidency(layer);
+  }
   switch (style.brush.type) {
     case "round-pen":
       drawVariableWidthPath(
@@ -64,6 +70,7 @@ export function renderBrushStroke(
       if (
         isBrushMixingActive(style.brush.mixing) &&
         (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !gpuSurface &&
         !brushPerfDebug.nullStages.nullFullCopy
       ) {
         throw new Error(

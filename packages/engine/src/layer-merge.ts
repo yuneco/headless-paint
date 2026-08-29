@@ -1,3 +1,4 @@
+import { invalidateGpuLayerResidency } from "./brush/gpu/gpu-layer-residency";
 import { clearLayer } from "./layer";
 import type { Layer, LayerMeta } from "./types";
 
@@ -18,6 +19,7 @@ export function mergeLayerDown(
   sourceLayer: Layer,
   options?: MergeLayerDownOptions,
 ): void {
+  invalidateGpuLayerResidency(targetLayer);
   const work = new OffscreenCanvas(targetLayer.width, targetLayer.height);
   const workCtx = work.getContext("2d");
   if (!workCtx) {

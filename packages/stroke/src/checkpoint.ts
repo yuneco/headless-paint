@@ -1,6 +1,7 @@
 import type { Layer } from "@headless-paint/engine";
 import { clearLayer, getImageData } from "@headless-paint/engine";
 import { decompressSync, deflateSync } from "fflate";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import type { Checkpoint } from "./types";
 
 let checkpointIdCounter = 0;
@@ -79,5 +80,6 @@ export function restoreFromCheckpoint(
     clearLayer(layer);
     return;
   }
+  invalidateGpuLayerResidency(layer);
   layer.ctx.putImageData(getCheckpointImageData(checkpoint), 0, 0);
 }

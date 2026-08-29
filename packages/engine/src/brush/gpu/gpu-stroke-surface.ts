@@ -1,5 +1,10 @@
 import type { Layer } from "../../types";
 import { brushPerfDebug, getCheckpointLagSteps } from "../perf-debug";
+import {
+  invalidateGpuLayerResidency,
+  prepareGpuLayerResidency,
+  validateGpuLayerResidency,
+} from "./gpu-layer-residency";
 
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 5;
@@ -79,7 +84,7 @@ export interface GpuStrokeSurface {
   readonly width: number;
   readonly height: number;
   readonly lost: boolean;
-  beginStroke(sourceCanvas: OffscreenCanvas): void;
+  beginStroke(sourceCanvas?: OffscreenCanvas): void;
   setTip(tipCanvas: OffscreenCanvas): void;
   initializeMaterialField(
     columns: number,
@@ -112,12 +117,18 @@ export interface GpuStrokeSurface {
 }
 
 interface GpuStrokeRuntime {
-  beginStroke(owner: object, sourceCanvas: OffscreenCanvas): boolean;
+  beginStroke(
+    owner: object,
+    layer: Layer,
+    sourceCanvas?: OffscreenCanvas,
+  ): boolean;
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
   issuePendingReadbacks(owner: object): void;
   endStroke(owner: object): void;
+  invalidateLayerResidency(layer: Layer): void;
+  isLayerResident(layer: Layer): boolean;
 }
 
 const VERTEX_SHADER_SOURCE = `#version 300 es
@@ -429,87 +440,97 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     return this.contextLost || this.gl.isContextLost();
   }
 
-  beginStroke(sourceCanvas: OffscreenCanvas): void {
+  beginStroke(sourceCanvas?: OffscreenCanvas): void {
     this.assertUsable();
-    if (
-      sourceCanvas.width !== this.width ||
-      sourceCanvas.height !== this.height
-    ) {
-      throw new Error("GPU stroke source size does not match the surface");
-    }
     const gl = this.gl;
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA8,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      sourceCanvas,
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.COLOR_ATTACHMENT0,
-      gl.TEXTURE_2D,
-      this.accumTexture,
-      0,
-    );
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error("GPU stroke framebuffer is incomplete");
-    }
-    gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA8,
-      this.width,
-      this.height,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      null,
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sourceFramebuffer);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.COLOR_ATTACHMENT0,
-      gl.TEXTURE_2D,
-      this.sourceTexture,
-      0,
-    );
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error("GPU stroke source framebuffer is incomplete");
-    }
+    if (sourceCanvas) {
+      if (
+        sourceCanvas.width !== this.width ||
+        sourceCanvas.height !== this.height
+      ) {
+        throw new Error("GPU stroke source size does not match the surface");
+      }
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
+      const uploadStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        sourceCanvas,
+      );
+      if (brushPerfDebug.enabled) {
+        brushPerfDebug.recordStage("gpuUpload", uploadStartedAt);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        this.accumTexture,
+        0,
+      );
+      if (
+        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
+      ) {
+        throw new Error("GPU stroke framebuffer is incomplete");
+      }
+      gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        this.width,
+        this.height,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.sourceFramebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        this.sourceTexture,
+        0,
+      );
+      if (
+        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
+      ) {
+        throw new Error("GPU stroke source framebuffer is incomplete");
+      }
 
-    // TexImageSource rows arrive top-down when UNPACK_FLIP_Y is false. Flip
-    // once inside WebGL so the accumulation FBO and y-down projection agree.
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.sourceFramebuffer);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.blitFramebuffer(
-      0,
-      0,
-      this.width,
-      this.height,
-      0,
-      this.height,
-      this.width,
-      0,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-    [this.accumTexture, this.sourceTexture] = [
-      this.sourceTexture,
-      this.accumTexture,
-    ];
-    [this.framebuffer, this.sourceFramebuffer] = [
-      this.sourceFramebuffer,
-      this.framebuffer,
-    ];
+      // TexImageSource rows arrive top-down when UNPACK_FLIP_Y is false. Flip
+      // once inside WebGL so the accumulation FBO and y-down projection agree.
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.sourceFramebuffer);
+      gl.disable(gl.BLEND);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.blitFramebuffer(
+        0,
+        0,
+        this.width,
+        this.height,
+        0,
+        this.height,
+        this.width,
+        0,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+      [this.accumTexture, this.sourceTexture] = [
+        this.sourceTexture,
+        this.accumTexture,
+      ];
+      [this.framebuffer, this.sourceFramebuffer] = [
+        this.sourceFramebuffer,
+        this.framebuffer,
+      ];
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
@@ -1457,19 +1478,25 @@ export function getGpuStrokeSurfaceCreationCountForTest(): number {
 }
 
 const gpuStrokeRuntime: GpuStrokeRuntime = {
-  beginStroke(owner, sourceCanvas) {
+  beginStroke(owner, layer, sourceCanvas) {
     if (brushPerfDebug.experiments.gpuDab !== "webgl2") return false;
     if (activeOwner) return false;
-    const surface = acquireGpuStrokeSurface(
-      sourceCanvas.width,
-      sourceCanvas.height,
-    );
+    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
     if (!surface) return false;
+    const residencyAvailable = prepareGpuLayerResidency(layer, surface);
+    const residencyHit =
+      brushPerfDebug.experiments.gpuResident && residencyAvailable;
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample("gpuResidencyHit", residencyHit ? 1 : 0);
+    }
+    if (!residencyHit && !sourceCanvas) return false;
     try {
-      surface.beginStroke(sourceCanvas);
+      surface.beginStroke(residencyHit ? undefined : sourceCanvas);
     } catch {
+      invalidateGpuLayerResidency(layer);
       return false;
     }
+    validateGpuLayerResidency(layer, surface);
     activeOwner = owner;
     activeSurface = surface;
     return true;
@@ -1483,6 +1510,11 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
   commitToLayer(owner, layer) {
     if (activeOwner !== owner) return;
     activeSurface?.commitToLayer(layer);
+    if (activeSurface && !activeSurface.lost) {
+      validateGpuLayerResidency(layer, activeSurface);
+    } else {
+      invalidateGpuLayerResidency(layer);
+    }
   },
   issuePendingReadbacks(owner) {
     if (activeOwner !== owner) return;
@@ -1494,6 +1526,14 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
     activeOwner = null;
     currentOwner = null;
     activeSurface = null;
+  },
+  invalidateLayerResidency(layer) {
+    invalidateGpuLayerResidency(layer);
+  },
+  isLayerResident(layer) {
+    if (!brushPerfDebug.experiments.gpuResident) return false;
+    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    return surface ? prepareGpuLayerResidency(layer, surface) : false;
   },
 };
 
