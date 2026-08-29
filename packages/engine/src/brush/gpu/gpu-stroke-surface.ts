@@ -503,7 +503,26 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   requestCheckpoint(): void {
     this.assertStrokeBegun();
-    const committed = this.lastCommittedRect;
+    // May be called before commitToLayer (preferred on WebKit, where a
+    // readPixels issued after the commit blit waits for it). Fall back to the
+    // pending dirty rect when nothing has been committed yet.
+    this.flush();
+    let committed = this.lastCommittedRect;
+    if (!committed && this.dirtyRect) {
+      const dirty = this.dirtyRect;
+      committed = {
+        left: Math.max(0, Math.floor(dirty.left)),
+        top: Math.max(0, Math.floor(dirty.top)),
+        right: Math.min(this.width, Math.ceil(dirty.right)),
+        bottom: Math.min(this.height, Math.ceil(dirty.bottom)),
+      };
+      if (
+        committed.right <= committed.left ||
+        committed.bottom <= committed.top
+      ) {
+        committed = null;
+      }
+    }
     const latestDab = this.latestDabPosition;
     this.lastCommittedRect = null;
     if (
@@ -572,6 +591,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample("readbackPixels", width * height);
+    }
     gl.readPixels(
       rect.left,
       this.height - rect.bottom,

@@ -177,11 +177,13 @@ export function createIncrementalStrokeRenderer(
   function feedMany(points: readonly InputPoint[]): void {
     if (finalized || points.length === 0) return;
     hasFed = true;
+    // Issue the previous batch's checkpoint readback before queuing new GPU work:
+    // WebKit's readPixels waits for everything queued before it.
+    if (gpuStrokeActive) gpuRuntime?.requestCheckpoint(gpuOwner);
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
       if (gpuStrokeActive) {
         gpuRuntime?.commitToLayer(gpuOwner, config.layer);
-        gpuRuntime?.requestCheckpoint(gpuOwner);
       }
       return;
     }
@@ -222,8 +224,8 @@ export function createIncrementalStrokeRenderer(
       strokeSession = strokeResult.state;
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
       if (gpuStrokeActive) {
-        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
         gpuRuntime?.requestCheckpoint(gpuOwner);
+        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
         gpuRuntime?.endStroke(gpuOwner);
       }
     },
