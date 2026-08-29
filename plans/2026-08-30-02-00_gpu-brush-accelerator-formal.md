@@ -85,7 +85,10 @@ interface BrushAccelerator {
 ## 4. 非目標
 - WebGPU、Chromium向けGPU、Rough bristle GPU（第2フェーズ）、tile atlas（4K上限で不要と判断）、8K
 
-## 5. ペンディング
-- `auto` の判定方法（UA sniff vs capability+実測）
+## 5. ユーザー決定（2026-08-30）
+- `auto` の判定は **UA sniff（WebKit系）**。capability実測はしない
+- **デバッグパネルからbackendを切替可能**にする: 現在engineがどのbackendで動いているか（`webgl2` / `cpu` と、autoで選ばれた理由）を表示し、切替は confirm → リロード。指定は brush 設定と同様に **localStorage に永続化**（`apps/web` の persisted settings に `engineBackend: "auto" | "webgl2" | "cpu"` を追加）。engine/stroke 側は起動時に注入されるacceleratorに従うだけで、動的切替はサポートしない
+- perf-debug 計測（stage timer / stall記録）は**邪魔にならない範囲で残す**（`perfDebug` 時のみ有効、通常時はゼロコスト）。残りの実験knobは削除。計測の削除可否は安定後に再判断
+
+## 6. ペンディング
 - context loss時の進行中strokeの扱いの詳細
-- perf-debug計測の残し方（開発機能として隔離するか削除するか）
