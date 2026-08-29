@@ -44,6 +44,7 @@ export const BRUSH_PERF_SAMPLE_NAMES = [
   "readbackPixels",
   "gpuResidencyHit",
   "gpuBranches",
+  "gpuCommitPixels",
 ] as const;
 
 export type BrushPerfSampleName = (typeof BRUSH_PERF_SAMPLE_NAMES)[number];
@@ -132,6 +133,7 @@ function createSamples(): Record<BrushPerfSampleName, number[]> {
     readbackPixels: [],
     gpuResidencyHit: [],
     gpuBranches: [],
+    gpuCommitPixels: [],
   };
 }
 
@@ -194,6 +196,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
           checkpointWaitMs: [...samples.checkpointWaitMs],
           gpuResidencyHit: [...samples.gpuResidencyHit],
           gpuBranches: [...samples.gpuBranches],
+          gpuCommitPixels: [...samples.gpuCommitPixels],
         },
         stageSeries: Object.fromEntries(
           BRUSH_PERF_STAGE_NAMES.map((name) => [name, [...stageSeries[name]]]),

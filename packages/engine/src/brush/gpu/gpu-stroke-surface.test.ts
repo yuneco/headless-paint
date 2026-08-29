@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { compileExpand, expandPoint } from "../../expand";
 import { createLayer } from "../../layer";
 import {
   advanceMaterialField,
@@ -22,6 +23,8 @@ afterEach(() => {
   brushPerfDebug.experiments.gpuReadback = "gpu-field";
   brushPerfDebug.experiments.checkpointLagSteps = 1;
   brushPerfDebug.experiments.gpuResident = true;
+  brushPerfDebug.enabled = false;
+  brushPerfDebug.reset();
 });
 
 describe("GpuStrokeSurface", () => {
@@ -349,6 +352,55 @@ describe("GpuStrokeSurface", () => {
       }
     }
     expect(firstMismatch).toBe(-1);
+  });
+
+  it("radial 4 Expand の branch 別 commit が従来の union commit と byte-identical", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(256, 256);
+    layer.ctx.fillStyle = "rgb(12, 34, 56)";
+    layer.ctx.fillRect(0, 0, layer.width, layer.height);
+    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas, 4);
+
+    const expanded = expandPoint(
+      { x: 208, y: 128 },
+      compileExpand({
+        levels: [
+          {
+            mode: "radial",
+            offset: { x: 128, y: 128 },
+            angle: 0,
+            divisions: 4,
+          },
+        ],
+      }),
+    );
+    for (const [branchIndex, point] of expanded.entries()) {
+      surface.selectBranch(branchIndex);
+      configureSolidDab(surface, [210, 70, 40, 255], 16);
+      surface.pushDab({
+        x: Math.round(point.x),
+        y: Math.round(point.y),
+        size: 16,
+        rotation: 0,
+        alpha: 1,
+        branchIndex,
+      });
+    }
+    surface.flush();
+    const unionCommitReference = surface.readCheckpoint(0, 0, layer.width);
+
+    surface.commitToLayer(layer);
+
+    const actual = layer.ctx.getImageData(0, 0, layer.width, layer.height).data;
+    expect(actual).toEqual(unionCommitReference);
+    expect(brushPerfDebug.snapshot().samples.gpuCommitPixels).toEqual([
+      4 * 16 * 16,
+    ]);
   });
 
   it('gpuDab: "off" では runtime が surface を生成しない', () => {

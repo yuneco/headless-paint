@@ -345,7 +345,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   );
 
   private instanceCount = 0;
-  private dirtyRect: DirtyRect | null = null;
+  private dirtyRects: (DirtyRect | null)[] = [null];
   private tipSource: OffscreenCanvas | null = null;
   private tipWidth = 0;
   private tipHeight = 0;
@@ -572,7 +572,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
-    this.dirtyRect = null;
+    this.dirtyRects = Array<DirtyRect | null>(branchCount).fill(null);
     this.discardPendingCheckpointSnapshots();
     this.strokeBegun = true;
   }
@@ -867,6 +867,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       (dab.size / 2) *
       (Math.abs(Math.cos(dab.rotation)) + Math.abs(Math.sin(dab.rotation)));
     this.includeDirtyRect(
+      this.currentBranchIndex,
       dab.x - halfExtent,
       dab.y - halfExtent,
       dab.x + halfExtent,
@@ -1139,67 +1140,73 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   commitToLayer(layer: Layer): void {
     this.assertStrokeBegun();
     this.flush();
-    const dirty = this.dirtyRect;
-    if (!dirty || this.lost) return;
-    const left = Math.max(0, Math.floor(dirty.left));
-    const top = Math.max(0, Math.floor(dirty.top));
-    const right = Math.min(this.width, Math.ceil(dirty.right));
-    const bottom = Math.min(this.height, Math.ceil(dirty.bottom));
-    const width = right - left;
-    const height = bottom - top;
-    this.dirtyRect = null;
-    if (width <= 0 || height <= 0) return;
+    if (this.lost) return;
+    const commitRects = this.dirtyRects.flatMap((dirty) => {
+      if (!dirty) return [];
+      const left = Math.max(0, Math.floor(dirty.left));
+      const top = Math.max(0, Math.floor(dirty.top));
+      const right = Math.min(this.width, Math.ceil(dirty.right));
+      const bottom = Math.min(this.height, Math.ceil(dirty.bottom));
+      return right > left && bottom > top ? [{ left, top, right, bottom }] : [];
+    });
+    this.dirtyRects = Array<DirtyRect | null>(this.branchCount).fill(null);
+    if (commitRects.length === 0) return;
 
     const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const gl = this.gl;
+    let committedPixels = 0;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
-    for (let tileTop = top; tileTop < bottom; tileTop += COMMIT_CANVAS_SIZE) {
-      const tileBottom = Math.min(bottom, tileTop + COMMIT_CANVAS_SIZE);
-      const tileHeight = tileBottom - tileTop;
-      for (
-        let tileLeft = left;
-        tileLeft < right;
-        tileLeft += COMMIT_CANVAS_SIZE
-      ) {
-        const tileRight = Math.min(right, tileLeft + COMMIT_CANVAS_SIZE);
-        const tileWidth = tileRight - tileLeft;
-        gl.blitFramebuffer(
-          tileLeft,
-          this.height - tileBottom,
-          tileRight,
-          this.height - tileTop,
-          0,
-          COMMIT_CANVAS_SIZE - tileHeight,
-          tileWidth,
-          COMMIT_CANVAS_SIZE,
-          gl.COLOR_BUFFER_BIT,
-          gl.NEAREST,
-        );
-        layer.ctx.save();
-        layer.ctx.globalAlpha = 1;
-        layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        layer.ctx.beginPath();
-        layer.ctx.rect(tileLeft, tileTop, tileWidth, tileHeight);
-        layer.ctx.clip();
-        layer.ctx.globalCompositeOperation = "copy";
-        layer.ctx.drawImage(
-          this.canvas,
-          0,
-          0,
-          tileWidth,
-          tileHeight,
-          tileLeft,
-          tileTop,
-          tileWidth,
-          tileHeight,
-        );
-        layer.ctx.restore();
+    for (const { left, top, right, bottom } of commitRects) {
+      for (let tileTop = top; tileTop < bottom; tileTop += COMMIT_CANVAS_SIZE) {
+        const tileBottom = Math.min(bottom, tileTop + COMMIT_CANVAS_SIZE);
+        const tileHeight = tileBottom - tileTop;
+        for (
+          let tileLeft = left;
+          tileLeft < right;
+          tileLeft += COMMIT_CANVAS_SIZE
+        ) {
+          const tileRight = Math.min(right, tileLeft + COMMIT_CANVAS_SIZE);
+          const tileWidth = tileRight - tileLeft;
+          committedPixels += tileWidth * tileHeight;
+          gl.blitFramebuffer(
+            tileLeft,
+            this.height - tileBottom,
+            tileRight,
+            this.height - tileTop,
+            0,
+            COMMIT_CANVAS_SIZE - tileHeight,
+            tileWidth,
+            COMMIT_CANVAS_SIZE,
+            gl.COLOR_BUFFER_BIT,
+            gl.NEAREST,
+          );
+          layer.ctx.save();
+          layer.ctx.globalAlpha = 1;
+          layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+          layer.ctx.beginPath();
+          layer.ctx.rect(tileLeft, tileTop, tileWidth, tileHeight);
+          layer.ctx.clip();
+          layer.ctx.globalCompositeOperation = "copy";
+          layer.ctx.drawImage(
+            this.canvas,
+            0,
+            0,
+            tileWidth,
+            tileHeight,
+            tileLeft,
+            tileTop,
+            tileWidth,
+            tileHeight,
+          );
+          layer.ctx.restore();
+        }
       }
     }
     if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample("gpuCommitPixels", committedPixels);
       brushPerfDebug.recordStage("gpuCommit", startedAt);
     }
   }
@@ -1207,7 +1214,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   endStroke(): void {
     this.discardPendingCheckpointSnapshots();
     this.instanceCount = 0;
-    this.dirtyRect = null;
+    this.dirtyRects = [null];
     this.strokeBegun = false;
     this.branchCount = 1;
     this.currentBranchIndex = 0;
@@ -1511,19 +1518,21 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   }
 
   private includeDirtyRect(
+    branchIndex: number,
     left: number,
     top: number,
     right: number,
     bottom: number,
   ): void {
-    if (!this.dirtyRect) {
-      this.dirtyRect = { left, top, right, bottom };
+    const dirtyRect = this.dirtyRects[branchIndex];
+    if (!dirtyRect) {
+      this.dirtyRects[branchIndex] = { left, top, right, bottom };
       return;
     }
-    this.dirtyRect.left = Math.min(this.dirtyRect.left, left);
-    this.dirtyRect.top = Math.min(this.dirtyRect.top, top);
-    this.dirtyRect.right = Math.max(this.dirtyRect.right, right);
-    this.dirtyRect.bottom = Math.max(this.dirtyRect.bottom, bottom);
+    dirtyRect.left = Math.min(dirtyRect.left, left);
+    dirtyRect.top = Math.min(dirtyRect.top, top);
+    dirtyRect.right = Math.max(dirtyRect.right, right);
+    dirtyRect.bottom = Math.max(dirtyRect.bottom, bottom);
   }
 
   private assertUsable(): void {
