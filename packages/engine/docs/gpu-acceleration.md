@@ -56,9 +56,9 @@ interface BrushAccelerator {
 renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?, accelerator?)
 appendToCommittedLayer(layer, points, style, expand, overlapCount?, state?, sourceLayer?, alphaLocked?, accelerator?)
 // stroke（core 利用者が渡す 3 箇所）
-createStrokeRuntime({ ...deps, accelerator })            // live 描画
-replayCommand(command, layers, registry, { accelerator })  // command の再生
-executeHistoryOp(op, ..., { accelerator })                 // Undo / Redo の history rebuild
+createStrokeRuntime({ ...deps, accelerator })              // live 描画（StrokeRuntimeDeps）
+replayCommand(layer, command, registry, { accelerator })   // command の再生（ReplayOptions）
+executeHistoryOp(op, state, { ...deps, accelerator })      // Undo / Redo の history rebuild（ExecutorDeps）
 ```
 
 core 利用者の最小手順:

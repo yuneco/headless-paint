@@ -64,6 +64,12 @@ export {
 } from "@headless-paint/engine";
 
 export {
+  createBrushAccelerator,
+  type BrushAccelerator,
+  type BrushAcceleratorBackend,
+  type BrushAcceleratorOptions,
+} from "@headless-paint/engine";
+export {
   hashSeed,
   mulberry32,
   renderBrushStroke,

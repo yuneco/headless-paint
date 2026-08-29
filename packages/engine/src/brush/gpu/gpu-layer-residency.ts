@@ -1,64 +1,26 @@
 import type { Layer } from "../../types";
-import type { GpuStrokeSurface } from "./gpu-stroke-surface";
+import type { BrushAccelerator } from "./accelerator";
 
-interface GpuLayerResidency {
-  surface: GpuStrokeSurface;
-  valid: boolean;
-  width: number;
-  height: number;
-}
+const layerAccelerators = new WeakMap<Layer, BrushAccelerator>();
 
-const gpuLayerResidencies = new WeakMap<Layer, GpuLayerResidency>();
-let residentLayer: Layer | null = null;
-
-export function prepareGpuLayerResidency(
+export function registerGpuLayerResidency(
   layer: Layer,
-  surface: GpuStrokeSurface,
-): boolean {
-  const previous = residentLayer;
-  if (previous && previous !== layer) {
-    invalidateGpuLayerResidency(previous);
-  }
-
-  residentLayer = layer;
-  const residency = gpuLayerResidencies.get(layer);
-  const hit =
-    residency?.valid === true &&
-    residency.surface === surface &&
-    residency.width === layer.width &&
-    residency.height === layer.height &&
-    surface.width === layer.width &&
-    surface.height === layer.height;
-
-  if (!hit) {
-    gpuLayerResidencies.set(layer, {
-      surface,
-      valid: false,
-      width: layer.width,
-      height: layer.height,
-    });
-  }
-  return hit;
-}
-
-export function validateGpuLayerResidency(
-  layer: Layer,
-  surface: GpuStrokeSurface,
+  accelerator: BrushAccelerator,
 ): void {
-  const previous = residentLayer;
-  if (previous && previous !== layer) {
-    invalidateGpuLayerResidency(previous);
+  const previous = layerAccelerators.get(layer);
+  if (previous && previous !== accelerator) previous.invalidate(layer);
+  layerAccelerators.set(layer, accelerator);
+}
+
+export function unregisterGpuLayerResidency(
+  layer: Layer,
+  accelerator: BrushAccelerator,
+): void {
+  if (layerAccelerators.get(layer) === accelerator) {
+    layerAccelerators.delete(layer);
   }
-  residentLayer = layer;
-  gpuLayerResidencies.set(layer, {
-    surface,
-    valid: true,
-    width: layer.width,
-    height: layer.height,
-  });
 }
 
 export function invalidateGpuLayerResidency(layer: Layer): void {
-  const residency = gpuLayerResidencies.get(layer);
-  if (residency) residency.valid = false;
+  layerAccelerators.get(layer)?.invalidate(layer);
 }

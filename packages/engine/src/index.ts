@@ -65,6 +65,12 @@ export {
   SPRAY_MAX_PARTICLES_PER_EMISSION,
 } from "./types";
 export {
+  createBrushAccelerator,
+  type BrushAccelerator,
+  type BrushAcceleratorBackend,
+  type BrushAcceleratorOptions,
+} from "./brush/gpu/accelerator";
+export {
   createBrushTipRegistry,
   generateBrushTip,
   hashSeed,

@@ -7,6 +7,7 @@ import {
   timeSpacingMsFromRate,
 } from "@headless-paint/engine";
 import type {
+  BrushAccelerator,
   BrushRenderState,
   BrushTipRegistry,
   CompiledExpand,
@@ -53,6 +54,7 @@ export interface StrokeRuntimeDeps {
   readonly onCommit: (command: StrokeCommand) => void;
   readonly onDrawingChanged: (isDrawing: boolean) => void;
   readonly randomSeed?: () => number;
+  readonly accelerator?: BrushAccelerator | null;
 }
 
 export interface StrokeRuntime {
@@ -318,6 +320,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       brushSeed,
       alphaLocked: start.config.alphaLocked,
       registry: start.config.tipRegistry,
+      accelerator: deps.accelerator,
       onRenderUpdate: (update) => {
         brushState = update.brushState;
       },

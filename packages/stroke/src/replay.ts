@@ -1,4 +1,8 @@
-import type { BrushTipRegistry, Layer } from "@headless-paint/engine";
+import type {
+  BrushAccelerator,
+  BrushTipRegistry,
+  Layer,
+} from "@headless-paint/engine";
 import {
   clearLayer,
   copyLayerPixels,
@@ -29,6 +33,7 @@ function replayStrokeCommand(
   layer: Layer,
   command: StrokeCommand,
   registry?: BrushTipRegistry,
+  accelerator?: BrushAccelerator | null,
 ): void {
   const renderer = createIncrementalStrokeRenderer({
     layer,
@@ -38,6 +43,7 @@ function replayStrokeCommand(
     brushSeed: command.brushSeed,
     alphaLocked: command.alphaLocked,
     registry,
+    accelerator,
   });
   renderer.feedMany(command.inputPoints);
   renderer.finalize();
@@ -89,13 +95,14 @@ export function replayCommand<TCustom = never>(
   layer: Layer,
   command: Command<TCustom>,
   registry?: BrushTipRegistry,
+  options: ReplayOptions = {},
 ): void {
   if (!isDrawCommand(command)) {
     return;
   }
   switch (command.type) {
     case "stroke":
-      replayStrokeCommand(layer, command, registry);
+      replayStrokeCommand(layer, command, registry, options.accelerator);
       break;
     case "clear":
       clearLayer(layer);
@@ -116,9 +123,10 @@ export function replayCommands<TCustom = never>(
   layer: Layer,
   commands: readonly Command<TCustom>[],
   registry?: BrushTipRegistry,
+  options: ReplayOptions = {},
 ): void {
   for (const command of commands) {
-    replayCommand(layer, command, registry);
+    replayCommand(layer, command, registry, options);
   }
 }
 
@@ -130,11 +138,12 @@ export function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
   registry?: BrushTipRegistry,
+  options: ReplayOptions = {},
 ): RebuildLayerResult {
   const checkpoint = findBestCheckpointForLayer(state, layer.id);
 
   if (checkpoint) {
-    restoreFromCheckpoint(layer, checkpoint);
+    restoreFromCheckpoint(layer, checkpoint, options.accelerator);
   } else if (
     state.currentIndex < state.historyStartIndex ||
     hasLayerCreationCommand(state, layer.id)
@@ -155,7 +164,7 @@ export function rebuildLayerFromHistory<TCustom = never>(
     const command = getCommandAt(state, i);
     if (!command) continue;
     if (isDrawCommand(command)) {
-      replayCommand(layer, command, registry);
+      replayCommand(layer, command, registry, options);
       continue;
     }
     if (!isStructuralCommand(command)) continue;
@@ -167,6 +176,7 @@ export function rebuildLayerFromHistory<TCustom = never>(
         sourceLayer,
         { ...state, currentIndex: i - 1 },
         registry,
+        options,
       );
       if (!result.ok) return result;
       copyLayerPixels(sourceLayer, layer);
@@ -189,6 +199,7 @@ export function rebuildLayerFromHistory<TCustom = never>(
         sourceLayer,
         { ...state, currentIndex: i - 1 },
         registry,
+        options,
       );
       if (!result.ok) return result;
       mergeLayerDown(layer, sourceLayer, {
@@ -197,6 +208,10 @@ export function rebuildLayerFromHistory<TCustom = never>(
     }
   }
   return { ok: true, source: checkpoint ? "checkpoint" : "empty" };
+}
+
+export interface ReplayOptions {
+  readonly accelerator?: BrushAccelerator | null;
 }
 
 /**

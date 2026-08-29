@@ -10,7 +10,10 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
-import { getActiveGpuStrokeSurface } from "./gpu/gpu-stroke-surface";
+import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./gpu/accelerator";
 import {
   type MixingUpdateInput,
   getActiveMixing,
@@ -52,13 +55,11 @@ export function renderStampBrushStroke(
   state: BrushRenderState,
   overlapCount: number,
   sourceLayer: Layer,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
   if (brushPerfDebug.nullStages.nullRender) return state;
   const { dynamics } = brush;
-  const spacingPx =
-    style.lineWidth *
-    dynamics.spacing *
-    brushPerfDebug.experiments.spacingScale;
+  const spacingPx = style.lineWidth * dynamics.spacing;
   const branch = state.branches[0];
 
   if (spacingPx <= 0 || !state.tipCanvas || points.length === 0 || !branch) {
@@ -98,6 +99,7 @@ export function renderStampBrushStroke(
         sourceLayer,
         mixing,
         mixingState,
+        accelerator,
       );
       mixingState = result.mixing;
     },
@@ -167,6 +169,7 @@ function stampAt(
   sourceLayer: Layer,
   mixing: BrushMixing | null,
   mixingState: BrushMixingState | undefined,
+  accelerator?: BrushAccelerator | null,
 ): StampAtResult {
   const localSeed = hashSeed(seed, emissionIndex);
   const rng = mulberry32(localSeed);
@@ -205,7 +208,7 @@ function stampAt(
   const y = point.y + scatterY;
 
   const ctx = layer.ctx;
-  const gpuSurface = mixing ? getActiveGpuStrokeSurface() : null;
+  const gpuSurface = mixing ? getActiveGpuStrokeSurface(accelerator) : null;
   const dabDrawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   if (!gpuSurface) {
     ctx.save();
@@ -222,6 +225,7 @@ function stampAt(
       style.color,
       mixing,
       mixingState,
+      accelerator,
     );
     drawCanvas = getDabSource(nextMixingState.renderCanvas);
     if (!brushPerfDebug.nullStages.nullRotate) {
@@ -254,6 +258,7 @@ function stampAt(
       nextMixingState = prepareInitialMixingCheckpoint(
         mixingUpdateInput,
         nextMixingState,
+        accelerator,
       );
     }
   }
@@ -293,10 +298,13 @@ function stampAt(
     brushPerfDebug.recordStage("dabDraw", dabDrawStartedAt);
   }
   if (mixingUpdateInput && nextMixingState) {
-    nextMixingState = updateMixingAfterDeposit({
-      ...mixingUpdateInput,
-      state: nextMixingState,
-    });
+    nextMixingState = updateMixingAfterDeposit(
+      {
+        ...mixingUpdateInput,
+        state: nextMixingState,
+      },
+      accelerator,
+    );
   }
   return {
     mixing: nextMixingState,

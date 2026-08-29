@@ -80,22 +80,6 @@ function configureBrushPerfDebugFromUrl(): void {
   if (!perf) return;
   const params = new URLSearchParams(window.location.search);
   perf.enabled = params.get("perfDebug") === "1";
-  perf.experiments.spacingScale =
-    Number(params.get("spacingScale") ?? "1") || 1;
-  perf.experiments.checkpointScale =
-    Number(params.get("checkpointScale") ?? "1") || 1;
-  const checkpointLagSteps = Number(params.get("checkpointLag") ?? "1");
-  perf.experiments.checkpointLagSteps =
-    Number.isSafeInteger(checkpointLagSteps) && checkpointLagSteps >= 1
-      ? checkpointLagSteps
-      : 1;
-  perf.experiments.updateScale = Number(params.get("updateScale") ?? "1") || 1;
-  perf.experiments.bitmapDab = params.get("bitmapDab") === "1";
-  perf.experiments.gpuDab =
-    params.get("gpuDab") === "webgl2" ? "webgl2" : "off";
-  perf.experiments.gpuReadback =
-    params.get("gpuReadback") === "sync" ? "sync" : "gpu-field";
-  perf.experiments.gpuResident = params.get("gpuResident") !== "0";
   const stallThresholdMs = Number(params.get("stallThresholdMs") ?? "60");
   perf.experiments.stallThresholdMs =
     Number.isFinite(stallThresholdMs) && stallThresholdMs >= 0

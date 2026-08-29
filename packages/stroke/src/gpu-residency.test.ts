@@ -1,9 +1,15 @@
-import type { ExpandConfig, Layer, StrokeStyle } from "@headless-paint/engine";
+import type {
+  BrushAccelerator,
+  ExpandConfig,
+  Layer,
+  StrokeStyle,
+} from "@headless-paint/engine";
 import {
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
   ROUND_PEN,
+  createBrushAccelerator,
   createLayer,
 } from "@headless-paint/engine";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
@@ -93,8 +99,6 @@ const CPU_POINTS: readonly InputPoint[] = [
 afterEach(() => {
   const perf = getPerf();
   perf.enabled = false;
-  perf.experiments.gpuDab = "off";
-  perf.experiments.gpuResident = true;
   perf.reset();
 });
 
@@ -147,7 +151,8 @@ describe("GPU layer residency", () => {
   });
 
   it("Undoのhistory rebuild後は無効化され、次のGPU strokeでuploadする", () => {
-    const perf = configurePerf(true);
+    const perf = configurePerf();
+    const accelerator = requireAccelerator({ resident: true });
     const layer = createTestLayer();
     let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
     history = beginHistoryMutation(history, { affectedLayers: [layer] });
@@ -159,6 +164,7 @@ describe("GPU layer residency", () => {
       expand: EXPAND,
       brushSeed: 101,
       alphaLocked: false,
+      accelerator,
     });
     history = pushCommand(history, first.command, {
       afterLayer: layer,
@@ -173,20 +179,25 @@ describe("GPU layer residency", () => {
       expand: EXPAND,
       brushSeed: 202,
       alphaLocked: false,
+      accelerator,
     });
     history = pushCommand(history, second.command, {
       afterLayer: layer,
       layerCount: 1,
     });
 
-    const undoResult = executeHistoryOp("undo", history, { layers: [layer] });
+    const undoResult = executeHistoryOp("undo", history, {
+      layers: [layer],
+      accelerator,
+    });
     expect(undoResult.ok).toBe(true);
     perf.reset();
 
-    drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 303);
+    drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 303, EXPAND, accelerator);
     const snapshot = perf.snapshot();
     expect(snapshot.samples.gpuResidencyHit).toEqual([0]);
     expect(snapshot.stages.gpuUpload.count).toBe(1);
+    accelerator.dispose();
   });
 });
 
@@ -203,19 +214,24 @@ function renderSequence(
   includeCpuStroke: boolean,
   expand: ExpandConfig = EXPAND,
 ): SequenceResult {
-  const perf = configurePerf(gpuResident);
+  const perf = configurePerf();
+  const accelerator = requireAccelerator({ resident: gpuResident });
   const layer = createTestLayer();
-  drawStroke(layer, GPU_STYLE, FIRST_GPU_POINTS, 101, expand);
-  if (includeCpuStroke) drawStroke(layer, CPU_STYLE, CPU_POINTS, 77);
-  drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 202, expand);
+  drawStroke(layer, GPU_STYLE, FIRST_GPU_POINTS, 101, expand, accelerator);
+  if (includeCpuStroke) {
+    drawStroke(layer, CPU_STYLE, CPU_POINTS, 77, EXPAND, accelerator);
+  }
+  drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 202, expand, accelerator);
   const snapshot = perf.snapshot();
-  return {
+  const result = {
     layer,
     residencyHits: snapshot.samples.gpuResidencyHit,
     gpuUploadCount: snapshot.stages.gpuUpload.count,
     samplingCopyPixels: snapshot.samples.samplingCopyPixels,
     gpuBranches: snapshot.samples.gpuBranches,
   };
+  accelerator.dispose();
+  return result;
 }
 
 function drawStroke(
@@ -224,6 +240,7 @@ function drawStroke(
   points: readonly InputPoint[],
   brushSeed: number,
   expand: ExpandConfig = EXPAND,
+  accelerator?: BrushAccelerator | null,
 ): void {
   const renderer = createIncrementalStrokeRenderer({
     layer,
@@ -232,6 +249,7 @@ function drawStroke(
     expand,
     brushSeed,
     alphaLocked: false,
+    accelerator,
   });
   renderer.feedMany(points);
   renderer.finalize();
@@ -246,21 +264,15 @@ function createTestLayer(): Layer {
   return layer;
 }
 
-function configurePerf(gpuResident: boolean): BrushPerfTestBridge {
+function configurePerf(): BrushPerfTestBridge {
   const perf = getPerf();
   perf.enabled = true;
   perf.reset();
-  perf.experiments.gpuDab = "webgl2";
-  perf.experiments.gpuResident = gpuResident;
   return perf;
 }
 
 interface BrushPerfTestBridge {
   enabled: boolean;
-  readonly experiments: {
-    gpuDab: "off" | "webgl2";
-    gpuResident: boolean;
-  };
   reset(): void;
   snapshot(): {
     readonly stages: {
@@ -272,6 +284,17 @@ interface BrushPerfTestBridge {
       readonly gpuBranches: readonly number[];
     };
   };
+}
+
+function requireAccelerator(options: {
+  readonly resident: boolean;
+}): BrushAccelerator {
+  const accelerator = createBrushAccelerator({
+    backend: "webgl2",
+    resident: options.resident,
+  });
+  if (!accelerator) throw new Error("WebGL2 accelerator is unavailable");
+  return accelerator;
 }
 
 function getPerf(): BrushPerfTestBridge {

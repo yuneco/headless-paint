@@ -10,140 +10,22 @@ import { sampleRotatedCheckpoint } from "../mixing";
 import { brushPerfDebug } from "../perf-debug";
 import {
   type GpuStrokeSurface,
-  acquireGpuStrokeSurface,
-  getGpuStrokeSurfaceCreationCountForTest,
+  createGpuStrokeSurface,
 } from "./gpu-stroke-surface";
 
 let surfaceUnderTest: GpuStrokeSurface | null = null;
 
 afterEach(() => {
-  surfaceUnderTest?.endStroke();
+  surfaceUnderTest?.dispose();
   surfaceUnderTest = null;
-  brushPerfDebug.experiments.gpuDab = "off";
-  brushPerfDebug.experiments.gpuReadback = "gpu-field";
-  brushPerfDebug.experiments.checkpointLagSteps = 1;
-  brushPerfDebug.experiments.gpuResident = true;
   brushPerfDebug.enabled = false;
   brushPerfDebug.reset();
 });
 
 describe("GpuStrokeSurface", () => {
-  it("beginStroke の source pixel を unpremultiplied checkpoint として返す", () => {
-    const source = new OffscreenCanvas(64, 48);
-    const ctx = source.getContext("2d");
-    expect(ctx).not.toBeNull();
-    if (!ctx) return;
-    ctx.fillStyle = "rgba(120, 40, 200, 0.5)";
-    ctx.fillRect(4, 5, 1, 1);
-
-    const surface = acquireGpuStrokeSurface(source.width, source.height);
-    expect(surface).not.toBeNull();
-    if (!surface) return;
-    surfaceUnderTest = surface;
-    surface.beginStroke(source);
-
-    const pixel = surface.readCheckpoint(4, 5, 1);
-    expectChannelNear(pixel[0], 120);
-    expectChannelNear(pixel[1], 40);
-    expectChannelNear(pixel[2], 200);
-    expectChannelNear(pixel[3], 128);
-  });
-
-  it("snapshot 後の dab を含めず snapshot 時点の色付き pixel を返す", () => {
-    const layer = createLayer(64, 48);
-    layer.ctx.fillStyle = "rgba(30, 140, 220, 0.75)";
-    layer.ctx.fillRect(0, 0, layer.width, layer.height);
-
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
-    expect(surface).not.toBeNull();
-    if (!surface) return;
-    surfaceUnderTest = surface;
-    surface.beginStroke(layer.canvas);
-    const snapshotId = surface.snapshotCheckpoint(16, 8, 32);
-    configureSolidDab(surface, [240, 25, 10, 255], 8);
-    surface.pushDab({ x: 32, y: 24, size: 8, rotation: 0, alpha: 1 });
-    surface.flush();
-    surface.issuePendingReadbacks();
-    const checkpoint = surface.takeCheckpoint(snapshotId, { wait: true });
-
-    expect(checkpoint).not.toBeNull();
-    if (!checkpoint) return;
-    expect(checkpoint.originX).toBe(16);
-    expect(checkpoint.originY).toBe(8);
-    expect(checkpoint.width).toBe(32);
-    expect(checkpoint.height).toBe(32);
-    expectCheckpointDocumentPixel(checkpoint, 32, 24, [30, 140, 220, 191]);
-
-    surface.commitToLayer(layer);
-    expectPixelNear(layer, 32, 24, [240, 25, 10, 255]);
-  });
-
-  it("async checkpoint の document 座標が色付き source と一致する", () => {
-    const layer = createLayer(96, 64);
-    layer.ctx.fillStyle = "rgb(220, 30, 20)";
-    layer.ctx.fillRect(0, 0, layer.width / 2, layer.height);
-    layer.ctx.fillStyle = "rgb(20, 40, 230)";
-    layer.ctx.fillRect(layer.width / 2, 0, layer.width / 2, layer.height);
-
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
-    expect(surface).not.toBeNull();
-    if (!surface) return;
-    surfaceUnderTest = surface;
-    surface.beginStroke(layer.canvas);
-    configureSolidDab(surface, [0, 0, 0, 0], 8);
-    surface.pushDab({ x: 48, y: 32, size: 8, rotation: 0, alpha: 1 });
-    surface.flush();
-    const snapshotId = surface.snapshotCheckpoint(0, 0, layer.width);
-    surface.issuePendingReadbacks();
-
-    const checkpoint = surface.takeCheckpoint(snapshotId, { wait: true });
-    expect(checkpoint).not.toBeNull();
-    if (!checkpoint) return;
-    expectCheckpointDocumentPixel(checkpoint, 16, 12, [220, 30, 20, 255]);
-    expectCheckpointDocumentPixel(checkpoint, 80, 45, [20, 40, 230, 255]);
-  });
-
-  it("lag=3 の predecessor snapshot を N+2 slot ring から順に返す", () => {
-    brushPerfDebug.experiments.checkpointLagSteps = 3;
-    const layer = createLayer(32, 32);
-    layer.ctx.fillStyle = "rgb(10, 20, 30)";
-    layer.ctx.fillRect(0, 0, layer.width, layer.height);
-
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
-    expect(surface).not.toBeNull();
-    if (!surface) return;
-    surfaceUnderTest = surface;
-    surface.beginStroke(layer.canvas);
-
-    const snapshot0 = surface.snapshotCheckpoint(0, 0, layer.width);
-    configureSolidDab(surface, [220, 40, 20, 255], 8);
-    surface.pushDab({ x: 16, y: 16, size: 8, rotation: 0, alpha: 1 });
-    const snapshot1 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot0);
-    const snapshot2 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot1);
-    const snapshot3 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot2);
-    surface.issuePendingReadbacks();
-
-    const completed0 = surface.takeCheckpoint(snapshot3, {
-      wait: true,
-      lagSteps: 3,
-    });
-    expect(completed0).not.toBeNull();
-    if (!completed0) return;
-    expectCheckpointDocumentPixel(completed0, 16, 16, [10, 20, 30, 255]);
-
-    const snapshot4 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot3);
-    const completed1 = surface.takeCheckpoint(snapshot4, {
-      wait: true,
-      lagSteps: 3,
-    });
-    expect(completed1).not.toBeNull();
-    if (!completed1) return;
-    expectCheckpointDocumentPixel(completed1, 16, 16, [220, 40, 20, 255]);
-  });
-
   it("単色 field と円 tip の dab を layer に commit する", () => {
     const layer = createLayer(64, 48);
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -187,7 +69,7 @@ describe("GpuStrokeSurface", () => {
 
   it("branch ごとの field を独立保持し branch 順に重ねる", () => {
     const layer = createLayer(64, 48);
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -236,7 +118,7 @@ describe("GpuStrokeSurface", () => {
     sourceCtx.fillStyle = "rgb(20, 50, 230)";
     sourceCtx.fillRect(32, 0, 32, 32);
 
-    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    const surface = createGpuStrokeSurface(source.width, source.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -288,7 +170,7 @@ describe("GpuStrokeSurface", () => {
     sourceCtx.fillStyle = "rgb(20, 50, 230)";
     sourceCtx.fillRect(0, 0, source.width, source.height);
 
-    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    const surface = createGpuStrokeSurface(source.width, source.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -335,7 +217,7 @@ describe("GpuStrokeSurface", () => {
     sourceCtx.fillStyle = "rgb(30, 210, 80)";
     sourceCtx.fillRect(18, 10, 31, 46);
 
-    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    const surface = createGpuStrokeSurface(source.width, source.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -418,7 +300,7 @@ describe("GpuStrokeSurface", () => {
     sourceCtx.fillStyle = "rgb(20, 50, 230)";
     sourceCtx.fillRect(0, 0, source.width, source.height);
 
-    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    const surface = createGpuStrokeSurface(source.width, source.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -493,7 +375,7 @@ describe("GpuStrokeSurface", () => {
 
   it("strip field の dab 補間が Canvas2D の field 拡大と一致する", () => {
     const layer = createLayer(32, 32);
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -545,7 +427,7 @@ describe("GpuStrokeSurface", () => {
     const layer = createLayer(128, 64);
     layer.ctx.fillStyle = "rgb(10, 20, 30)";
     layer.ctx.fillRect(0, 0, layer.width, layer.height);
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -568,7 +450,7 @@ describe("GpuStrokeSurface", () => {
     const layer = createLayer(1400, 1100);
     layer.ctx.fillStyle = "rgb(12, 34, 56)";
     layer.ctx.fillRect(0, 0, layer.width, layer.height);
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -579,16 +461,9 @@ describe("GpuStrokeSurface", () => {
     surface.pushDab({ x: 1300, y: 1050, size: 16, rotation: 0, alpha: 1 });
     surface.commitToLayer(layer);
 
-    const actual = layer.ctx.getImageData(0, 0, layer.width, layer.height).data;
-    const expected = surface.readCheckpoint(0, 0, layer.width);
-    let firstMismatch = -1;
-    for (let offset = 0; offset < actual.length; offset++) {
-      if (actual[offset] !== expected[offset]) {
-        firstMismatch = offset;
-        break;
-      }
-    }
-    expect(firstMismatch).toBe(-1);
+    expectPixelNear(layer, 100, 50, [210, 70, 40, 255]);
+    expectPixelNear(layer, 1300, 1050, [210, 70, 40, 255]);
+    expectPixelNear(layer, 700, 550, [12, 34, 56, 255]);
     expect(brushPerfDebug.snapshot().samples.gpuCommitDraws).toEqual([6]);
   });
 
@@ -598,7 +473,7 @@ describe("GpuStrokeSurface", () => {
     const layer = createLayer(256, 256);
     layer.ctx.fillStyle = "rgb(12, 34, 56)";
     layer.ctx.fillRect(0, 0, layer.width, layer.height);
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -629,31 +504,21 @@ describe("GpuStrokeSurface", () => {
         branchIndex,
       });
     }
-    surface.flush();
-    const unionCommitReference = surface.readCheckpoint(0, 0, layer.width);
-
     surface.commitToLayer(layer);
 
-    const actual = layer.ctx.getImageData(0, 0, layer.width, layer.height).data;
-    expect(actual).toEqual(unionCommitReference);
+    for (const point of expanded) {
+      expectPixelNear(
+        layer,
+        Math.round(point.x),
+        Math.round(point.y),
+        [210, 70, 40, 255],
+      );
+    }
+    expectPixelNear(layer, 128, 128, [12, 34, 56, 255]);
     expect(brushPerfDebug.snapshot().samples.gpuCommitPixels).toEqual([
       4 * 16 * 16,
     ]);
     expect(brushPerfDebug.snapshot().samples.gpuCommitDraws).toEqual([4]);
-  });
-
-  it('gpuDab: "off" では runtime が surface を生成しない', () => {
-    brushPerfDebug.experiments.gpuDab = "off";
-    const creationsBefore = getGpuStrokeSurfaceCreationCountForTest();
-    const layer = createLayer(80, 60);
-    const began = globalThis.__hpGpuStrokeRuntime?.beginStroke(
-      {},
-      layer,
-      layer.canvas,
-    );
-
-    expect(began).toBe(false);
-    expect(getGpuStrokeSurfaceCreationCountForTest()).toBe(creationsBefore);
   });
 });
 
@@ -691,26 +556,5 @@ function expectPixelNear(
   const pixel = layer.ctx.getImageData(x, y, 1, 1).data;
   for (let channel = 0; channel < expected.length; channel++) {
     expectChannelNear(pixel[channel], expected[channel] ?? 0);
-  }
-}
-
-function expectCheckpointDocumentPixel(
-  checkpoint: NonNullable<ReturnType<GpuStrokeSurface["takeCheckpoint"]>>,
-  x: number,
-  y: number,
-  expected: readonly [number, number, number, number],
-): void {
-  const localX = x - checkpoint.originX;
-  const localY = y - checkpoint.originY;
-  expect(localX).toBeGreaterThanOrEqual(0);
-  expect(localX).toBeLessThan(checkpoint.width);
-  expect(localY).toBeGreaterThanOrEqual(0);
-  expect(localY).toBeLessThan(checkpoint.height);
-  const offset = (localY * checkpoint.width + localX) * 4;
-  for (let channel = 0; channel < expected.length; channel++) {
-    expectChannelNear(
-      checkpoint.pixels[offset + channel],
-      expected[channel] ?? 0,
-    );
   }
 }

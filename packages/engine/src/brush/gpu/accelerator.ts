@@ -1,0 +1,306 @@
+import type { Layer } from "../../types";
+import { brushPerfDebug } from "../perf-debug";
+import {
+  registerGpuLayerResidency,
+  unregisterGpuLayerResidency,
+} from "./gpu-layer-residency";
+import {
+  type GpuStrokeSurface,
+  createGpuStrokeSurface,
+} from "./gpu-stroke-surface";
+
+const DEFAULT_MAX_BRANCHES = 64;
+
+export type BrushAcceleratorBackend = "auto" | "webgl2" | "cpu";
+
+export interface BrushAcceleratorOptions {
+  readonly backend?: BrushAcceleratorBackend;
+  readonly maxBranches?: number;
+  readonly resident?: boolean;
+}
+
+export interface BrushAccelerator {
+  readonly backend: "webgl2";
+  warmUp(layer: Layer): void;
+  invalidate(layer: Layer): void;
+  dispose(): void;
+}
+
+interface LayerResidency {
+  readonly surface: GpuStrokeSurface;
+  readonly width: number;
+  readonly height: number;
+  valid: boolean;
+}
+
+/** Internal runtime contract. It is intentionally absent from the public type. */
+interface BrushAcceleratorRuntime extends BrushAccelerator {
+  supportsBranchCount(branchCount: number): boolean;
+  beginStroke(
+    owner: object,
+    layer: Layer,
+    sourceCanvas?: OffscreenCanvas,
+    branchCount?: number,
+  ): boolean;
+  enter(owner: object): void;
+  leave(owner: object): void;
+  commitToLayer(owner: object, layer: Layer): void;
+  endStroke(owner: object): void;
+  isLayerResident(layer: Layer): boolean;
+  getActiveSurface(): GpuStrokeSurface | null;
+  readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
+}
+
+export function isWebKitUserAgent(userAgent: string): boolean {
+  return (
+    /AppleWebKit/i.test(userAgent) &&
+    !/(?:Chrome|Chromium|CriOS|Edg|EdgiOS|EdgA|Firefox|FxiOS)/i.test(userAgent)
+  );
+}
+
+export function createBrushAccelerator(
+  options: BrushAcceleratorOptions = {},
+): BrushAccelerator | null {
+  const backend = options.backend ?? "auto";
+  if (backend === "cpu") return null;
+  if (
+    backend === "auto" &&
+    (typeof navigator === "undefined" ||
+      !isWebKitUserAgent(navigator.userAgent))
+  ) {
+    return null;
+  }
+
+  const surface = createGpuStrokeSurface(1, 1);
+  if (!surface) return null;
+  return new WebGl2BrushAccelerator(surface, options);
+}
+
+export function getBrushAcceleratorRuntime(
+  accelerator: BrushAccelerator | null | undefined,
+): BrushAcceleratorRuntime | null {
+  return accelerator instanceof WebGl2BrushAccelerator ? accelerator : null;
+}
+
+export function getActiveGpuStrokeSurface(
+  accelerator: BrushAccelerator | null | undefined,
+): GpuStrokeSurface | null {
+  return getBrushAcceleratorRuntime(accelerator)?.getActiveSurface() ?? null;
+}
+
+class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
+  readonly backend = "webgl2" as const;
+
+  private surface: GpuStrokeSurface | null;
+  private readonly maxBranches: number;
+  private readonly resident: boolean;
+  private readonly residencies = new WeakMap<Layer, LayerResidency>();
+  private residentLayer: Layer | null = null;
+  private activeOwner: object | null = null;
+  private currentOwner: object | null = null;
+  private activeSurface: GpuStrokeSurface | null = null;
+  private activeLayer: Layer | null = null;
+  private disposed = false;
+  private permanentlyUnavailable = false;
+
+  constructor(surface: GpuStrokeSurface, options: BrushAcceleratorOptions) {
+    this.surface = surface;
+    this.maxBranches = sanitizeMaxBranches(options.maxBranches);
+    this.resident = options.resident ?? true;
+  }
+
+  warmUp(layer: Layer): void {
+    if (this.disposed || this.activeOwner) return;
+    const surface = this.acquireSurface(layer.width, layer.height);
+    if (!surface) return;
+    try {
+      surface.beginStroke(layer.canvas, 1);
+      surface.endStroke();
+      this.validateResidency(layer, surface);
+    } catch {
+      this.invalidate(layer);
+    }
+  }
+
+  invalidate(layer: Layer): void {
+    const residency = this.residencies.get(layer);
+    if (residency) residency.valid = false;
+    if (this.residentLayer === layer) this.residentLayer = null;
+    unregisterGpuLayerResidency(layer, this);
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.activeOwner) this.activeSurface?.endStroke();
+    if (this.activeLayer) this.invalidate(this.activeLayer);
+    this.activeOwner = null;
+    this.currentOwner = null;
+    this.activeSurface = null;
+    this.activeLayer = null;
+    if (this.residentLayer) this.invalidate(this.residentLayer);
+    this.surface?.dispose();
+    this.surface = null;
+  }
+
+  supportsBranchCount(branchCount: number): boolean {
+    return (
+      !this.disposed &&
+      !this.permanentlyUnavailable &&
+      Number.isSafeInteger(branchCount) &&
+      branchCount >= 1 &&
+      branchCount <= this.maxBranches &&
+      branchCount <= (this.surface?.maxBranchCount ?? DEFAULT_MAX_BRANCHES)
+    );
+  }
+
+  beginStroke(
+    owner: object,
+    layer: Layer,
+    sourceCanvas?: OffscreenCanvas,
+    branchCount = 1,
+  ): boolean {
+    if (!this.supportsBranchCount(branchCount)) return false;
+    if (this.activeOwner && this.activeOwner !== owner) {
+      if (brushPerfDebug.enabled) {
+        brushPerfDebug.recordEvent("gpuStaleOwnerRecovered", {});
+      }
+      this.activeSurface?.endStroke();
+      if (this.activeLayer) this.invalidate(this.activeLayer);
+      this.activeOwner = null;
+      this.currentOwner = null;
+      this.activeSurface = null;
+      this.activeLayer = null;
+    }
+    if (this.activeOwner) return false;
+
+    const surface = this.acquireSurface(layer.width, layer.height);
+    if (!surface || surface.lost) return false;
+    const residencyHit = this.resident && this.prepareResidency(layer, surface);
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample("gpuResidencyHit", residencyHit ? 1 : 0);
+      brushPerfDebug.recordSample("gpuBranches", branchCount);
+      brushPerfDebug.recordEvent("residency", { hit: residencyHit });
+    }
+    if (!residencyHit && !sourceCanvas) return false;
+    try {
+      surface.beginStroke(residencyHit ? undefined : sourceCanvas, branchCount);
+    } catch {
+      this.invalidate(layer);
+      if (surface.lost) this.permanentlyUnavailable = true;
+      return false;
+    }
+    this.validateResidency(layer, surface);
+    this.activeOwner = owner;
+    this.activeSurface = surface;
+    this.activeLayer = layer;
+    return true;
+  }
+
+  enter(owner: object): void {
+    if (this.activeOwner === owner) this.currentOwner = owner;
+  }
+
+  leave(owner: object): void {
+    if (this.currentOwner === owner) this.currentOwner = null;
+  }
+
+  commitToLayer(owner: object, layer: Layer): void {
+    if (this.activeOwner !== owner) return;
+    try {
+      this.activeSurface?.commitToLayer(layer);
+    } catch {
+      this.invalidate(layer);
+      return;
+    }
+    if (this.activeSurface && !this.activeSurface.lost) {
+      this.validateResidency(layer, this.activeSurface);
+    } else {
+      this.invalidate(layer);
+      this.permanentlyUnavailable = true;
+    }
+  }
+
+  endStroke(owner: object): void {
+    if (this.activeOwner !== owner) return;
+    const lost = this.activeSurface?.lost ?? false;
+    this.activeSurface?.endStroke();
+    if (lost && this.activeLayer) this.invalidate(this.activeLayer);
+    this.activeOwner = null;
+    this.currentOwner = null;
+    this.activeSurface = null;
+    this.activeLayer = null;
+  }
+
+  isLayerResident(layer: Layer): boolean {
+    if (!this.resident || this.disposed || this.permanentlyUnavailable) {
+      return false;
+    }
+    const surface = this.acquireSurface(layer.width, layer.height);
+    return surface ? this.prepareResidency(layer, surface) : false;
+  }
+
+  getActiveSurface(): GpuStrokeSurface | null {
+    return this.currentOwner === this.activeOwner ? this.activeSurface : null;
+  }
+
+  readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null {
+    return this.activeSurface?.readMaterialFieldForTest(branchIndex) ?? null;
+  }
+
+  private acquireSurface(
+    width: number,
+    height: number,
+  ): GpuStrokeSurface | null {
+    if (this.disposed || this.permanentlyUnavailable) return null;
+    if (this.surface?.lost) {
+      this.permanentlyUnavailable = true;
+      return null;
+    }
+    if (this.surface?.width === width && this.surface.height === height) {
+      return this.surface;
+    }
+    this.surface?.dispose();
+    this.surface = createGpuStrokeSurface(width, height);
+    if (!this.surface) {
+      this.permanentlyUnavailable = true;
+      return null;
+    }
+    if (this.residentLayer) this.invalidate(this.residentLayer);
+    return this.surface;
+  }
+
+  private prepareResidency(layer: Layer, surface: GpuStrokeSurface): boolean {
+    const residency = this.residencies.get(layer);
+    return (
+      this.residentLayer === layer &&
+      residency?.valid === true &&
+      residency.surface === surface &&
+      residency.width === layer.width &&
+      residency.height === layer.height &&
+      surface.width === layer.width &&
+      surface.height === layer.height
+    );
+  }
+
+  private validateResidency(layer: Layer, surface: GpuStrokeSurface): void {
+    if (this.residentLayer && this.residentLayer !== layer) {
+      this.invalidate(this.residentLayer);
+    }
+    this.residentLayer = layer;
+    this.residencies.set(layer, {
+      surface,
+      valid: true,
+      width: layer.width,
+      height: layer.height,
+    });
+    registerGpuLayerResidency(layer, this);
+  }
+}
+
+function sanitizeMaxBranches(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return DEFAULT_MAX_BRANCHES;
+  }
+  return Math.max(1, Math.min(DEFAULT_MAX_BRANCHES, Math.floor(value)));
+}

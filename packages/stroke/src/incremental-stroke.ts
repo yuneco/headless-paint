@@ -1,4 +1,5 @@
 import type {
+  BrushAccelerator,
   BrushRenderState,
   BrushTipRegistry,
   ExpandConfig,
@@ -36,6 +37,7 @@ export interface IncrementalStrokeRendererConfig {
   readonly alphaLocked: boolean;
   readonly sourceLayer?: Layer;
   readonly registry?: BrushTipRegistry;
+  readonly accelerator?: BrushAccelerator | null;
   readonly onRenderUpdate?: (update: IncrementalStrokeRenderUpdate) => void;
 }
 
@@ -60,10 +62,10 @@ export function createIncrementalStrokeRenderer(
 ): IncrementalStrokeRenderer {
   const compiledFilterPipeline = compileFilterPipeline(config.filterPipeline);
   const compiledExpand = compileExpand(config.expand);
-  const gpuRuntime = getGpuStrokeRuntime();
+  const gpuRuntime = getGpuStrokeRuntime(config.accelerator);
   const gpuOwner = {};
   const gpuStrokeEligible =
-    brushPerfGpuDabEnabled() &&
+    gpuRuntime !== null &&
     config.style.brush.type === "stamp" &&
     isBrushMixingActive(config.style.brush.mixing) &&
     config.style.compositeOperation === "source-over" &&
@@ -146,9 +148,10 @@ export function createIncrementalStrokeRenderer(
           brushState,
           samplingLayer,
           config.alphaLocked,
+          config.accelerator,
         );
         if (!gpuStrokeActive) {
-          gpuRuntime?.invalidateLayerResidency(config.layer);
+          config.accelerator?.invalidate(config.layer);
         }
       } finally {
         if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
@@ -204,9 +207,6 @@ export function createIncrementalStrokeRenderer(
   function feedMany(points: readonly InputPoint[]): void {
     if (finalized || points.length === 0) return;
     hasFed = true;
-    // Issue deterministic snapshots from the previous batch before queuing new
-    // GPU work. WebKit's readPixels is cheapest at this boundary.
-    if (gpuStrokeActive) gpuRuntime?.issuePendingReadbacks(gpuOwner);
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
       if (gpuStrokeActive) {
@@ -274,9 +274,7 @@ interface GpuStrokeRuntimeBridge {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
-  issuePendingReadbacks(owner: object): void;
   endStroke(owner: object): void;
-  invalidateLayerResidency(layer: Layer): void;
   isLayerResident(layer: Layer): boolean;
 }
 
@@ -298,24 +296,15 @@ function getBrushPerfDebug(): BrushPerfDebugBridge | undefined {
   ).__hpBrushPerf;
 }
 
-function getGpuStrokeRuntime(): GpuStrokeRuntimeBridge | undefined {
-  return (
-    globalThis as typeof globalThis & {
-      __hpGpuStrokeRuntime?: GpuStrokeRuntimeBridge;
-    }
-  ).__hpGpuStrokeRuntime;
-}
-
-function brushPerfGpuDabEnabled(): boolean {
-  return (
-    (
-      globalThis as typeof globalThis & {
-        __hpBrushPerf?: {
-          readonly experiments: { readonly gpuDab?: "off" | "webgl2" };
-        };
-      }
-    ).__hpBrushPerf?.experiments.gpuDab === "webgl2"
-  );
+function getGpuStrokeRuntime(
+  accelerator: BrushAccelerator | null | undefined,
+): GpuStrokeRuntimeBridge | null {
+  if (!accelerator) return null;
+  const runtime = accelerator as BrushAccelerator &
+    Partial<GpuStrokeRuntimeBridge>;
+  return typeof runtime.beginStroke === "function"
+    ? (runtime as GpuStrokeRuntimeBridge)
+    : null;
 }
 
 function shouldFlushBristleBatch(

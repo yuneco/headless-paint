@@ -1,4 +1,5 @@
 import type {
+  BrushAccelerator,
   BrushRenderState,
   Color,
   ExpandConfig,
@@ -18,6 +19,7 @@ import {
   SPRAY_AIRBRUSH,
   clearLayer,
   copyLayerPixels,
+  createBrushAccelerator,
   createLayer,
 } from "@headless-paint/engine";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
@@ -114,10 +116,6 @@ afterEach(() => {
   if (!perf) return;
   perf.enabled = false;
   perf.reset();
-  perf.experiments.gpuDab = "off";
-  perf.experiments.gpuReadback = "gpu-field";
-  perf.experiments.checkpointLagSteps = 1;
-  perf.experiments.gpuResident = true;
 });
 
 const INPUT_POINTS: readonly InputPoint[] = [
@@ -378,50 +376,34 @@ describe("live-vs-replay parity", () => {
   }
 });
 
-describe.each([
-  { gpuReadback: "gpu-field", checkpointLagSteps: 1 },
-  { gpuReadback: "sync", checkpointLagSteps: 1 },
-] as const)(
-  "GPU mixing $gpuReadback lag=$checkpointLagSteps feedMany parity",
-  ({ gpuReadback, checkpointLagSteps }) => {
-    it("複数 batch と replay 相当の単一 batch が byte-identical", () => {
-      const perf = getBrushPerfTestBridge();
-      if (!perf) throw new Error("Brush perf debug bridge is unavailable");
-      perf.enabled = true;
-      perf.reset();
-      const splitLayer = renderGpuMixingBatches(
-        gpuReadback,
-        checkpointLagSteps,
-        [
-          INPUT_POINTS.slice(0, 2),
-          INPUT_POINTS.slice(2, 5),
-          INPUT_POINTS.slice(5),
-        ],
-      );
-      const replayLayer = renderGpuMixingBatches(
-        gpuReadback,
-        checkpointLagSteps,
-        [INPUT_POINTS],
-      );
+describe("GPU mixing feedMany parity", () => {
+  it("複数 batch と replay 相当の単一 batch が byte-identical", () => {
+    const perf = getBrushPerfTestBridge();
+    if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+    perf.enabled = true;
+    perf.reset();
+    const splitLayer = renderGpuMixingBatches([
+      INPUT_POINTS.slice(0, 2),
+      INPUT_POINTS.slice(2, 5),
+      INPUT_POINTS.slice(5),
+    ]);
+    const replayLayer = renderGpuMixingBatches([INPUT_POINTS]);
 
-      expectPixelEqual(
-        splitLayer,
-        replayLayer,
-        `GPU mixing ${gpuReadback} lag=${checkpointLagSteps} split feedMany vs replay feedMany`,
-      );
-      const stages = perf.snapshot().stages;
-      expect(stages.gpuFlush.count).toBeGreaterThan(0);
-      if (gpuReadback === "gpu-field") {
-        expect(stages.gpuFieldUpdate.count).toBeGreaterThan(0);
-        expect(stages.checkpointReadback.count).toBe(0);
-      }
-    });
-  },
-);
+    expectPixelEqual(
+      splitLayer,
+      replayLayer,
+      "GPU mixing split feedMany vs replay feedMany",
+    );
+    const stages = perf.snapshot().stages;
+    expect(stages.gpuFlush.count).toBeGreaterThan(0);
+    expect(stages.gpuFieldUpdate.count).toBeGreaterThan(0);
+    expect(stages.checkpointReadback.count).toBe(0);
+  });
+});
 
 describe("GPU mixing Expand parity", () => {
   it("radial 2 の branch field が 5 update ごとに CPU と一致する", () => {
-    const cpuSnapshots = traceRadialFieldUpdates("off");
+    const cpuSnapshots = traceRadialFieldUpdates("cpu");
     const gpuSnapshots = traceRadialFieldUpdates("webgl2");
 
     expect(gpuSnapshots.map(snapshotKey)).toEqual(
@@ -440,7 +422,7 @@ describe("GPU mixing Expand parity", () => {
   });
 
   it("radial 4 の中心重なり fixture が CPU と Tier B alpha parity を満たす", () => {
-    const cpuLayer = renderGpuExpandBatches("off", [
+    const cpuLayer = renderGpuExpandBatches("cpu", [
       CENTER_CROSSING_INPUT_POINTS,
     ]);
     const perf = getBrushPerfTestBridge();
@@ -478,8 +460,7 @@ describe("GPU mixing Expand parity", () => {
     const perf = getBrushPerfTestBridge();
     if (!perf) throw new Error("Brush perf debug bridge is unavailable");
     perf.enabled = true;
-    perf.experiments.gpuDab = "webgl2";
-    perf.experiments.gpuReadback = "gpu-field";
+    const accelerator = createTestAccelerator();
 
     const baseLayer = createTestLayer();
     paintExpandFixture(baseLayer);
@@ -493,20 +474,22 @@ describe("GPU mixing Expand parity", () => {
       expand: RADIAL_EXPAND_4,
       brushSeed: BRUSH_SEED,
       alphaLocked: false,
+      accelerator,
     });
     const replayLayer = createTestLayer();
-    replayOnLayer(command, replayLayer, baseLayer);
+    replayOnLayer(command, replayLayer, baseLayer, accelerator);
 
     expectPixelEqual(
       liveLayer,
       replayLayer,
       "GPU radial 4 live stroke vs command replay",
     );
+    accelerator.dispose();
   });
 
   it("radial 64 が GPU を使い live/replay byte 一致と CPU Tier B parity を満たす", () => {
     const cpuLayer = renderGpuExpandBatches(
-      "off",
+      "cpu",
       [CENTER_CROSSING_INPUT_POINTS],
       RADIAL_EXPAND_64,
     );
@@ -514,11 +497,9 @@ describe("GPU mixing Expand parity", () => {
     if (!perf) throw new Error("Brush perf debug bridge is unavailable");
     perf.enabled = true;
     perf.reset();
-    perf.experiments.gpuDab = "webgl2";
-    perf.experiments.gpuReadback = "gpu-field";
-    const gpuRuntime = getGpuBranchTestBridge();
-    if (!gpuRuntime)
-      throw new Error("GPU stroke runtime bridge is unavailable");
+    const accelerator = createTestAccelerator();
+    const gpuRuntime = getGpuTestRuntime(accelerator);
+    if (!gpuRuntime) throw new Error("GPU accelerator runtime is unavailable");
     expect(gpuRuntime.supportsBranchCount(64)).toBe(true);
 
     const baseLayer = createTestLayer();
@@ -533,12 +514,13 @@ describe("GPU mixing Expand parity", () => {
       expand: RADIAL_EXPAND_64,
       brushSeed: BRUSH_SEED,
       alphaLocked: false,
+      accelerator,
     });
 
     expect(perf.snapshot().samples.gpuBranches).toEqual([64]);
     expect(perf.snapshot().stages.gpuFieldUpdate.count).toBeGreaterThan(0);
     const replayLayer = createTestLayer();
-    replayOnLayer(command, replayLayer, baseLayer);
+    replayOnLayer(command, replayLayer, baseLayer, accelerator);
 
     expectPixelEqual(
       liveLayer,
@@ -546,16 +528,18 @@ describe("GPU mixing Expand parity", () => {
       "GPU radial 64 live stroke vs command replay",
     );
     expectAlphaTierB(cpuLayer, liveLayer);
+    accelerator.dispose();
   });
 
   it("radial 65 は supportsBranchCount=false となり CPU fallback する", () => {
-    const gpuRuntime = getGpuBranchTestBridge();
-    if (!gpuRuntime)
-      throw new Error("GPU stroke runtime bridge is unavailable");
+    const accelerator = createTestAccelerator();
+    const gpuRuntime = getGpuTestRuntime(accelerator);
+    if (!gpuRuntime) throw new Error("GPU accelerator runtime is unavailable");
     expect(gpuRuntime.supportsBranchCount(65)).toBe(false);
+    accelerator.dispose();
 
     const expected = renderGpuExpandBatches(
-      "off",
+      "cpu",
       [CENTER_CROSSING_INPUT_POINTS],
       RADIAL_EXPAND_65,
     );
@@ -581,15 +565,15 @@ interface MaterialFieldSnapshot {
 }
 
 function traceRadialFieldUpdates(
-  gpuDab: "off" | "webgl2",
+  backend: "cpu" | "webgl2",
 ): readonly MaterialFieldSnapshot[] {
   const perf = getBrushPerfTestBridge();
   if (!perf) throw new Error("Brush perf debug bridge is unavailable");
   perf.enabled = true;
   perf.reset();
-  perf.experiments.gpuDab = gpuDab;
-  perf.experiments.gpuReadback = "gpu-field";
-  perf.experiments.gpuResident = false;
+  const accelerator =
+    backend === "webgl2" ? createTestAccelerator({ resident: false }) : null;
+  const gpuRuntime = getGpuTestRuntime(accelerator);
 
   const layer = createTestLayer();
   layer.ctx.fillStyle = "rgb(35, 95, 220)";
@@ -603,12 +587,14 @@ function traceRadialFieldUpdates(
     expand: RADIAL_EXPAND_2,
     brushSeed: BRUSH_SEED,
     alphaLocked: false,
+    accelerator,
     onRenderUpdate: ({ brushState }) => {
-      captureFieldSnapshots(snapshots, capturedUpdates, brushState, gpuDab);
+      captureFieldSnapshots(snapshots, capturedUpdates, brushState, gpuRuntime);
     },
   });
   for (const point of FIELD_TRACE_INPUT_POINTS) renderer.feed(point);
   renderer.finalize();
+  accelerator?.dispose();
   return snapshots;
 }
 
@@ -616,38 +602,22 @@ function captureFieldSnapshots(
   snapshots: MaterialFieldSnapshot[],
   capturedUpdates: Set<string>,
   brushState: BrushRenderState | undefined,
-  gpuDab: "off" | "webgl2",
+  gpuRuntime: GpuTestRuntime | null,
 ): void {
   if (!brushState) return;
-  const gpuRuntime = getGpuFieldTestBridge();
   for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
     const branch = brushState.branches[branchIndex];
     const updateCount = branch?.emissionCount ?? 0;
     if (updateCount === 0 || updateCount % 5 !== 0) continue;
     const key = `${branchIndex}:${updateCount}`;
     if (capturedUpdates.has(key)) continue;
-    const pixels =
-      gpuDab === "webgl2"
-        ? gpuRuntime?.readMaterialFieldForTest(branchIndex)
-        : materialFieldPixels(branch?.mixing?.field);
+    const pixels = gpuRuntime
+      ? gpuRuntime.readMaterialFieldForTest(branchIndex)
+      : materialFieldPixels(branch?.mixing?.field);
     if (!pixels) throw new Error("GPU material field is unavailable");
     snapshots.push({ branchIndex, updateCount, pixels });
     capturedUpdates.add(key);
   }
-}
-
-function getGpuFieldTestBridge():
-  | {
-      readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
-    }
-  | undefined {
-  return (
-    globalThis as typeof globalThis & {
-      readonly __hpGpuStrokeRuntime?: {
-        readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
-      };
-    }
-  ).__hpGpuStrokeRuntime;
 }
 
 function materialFieldPixels(
@@ -674,16 +644,9 @@ function snapshotKey(snapshot: MaterialFieldSnapshot): string {
 }
 
 function renderGpuMixingBatches(
-  gpuReadback: "gpu-field" | "sync",
-  checkpointLagSteps: number,
   batches: readonly (readonly InputPoint[])[],
 ): Layer {
-  const perf = getBrushPerfTestBridge();
-  if (!perf) throw new Error("Brush perf debug bridge is unavailable");
-  perf.experiments.gpuDab = "webgl2";
-  perf.experiments.gpuReadback = gpuReadback;
-  perf.experiments.checkpointLagSteps = checkpointLagSteps;
-
+  const accelerator = createTestAccelerator();
   const layer = createTestLayer();
   paintOpaqueBands(layer);
   const renderer = createIncrementalStrokeRenderer({
@@ -693,22 +656,23 @@ function renderGpuMixingBatches(
     expand: EXPAND,
     brushSeed: BRUSH_SEED,
     alphaLocked: false,
+    accelerator,
   });
   for (const batch of batches) renderer.feedMany(batch);
   renderer.finalize();
+  accelerator.dispose();
   return layer;
 }
 
 function renderGpuExpandBatches(
-  gpuDab: "off" | "webgl2",
+  backend: "cpu" | "webgl2",
   batches: readonly (readonly InputPoint[])[],
   expand: ExpandConfig = RADIAL_EXPAND_4,
 ): Layer {
   const perf = getBrushPerfTestBridge();
   if (!perf) throw new Error("Brush perf debug bridge is unavailable");
   perf.enabled = true;
-  perf.experiments.gpuDab = gpuDab;
-  perf.experiments.gpuReadback = "gpu-field";
+  const accelerator = backend === "webgl2" ? createTestAccelerator() : null;
 
   const layer = createTestLayer();
   paintExpandFixture(layer);
@@ -719,22 +683,12 @@ function renderGpuExpandBatches(
     expand,
     brushSeed: BRUSH_SEED,
     alphaLocked: false,
+    accelerator,
   });
   for (const batch of batches) renderer.feedMany(batch);
   renderer.finalize();
+  accelerator?.dispose();
   return layer;
-}
-
-function getGpuBranchTestBridge():
-  | { supportsBranchCount(branchCount: number): boolean }
-  | undefined {
-  return (
-    globalThis as typeof globalThis & {
-      readonly __hpGpuStrokeRuntime?: {
-        supportsBranchCount(branchCount: number): boolean;
-      };
-    }
-  ).__hpGpuStrokeRuntime;
 }
 
 function paintExpandFixture(layer: Layer): void {
@@ -766,12 +720,6 @@ function expectAlphaTierB(cpuLayer: Layer, gpuLayer: Layer): void {
 function getBrushPerfTestBridge():
   | {
       enabled: boolean;
-      readonly experiments: {
-        gpuDab: "off" | "webgl2";
-        gpuReadback: "gpu-field" | "sync";
-        checkpointLagSteps: number;
-        gpuResident: boolean;
-      };
       reset(): void;
       snapshot(): {
         readonly stages: {
@@ -789,12 +737,6 @@ function getBrushPerfTestBridge():
     globalThis as typeof globalThis & {
       readonly __hpBrushPerf?: {
         enabled: boolean;
-        readonly experiments: {
-          gpuDab: "off" | "webgl2";
-          gpuReadback: "gpu-field" | "sync";
-          checkpointLagSteps: number;
-          gpuResident: boolean;
-        };
         reset(): void;
         snapshot(): {
           readonly stages: {
@@ -809,6 +751,33 @@ function getBrushPerfTestBridge():
       };
     }
   ).__hpBrushPerf;
+}
+
+interface GpuTestRuntime {
+  supportsBranchCount(branchCount: number): boolean;
+  readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
+}
+
+function createTestAccelerator(
+  options: { readonly resident?: boolean } = {},
+): BrushAccelerator {
+  const accelerator = createBrushAccelerator({
+    backend: "webgl2",
+    resident: options.resident,
+  });
+  if (!accelerator) throw new Error("WebGL2 accelerator is unavailable");
+  return accelerator;
+}
+
+function getGpuTestRuntime(
+  accelerator: BrushAccelerator | null,
+): GpuTestRuntime | null {
+  if (!accelerator) return null;
+  const runtime = accelerator as BrushAccelerator & Partial<GpuTestRuntime>;
+  return typeof runtime.supportsBranchCount === "function" &&
+    typeof runtime.readMaterialFieldForTest === "function"
+    ? (runtime as GpuTestRuntime)
+    : null;
 }
 
 interface ParityRun {

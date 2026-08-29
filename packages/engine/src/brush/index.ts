@@ -6,8 +6,11 @@ import type {
   StrokeStyle,
 } from "../types";
 import { renderBristleBrushStroke } from "./bristle";
+import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./gpu/accelerator";
 import { invalidateGpuLayerResidency } from "./gpu/gpu-layer-residency";
-import { getActiveGpuStrokeSurface } from "./gpu/gpu-stroke-surface";
 import { isBrushMixingActive } from "./mixing";
 import { brushPerfDebug } from "./perf-debug";
 import { renderSprayBrushStroke } from "./spray";
@@ -48,8 +51,9 @@ export function renderBrushStroke(
   overlapCount = 0,
   state?: BrushRenderState,
   sourceLayer?: Layer,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
-  const gpuSurface = getActiveGpuStrokeSurface();
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
   if (points.length > 0 && style.brush.type !== "round-pen" && !gpuSurface) {
     invalidateGpuLayerResidency(layer);
   }
@@ -85,6 +89,7 @@ export function renderBrushStroke(
         state ?? DEFAULT_BRUSH_RENDER_STATE,
         overlapCount,
         sourceLayer ?? layer,
+        accelerator,
       );
     case "spray":
       return renderSprayBrushStroke(

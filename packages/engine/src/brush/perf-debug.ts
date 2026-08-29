@@ -14,7 +14,6 @@ export const BRUSH_PERF_STAGE_NAMES = [
   "materialAdvance",
   "materialUpload",
   "checkpointReadback",
-  "gpuReadRequest",
   "gpuFieldUpdate",
   "gpuFlush",
   "gpuCommit",
@@ -39,9 +38,6 @@ export const BRUSH_PERF_SAMPLE_NAMES = [
   "bboxAreas",
   "samplingCopyPixels",
   "checkpoints",
-  "checkpointLag",
-  "checkpointWaitMs",
-  "readbackPixels",
   "gpuResidencyHit",
   "gpuBranches",
   "gpuCommitPixels",
@@ -141,14 +137,6 @@ export interface BrushPerfSnapshot {
 export interface BrushPerfDebug {
   enabled: boolean;
   experiments: {
-    spacingScale: number;
-    checkpointScale: number;
-    checkpointLagSteps: number;
-    updateScale: number;
-    bitmapDab: boolean;
-    gpuDab: "off" | "webgl2";
-    gpuReadback: "sync" | "gpu-field";
-    gpuResident: boolean;
     stallThresholdMs: number;
   };
   nullStages: BrushPerfNullStages;
@@ -216,9 +204,6 @@ function createSamples(): Record<BrushPerfSampleName, number[]> {
     bboxAreas: [],
     samplingCopyPixels: [],
     checkpoints: [],
-    checkpointLag: [],
-    checkpointWaitMs: [],
-    readbackPixels: [],
     gpuResidencyHit: [],
     gpuBranches: [],
     gpuCommitPixels: [],
@@ -272,14 +257,6 @@ function createBrushPerfDebug(): BrushPerfDebug {
   return {
     enabled: false,
     experiments: {
-      spacingScale: 1,
-      checkpointScale: 1,
-      checkpointLagSteps: 1,
-      updateScale: 1,
-      bitmapDab: false,
-      gpuDab: "off",
-      gpuReadback: "gpu-field",
-      gpuResident: true,
       stallThresholdMs: DEFAULT_STALL_THRESHOLD_MS,
     },
     nullStages: createNullStages(),
@@ -388,9 +365,6 @@ function createBrushPerfDebug(): BrushPerfDebug {
           bboxAreas: [...samples.bboxAreas],
           samplingCopyPixels: [...samples.samplingCopyPixels],
           checkpoints: [...samples.checkpoints],
-          readbackPixels: [...samples.readbackPixels],
-          checkpointLag: [...samples.checkpointLag],
-          checkpointWaitMs: [...samples.checkpointWaitMs],
           gpuResidencyHit: [...samples.gpuResidencyHit],
           gpuBranches: [...samples.gpuBranches],
           gpuCommitPixels: [...samples.gpuCommitPixels],
@@ -423,8 +397,3 @@ const installedBrushPerfDebug =
   globalThis.__hpBrushPerf ?? createBrushPerfDebug();
 globalThis.__hpBrushPerf = installedBrushPerfDebug;
 export const brushPerfDebug = installedBrushPerfDebug;
-
-export function getCheckpointLagSteps(): number {
-  const value = brushPerfDebug.experiments.checkpointLagSteps;
-  return Number.isSafeInteger(value) && value >= 1 ? value : 1;
-}

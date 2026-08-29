@@ -1,14 +1,8 @@
 import type { Layer } from "../../types";
-import { brushPerfDebug, getCheckpointLagSteps } from "../perf-debug";
-import {
-  invalidateGpuLayerResidency,
-  prepareGpuLayerResidency,
-  validateGpuLayerResidency,
-} from "./gpu-layer-residency";
+import { brushPerfDebug } from "../perf-debug";
 
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 6;
-const CHECKPOINT_WAIT_TIMEOUT_NS = 1_000_000_000;
 const COMMIT_TILE_SIZE = 512;
 const COMMIT_CANVAS_SIZE = 1024;
 const MAX_GPU_STROKE_BRANCHES = 64;
@@ -56,41 +50,6 @@ interface PendingBranchSegment {
   checkpoint?: PendingMaterialCheckpointCapture;
 }
 
-interface CheckpointSlot {
-  readonly texture: WebGLTexture;
-  readonly framebuffer: WebGLFramebuffer;
-  readonly buffer: WebGLBuffer;
-  textureWidth: number;
-  textureHeight: number;
-  bufferSize: number;
-  snapshotId?: number;
-}
-
-interface PendingCheckpointSnapshot {
-  readonly id: number;
-  readonly previousId?: number;
-  readonly slot: CheckpointSlot;
-  readonly originX: number;
-  readonly originY: number;
-  readonly readOriginX: number;
-  readonly readOriginY: number;
-  readonly width: number;
-  readonly height: number;
-  readonly left: number;
-  readonly top: number;
-  readonly readWidth: number;
-  readonly readHeight: number;
-  sync?: WebGLSync;
-}
-
-export interface CompletedGpuCheckpoint {
-  readonly originX: number;
-  readonly originY: number;
-  readonly width: number;
-  readonly height: number;
-  readonly pixels: Uint8ClampedArray;
-}
-
 export interface GpuDab {
   readonly x: number;
   readonly y: number;
@@ -124,6 +83,7 @@ export interface GpuStrokeSurface {
   readonly height: number;
   readonly lost: boolean;
   readonly branchIndex: number;
+  readonly maxBranchCount: number;
   beginStroke(sourceCanvas?: OffscreenCanvas, branchCount?: number): void;
   beginBranchBatch(): void;
   endBranchBatch(): void;
@@ -149,42 +109,9 @@ export interface GpuStrokeSurface {
   readMaterialFieldForTest(branchIndex?: number): Uint8ClampedArray;
   pushDab(dab: GpuDab): void;
   flush(): void;
-  readCheckpoint(
-    originX: number,
-    originY: number,
-    size: number,
-  ): Uint8ClampedArray;
-  snapshotCheckpoint(
-    originX: number,
-    originY: number,
-    size: number,
-    previousId?: number,
-  ): number;
-  issuePendingReadbacks(): void;
-  takeCheckpoint(
-    id: number,
-    options: { readonly wait: boolean; readonly lagSteps?: number },
-  ): CompletedGpuCheckpoint | null;
   commitToLayer(layer: Layer): void;
   endStroke(): void;
-}
-
-interface GpuStrokeRuntime {
-  supportsBranchCount(branchCount: number): boolean;
-  beginStroke(
-    owner: object,
-    layer: Layer,
-    sourceCanvas?: OffscreenCanvas,
-    branchCount?: number,
-  ): boolean;
-  enter(owner: object): void;
-  leave(owner: object): void;
-  commitToLayer(owner: object, layer: Layer): void;
-  issuePendingReadbacks(owner: object): void;
-  endStroke(owner: object): void;
-  invalidateLayerResidency(layer: Layer): void;
-  isLayerResident(layer: Layer): boolean;
-  readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
+  dispose(): void;
 }
 
 const VERTEX_SHADER_SOURCE = `#version 300 es
@@ -447,12 +374,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   readonly maxBranchCount: number;
   private strokeBegun = false;
   private contextLost = false;
-  private checkpointSlots: CheckpointSlot[] = [];
-  private readonly pendingCheckpointSnapshots = new Map<
-    number,
-    PendingCheckpointSnapshot
-  >();
-  private nextCheckpointId = 1;
+  private quadBuffer: WebGLBuffer | null = null;
+  private disposed = false;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -490,11 +413,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       throw new Error("GPU fragment uniform capacity is insufficient");
     }
     this.canvas.addEventListener("webglcontextlost", () => {
-      this.discardPendingCheckpointSnapshots();
-      this.deleteCheckpointSlots();
-      this.deleteMaterialCheckpoints();
       this.contextLost = true;
-      gpuPermanentlyUnavailable = true;
     });
 
     this.program = createProgram(
@@ -713,7 +632,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     for (const checkpoint of this.materialCheckpoints) {
       checkpoint.initialized = false;
     }
-    this.discardPendingCheckpointSnapshots();
     this.strokeBegun = true;
   }
 
@@ -721,10 +639,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     // A single branch already keeps dabs pending until its next field update.
     // Segment batching would flush the final segment at every append boundary.
-    if (
-      brushPerfDebug.experiments.gpuReadback !== "gpu-field" ||
-      this.branchCount === 1
-    ) {
+    if (this.branchCount === 1) {
       return;
     }
     if (this.pendingBranchSegments) {
@@ -1246,237 +1161,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
   }
 
-  readCheckpoint(
-    originX: number,
-    originY: number,
-    size: number,
-  ): Uint8ClampedArray {
-    this.assertStrokeBegun();
-    this.flush();
-    const tileSize = Math.max(0, Math.floor(size));
-    const output = new Uint8ClampedArray(tileSize * tileSize * 4);
-    if (tileSize === 0 || this.lost) return output;
-
-    // readPixels is integer-addressed. The spike preserves the existing tile
-    // size and uses the containing document pixel for fractional tile origins.
-    const readOriginX = Math.floor(originX);
-    const readOriginY = Math.floor(originY);
-    const left = Math.max(0, readOriginX);
-    const top = Math.max(0, readOriginY);
-    const right = Math.min(this.width, readOriginX + tileSize);
-    const bottom = Math.min(this.height, readOriginY + tileSize);
-    const readWidth = Math.max(0, right - left);
-    const readHeight = Math.max(0, bottom - top);
-    if (readWidth === 0 || readHeight === 0) return output;
-
-    const premultiplied = new Uint8Array(readWidth * readHeight * 4);
-    const gl = this.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.readPixels(
-      left,
-      this.height - bottom,
-      readWidth,
-      readHeight,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      premultiplied,
-    );
-
-    copyUnpremultipliedCheckpoint(output, premultiplied, {
-      outputWidth: tileSize,
-      outputOriginX: readOriginX,
-      outputOriginY: readOriginY,
-      left,
-      top,
-      readWidth,
-      readHeight,
-    });
-    return output;
-  }
-
-  snapshotCheckpoint(
-    originX: number,
-    originY: number,
-    size: number,
-    previousId?: number,
-  ): number {
-    this.assertStrokeBegun();
-    this.flush();
-    if (
-      previousId !== undefined &&
-      !this.pendingCheckpointSnapshots.has(previousId)
-    ) {
-      throw new Error("Previous GPU checkpoint snapshot is unavailable");
-    }
-    const tileSize = Math.max(0, Math.floor(size));
-    const readOriginX = Math.floor(originX);
-    const readOriginY = Math.floor(originY);
-    const left = Math.max(0, readOriginX);
-    const top = Math.max(0, readOriginY);
-    const right = Math.min(this.width, readOriginX + tileSize);
-    const bottom = Math.min(this.height, readOriginY + tileSize);
-    const readWidth = Math.max(0, right - left);
-    const readHeight = Math.max(0, bottom - top);
-    const slot = this.acquireCheckpointSlot(readWidth, readHeight);
-    const id = this.nextCheckpointId++;
-    slot.snapshotId = id;
-    const snapshot: PendingCheckpointSnapshot = {
-      id,
-      previousId,
-      slot,
-      originX,
-      originY,
-      readOriginX,
-      readOriginY,
-      width: tileSize,
-      height: tileSize,
-      left,
-      top,
-      readWidth,
-      readHeight,
-    };
-    this.pendingCheckpointSnapshots.set(id, snapshot);
-
-    if (readWidth > 0 && readHeight > 0 && !this.lost) {
-      const gl = this.gl;
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, slot.framebuffer);
-      gl.disable(gl.BLEND);
-      gl.disable(gl.SCISSOR_TEST);
-      gl.blitFramebuffer(
-        left,
-        this.height - bottom,
-        right,
-        this.height - top,
-        0,
-        0,
-        readWidth,
-        readHeight,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      );
-    }
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample("checkpoints", 1);
-    }
-    return id;
-  }
-
-  issuePendingReadbacks(): void {
-    this.assertStrokeBegun();
-    let issued = false;
-    for (const snapshot of this.pendingCheckpointSnapshots.values()) {
-      if (
-        snapshot.sync ||
-        snapshot.readWidth === 0 ||
-        snapshot.readHeight === 0
-      )
-        continue;
-      this.issueCheckpointReadback(snapshot);
-      issued = true;
-    }
-    if (issued) this.gl.flush();
-  }
-
-  takeCheckpoint(
-    id: number,
-    options: { readonly wait: boolean; readonly lagSteps?: number },
-  ): CompletedGpuCheckpoint | null {
-    const snapshot = this.resolveCheckpointSnapshot(id, options.lagSteps ?? 0);
-    if (!snapshot || this.lost) return null;
-    if (snapshot.readWidth === 0 || snapshot.readHeight === 0) {
-      this.recordCheckpointWait(false, 0);
-      return this.completeCheckpoint(snapshot, new Uint8Array());
-    }
-    if (!snapshot.sync) {
-      this.issueCheckpointReadback(snapshot);
-      this.gl.flush();
-    }
-
-    const sync = snapshot.sync;
-    if (!sync) return null;
-    const gl = this.gl;
-    let status = gl.clientWaitSync(sync, 0, 0);
-    let waited = false;
-    let waitMs = 0;
-    if (status === gl.TIMEOUT_EXPIRED && options.wait) {
-      // A replay may reach the take point before any batch boundary. Start all
-      // other unread snapshots now so the single blocking wait advances the
-      // whole ring, not only the requested checkpoint.
-      this.issuePendingReadbacks();
-      waited = true;
-      const waitStartedAt = performance.now();
-      const maxTimeout = Number(
-        gl.getParameter(gl.MAX_CLIENT_WAIT_TIMEOUT_WEBGL),
-      );
-      const waitTimeout = Math.min(
-        CHECKPOINT_WAIT_TIMEOUT_NS,
-        Number.isFinite(maxTimeout) ? Math.max(0, maxTimeout) : 0,
-      );
-      if (waitTimeout === 0) {
-        // WebGL implementations may expose a zero maximum client-wait
-        // timeout. finish is the only synchronous completion primitive in
-        // that case; the following clientWaitSync still validates the fence.
-        gl.finish();
-        status = gl.clientWaitSync(
-          sync,
-          gl.SYNC_FLUSH_COMMANDS_BIT,
-          waitTimeout,
-        );
-        if (status === gl.TIMEOUT_EXPIRED || status === gl.WAIT_FAILED) {
-          status = gl.clientWaitSync(sync, 0, 0);
-        }
-        if (status === gl.TIMEOUT_EXPIRED && !this.lost) {
-          status = gl.CONDITION_SATISFIED;
-        }
-      } else {
-        do {
-          status = gl.clientWaitSync(
-            sync,
-            gl.SYNC_FLUSH_COMMANDS_BIT,
-            waitTimeout,
-          );
-        } while (status === gl.TIMEOUT_EXPIRED && !this.lost);
-      }
-      if (status === gl.WAIT_FAILED && !this.lost) {
-        // WebGL2 requires flags=0 on implementations that do not expose the
-        // desktop SYNC_FLUSH_COMMANDS_BIT behavior. Preserve the requested
-        // wait path above, then fall back to the portable blocking primitive.
-        gl.finish();
-        status = gl.clientWaitSync(sync, 0, 0);
-        if (status === gl.TIMEOUT_EXPIRED && !this.lost) {
-          status = gl.CONDITION_SATISFIED;
-        }
-      }
-      waitMs = performance.now() - waitStartedAt;
-    }
-    this.recordCheckpointWait(waited, waitMs);
-    if (status === gl.TIMEOUT_EXPIRED) return null;
-    if (status === gl.WAIT_FAILED) {
-      const error = gl.getError();
-      this.releaseCheckpoint(snapshot);
-      if (options.wait) {
-        throw new Error(`GPU checkpoint fence wait failed (${error})`);
-      }
-      return null;
-    }
-    if (status !== gl.ALREADY_SIGNALED && status !== gl.CONDITION_SATISFIED) {
-      return null;
-    }
-
-    const premultiplied = new Uint8Array(
-      snapshot.readWidth * snapshot.readHeight * 4,
-    );
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, snapshot.slot.buffer);
-    const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, premultiplied);
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("checkpointReadback", readbackStartedAt);
-    }
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    return this.completeCheckpoint(snapshot, premultiplied);
-  }
-
   commitToLayer(layer: Layer): void {
     this.assertStrokeBegun();
     this.flush();
@@ -1560,7 +1244,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   }
 
   endStroke(): void {
-    this.discardPendingCheckpointSnapshots();
     this.instanceCount = 0;
     this.pendingBranchSegments = null;
     this.dirtyRects = [null];
@@ -1572,6 +1255,31 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     for (const checkpoint of this.materialCheckpoints) {
       checkpoint.initialized = false;
     }
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.endStroke();
+    const gl = this.gl;
+    gl.deleteProgram(this.program);
+    gl.deleteProgram(this.fieldMixProgram);
+    gl.deleteProgram(this.fieldDiffusionProgram);
+    gl.deleteVertexArray(this.vertexArray);
+    gl.deleteBuffer(this.quadBuffer);
+    gl.deleteBuffer(this.instanceBuffer);
+    gl.deleteBuffer(this.branchDataBuffer);
+    gl.deleteTexture(this.accumTexture);
+    gl.deleteTexture(this.sourceTexture);
+    gl.deleteTexture(this.tipTexture);
+    for (const texture of this.fieldTextures) gl.deleteTexture(texture);
+    for (const framebuffer of this.fieldFramebuffers) {
+      gl.deleteFramebuffer(framebuffer);
+    }
+    gl.deleteTexture(this.materialCheckpointTexture);
+    gl.deleteFramebuffer(this.materialCheckpointFramebuffer);
+    gl.deleteFramebuffer(this.framebuffer);
+    gl.deleteFramebuffer(this.sourceFramebuffer);
   }
 
   private copyAccumToStrokeStartSource(): void {
@@ -1603,15 +1311,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         initialized: false,
       });
     }
-  }
-
-  private deleteMaterialCheckpoints(): void {
-    const gl = this.gl;
-    gl.deleteTexture(this.materialCheckpointTexture);
-    gl.deleteFramebuffer(this.materialCheckpointFramebuffer);
-    this.materialCheckpoints.length = 0;
-    this.materialCheckpointTextureSize = 0;
-    this.materialCheckpointLayerCount = 0;
   }
 
   private queueMaterialCheckpoint(
@@ -1769,205 +1468,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
   }
 
-  private acquireCheckpointSlot(
-    readWidth: number,
-    readHeight: number,
-  ): CheckpointSlot {
-    this.ensureCheckpointSlots();
-    const slot = this.checkpointSlots.find(
-      (candidate) => candidate.snapshotId === undefined,
-    );
-    if (!slot) {
-      throw new Error("GPU checkpoint snapshot ring is full");
-    }
-    this.ensureCheckpointSlotCapacity(slot, readWidth, readHeight);
-    return slot;
-  }
-
-  private ensureCheckpointSlots(): void {
-    const ringSize = getCheckpointLagSteps() + 2;
-    if (this.checkpointSlots.length >= ringSize) return;
-    const gl = this.gl;
-    for (let index = this.checkpointSlots.length; index < ringSize; index++) {
-      const texture = requireResource(
-        gl.createTexture(),
-        "WebGL checkpoint texture",
-      );
-      this.configureTexture(texture, gl.NEAREST);
-      const framebuffer = requireResource(
-        gl.createFramebuffer(),
-        "WebGL checkpoint framebuffer",
-      );
-      const buffer = requireResource(
-        gl.createBuffer(),
-        "WebGL checkpoint pixel pack buffer",
-      );
-      this.checkpointSlots.push({
-        texture,
-        framebuffer,
-        buffer,
-        textureWidth: 0,
-        textureHeight: 0,
-        bufferSize: 0,
-      });
-    }
-  }
-
-  private ensureCheckpointSlotCapacity(
-    slot: CheckpointSlot,
-    readWidth: number,
-    readHeight: number,
-  ): void {
-    const gl = this.gl;
-    const requiredWidth = Math.max(1, readWidth);
-    const requiredHeight = Math.max(1, readHeight);
-    if (
-      slot.textureWidth < requiredWidth ||
-      slot.textureHeight < requiredHeight
-    ) {
-      slot.textureWidth = Math.max(slot.textureWidth, requiredWidth);
-      slot.textureHeight = Math.max(slot.textureHeight, requiredHeight);
-      gl.bindTexture(gl.TEXTURE_2D, slot.texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA8,
-        slot.textureWidth,
-        slot.textureHeight,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null,
-      );
-      brushPerfDebug.recordEvent("realloc:snapshotArray", {
-        width: slot.textureWidth,
-        height: slot.textureHeight,
-      });
-      gl.bindFramebuffer(gl.FRAMEBUFFER, slot.framebuffer);
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        gl.TEXTURE_2D,
-        slot.texture,
-        0,
-      );
-      if (
-        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
-      ) {
-        throw new Error("GPU checkpoint framebuffer is incomplete");
-      }
-    }
-    const byteLength = readWidth * readHeight * 4;
-    if (slot.bufferSize < byteLength) {
-      slot.bufferSize = byteLength;
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, slot.buffer);
-      gl.bufferData(gl.PIXEL_PACK_BUFFER, byteLength, gl.STREAM_READ);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    }
-  }
-
-  private issueCheckpointReadback(snapshot: PendingCheckpointSnapshot): void {
-    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    const gl = this.gl;
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.slot.framebuffer);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, snapshot.slot.buffer);
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample(
-        "readbackPixels",
-        snapshot.readWidth * snapshot.readHeight,
-      );
-    }
-    gl.readPixels(
-      0,
-      0,
-      snapshot.readWidth,
-      snapshot.readHeight,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      0,
-    );
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    snapshot.sync = requireResource(
-      gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0),
-      "WebGL checkpoint fence",
-    );
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("gpuReadRequest", startedAt);
-    }
-  }
-
-  private resolveCheckpointSnapshot(
-    id: number,
-    lagSteps: number,
-  ): PendingCheckpointSnapshot | undefined {
-    if (!Number.isSafeInteger(lagSteps) || lagSteps < 0) return undefined;
-    let snapshot = this.pendingCheckpointSnapshots.get(id);
-    for (let step = 0; step < lagSteps && snapshot; step++) {
-      if (snapshot.previousId === undefined) return undefined;
-      snapshot = this.pendingCheckpointSnapshots.get(snapshot.previousId);
-    }
-    return snapshot;
-  }
-
-  private completeCheckpoint(
-    snapshot: PendingCheckpointSnapshot,
-    premultiplied: Uint8Array,
-  ): CompletedGpuCheckpoint {
-    const pixels = new Uint8ClampedArray(snapshot.width * snapshot.height * 4);
-    copyUnpremultipliedCheckpoint(pixels, premultiplied, {
-      outputWidth: snapshot.width,
-      outputOriginX: snapshot.readOriginX,
-      outputOriginY: snapshot.readOriginY,
-      left: snapshot.left,
-      top: snapshot.top,
-      readWidth: snapshot.readWidth,
-      readHeight: snapshot.readHeight,
-    });
-    this.releaseCheckpoint(snapshot);
-    return {
-      originX: snapshot.originX,
-      originY: snapshot.originY,
-      width: snapshot.width,
-      height: snapshot.height,
-      pixels,
-    };
-  }
-
-  private releaseCheckpoint(snapshot: PendingCheckpointSnapshot): void {
-    if (snapshot.sync) this.gl.deleteSync(snapshot.sync);
-    this.pendingCheckpointSnapshots.delete(snapshot.id);
-    snapshot.slot.snapshotId = undefined;
-  }
-
-  private discardPendingCheckpointSnapshots(): void {
-    for (const snapshot of this.pendingCheckpointSnapshots.values()) {
-      if (snapshot.sync) this.gl.deleteSync(snapshot.sync);
-      snapshot.slot.snapshotId = undefined;
-    }
-    this.pendingCheckpointSnapshots.clear();
-  }
-
-  private deleteCheckpointSlots(): void {
-    const gl = this.gl;
-    for (const slot of this.checkpointSlots) {
-      gl.deleteTexture(slot.texture);
-      gl.deleteFramebuffer(slot.framebuffer);
-      gl.deleteBuffer(slot.buffer);
-    }
-    this.checkpointSlots = [];
-  }
-
-  private recordCheckpointWait(waited: boolean, waitMs: number): void {
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample("checkpointLag", waited ? 1 : 0);
-      brushPerfDebug.recordSample("checkpointWaitMs", waitMs);
-    }
-  }
-
   private configureGeometry(): void {
     const gl = this.gl;
     const unitQuad = new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]);
     const quadBuffer = requireResource(gl.createBuffer(), "WebGL quad buffer");
+    this.quadBuffer = quadBuffer;
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, unitQuad, gl.STATIC_DRAW);
@@ -2139,140 +1644,16 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   }
 }
 
-let cachedSurface: WebGl2StrokeSurface | null = null;
-let gpuPermanentlyUnavailable = false;
-let gpuStrokeBranchLimit = MAX_GPU_STROKE_BRANCHES;
-let surfaceCreationCount = 0;
-let activeOwner: object | null = null;
-let currentOwner: object | null = null;
-let activeSurface: GpuStrokeSurface | null = null;
-
-export function acquireGpuStrokeSurface(
+export function createGpuStrokeSurface(
   width: number,
   height: number,
 ): GpuStrokeSurface | null {
-  if (gpuPermanentlyUnavailable) return null;
-  if (cachedSurface?.lost) {
-    gpuPermanentlyUnavailable = true;
-    return null;
-  }
-  if (
-    cachedSurface &&
-    cachedSurface.width === width &&
-    cachedSurface.height === height
-  ) {
-    return cachedSurface;
-  }
   try {
-    cachedSurface = new WebGl2StrokeSurface(width, height);
-    gpuStrokeBranchLimit = cachedSurface.maxBranchCount;
-    surfaceCreationCount++;
-    return cachedSurface;
+    return new WebGl2StrokeSurface(width, height);
   } catch {
-    gpuPermanentlyUnavailable = true;
-    cachedSurface = null;
     return null;
   }
 }
-
-export function getActiveGpuStrokeSurface(): GpuStrokeSurface | null {
-  return currentOwner === activeOwner ? activeSurface : null;
-}
-
-export function getGpuStrokeSurfaceCreationCountForTest(): number {
-  return surfaceCreationCount;
-}
-
-const gpuStrokeRuntime: GpuStrokeRuntime = {
-  supportsBranchCount(branchCount) {
-    return (
-      Number.isSafeInteger(branchCount) &&
-      branchCount >= 1 &&
-      branchCount <= gpuStrokeBranchLimit
-    );
-  },
-  beginStroke(owner, layer, sourceCanvas, branchCount = 1) {
-    if (brushPerfDebug.experiments.gpuDab !== "webgl2") return false;
-    if (activeOwner && activeOwner !== owner) {
-      // A previous stroke was abandoned without endStroke (cancel / dispose).
-      // Recover instead of silently falling back to the CPU path forever.
-      if (brushPerfDebug.enabled) {
-        brushPerfDebug.recordEvent("gpuStaleOwnerRecovered", {});
-      }
-      activeSurface?.endStroke();
-      activeOwner = null;
-      activeSurface = null;
-      currentOwner = null;
-    }
-    if (activeOwner) return false;
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
-    if (!surface) return false;
-    const residencyAvailable = prepareGpuLayerResidency(layer, surface);
-    const residencyHit =
-      brushPerfDebug.experiments.gpuResident && residencyAvailable;
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample("gpuResidencyHit", residencyHit ? 1 : 0);
-      brushPerfDebug.recordSample("gpuBranches", branchCount);
-      brushPerfDebug.recordEvent("residency", { hit: residencyHit });
-    }
-    if (!residencyHit && !sourceCanvas) return false;
-    try {
-      surface.beginStroke(residencyHit ? undefined : sourceCanvas, branchCount);
-    } catch {
-      invalidateGpuLayerResidency(layer);
-      return false;
-    }
-    validateGpuLayerResidency(layer, surface);
-    activeOwner = owner;
-    activeSurface = surface;
-    return true;
-  },
-  enter(owner) {
-    if (activeOwner === owner) currentOwner = owner;
-  },
-  leave(owner) {
-    if (currentOwner === owner) currentOwner = null;
-  },
-  commitToLayer(owner, layer) {
-    if (activeOwner !== owner) return;
-    activeSurface?.commitToLayer(layer);
-    if (activeSurface && !activeSurface.lost) {
-      validateGpuLayerResidency(layer, activeSurface);
-    } else {
-      invalidateGpuLayerResidency(layer);
-    }
-  },
-  issuePendingReadbacks(owner) {
-    if (activeOwner !== owner) return;
-    activeSurface?.issuePendingReadbacks();
-  },
-  endStroke(owner) {
-    if (activeOwner !== owner) return;
-    activeSurface?.endStroke();
-    activeOwner = null;
-    currentOwner = null;
-    activeSurface = null;
-  },
-  invalidateLayerResidency(layer) {
-    invalidateGpuLayerResidency(layer);
-  },
-  isLayerResident(layer) {
-    if (!brushPerfDebug.experiments.gpuResident) return false;
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
-    return surface ? prepareGpuLayerResidency(layer, surface) : false;
-  },
-  readMaterialFieldForTest(branchIndex) {
-    return activeSurface?.readMaterialFieldForTest(branchIndex) ?? null;
-  },
-};
-
-declare global {
-  // Experiment-only bridge used by @headless-paint/stroke without exporting
-  // the GPU module from the engine public index.
-  var __hpGpuStrokeRuntime: GpuStrokeRuntime | undefined;
-}
-
-globalThis.__hpGpuStrokeRuntime = gpuStrokeRuntime;
 
 function createProgram(
   gl: WebGL2RenderingContext,
@@ -2381,48 +1762,4 @@ function distanceCoefficient(ratePerPx: number, distancePx: number): number {
 
 function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, value));
-}
-
-function unpremultiply(value: number, alpha: number): number {
-  return Math.min(255, Math.round((value * 255) / alpha));
-}
-
-function copyUnpremultipliedCheckpoint(
-  output: Uint8ClampedArray,
-  premultiplied: Uint8Array,
-  request: {
-    readonly outputWidth: number;
-    readonly outputOriginX: number;
-    readonly outputOriginY: number;
-    readonly left: number;
-    readonly top: number;
-    readonly readWidth: number;
-    readonly readHeight: number;
-  },
-): void {
-  const outputX = request.left - request.outputOriginX;
-  const outputY = request.top - request.outputOriginY;
-  for (let sourceRow = 0; sourceRow < request.readHeight; sourceRow++) {
-    const targetRow = outputY + request.readHeight - 1 - sourceRow;
-    for (let column = 0; column < request.readWidth; column++) {
-      const sourceOffset = (sourceRow * request.readWidth + column) * 4;
-      const targetOffset =
-        (targetRow * request.outputWidth + outputX + column) * 4;
-      const alpha = premultiplied[sourceOffset + 3] ?? 0;
-      output[targetOffset + 3] = alpha;
-      if (alpha === 0) continue;
-      output[targetOffset] = unpremultiply(
-        premultiplied[sourceOffset] ?? 0,
-        alpha,
-      );
-      output[targetOffset + 1] = unpremultiply(
-        premultiplied[sourceOffset + 1] ?? 0,
-        alpha,
-      );
-      output[targetOffset + 2] = unpremultiply(
-        premultiplied[sourceOffset + 2] ?? 0,
-        alpha,
-      );
-    }
-  }
 }

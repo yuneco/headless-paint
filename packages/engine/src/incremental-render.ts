@@ -8,7 +8,10 @@ import {
   renderBrushStroke,
   stateToBranch,
 } from "./brush";
-import { getActiveGpuStrokeSurface } from "./brush/gpu/gpu-stroke-surface";
+import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./brush/gpu/accelerator";
 import { expandStrokePoints } from "./expand";
 import { clearLayer } from "./layer";
 import type {
@@ -34,6 +37,7 @@ export function appendToCommittedLayer(
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
   alphaLocked = layer.meta.alphaLocked,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
   if (points.length === 0) {
     return brushState ?? createDefaultBrushState();
@@ -43,7 +47,7 @@ export function appendToCommittedLayer(
   const strokes = expandStrokePoints(points, compiledExpand);
   let currentState = ensureBrushRenderState(brushState, strokes.length);
   const nextBranches: BrushBranchRenderState[] = [...currentState.branches];
-  const gpuSurface = getActiveGpuStrokeSurface();
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
   gpuSurface?.beginBranchBatch();
   try {
     for (let i = 0; i < strokes.length; i++) {
@@ -58,6 +62,7 @@ export function appendToCommittedLayer(
           overlapCount,
           branchState,
           sourceLayer,
+          accelerator,
         );
         const renderedBranch = stateToBranch(renderedState);
         nextBranches[i] = renderedBranch;

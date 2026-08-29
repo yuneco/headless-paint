@@ -1,4 +1,5 @@
 import type {
+  BrushAccelerator,
   BrushTipRegistry,
   Layer,
   LayerMeta,
@@ -26,6 +27,7 @@ export interface ExecutorDeps<TCustom = never> {
   readonly tipRegistry?: BrushTipRegistry;
   readonly customExecutor?: CustomCommandExecutor<TCustom>;
   readonly shiftTempCanvas?: OffscreenCanvas;
+  readonly accelerator?: BrushAccelerator | null;
 }
 
 export interface ExecutorFailure {
@@ -242,7 +244,9 @@ function executeLayerDraw<TCustom>(
     const layer = deps.layers.find((candidate) => candidate.id === layerId);
     if (!layer) continue;
 
-    const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry);
+    const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
+      accelerator: deps.accelerator,
+    });
     if (!result.ok) {
       return createFailureResult(
         state,
@@ -255,7 +259,7 @@ function executeLayerDraw<TCustom>(
         persistence,
       );
     }
-    invalidateGpuLayerResidency(layer);
+    invalidateGpuLayerResidency(layer, deps.accelerator);
     if (!layer.meta.visible) visibilityFixLayerIds.push(layer.id);
   }
 
@@ -310,11 +314,13 @@ function executeCustom<TCustom>(
 
   const dirty = outcome.dirty ?? DIRTY_NONE;
   if (dirty.type === "all") {
-    for (const layer of deps.layers) invalidateGpuLayerResidency(layer);
+    for (const layer of deps.layers) {
+      invalidateGpuLayerResidency(layer, deps.accelerator);
+    }
   } else if (dirty.type === "layers") {
     for (const layerId of dirty.layerIds) {
       const layer = deps.layers.find((candidate) => candidate.id === layerId);
-      if (layer) invalidateGpuLayerResidency(layer);
+      if (layer) invalidateGpuLayerResidency(layer, deps.accelerator);
     }
   }
 
@@ -409,7 +415,9 @@ function executeStructural<TCustom>(
         command.layerId,
         command.meta,
       );
-      const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry);
+      const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
+        accelerator: deps.accelerator,
+      });
       if (!result.ok) {
         return createFailureResult(
           state,
@@ -539,6 +547,7 @@ function executeStructural<TCustom>(
         sourceLayer,
         next,
         deps.tipRegistry,
+        { accelerator: deps.accelerator },
       );
       if (!sourceResult.ok) {
         return createFailureResult(
@@ -574,6 +583,7 @@ function executeStructural<TCustom>(
         targetLayer,
         next,
         deps.tipRegistry,
+        { accelerator: deps.accelerator },
       );
       if (!targetResult.ok) {
         return createFailureResult(
@@ -587,7 +597,7 @@ function executeStructural<TCustom>(
           persistence,
         );
       }
-      invalidateGpuLayerResidency(targetLayer);
+      invalidateGpuLayerResidency(targetLayer, deps.accelerator);
 
       return {
         ok: true,
