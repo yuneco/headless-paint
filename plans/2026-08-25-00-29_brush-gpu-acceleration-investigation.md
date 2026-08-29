@@ -582,3 +582,12 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - Undo9（8 move合成stroke×10）はWebKitで476→515ms: strokeごとのfull-layer `texImage2D`（2048²）が原因。実strokeでは償却されるが、短いstroke連打とreplayで不利 → dirty-region uploadが次の課題
 - 未対応: Expand、mixing以外、compositeOperation≠source-over、context loss復旧、WebGPU版
 - 次: STP（実Safari）で同計測 → iPad。ChromiumはCPU経路維持（backend選択はUA/計測で決める）
+
+### 18.8 実Safari（STP 251、Safari MCP経由、2026-08-29）
+| 経路 | dispatch p50/p95 | 内訳 | undo1 / undo9 |
+|---|---|---|---|
+| CPU | 7/10ms | checkpointReadback 1002回 1585ms | 145 / 467ms |
+| **GPU WebGL2 async** | **1/2ms** | gpuReadRequest 241回41ms、gpuCommit 241回87ms、checkpointReadback 240回33ms | 168 / 520ms |
+- Playwright WebKit（8/11 → 1/2）と同傾向。**実Safariでも同期点除去の効果を確認**
+- runner: `work.local/benchmark-acrylic-stp.py`（`GPU_DAB` / `GPU_READBACK` / `BATCHES` / `SAMPLES` / `REPEATS`）。自動化ウィンドウは人がクリックして可視にする必要あり（背景実行では120秒待っても`hidden`のまま。ユーザーが`!`で実行すると成功）
+- 残課題: undo9はGPUが約10%遅い（stroke開始のfull-layer upload）。Chromiumではcommit 2.9ms/回でCPU経路に劣る
