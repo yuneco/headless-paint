@@ -27,7 +27,7 @@ import {
   BRISTLE_S_CURVE_FIXTURE_WIDTH,
   createBristleSCurveEvaluationPoints,
 } from "./brush-evaluation-fixtures";
-import { registerAppBrushTips } from "./brush-presets";
+import { APP_BRUSH_PRESETS, registerAppBrushTips } from "./brush-presets";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
 import { SidebarPanel } from "./components/SidebarPanel";
@@ -63,8 +63,15 @@ interface UndoTimingDebug {
   snapshot(): readonly UndoTimingEntry[];
 }
 
+interface HpDebugUi {
+  setColor(hex: string): void;
+  setLineWidth(px: number): void;
+  selectBrush(label: string): void;
+}
+
 declare global {
   var __hpUndoTiming: UndoTimingDebug | undefined;
+  var __hpDebugUi: HpDebugUi | undefined;
 }
 
 function configureBrushPerfDebugFromUrl(): void {
@@ -247,6 +254,43 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     initialBrush:
       restoredSettings?.pen.brush ?? DEFAULT_PEN_CONFIG.initialBrush,
   });
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("perfDebug") !== "1") {
+      return;
+    }
+    const debugUi: HpDebugUi = {
+      setColor(hex) {
+        if (!/^#[0-9a-f]{6}$/i.test(hex)) {
+          throw new Error(`Invalid debug color: ${hex}`);
+        }
+        penSettings.setColor({
+          r: Number.parseInt(hex.slice(1, 3), 16),
+          g: Number.parseInt(hex.slice(3, 5), 16),
+          b: Number.parseInt(hex.slice(5, 7), 16),
+          a: 255,
+        });
+      },
+      setLineWidth(px) {
+        if (!Number.isFinite(px) || px <= 0) {
+          throw new Error(`Invalid debug line width: ${px}`);
+        }
+        penSettings.setLineWidth(px);
+      },
+      selectBrush(label) {
+        const preset = APP_BRUSH_PRESETS.find(
+          (candidate) => candidate.label === label,
+        );
+        if (!preset) throw new Error(`Unknown debug brush: ${label}`);
+        penSettings.setBrush(preset.config);
+      },
+    };
+    globalThis.__hpDebugUi = debugUi;
+    return () => {
+      if (globalThis.__hpDebugUi === debugUi) {
+        globalThis.__hpDebugUi = undefined;
+      }
+    };
+  }, [penSettings.setBrush, penSettings.setColor, penSettings.setLineWidth]);
   const smoothing = useSmoothing({
     initialEnabled:
       restoredSettings?.smoothing.enabled ??
