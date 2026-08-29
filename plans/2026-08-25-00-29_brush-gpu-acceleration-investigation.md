@@ -666,3 +666,4 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 | radial 8 GPU | 22/30 | 880 | **6292（−67%）** | gpuCommit 241回×14ms=3420ms、gpuFieldUpdate 18776回1543ms |
 - 実装: branchごとのfieldを`TEXTURE_2D_ARRAY`のlayerに保持、dab instanceに`branchIndex`、branch順にflushしてCPUと同じ重なり順序。parity（radial 4、中心重なり）Tier B通過、live/replay byte一致。branch上限12（超過はCPU fallback）。テスト502件green
 - **liveが伸びない原因はcommit**: dirty rectの和が対称展開でlayer全体になり、毎batch 2048²をblit+drawImage → branchごとのdirty rectでcommitする修正が必要
+- branchごとのdirty rect commit後（`21fe05f`）: radial 4 dispatch 12/14（commit 241回×8ms、転送p50 57k px）、radial 8 22/26（14ms/回）。**転送量に比例せず、branchごとの「blit→drawImage」往復が原因**。gpuFieldUpdateもbranch数倍（r8で1.5s）。対策: commitのパッキング（全rectを一括blit→drawImage群）と、全branchのfieldを1 passで更新するstrip化 → 委譲中
