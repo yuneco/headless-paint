@@ -11,7 +11,13 @@ const INSTANCE_FLOATS = 6;
 const CHECKPOINT_WAIT_TIMEOUT_NS = 1_000_000_000;
 const COMMIT_TILE_SIZE = 512;
 const COMMIT_CANVAS_SIZE = 1024;
-const MAX_GPU_STROKE_BRANCHES = 12;
+const MAX_GPU_STROKE_BRANCHES = 64;
+// uPreviousField and uFieldDimensions consume one default-block vector each.
+const FIELD_DIFFUSION_FIXED_FRAGMENT_UNIFORM_VECTORS = 2;
+const BRANCH_DATA_BINDING = 0;
+const BRANCH_DATA_VEC4S_PER_BRANCH = 4;
+const BRANCH_DATA_FLOATS =
+  MAX_GPU_STROKE_BRANCHES * BRANCH_DATA_VEC4S_PER_BRANCH * 4;
 
 interface DirtyRect {
   left: number;
@@ -266,17 +272,19 @@ precision highp float;
 
 uniform highp sampler2DArray uCheckpoints;
 uniform sampler2D uPreviousField;
-uniform vec2 uCheckpointOrigins[${MAX_GPU_STROKE_BRANCHES}];
-uniform ivec2 uCheckpointSizes[${MAX_GPU_STROKE_BRANCHES}];
 uniform ivec2 uFieldDimensions;
-uniform vec4 uGeometry[${MAX_GPU_STROKE_BRANCHES}];
-uniform vec4 uBaseColors[${MAX_GPU_STROKE_BRANCHES}];
-uniform vec3 uRates[${MAX_GPU_STROKE_BRANCHES}];
+
+layout(std140) uniform BranchData {
+  vec4 uCheckpointRects[${MAX_GPU_STROKE_BRANCHES}];
+  vec4 uGeometry[${MAX_GPU_STROKE_BRANCHES}];
+  vec4 uBaseColors[${MAX_GPU_STROKE_BRANCHES}];
+  vec4 uRates[${MAX_GPU_STROKE_BRANCHES}];
+};
 
 out vec4 outColor;
 
 vec4 checkpointTexel(ivec2 tilePixel, int branchIndex) {
-  ivec2 checkpointSize = uCheckpointSizes[branchIndex];
+  ivec2 checkpointSize = ivec2(uCheckpointRects[branchIndex].zw);
   if (
     tilePixel.x < 0 || tilePixel.y < 0 ||
     tilePixel.x >= checkpointSize.x || tilePixel.y >= checkpointSize.y
@@ -294,7 +302,7 @@ vec4 checkpointTexel(ivec2 tilePixel, int branchIndex) {
 
 vec4 sampleCheckpointBilinear(vec2 documentPosition, int branchIndex) {
   vec2 samplePosition =
-    documentPosition - uCheckpointOrigins[branchIndex] - vec2(0.5);
+    documentPosition - uCheckpointRects[branchIndex].xy - vec2(0.5);
   ivec2 p0 = ivec2(floor(samplePosition));
   vec2 fraction = samplePosition - vec2(p0);
   return mix(
@@ -320,7 +328,7 @@ void main() {
     stripCoord.y - branchIndex * uFieldDimensions.y
   );
   vec4 geometry = uGeometry[branchIndex];
-  vec3 rates = uRates[branchIndex];
+  vec3 rates = uRates[branchIndex].xyz;
   vec4 current = texelFetch(uPreviousField, stripCoord, 0);
   if (rates.z < 0.5) {
     outColor = current;
@@ -346,12 +354,15 @@ void main() {
 }
 `;
 
-const FIELD_DIFFUSION_FRAGMENT_SHADER_SOURCE = `#version 300 es
+function createFieldDiffusionFragmentShaderSource(
+  maxBranchCount: number,
+): string {
+  return `#version 300 es
 precision highp float;
 
 uniform sampler2D uPreviousField;
 uniform ivec2 uFieldDimensions;
-uniform float uStrengths[${MAX_GPU_STROKE_BRANCHES}];
+uniform float uStrengths[${maxBranchCount}];
 
 out vec4 outColor;
 
@@ -385,6 +396,7 @@ void main() {
   outColor = mix(current, sum / count, strength);
 }
 `;
+}
 
 class WebGl2StrokeSurface implements GpuStrokeSurface {
   readonly width: number;
@@ -397,6 +409,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private readonly fieldDiffusionProgram: WebGLProgram;
   private readonly vertexArray: WebGLVertexArrayObject;
   private readonly instanceBuffer: WebGLBuffer;
+  private readonly branchDataBuffer: WebGLBuffer;
   private accumTexture: WebGLTexture;
   private sourceTexture: WebGLTexture;
   private readonly tipTexture: WebGLTexture;
@@ -431,6 +444,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private currentBranchIndex = 0;
   private pendingBranchSegments: PendingBranchSegment[][] | null = null;
   private readonly useFloatField: boolean;
+  readonly maxBranchCount: number;
   private strokeBegun = false;
   private contextLost = false;
   private checkpointSlots: CheckpointSlot[] = [];
@@ -459,6 +473,22 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     });
     if (!gl) throw new Error("WebGL2 is unavailable");
     this.gl = gl;
+    const fragmentUniformVectors = Number(
+      gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+    );
+    const availableBranchUniformVectors = Number.isFinite(
+      fragmentUniformVectors,
+    )
+      ? Math.floor(fragmentUniformVectors) -
+        FIELD_DIFFUSION_FIXED_FRAGMENT_UNIFORM_VECTORS
+      : 0;
+    this.maxBranchCount = Math.min(
+      MAX_GPU_STROKE_BRANCHES,
+      Math.max(0, availableBranchUniformVectors),
+    );
+    if (this.maxBranchCount < 1) {
+      throw new Error("GPU fragment uniform capacity is insufficient");
+    }
     this.canvas.addEventListener("webglcontextlost", () => {
       this.discardPendingCheckpointSnapshots();
       this.deleteCheckpointSlots();
@@ -482,7 +512,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.fieldDiffusionProgram = createProgram(
       gl,
       FIELD_VERTEX_SHADER_SOURCE,
-      FIELD_DIFFUSION_FRAGMENT_SHADER_SOURCE,
+      createFieldDiffusionFragmentShaderSource(this.maxBranchCount),
       "GPU material field diffusion",
     );
     this.vertexArray = requireResource(
@@ -492,6 +522,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.instanceBuffer = requireResource(
       gl.createBuffer(),
       "WebGL instance buffer",
+    );
+    this.branchDataBuffer = requireResource(
+      gl.createBuffer(),
+      "WebGL branch data uniform buffer",
     );
     this.accumTexture = requireResource(
       gl.createTexture(),
@@ -532,6 +566,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     );
 
     this.configureGeometry();
+    this.configureBranchDataBuffer();
     this.configureTexture(this.accumTexture, gl.NEAREST);
     this.configureTexture(this.sourceTexture, gl.NEAREST);
     this.configureTexture(this.tipTexture, gl.LINEAR);
@@ -562,10 +597,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (
       !Number.isSafeInteger(branchCount) ||
       branchCount < 1 ||
-      branchCount > MAX_GPU_STROKE_BRANCHES
+      branchCount > this.maxBranchCount
     ) {
       throw new Error(
-        `GPU stroke branch count must be between 1 and ${MAX_GPU_STROKE_BRANCHES}`,
+        `GPU stroke branch count must be between 1 and ${this.maxBranchCount}`,
       );
     }
     this.branchCount = branchCount;
@@ -1061,11 +1096,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const gl = this.gl;
     const nextIndex = oppositeFieldIndex(this.activeFieldIndex);
-    const geometry = new Float32Array(MAX_GPU_STROKE_BRANCHES * 4);
-    const baseColors = new Float32Array(MAX_GPU_STROKE_BRANCHES * 4);
-    const rates = new Float32Array(MAX_GPU_STROKE_BRANCHES * 3);
-    const checkpointOrigins = new Float32Array(MAX_GPU_STROKE_BRANCHES * 2);
-    const checkpointSizes = new Int32Array(MAX_GPU_STROKE_BRANCHES * 2);
+    const branchData = new Float32Array(BRANCH_DATA_FLOATS);
+    const checkpointRectsOffset = 0;
+    const geometryOffset = MAX_GPU_STROKE_BRANCHES * 4;
+    const baseColorsOffset = MAX_GPU_STROKE_BRANCHES * 8;
+    const ratesOffset = MAX_GPU_STROKE_BRANCHES * 12;
 
     for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
       const update = updates[branchIndex];
@@ -1074,13 +1109,14 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         throw new Error("GPU material checkpoint has not been initialized");
       }
       if (checkpoint?.initialized) {
-        checkpointOrigins.set(
-          [checkpoint.originX, checkpoint.originY],
-          branchIndex * 2,
-        );
-        checkpointSizes.set(
-          [checkpoint.textureSize, checkpoint.textureSize],
-          branchIndex * 2,
+        branchData.set(
+          [
+            checkpoint.originX,
+            checkpoint.originY,
+            checkpoint.textureSize,
+            checkpoint.textureSize,
+          ],
+          checkpointRectsOffset + branchIndex * 4,
         );
       }
       if (!update) continue;
@@ -1091,31 +1127,32 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         throw new Error("GPU material field batch dimensions do not match");
       }
       const distance = sanitizeNonNegative(update.distancePx);
-      geometry.set(
+      branchData.set(
         [
           update.centerX,
           update.centerY,
           update.angle,
           Math.max(1, update.sampleSize),
         ],
-        branchIndex * 4,
+        geometryOffset + branchIndex * 4,
       );
-      baseColors.set(
+      branchData.set(
         [
           clampUnit(update.baseColor.r / 255),
           clampUnit(update.baseColor.g / 255),
           clampUnit(update.baseColor.b / 255),
           clampUnit(update.baseColor.a / 255),
         ],
-        branchIndex * 4,
+        baseColorsOffset + branchIndex * 4,
       );
-      rates.set(
+      branchData.set(
         [
           distanceCoefficient(update.pickupRatePerPx, distance),
           distanceCoefficient(update.restoreRatePerPx, distance),
           1,
+          0,
         ],
-        branchIndex * 3,
+        ratesOffset + branchIndex * 4,
       );
     }
 
@@ -1137,30 +1174,17 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gl.getUniformLocation(this.fieldMixProgram, "uPreviousField"),
       1,
     );
-    gl.uniform2fv(
-      gl.getUniformLocation(this.fieldMixProgram, "uCheckpointOrigins[0]"),
-      checkpointOrigins,
-    );
-    gl.uniform2iv(
-      gl.getUniformLocation(this.fieldMixProgram, "uCheckpointSizes[0]"),
-      checkpointSizes,
-    );
     gl.uniform2i(
       gl.getUniformLocation(this.fieldMixProgram, "uFieldDimensions"),
       this.fieldColumns,
       this.fieldRows,
     );
-    gl.uniform4fv(
-      gl.getUniformLocation(this.fieldMixProgram, "uGeometry[0]"),
-      geometry,
-    );
-    gl.uniform4fv(
-      gl.getUniformLocation(this.fieldMixProgram, "uBaseColors[0]"),
-      baseColors,
-    );
-    gl.uniform3fv(
-      gl.getUniformLocation(this.fieldMixProgram, "uRates[0]"),
-      rates,
+    gl.bindBuffer(gl.UNIFORM_BUFFER, this.branchDataBuffer);
+    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, branchData);
+    gl.bindBufferBase(
+      gl.UNIFORM_BUFFER,
+      BRANCH_DATA_BINDING,
+      this.branchDataBuffer,
     );
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     return startedAt;
@@ -1171,7 +1195,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     startedAt: number,
   ): void {
     const gl = this.gl;
-    const passAmounts = new Float32Array(MAX_GPU_STROKE_BRANCHES);
+    const passAmounts = new Float32Array(this.maxBranchCount);
     for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
       const update = updates[branchIndex];
       if (!update) continue;
@@ -1182,7 +1206,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
     let sourceIndex = oppositeFieldIndex(this.activeFieldIndex);
     while (passAmounts.some((amount) => amount > 1e-6)) {
-      const strengths = new Float32Array(MAX_GPU_STROKE_BRANCHES);
+      const strengths = new Float32Array(this.maxBranchCount);
       for (let index = 0; index < this.branchCount; index++) {
         strengths[index] = Math.min(1, passAmounts[index] ?? 0);
       }
@@ -1971,6 +1995,33 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.bindVertexArray(null);
   }
 
+  private configureBranchDataBuffer(): void {
+    const gl = this.gl;
+    const blockIndex = gl.getUniformBlockIndex(
+      this.fieldMixProgram,
+      "BranchData",
+    );
+    if (blockIndex === gl.INVALID_INDEX) {
+      throw new Error("GPU branch data uniform block is unavailable");
+    }
+    gl.uniformBlockBinding(
+      this.fieldMixProgram,
+      blockIndex,
+      BRANCH_DATA_BINDING,
+    );
+    gl.bindBuffer(gl.UNIFORM_BUFFER, this.branchDataBuffer);
+    gl.bufferData(
+      gl.UNIFORM_BUFFER,
+      BRANCH_DATA_FLOATS * Float32Array.BYTES_PER_ELEMENT,
+      gl.DYNAMIC_DRAW,
+    );
+    gl.bindBufferBase(
+      gl.UNIFORM_BUFFER,
+      BRANCH_DATA_BINDING,
+      this.branchDataBuffer,
+    );
+  }
+
   private configureTexture(texture: WebGLTexture, filter: number): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -2090,6 +2141,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
 let cachedSurface: WebGl2StrokeSurface | null = null;
 let gpuPermanentlyUnavailable = false;
+let gpuStrokeBranchLimit = MAX_GPU_STROKE_BRANCHES;
 let surfaceCreationCount = 0;
 let activeOwner: object | null = null;
 let currentOwner: object | null = null;
@@ -2113,6 +2165,7 @@ export function acquireGpuStrokeSurface(
   }
   try {
     cachedSurface = new WebGl2StrokeSurface(width, height);
+    gpuStrokeBranchLimit = cachedSurface.maxBranchCount;
     surfaceCreationCount++;
     return cachedSurface;
   } catch {
@@ -2135,7 +2188,7 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
     return (
       Number.isSafeInteger(branchCount) &&
       branchCount >= 1 &&
-      branchCount <= MAX_GPU_STROKE_BRANCHES
+      branchCount <= gpuStrokeBranchLimit
     );
   },
   beginStroke(owner, layer, sourceCanvas, branchCount = 1) {

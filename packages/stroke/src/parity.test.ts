@@ -83,6 +83,26 @@ const RADIAL_EXPAND_2: ExpandConfig = {
     },
   ],
 };
+const RADIAL_EXPAND_64: ExpandConfig = {
+  levels: [
+    {
+      mode: "radial",
+      offset: { x: WIDTH / 2, y: HEIGHT / 2 },
+      angle: 0,
+      divisions: 64,
+    },
+  ],
+};
+const RADIAL_EXPAND_65: ExpandConfig = {
+  levels: [
+    {
+      mode: "radial",
+      offset: { x: WIDTH / 2, y: HEIGHT / 2 },
+      angle: 0,
+      divisions: 65,
+    },
+  ],
+};
 const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };
 const RED: Color = { r: 225, g: 30, b: 30, a: 255 };
 const GREEN: Color = { r: 30, g: 185, b: 90, a: 255 };
@@ -483,6 +503,75 @@ describe("GPU mixing Expand parity", () => {
       "GPU radial 4 live stroke vs command replay",
     );
   });
+
+  it("radial 64 が GPU を使い live/replay byte 一致と CPU Tier B parity を満たす", () => {
+    const cpuLayer = renderGpuExpandBatches(
+      "off",
+      [CENTER_CROSSING_INPUT_POINTS],
+      RADIAL_EXPAND_64,
+    );
+    const perf = getBrushPerfTestBridge();
+    if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+    perf.enabled = true;
+    perf.reset();
+    perf.experiments.gpuDab = "webgl2";
+    perf.experiments.gpuReadback = "gpu-field";
+    const gpuRuntime = getGpuBranchTestBridge();
+    if (!gpuRuntime)
+      throw new Error("GPU stroke runtime bridge is unavailable");
+    expect(gpuRuntime.supportsBranchCount(64)).toBe(true);
+
+    const baseLayer = createTestLayer();
+    paintExpandFixture(baseLayer);
+    const liveLayer = createTestLayer();
+    copyLayerPixels(baseLayer, liveLayer);
+    const { command } = simulateLiveStroke({
+      layer: liveLayer,
+      inputPoints: CENTER_CROSSING_INPUT_POINTS,
+      style: STAMP_MIXING_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: RADIAL_EXPAND_64,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+    });
+
+    expect(perf.snapshot().samples.gpuBranches).toEqual([64]);
+    expect(perf.snapshot().stages.gpuFieldUpdate.count).toBeGreaterThan(0);
+    const replayLayer = createTestLayer();
+    replayOnLayer(command, replayLayer, baseLayer);
+
+    expectPixelEqual(
+      liveLayer,
+      replayLayer,
+      "GPU radial 64 live stroke vs command replay",
+    );
+    expectAlphaTierB(cpuLayer, liveLayer);
+  });
+
+  it("radial 65 は supportsBranchCount=false となり CPU fallback する", () => {
+    const gpuRuntime = getGpuBranchTestBridge();
+    if (!gpuRuntime)
+      throw new Error("GPU stroke runtime bridge is unavailable");
+    expect(gpuRuntime.supportsBranchCount(65)).toBe(false);
+
+    const expected = renderGpuExpandBatches(
+      "off",
+      [CENTER_CROSSING_INPUT_POINTS],
+      RADIAL_EXPAND_65,
+    );
+    const perf = getBrushPerfTestBridge();
+    if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+    perf.enabled = true;
+    perf.reset();
+    const actual = renderGpuExpandBatches(
+      "webgl2",
+      [CENTER_CROSSING_INPUT_POINTS],
+      RADIAL_EXPAND_65,
+    );
+
+    expectPixelEqual(expected, actual, "radial 65 CPU fallback");
+    expect(perf.snapshot().samples.gpuBranches).toEqual([]);
+  });
 });
 
 interface MaterialFieldSnapshot {
@@ -613,6 +702,7 @@ function renderGpuMixingBatches(
 function renderGpuExpandBatches(
   gpuDab: "off" | "webgl2",
   batches: readonly (readonly InputPoint[])[],
+  expand: ExpandConfig = RADIAL_EXPAND_4,
 ): Layer {
   const perf = getBrushPerfTestBridge();
   if (!perf) throw new Error("Brush perf debug bridge is unavailable");
@@ -626,13 +716,25 @@ function renderGpuExpandBatches(
     layer,
     style: STAMP_MIXING_STYLE,
     filterPipeline: FILTER_PIPELINE,
-    expand: RADIAL_EXPAND_4,
+    expand,
     brushSeed: BRUSH_SEED,
     alphaLocked: false,
   });
   for (const batch of batches) renderer.feedMany(batch);
   renderer.finalize();
   return layer;
+}
+
+function getGpuBranchTestBridge():
+  | { supportsBranchCount(branchCount: number): boolean }
+  | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      readonly __hpGpuStrokeRuntime?: {
+        supportsBranchCount(branchCount: number): boolean;
+      };
+    }
+  ).__hpGpuStrokeRuntime;
 }
 
 function paintExpandFixture(layer: Layer): void {
