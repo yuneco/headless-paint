@@ -611,3 +611,14 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - 結果: live / replay / Undo でpixel一致（同一backend）。WebKitのreadPixels費用はbatch開始時の小tile読みだけ
 - 1 batch内に複数checkpointが来る場合はsnapshot ringに溜め、readbackはbatch開始時にまとめて発行。取り込み時点で未readbackならその場で発行＋待つ（高速stroke時のみのコスト）
 - 旧async（batch矩形）モードは削除、`gpuReadback: "sync" | "async"`のasyncをこの方式に置き換える
+
+### 18.12 決定的async（lag N）の結果 → 方式転換（2026-08-29）
+| 経路 | dispatch p50/p95 | undoLong（1920 samples級×2本replay） | parity F1 |Δ|>0.1 |
+|---|---|---|---|
+| CPU | 8/12 | 2735ms | — |
+| GPU lag=1 | 7/11 | 2968 | 5.9% |
+| GPU lag=2 | 8/12 | 3131 | 0.98% |
+| GPU lag=4 | 8/12 | 3640 | 8.2% |
+- replayはcheckpointごとにGPU完了待ち（≈1ms/回の往復レイテンシ）が必要で、Nを上げても待ち回数は減らない。tileを(N+1)倍にした分の帯域増でNが大きいほど遅い
+- 結論: **CPUへpixelを戻す設計は「同期回数×レイテンシ」が床**。高速stroke・replayでは利得が消える。batch方式（1/2ms）は非決定的で採用不可
+- **方式転換**: pickup sampling（回転付きbilinear）と material field 更新（pickup/restore/diffusion）をGPU shaderで実行し、18×8 fieldをGPU常駐にする → readbackゼロ、同期点ゼロ、GPU実行順で決定的（live/replay一致）、lagなし。C11の本来形
