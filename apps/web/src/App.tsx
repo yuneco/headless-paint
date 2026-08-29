@@ -67,6 +67,7 @@ interface HpDebugUi {
   setColor(hex: string): void;
   setLineWidth(px: number): void;
   selectBrush(label: string): void;
+  setSymmetry?(mode: string, divisions: number): void;
 }
 
 declare global {
@@ -318,6 +319,14 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     [smoothing.compiledFilterPipeline, usesStatefulMaterial],
   );
   const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
+  useEffect(() => {
+    const ui = globalThis.__hpDebugUi;
+    if (!ui) return;
+    ui.setSymmetry = (mode, divisions) => {
+      expand.setMode(mode as Parameters<typeof expand.setMode>[0]);
+      expand.setDivisions(divisions);
+    };
+  }, [expand.setMode, expand.setDivisions]);
   const patternPreview = usePatternPreview();
 
   // メインエンジン
