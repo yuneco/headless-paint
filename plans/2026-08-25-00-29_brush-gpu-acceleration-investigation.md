@@ -6,7 +6,7 @@
 - Revised: 2026-08-25（Claude + codex review round 1 を反映。GPU一択の計画から「候補群を安く切り分ける実験計画」へ再構成）
 - Branch at creation: `feature/acrylic-v2-production`
 - HEAD at creation: `9ccff0c docs: close acrylic width regression`
-- State: **E0〜E2完了、E1b（C4）棄却（2026-08-25）。Section 15/16に結果。次はユーザー採用判断（GPU spikeへ進むか）**
+- State: **GPU spike完了（2026-08-30、`8c9c3a4`）。Section 19が採用判断gateの材料。次はユーザーの採用判断 → 正式設計（F1）**
 - Scope: Acrylic v2 / Rough bristle **renderer自体**の高速化。CPU最適化・WASM・WebGL2・WebGPUを候補として、有効性を素早く安く切り分ける
 - Out of scope（ユーザー決定 2026-08-25）: Undo checkpoint戦略、遅延を目立たなくするUI/非同期化など「重さを隠す」方向の検討
 - Work branch: `experiment/brush-acceleration`（`feature/acrylic-v2-production@9ccff0c`から分岐）。実験はすべてこのbranchで行い、自由にcommitを積んでよい
@@ -683,3 +683,35 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - parity（WebKit）: radial 1 F1 **0.0045 / 0%**、radial 4 F1 **0.0032 / 0%**（F3 0.0047 / 0%）。Expandでも経路差なし
 - 性能は一時後退: r4 dispatch 5/6・undoLong 3757、r8 9/12・undoLong 7605（field passがbranch逐次発行に戻ったため。strip一括更新時は r4 2/3・944）→ snapshot方式のまま一括更新へ戻す修正を委譲
 - 途中でcodexが提案した「Expand時はreadbackへ戻す」案は同期の床を再導入するため不採用
+
+## 19. 採用判断gate（2026-08-30、branch `experiment/brush-acceleration` @ `8c9c3a4`）
+
+### 19.1 最終数値（WebKit Playwright、backlog fixture 1920 samples、常駐ON、gpu-field + GPU内checkpoint snapshot）
+| 条件 | CPU dispatch p50/p95 | **GPU dispatch** | CPU undoLong | **GPU undoLong** | parity F1（RGB MAE / |Δ|>0.1） |
+|---|---|---|---|---|---|
+| 2K radial 1 | 8/12 | **2/2** | 2710 | **903（−67%）** | 0.0044 / 0% |
+| 2K radial 4 | 16/24 | **2/3** | 9392 | **1675（−82%）** | 0.0032 / 0% |
+| 2K radial 8 | 28/45 | **3/4** | 19137 | **2422（−87%）** | — |
+| 4K radial 1 | 16/19 | **1/2** | 5749 | **1579（−73%）** | — |
+- 実Safari（STP）: CPU 7/10・undoLong 2726 → GPU 1/1・689（gpu-field導入時点の値）
+- iPad実機: 体感良好、決定性OK、色混ぜ感触良好。短stroke連打のまとめ描きは常駐化で対処（実機再確認は未）
+- Chromium: CPU 1/1.5が元から速く、GPUは3.9/5（commit費用）→ **WebKit系のみGPU**
+- テスト508件green（live/replay byte一致、Expand parity Tier B、residency、field CPU一致±2/255 を含む）
+
+### 19.2 実装の構成（実験コード、`packages/engine/src/brush/gpu/`）
+- `GpuStrokeSurface`（WebGL2）: layer同寸accum RGBA8 FBO、tip texture、field strip（RGBA16F/8、`columns × rows×branchCount`）、branch別checkpoint snapshot（`TEXTURE_2D_ARRAY`）、1024² commit canvas（shelf packing）、instanced dab（branchIndex付き）
+- 経路: dab = instanced draw（tip × field bilinear、premultiplied source-over）/ field更新 = checkpoint距離ごとにaccum tileをsnapshotへblit → updateDistanceごとに全branch 1 passでsample/mix + diffusion / commit = batchごとにbranch別dirty rectをpacking blit → drawImage群
+- 常駐: layer別WeakMap、無効化hookを engine（layer/draw/merge/transform/wrap-shift/CPU brush）と stroke（非GPU stroke、checkpoint復元、command executor）に配置。直近1 layerのみ
+- 切替: `brushPerfDebug.experiments.gpuDab="webgl2"`（既定off）、`gpuReadback="gpu-field"`（既定）、`gpuResident`。URL `?gpuDab=webgl2`
+- 適格: stamp + mixing ON + source-over + alphaLock無し + branch≤12 + WebGL2取得成功。それ以外はCPU経路
+
+### 19.3 残課題（正式設計で扱う）
+- backend選択規則（UA/実測でWebKit系のみGPU、Node/Chromium/context lostはCPU）とpublic契約（`Layer`はCanvas2Dのまま。GPUは内部accelerator）
+- 実験コードの整理: `sync` readback経路、lag knob、perf-debug knob群、`__hpDebugUi`、`nullStages` の削除/隔離
+- context loss時の扱い（rebuild単位でCPU再実行）とresource lifecycle（runtime単位のsurface、dispose）
+- 外部からの`layer.ctx`直接書き込みは常駐無効化を検出できない（契約として「engine API経由で書く」を明示するか、常駐をopt-inにする）
+- field textureフォーマット差（RGBA16F/8）と異GPU間のbit差はTier B許容として文書化
+- Rough bristleは未着手（Hold。必要になったらこの基盤にmask+ink shaderを乗せる）
+- WebGPU版はChromiumのcommit費用が動機だがCPU経路が速いため優先度低
+- Tier B閾値・parity harnessの正式化（`pass`判定のcoverage基準が表示canvas ROIで厳しすぎる）
+- iPadでの最終確認（常駐化・Expand込み）
