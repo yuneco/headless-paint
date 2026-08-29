@@ -719,3 +719,8 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 ### 19.4 ユーザー判断（2026-08-30）
 - 性能改善は認める。**現実装は棄却しない**。ただしiPad実機でradial 6でも時々**数百msのstall**（入力は取れており、後でまとめて正しく描画される）→ 要改善項目
 - 仮説: texture再確保（branch数/tile寸法変化時の`texImage2D`）、常駐miss時の16MB upload、commit packingの複数巡回、GC。Mac側で再現しにくいためアプリ内stall記録で切り分ける
+
+### 19.5 採用方針とBristle展開のタイミング（ユーザー決定 2026-08-30）
+- **採用前提**で進める。iPadのstallは正式化前の要改善項目
+- 順序: iPad stall診断・修正 → **F1 正式設計**（GPU backendをbrush非依存契約にする: accum / commit / 常駐 / branch / field。backend選択、lifecycle、context loss、Tier B契約、常駐のopt-in/契約）→ F2 → F3（Acrylic正式実装、実験コード整理）→ F4 → **第2フェーズでBristle GPU**（Rough mixing ONも同時）
+- Bristleは「Acrylic = 毛束1・かすれなし・mask恒等の単純化ケース」と見なす。差分はmask（MAX蓄積の別texture、Fine tooth/反復接触のhashをfragmentで）とink passの追加で、accum以降の契約は共通。F1でplug-in点（chunk単位のmask+ink pass）を定義し、契約が不明瞭なら1〜2日のcontract-check spikeで確認
