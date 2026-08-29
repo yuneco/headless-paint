@@ -677,3 +677,9 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - commitは全branch rectを1024²にshelf packingして一括blit→drawImage群（1 commit 0.2ms）。fieldは`columns × (rows×branchCount)`のstripで全branch 1 pass更新
 - strip化で単branchのparityが一度壊れた（dab shaderの補間式変更＋branch=1でも不要なflush分割→即時再pickup）→ 修正済み
 - **残: Expand時のparity**（branch間のpickup順序: CPUはbranchごとに逐次でcheckpoint tileを読む、GPUは全branchを同時にaccumから読む）。調査中
+
+### 18.19 GPU内checkpoint snapshot（2026-08-30、`d42dc3e`）
+- fieldのsampling元を「live accum」から「checkpoint距離ごとにbranch別snapshot textureへblitしたtile」に変更（CPUの時間基準を再現、readbackゼロ）
+- parity（WebKit）: radial 1 F1 **0.0045 / 0%**、radial 4 F1 **0.0032 / 0%**（F3 0.0047 / 0%）。Expandでも経路差なし
+- 性能は一時後退: r4 dispatch 5/6・undoLong 3757、r8 9/12・undoLong 7605（field passがbranch逐次発行に戻ったため。strip一括更新時は r4 2/3・944）→ snapshot方式のまま一括更新へ戻す修正を委譲
+- 途中でcodexが提案した「Expand時はreadbackへ戻す」案は同期の床を再導入するため不採用
