@@ -14,7 +14,7 @@ import {
   createMaterialField,
   writeMaterialFieldPixels,
 } from "./material-field";
-import { brushPerfDebug } from "./perf-debug";
+import { brushPerfDebug, getCheckpointLagSteps } from "./perf-debug";
 
 const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
@@ -291,12 +291,17 @@ function captureCheckpoint(
   };
 }
 
-function getCheckpointTile(input: MixingUpdateInput): {
+function getCheckpointTile(
+  input: MixingUpdateInput,
+  asyncCheckpointLagSteps?: number,
+): {
   readonly originX: number;
   readonly originY: number;
   readonly tileSize: number;
 } {
-  const margin = input.mixing.checkpointDistancePx;
+  const margin =
+    input.mixing.checkpointDistancePx *
+    (asyncCheckpointLagSteps === undefined ? 1 : asyncCheckpointLagSteps + 1);
   const tileSize = Math.max(
     1,
     Math.ceil(input.checkpointFootprintSize * Math.SQRT2 + margin * 2 + 4),
@@ -311,22 +316,28 @@ function snapshotAsyncGpuCheckpoint(
   state: BrushMixingState,
   gpuSurface: NonNullable<ReturnType<typeof getActiveGpuStrokeSurface>>,
 ): BrushMixingState {
-  const { originX, originY, tileSize } = getCheckpointTile(input);
+  const checkpointLagSteps = getCheckpointLagSteps();
+  const { originX, originY, tileSize } = getCheckpointTile(
+    input,
+    checkpointLagSteps,
+  );
   const previousId = state.pendingGpuCheckpoint;
   const pendingGpuCheckpoint = gpuSurface.snapshotCheckpoint(
     originX,
     originY,
     tileSize,
+    previousId,
   );
   let next: BrushMixingState = {
     ...state,
     pendingGpuCheckpoint,
     lastCheckpointDistance: input.stampDistance,
   };
-  if (previousId !== undefined) {
-    const completed = gpuSurface.takeCheckpoint(previousId, { wait: true });
-    if (completed) next = applyCompletedGpuCheckpoint(next, completed);
-  }
+  const completed = gpuSurface.takeCheckpoint(pendingGpuCheckpoint, {
+    wait: true,
+    lagSteps: checkpointLagSteps,
+  });
+  if (completed) next = applyCompletedGpuCheckpoint(next, completed);
   return next;
 }
 

@@ -75,6 +75,7 @@ afterEach(() => {
   perf.reset();
   perf.experiments.gpuDab = "off";
   perf.experiments.gpuReadback = "async";
+  perf.experiments.checkpointLagSteps = 1;
 });
 
 const INPUT_POINTS: readonly InputPoint[] = [
@@ -116,6 +117,7 @@ const STAMP_MIXING_STYLE = makeStyle({
       restoreRatePerPx: 0,
       diffusionRatePerPx: 0,
       updateDistancePx: 1,
+      checkpointDistancePx: 12,
     },
   },
 });
@@ -289,25 +291,37 @@ describe("live-vs-replay parity", () => {
   }
 });
 
-describe.each(["async", "sync"] as const)(
-  "GPU mixing %s feedMany parity",
-  (gpuReadback) => {
+describe.each([
+  { gpuReadback: "async", checkpointLagSteps: 1 },
+  { gpuReadback: "async", checkpointLagSteps: 3 },
+  { gpuReadback: "sync", checkpointLagSteps: 1 },
+] as const)(
+  "GPU mixing $gpuReadback lag=$checkpointLagSteps feedMany parity",
+  ({ gpuReadback, checkpointLagSteps }) => {
     it("複数 batch と replay 相当の単一 batch が byte-identical", () => {
       const perf = getBrushPerfTestBridge();
       if (!perf) throw new Error("Brush perf debug bridge is unavailable");
       perf.enabled = true;
       perf.reset();
-      const splitLayer = renderGpuMixingBatches(gpuReadback, [
-        INPUT_POINTS.slice(0, 2),
-        INPUT_POINTS.slice(2, 5),
-        INPUT_POINTS.slice(5),
-      ]);
-      const replayLayer = renderGpuMixingBatches(gpuReadback, [INPUT_POINTS]);
+      const splitLayer = renderGpuMixingBatches(
+        gpuReadback,
+        checkpointLagSteps,
+        [
+          INPUT_POINTS.slice(0, 2),
+          INPUT_POINTS.slice(2, 5),
+          INPUT_POINTS.slice(5),
+        ],
+      );
+      const replayLayer = renderGpuMixingBatches(
+        gpuReadback,
+        checkpointLagSteps,
+        [INPUT_POINTS],
+      );
 
       expectPixelEqual(
         splitLayer,
         replayLayer,
-        `GPU mixing ${gpuReadback} split feedMany vs replay feedMany`,
+        `GPU mixing ${gpuReadback} lag=${checkpointLagSteps} split feedMany vs replay feedMany`,
       );
       expect(perf.snapshot().stages.gpuFlush.count).toBeGreaterThan(0);
     });
@@ -316,12 +330,14 @@ describe.each(["async", "sync"] as const)(
 
 function renderGpuMixingBatches(
   gpuReadback: "async" | "sync",
+  checkpointLagSteps: number,
   batches: readonly (readonly InputPoint[])[],
 ): Layer {
   const perf = getBrushPerfTestBridge();
   if (!perf) throw new Error("Brush perf debug bridge is unavailable");
   perf.experiments.gpuDab = "webgl2";
   perf.experiments.gpuReadback = gpuReadback;
+  perf.experiments.checkpointLagSteps = checkpointLagSteps;
 
   const layer = createTestLayer();
   paintOpaqueBands(layer);
@@ -344,6 +360,7 @@ function getBrushPerfTestBridge():
       readonly experiments: {
         gpuDab: "off" | "webgl2";
         gpuReadback: "async" | "sync";
+        checkpointLagSteps: number;
       };
       reset(): void;
       snapshot(): {
@@ -360,6 +377,7 @@ function getBrushPerfTestBridge():
         readonly experiments: {
           gpuDab: "off" | "webgl2";
           gpuReadback: "async" | "sync";
+          checkpointLagSteps: number;
         };
         reset(): void;
         snapshot(): {

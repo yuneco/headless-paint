@@ -14,6 +14,7 @@ afterEach(() => {
   surfaceUnderTest = null;
   brushPerfDebug.experiments.gpuDab = "off";
   brushPerfDebug.experiments.gpuReadback = "async";
+  brushPerfDebug.experiments.checkpointLagSteps = 1;
 });
 
 describe("GpuStrokeSurface", () => {
@@ -90,6 +91,44 @@ describe("GpuStrokeSurface", () => {
     if (!checkpoint) return;
     expectCheckpointDocumentPixel(checkpoint, 16, 12, [220, 30, 20, 255]);
     expectCheckpointDocumentPixel(checkpoint, 80, 45, [20, 40, 230, 255]);
+  });
+
+  it("lag=3 の predecessor snapshot を N+2 slot ring から順に返す", () => {
+    brushPerfDebug.experiments.checkpointLagSteps = 3;
+    const layer = createLayer(32, 32);
+    layer.ctx.fillStyle = "rgb(10, 20, 30)";
+    layer.ctx.fillRect(0, 0, layer.width, layer.height);
+
+    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+
+    const snapshot0 = surface.snapshotCheckpoint(0, 0, layer.width);
+    configureSolidDab(surface, [220, 40, 20, 255], 8);
+    surface.pushDab({ x: 16, y: 16, size: 8, rotation: 0, alpha: 1 });
+    const snapshot1 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot0);
+    const snapshot2 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot1);
+    const snapshot3 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot2);
+    surface.issuePendingReadbacks();
+
+    const completed0 = surface.takeCheckpoint(snapshot3, {
+      wait: true,
+      lagSteps: 3,
+    });
+    expect(completed0).not.toBeNull();
+    if (!completed0) return;
+    expectCheckpointDocumentPixel(completed0, 16, 16, [10, 20, 30, 255]);
+
+    const snapshot4 = surface.snapshotCheckpoint(0, 0, layer.width, snapshot3);
+    const completed1 = surface.takeCheckpoint(snapshot4, {
+      wait: true,
+      lagSteps: 3,
+    });
+    expect(completed1).not.toBeNull();
+    if (!completed1) return;
+    expectCheckpointDocumentPixel(completed1, 16, 16, [220, 40, 20, 255]);
   });
 
   it("単色 field と円 tip の dab を layer に commit する", () => {

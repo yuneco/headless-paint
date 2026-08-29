@@ -1,9 +1,8 @@
 import type { Layer } from "../../types";
-import { brushPerfDebug } from "../perf-debug";
+import { brushPerfDebug, getCheckpointLagSteps } from "../perf-debug";
 
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 5;
-const CHECKPOINT_RING_SIZE = 4;
 const CHECKPOINT_WAIT_TIMEOUT_NS = 1_000_000_000;
 const COMMIT_CANVAS_SIZE = 512;
 
@@ -26,6 +25,7 @@ interface CheckpointSlot {
 
 interface PendingCheckpointSnapshot {
   readonly id: number;
+  readonly previousId?: number;
   readonly slot: CheckpointSlot;
   readonly originX: number;
   readonly originY: number;
@@ -70,11 +70,16 @@ export interface GpuStrokeSurface {
     originY: number,
     size: number,
   ): Uint8ClampedArray;
-  snapshotCheckpoint(originX: number, originY: number, size: number): number;
+  snapshotCheckpoint(
+    originX: number,
+    originY: number,
+    size: number,
+    previousId?: number,
+  ): number;
   issuePendingReadbacks(): void;
   takeCheckpoint(
     id: number,
-    options: { readonly wait: boolean },
+    options: { readonly wait: boolean; readonly lagSteps?: number },
   ): CompletedGpuCheckpoint | null;
   commitToLayer(layer: Layer): void;
   endStroke(): void;
@@ -509,9 +514,20 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     return output;
   }
 
-  snapshotCheckpoint(originX: number, originY: number, size: number): number {
+  snapshotCheckpoint(
+    originX: number,
+    originY: number,
+    size: number,
+    previousId?: number,
+  ): number {
     this.assertStrokeBegun();
     this.flush();
+    if (
+      previousId !== undefined &&
+      !this.pendingCheckpointSnapshots.has(previousId)
+    ) {
+      throw new Error("Previous GPU checkpoint snapshot is unavailable");
+    }
     const tileSize = Math.max(0, Math.floor(size));
     const readOriginX = Math.floor(originX);
     const readOriginY = Math.floor(originY);
@@ -526,6 +542,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     slot.snapshotId = id;
     const snapshot: PendingCheckpointSnapshot = {
       id,
+      previousId,
       slot,
       originX,
       originY,
@@ -583,9 +600,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   takeCheckpoint(
     id: number,
-    options: { readonly wait: boolean },
+    options: { readonly wait: boolean; readonly lagSteps?: number },
   ): CompletedGpuCheckpoint | null {
-    const snapshot = this.pendingCheckpointSnapshots.get(id);
+    const snapshot = this.resolveCheckpointSnapshot(id, options.lagSteps ?? 0);
     if (!snapshot || this.lost) return null;
     if (snapshot.readWidth === 0 || snapshot.readHeight === 0) {
       this.recordCheckpointWait(false, 0);
@@ -603,6 +620,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     let waited = false;
     let waitMs = 0;
     if (status === gl.TIMEOUT_EXPIRED && options.wait) {
+      // A replay may reach the take point before any batch boundary. Start all
+      // other unread snapshots now so the single blocking wait advances the
+      // whole ring, not only the requested checkpoint.
+      this.issuePendingReadbacks();
       waited = true;
       const waitStartedAt = performance.now();
       const maxTimeout = Number(
@@ -768,13 +789,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   }
 
   private ensureCheckpointSlots(): void {
-    if (this.checkpointSlots.length === CHECKPOINT_RING_SIZE) return;
+    const ringSize = getCheckpointLagSteps() + 2;
+    if (this.checkpointSlots.length >= ringSize) return;
     const gl = this.gl;
-    for (
-      let index = this.checkpointSlots.length;
-      index < CHECKPOINT_RING_SIZE;
-      index++
-    ) {
+    for (let index = this.checkpointSlots.length; index < ringSize; index++) {
       const texture = requireResource(
         gl.createTexture(),
         "WebGL checkpoint texture",
@@ -876,6 +894,19 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (brushPerfDebug.enabled) {
       brushPerfDebug.recordStage("gpuReadRequest", startedAt);
     }
+  }
+
+  private resolveCheckpointSnapshot(
+    id: number,
+    lagSteps: number,
+  ): PendingCheckpointSnapshot | undefined {
+    if (!Number.isSafeInteger(lagSteps) || lagSteps < 0) return undefined;
+    let snapshot = this.pendingCheckpointSnapshots.get(id);
+    for (let step = 0; step < lagSteps && snapshot; step++) {
+      if (snapshot.previousId === undefined) return undefined;
+      snapshot = this.pendingCheckpointSnapshots.get(snapshot.previousId);
+    }
+    return snapshot;
   }
 
   private completeCheckpoint(

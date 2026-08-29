@@ -76,6 +76,7 @@ export interface BrushPerfDebug {
   experiments: {
     spacingScale: number;
     checkpointScale: number;
+    checkpointLagSteps: number;
     updateScale: number;
     bitmapDab: boolean;
     gpuDab: "off" | "webgl2";
@@ -138,6 +139,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
     experiments: {
       spacingScale: 1,
       checkpointScale: 1,
+      checkpointLagSteps: 1,
       updateScale: 1,
       bitmapDab: false,
       gpuDab: "off",
@@ -200,3 +202,8 @@ const installedBrushPerfDebug =
   globalThis.__hpBrushPerf ?? createBrushPerfDebug();
 globalThis.__hpBrushPerf = installedBrushPerfDebug;
 export const brushPerfDebug = installedBrushPerfDebug;
+
+export function getCheckpointLagSteps(): number {
+  const value = brushPerfDebug.experiments.checkpointLagSteps;
+  return Number.isSafeInteger(value) && value >= 1 ? value : 1;
+}

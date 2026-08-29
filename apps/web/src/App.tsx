@@ -83,6 +83,11 @@ function configureBrushPerfDebugFromUrl(): void {
     Number(params.get("spacingScale") ?? "1") || 1;
   perf.experiments.checkpointScale =
     Number(params.get("checkpointScale") ?? "1") || 1;
+  const checkpointLagSteps = Number(params.get("checkpointLag") ?? "1");
+  perf.experiments.checkpointLagSteps =
+    Number.isSafeInteger(checkpointLagSteps) && checkpointLagSteps >= 1
+      ? checkpointLagSteps
+      : 1;
   perf.experiments.updateScale = Number(params.get("updateScale") ?? "1") || 1;
   perf.experiments.bitmapDab = params.get("bitmapDab") === "1";
   perf.experiments.gpuDab =
