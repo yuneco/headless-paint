@@ -30,9 +30,13 @@ interface PackedCommitTile extends CommitTile {
   readonly packedY: number;
 }
 
-interface PendingBranchSegment {
-  readonly dabs: GpuDab[];
-  update?: GpuMaterialFieldUpdate;
+interface MaterialCheckpoint {
+  readonly texture: WebGLTexture;
+  readonly framebuffer: WebGLFramebuffer;
+  textureSize: number;
+  originX: number;
+  originY: number;
+  initialized: boolean;
 }
 
 interface CheckpointSlot {
@@ -104,8 +108,6 @@ export interface GpuStrokeSurface {
   readonly lost: boolean;
   readonly branchIndex: number;
   beginStroke(sourceCanvas?: OffscreenCanvas, branchCount?: number): void;
-  beginBranchBatch(): void;
-  endBranchBatch(): void;
   selectBranch(branchIndex: number): void;
   setTip(tipCanvas: OffscreenCanvas): void;
   initializeMaterialField(
@@ -114,6 +116,16 @@ export interface GpuStrokeSurface {
     baseColor: GpuMaterialFieldUpdate["baseColor"],
   ): void;
   updateMaterialField(update: GpuMaterialFieldUpdate): void;
+  initializeMaterialCheckpoint(
+    originX: number,
+    originY: number,
+    size: number,
+  ): void;
+  snapshotMaterialCheckpoint(
+    originX: number,
+    originY: number,
+    size: number,
+  ): void;
   updateField(pixels: Uint8ClampedArray, columns: number, rows: number): void;
   readMaterialFieldForTest(branchIndex?: number): Uint8ClampedArray;
   pushDab(dab: GpuDab): void;
@@ -153,6 +165,7 @@ interface GpuStrokeRuntime {
   endStroke(owner: object): void;
   invalidateLayerResidency(layer: Layer): void;
   isLayerResident(layer: Layer): boolean;
+  readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
 }
 
 const VERTEX_SHADER_SOURCE = `#version 300 es
@@ -238,9 +251,10 @@ void main() {
 const FIELD_MIX_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 
-uniform sampler2D uAccum;
+uniform sampler2D uCheckpoint;
 uniform sampler2D uPreviousField;
-uniform vec2 uSurfaceSize;
+uniform vec2 uCheckpointOrigin;
+uniform ivec2 uCheckpointSize;
 uniform ivec2 uFieldDimensions;
 uniform vec4 uGeometry[${MAX_GPU_STROKE_BRANCHES}];
 uniform vec4 uBaseColors[${MAX_GPU_STROKE_BRANCHES}];
@@ -248,36 +262,40 @@ uniform vec3 uRates[${MAX_GPU_STROKE_BRANCHES}];
 
 out vec4 outColor;
 
-vec4 accumTexel(ivec2 documentPixel) {
-  ivec2 surfaceSize = ivec2(uSurfaceSize);
+vec4 checkpointTexel(ivec2 tilePixel) {
   if (
-    documentPixel.x < 0 || documentPixel.y < 0 ||
-    documentPixel.x >= surfaceSize.x || documentPixel.y >= surfaceSize.y
+    tilePixel.x < 0 || tilePixel.y < 0 ||
+    tilePixel.x >= uCheckpointSize.x || tilePixel.y >= uCheckpointSize.y
   ) {
     return vec4(0.0);
   }
-  return texelFetch(
-    uAccum,
-    ivec2(documentPixel.x, surfaceSize.y - 1 - documentPixel.y),
+  vec4 premultiplied = texelFetch(
+    uCheckpoint,
+    ivec2(tilePixel.x, uCheckpointSize.y - 1 - tilePixel.y),
     0
   );
+  if (premultiplied.a <= 0.0) return vec4(0.0);
+  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
 }
 
-vec4 sampleAccumBilinear(vec2 documentPosition) {
-  vec2 samplePosition = documentPosition - vec2(0.5);
+vec4 sampleCheckpointBilinear(vec2 documentPosition) {
+  vec2 samplePosition =
+    documentPosition - uCheckpointOrigin - vec2(0.5);
   ivec2 p0 = ivec2(floor(samplePosition));
   vec2 fraction = samplePosition - vec2(p0);
-  vec4 premultiplied = mix(
-    mix(accumTexel(p0), accumTexel(p0 + ivec2(1, 0)), fraction.x),
+  return mix(
     mix(
-      accumTexel(p0 + ivec2(0, 1)),
-      accumTexel(p0 + ivec2(1, 1)),
+      checkpointTexel(p0),
+      checkpointTexel(p0 + ivec2(1, 0)),
+      fraction.x
+    ),
+    mix(
+      checkpointTexel(p0 + ivec2(0, 1)),
+      checkpointTexel(p0 + ivec2(1, 1)),
       fraction.x
     ),
     fraction.y
   );
-  if (premultiplied.a <= 0.0) return vec4(0.0);
-  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
 }
 
 void main() {
@@ -303,7 +321,7 @@ void main() {
     local.x * cosine - local.y * sine,
     local.x * sine + local.y * cosine
   );
-  vec4 sampled = sampleAccumBilinear(documentPosition);
+  vec4 sampled = sampleCheckpointBilinear(documentPosition);
   float pickupAmount = rates.x * sampled.a;
   vec3 picked = mix(current.rgb, sampled.rgb, pickupAmount);
   vec4 baseColor = uBaseColors[branchIndex];
@@ -373,6 +391,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     WebGLFramebuffer,
     WebGLFramebuffer,
   ];
+  private readonly materialCheckpoints: MaterialCheckpoint[] = [];
   private framebuffer: WebGLFramebuffer;
   private sourceFramebuffer: WebGLFramebuffer;
   private readonly surfaceSizeLocation: WebGLUniformLocation;
@@ -391,7 +410,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private activeFieldIndex: 0 | 1 = 0;
   private branchCount = 1;
   private currentBranchIndex = 0;
-  private pendingBranchSegments: PendingBranchSegment[][] | null = null;
   private readonly useFloatField: boolean;
   private strokeBegun = false;
   private contextLost = false;
@@ -419,6 +437,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.canvas.addEventListener("webglcontextlost", () => {
       this.discardPendingCheckpointSnapshots();
       this.deleteCheckpointSlots();
+      this.deleteMaterialCheckpoints();
       this.contextLost = true;
       gpuPermanentlyUnavailable = true;
     });
@@ -606,57 +625,17 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         this.framebuffer,
       ];
     }
+    this.copyAccumToStrokeStartSource();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
-    this.pendingBranchSegments = null;
     this.dirtyRects = Array<DirtyRect | null>(branchCount).fill(null);
+    this.ensureMaterialCheckpoints(branchCount);
+    for (const checkpoint of this.materialCheckpoints) {
+      checkpoint.initialized = false;
+    }
     this.discardPendingCheckpointSnapshots();
     this.strokeBegun = true;
-  }
-
-  beginBranchBatch(): void {
-    this.assertStrokeBegun();
-    // A single branch already keeps dabs pending until its next field update.
-    // Segment batching would flush the final segment at every append boundary.
-    if (
-      brushPerfDebug.experiments.gpuReadback !== "gpu-field" ||
-      this.branchCount === 1
-    ) {
-      return;
-    }
-    if (this.pendingBranchSegments) {
-      throw new Error("GPU branch batch is already active");
-    }
-    this.flush();
-    this.pendingBranchSegments = Array.from(
-      { length: this.branchCount },
-      () => [{ dabs: [] }],
-    );
-  }
-
-  endBranchBatch(): void {
-    this.assertStrokeBegun();
-    const branches = this.pendingBranchSegments;
-    if (!branches) return;
-    this.pendingBranchSegments = null;
-
-    const segmentCount = branches.reduce(
-      (maximum, segments) => Math.max(maximum, segments.length),
-      0,
-    );
-    for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
-      const segments = branches.map((segments) => segments[segmentIndex]);
-      const updates = segments.map((segment) => segment?.update);
-      let fieldUpdateStartedAt = 0;
-      if (updates.some((update) => update !== undefined)) {
-        fieldUpdateStartedAt = this.executeMaterialFieldUpdateBatch(updates);
-      }
-      this.drawDabs(segments.flatMap((segment) => segment?.dabs ?? []));
-      if (updates.some((update) => update !== undefined)) {
-        this.executeMaterialFieldDiffusionBatch(updates, fieldUpdateStartedAt);
-      }
-    }
   }
 
   selectBranch(branchIndex: number): void {
@@ -669,7 +648,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       throw new Error("GPU stroke branch index is out of range");
     }
     if (branchIndex === this.currentBranchIndex) return;
-    if (!this.pendingBranchSegments) this.flush();
+    this.flush();
     this.currentBranchIndex = branchIndex;
   }
 
@@ -710,11 +689,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   updateField(pixels: Uint8ClampedArray, columns: number, rows: number): void {
     this.assertStrokeBegun();
-    if (this.pendingBranchSegments) {
-      throw new Error(
-        "GPU material field upload is unavailable in a branch batch",
-      );
-    }
     if (this.instanceCount > 0) this.flush();
     if (pixels.length !== columns * rows * 4) {
       throw new Error(
@@ -774,16 +748,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     this.ensureMaterialFieldSize(update.columns, update.rows);
     if (brushPerfDebug.nullStages.nullFieldAdvance) return;
-    const branchSegments =
-      this.pendingBranchSegments?.[this.currentBranchIndex];
-    if (branchSegments) {
-      const segment = branchSegments[branchSegments.length - 1];
-      if (!segment) throw new Error("GPU branch segment is unavailable");
-      segment.update = update;
-      branchSegments.push({ dabs: [] });
-      return;
-    }
-
     const updates = Array<GpuMaterialFieldUpdate | undefined>(
       this.branchCount,
     ).fill(undefined);
@@ -793,6 +757,29 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     // with the old field, then the old texture is safe as a diffusion target.
     this.flush();
     this.executeMaterialFieldDiffusionBatch(updates, startedAt);
+  }
+
+  initializeMaterialCheckpoint(
+    originX: number,
+    originY: number,
+    size: number,
+  ): void {
+    this.assertStrokeBegun();
+    const checkpoint = this.materialCheckpoints[this.currentBranchIndex];
+    if (!checkpoint) throw new Error("GPU material checkpoint is unavailable");
+    if (checkpoint.initialized) return;
+    this.captureMaterialCheckpoint(checkpoint, originX, originY, size, true);
+  }
+
+  snapshotMaterialCheckpoint(
+    originX: number,
+    originY: number,
+    size: number,
+  ): void {
+    this.assertStrokeBegun();
+    const checkpoint = this.materialCheckpoints[this.currentBranchIndex];
+    if (!checkpoint) throw new Error("GPU material checkpoint is unavailable");
+    this.captureMaterialCheckpoint(checkpoint, originX, originY, size, false);
   }
 
   readMaterialFieldForTest(
@@ -836,15 +823,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   pushDab(dab: GpuDab): void {
     this.assertStrokeBegun();
     this.selectBranch(dab.branchIndex ?? this.currentBranchIndex);
-    const branchSegments =
-      this.pendingBranchSegments?.[this.currentBranchIndex];
-    if (branchSegments) {
-      const segment = branchSegments[branchSegments.length - 1];
-      if (!segment) throw new Error("GPU branch segment is unavailable");
-      segment.dabs.push({ ...dab, branchIndex: this.currentBranchIndex });
-      this.includeDabDirtyRect(dab, this.currentBranchIndex);
-      return;
-    }
     if (this.instanceCount >= INSTANCE_CAPACITY) this.flush();
     const offset = this.instanceCount * INSTANCE_FLOATS;
     this.instances[offset] = dab.x;
@@ -895,30 +873,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
   }
 
-  private drawDabs(dabs: readonly GpuDab[]): void {
-    for (let start = 0; start < dabs.length; start += INSTANCE_CAPACITY) {
-      const end = Math.min(dabs.length, start + INSTANCE_CAPACITY);
-      for (let index = start; index < end; index++) {
-        const dab = dabs[index];
-        if (!dab) continue;
-        const offset = (index - start) * INSTANCE_FLOATS;
-        this.instances[offset] = dab.x;
-        this.instances[offset + 1] = dab.y;
-        this.instances[offset + 2] = dab.size;
-        this.instances[offset + 3] = dab.rotation;
-        this.instances[offset + 4] = dab.alpha;
-        this.instances[offset + 5] = dab.branchIndex ?? 0;
-      }
-      this.instanceCount = end - start;
-      this.flush();
-    }
-  }
-
   private executeMaterialFieldUpdateBatch(
     updates: readonly (GpuMaterialFieldUpdate | undefined)[],
   ): number {
     const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const gl = this.gl;
+    const checkpoint = this.materialCheckpoints[this.currentBranchIndex];
+    if (!checkpoint?.initialized) {
+      throw new Error("GPU material checkpoint has not been initialized");
+    }
     const nextIndex = oppositeFieldIndex(this.activeFieldIndex);
     const geometry = new Float32Array(MAX_GPU_STROKE_BRANCHES * 4);
     const baseColors = new Float32Array(MAX_GPU_STROKE_BRANCHES * 4);
@@ -969,18 +932,23 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.useProgram(this.fieldMixProgram);
     gl.bindVertexArray(this.vertexArray);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
+    gl.bindTexture(gl.TEXTURE_2D, checkpoint.texture);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[this.activeFieldIndex]);
-    gl.uniform1i(gl.getUniformLocation(this.fieldMixProgram, "uAccum"), 0);
+    gl.uniform1i(gl.getUniformLocation(this.fieldMixProgram, "uCheckpoint"), 0);
     gl.uniform1i(
       gl.getUniformLocation(this.fieldMixProgram, "uPreviousField"),
       1,
     );
     gl.uniform2f(
-      gl.getUniformLocation(this.fieldMixProgram, "uSurfaceSize"),
-      this.width,
-      this.height,
+      gl.getUniformLocation(this.fieldMixProgram, "uCheckpointOrigin"),
+      checkpoint.originX,
+      checkpoint.originY,
+    );
+    gl.uniform2i(
+      gl.getUniformLocation(this.fieldMixProgram, "uCheckpointSize"),
+      checkpoint.textureSize,
+      checkpoint.textureSize,
     );
     gl.uniform2i(
       gl.getUniformLocation(this.fieldMixProgram, "uFieldDimensions"),
@@ -1369,12 +1337,145 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   endStroke(): void {
     this.discardPendingCheckpointSnapshots();
     this.instanceCount = 0;
-    this.pendingBranchSegments = null;
     this.dirtyRects = [null];
     this.strokeBegun = false;
     this.branchCount = 1;
     this.currentBranchIndex = 0;
     this.tipSource = null;
+    for (const checkpoint of this.materialCheckpoints) {
+      checkpoint.initialized = false;
+    }
+  }
+
+  private copyAccumToStrokeStartSource(): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.sourceFramebuffer);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.blitFramebuffer(
+      0,
+      0,
+      this.width,
+      this.height,
+      0,
+      0,
+      this.width,
+      this.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+  }
+
+  private ensureMaterialCheckpoints(count: number): void {
+    const gl = this.gl;
+    while (this.materialCheckpoints.length < count) {
+      const texture = requireResource(
+        gl.createTexture(),
+        "WebGL material checkpoint texture",
+      );
+      this.configureTexture(texture, gl.NEAREST);
+      const framebuffer = requireResource(
+        gl.createFramebuffer(),
+        "WebGL material checkpoint framebuffer",
+      );
+      this.materialCheckpoints.push({
+        texture,
+        framebuffer,
+        textureSize: 0,
+        originX: 0,
+        originY: 0,
+        initialized: false,
+      });
+    }
+  }
+
+  private deleteMaterialCheckpoints(): void {
+    const gl = this.gl;
+    for (const checkpoint of this.materialCheckpoints) {
+      gl.deleteTexture(checkpoint.texture);
+      gl.deleteFramebuffer(checkpoint.framebuffer);
+    }
+    this.materialCheckpoints.length = 0;
+  }
+
+  private captureMaterialCheckpoint(
+    checkpoint: MaterialCheckpoint,
+    originX: number,
+    originY: number,
+    size: number,
+    fromStrokeStart: boolean,
+  ): void {
+    this.flush();
+    const tileSize = Math.max(1, Math.floor(size));
+    const gl = this.gl;
+    if (checkpoint.textureSize !== tileSize) {
+      gl.bindTexture(gl.TEXTURE_2D, checkpoint.texture);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        tileSize,
+        tileSize,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+      gl.bindFramebuffer(gl.FRAMEBUFFER, checkpoint.framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        checkpoint.texture,
+        0,
+      );
+      if (
+        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
+      ) {
+        throw new Error("GPU material checkpoint framebuffer is incomplete");
+      }
+      checkpoint.textureSize = tileSize;
+    }
+
+    checkpoint.originX = originX;
+    checkpoint.originY = originY;
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, checkpoint.framebuffer);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const readOriginX = Math.floor(originX);
+    const readOriginY = Math.floor(originY);
+    const left = Math.max(0, readOriginX);
+    const top = Math.max(0, readOriginY);
+    const right = Math.min(this.width, readOriginX + tileSize);
+    const bottom = Math.min(this.height, readOriginY + tileSize);
+    if (right > left && bottom > top) {
+      gl.bindFramebuffer(
+        gl.READ_FRAMEBUFFER,
+        fromStrokeStart ? this.sourceFramebuffer : this.framebuffer,
+      );
+      gl.blitFramebuffer(
+        left,
+        this.height - bottom,
+        right,
+        this.height - top,
+        left - readOriginX,
+        tileSize - (bottom - readOriginY),
+        right - readOriginX,
+        tileSize - (top - readOriginY),
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+    }
+    checkpoint.initialized = true;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+    gl.viewport(0, 0, this.width, this.height);
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample("checkpoints", 1);
+    }
   }
 
   private acquireCheckpointSlot(
@@ -1807,6 +1908,9 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
     if (!brushPerfDebug.experiments.gpuResident) return false;
     const surface = acquireGpuStrokeSurface(layer.width, layer.height);
     return surface ? prepareGpuLayerResidency(layer, surface) : false;
+  },
+  readMaterialFieldForTest(branchIndex) {
+    return activeSurface?.readMaterialFieldForTest(branchIndex) ?? null;
   },
 };
 

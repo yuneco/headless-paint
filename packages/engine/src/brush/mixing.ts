@@ -212,14 +212,22 @@ export function updateMixingAfterDeposit(
     }
   }
 
-  if (gpuFieldActive) return state;
   const lastCheckpoint = state.lastCheckpointDistance ?? 0;
   if (
     input.stampDistance - lastCheckpoint >=
     input.mixing.checkpointDistancePx *
       brushPerfDebug.experiments.checkpointScale
   ) {
-    state = captureCheckpoint(input, state);
+    if (gpuFieldActive) {
+      const { originX, originY, tileSize } = getCheckpointTile(input);
+      gpuSurface.snapshotMaterialCheckpoint(originX, originY, tileSize);
+      state = {
+        ...state,
+        lastCheckpointDistance: input.stampDistance,
+      };
+    } else {
+      state = captureCheckpoint(input, state);
+    }
   }
   return state;
 }
@@ -229,14 +237,20 @@ export function prepareInitialMixingCheckpoint(
   input: MixingUpdateInput,
   state: BrushMixingState,
 ): BrushMixingState {
-  if (
-    getActiveGpuStrokeSurface() &&
-    brushPerfDebug.experiments.gpuReadback === "gpu-field"
-  ) {
+  const gpuSurface = getActiveGpuStrokeSurface();
+  if (gpuSurface && brushPerfDebug.experiments.gpuReadback === "gpu-field") {
+    const { originX, originY, tileSize } = getCheckpointTile(input);
+    gpuSurface.initializeMaterialCheckpoint(originX, originY, tileSize);
     return state;
   }
   if (state.checkpointPixels) return state;
-  return captureCheckpoint(input, state, input.sourceLayer.canvas, false);
+  // The first pickup is anchored to the immutable stroke-start source. A
+  // resident GPU accumulation may already contain deposits from an earlier
+  // Expand branch by the time the next branch initializes.
+  return captureCheckpoint(input, state, input.sourceLayer.canvas, {
+    updateCheckpointDistance: false,
+    readFromGpu: false,
+  });
 }
 
 function sampleCheckpointFootprint(
@@ -266,11 +280,16 @@ function captureCheckpoint(
   input: MixingUpdateInput,
   state: BrushMixingState,
   sourceCanvas: OffscreenCanvas = input.targetLayer.canvas,
-  updateCheckpointDistance = true,
+  options: {
+    readonly updateCheckpointDistance?: boolean;
+    readonly readFromGpu?: boolean;
+  } = {},
 ): BrushMixingState {
+  const updateCheckpointDistance = options.updateCheckpointDistance ?? true;
+  const readFromGpu = options.readFromGpu ?? true;
   const { originX, originY, tileSize } = getCheckpointTile(input);
   const gpuSurface = getActiveGpuStrokeSurface();
-  if (gpuSurface) {
+  if (gpuSurface && readFromGpu) {
     const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const checkpointPixels = new ImageData(tileSize, tileSize);
     checkpointPixels.data.set(

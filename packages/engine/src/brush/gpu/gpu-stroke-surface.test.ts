@@ -197,7 +197,6 @@ describe("GpuStrokeSurface", () => {
     configureSolidDab(surface, [255, 0, 0, 255], 16);
     surface.selectBranch(1);
     configureSolidDab(surface, [0, 0, 255, 255], 16);
-    surface.beginBranchBatch();
     surface.selectBranch(0);
     surface.pushDab({
       x: 32,
@@ -216,7 +215,6 @@ describe("GpuStrokeSurface", () => {
       alpha: 0.75,
       branchIndex: 1,
     });
-    surface.endBranchBatch();
     surface.commitToLayer(layer);
 
     const branch0 = surface.readMaterialFieldForTest(0);
@@ -226,7 +224,7 @@ describe("GpuStrokeSurface", () => {
     expectPixelNear(layer, 32, 24, [51, 0, 204, 239]);
   });
 
-  it("全 branch の field を 2D strip 上の 1 update pass で独立更新する", () => {
+  it("全 branch の field を 2D strip 上で branch 順に独立更新する", () => {
     brushPerfDebug.enabled = true;
     brushPerfDebug.reset();
     const source = new OffscreenCanvas(64, 32);
@@ -249,9 +247,9 @@ describe("GpuStrokeSurface", () => {
     for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
       surface.selectBranch(branchIndex);
       surface.initializeMaterialField(columns, rows, baseColor);
+      surface.initializeMaterialCheckpoint(0, 0, source.width);
     }
 
-    surface.beginBranchBatch();
     for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
       surface.selectBranch(branchIndex);
       surface.updateMaterialField({
@@ -268,7 +266,6 @@ describe("GpuStrokeSurface", () => {
         distancePx: 1,
       });
     }
-    surface.endBranchBatch();
 
     const branch0 = surface.readMaterialFieldForTest(0);
     const branch1 = surface.readMaterialFieldForTest(1);
@@ -278,7 +275,52 @@ describe("GpuStrokeSurface", () => {
     expectChannelNear(branch1[0], 20);
     expectChannelNear(branch1[1], 50);
     expectChannelNear(branch1[2], 230);
-    expect(brushPerfDebug.snapshot().stages.gpuFieldUpdate.count).toBe(1);
+    expect(brushPerfDebug.snapshot().stages.gpuFieldUpdate.count).toBe(2);
+  });
+
+  it("field update は live accum ではなく直近の checkpoint snapshot を読む", () => {
+    const source = new OffscreenCanvas(64, 64);
+    const sourceCtx = source.getContext("2d");
+    expect(sourceCtx).not.toBeNull();
+    if (!sourceCtx) return;
+    sourceCtx.fillStyle = "rgb(20, 50, 230)";
+    sourceCtx.fillRect(0, 0, source.width, source.height);
+
+    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(source);
+    const baseColor = { r: 230, g: 35, b: 20, a: 255 } as const;
+    configureSolidDab(surface, [230, 35, 20, 255], 16);
+    surface.initializeMaterialCheckpoint(0, 0, source.width);
+    surface.pushDab({ x: 32, y: 32, size: 16, rotation: 0, alpha: 1 });
+
+    const update = {
+      baseColor,
+      centerX: 32,
+      centerY: 32,
+      angle: 0,
+      sampleSize: 8,
+      columns: 18,
+      rows: 8,
+      pickupRatePerPx: 10,
+      restoreRatePerPx: 0,
+      diffusionRatePerPx: 0,
+      distancePx: 1,
+    } as const;
+    surface.updateMaterialField(update);
+    const beforeCheckpoint = surface.readMaterialFieldForTest();
+    expectChannelNear(beforeCheckpoint[0], 20);
+    expectChannelNear(beforeCheckpoint[1], 50);
+    expectChannelNear(beforeCheckpoint[2], 230);
+
+    surface.snapshotMaterialCheckpoint(0, 0, source.width);
+    surface.updateMaterialField(update);
+    const afterCheckpoint = surface.readMaterialFieldForTest();
+    expectChannelNear(afterCheckpoint[0], 230);
+    expectChannelNear(afterCheckpoint[1], 35);
+    expectChannelNear(afterCheckpoint[2], 20);
   });
 
   it("field update pass が CPU sampling/mix/restore/diffusion と一致する", () => {
@@ -314,6 +356,7 @@ describe("GpuStrokeSurface", () => {
       distancePx: 7.5,
     } as const;
     surface.initializeMaterialField(columns, rows, baseColor);
+    surface.initializeMaterialCheckpoint(0, 0, source.width);
     const tip = new OffscreenCanvas(16, 16);
     const tipCtx = tip.getContext("2d");
     expect(tipCtx).not.toBeNull();
@@ -383,6 +426,7 @@ describe("GpuStrokeSurface", () => {
     const rows = 8;
     const baseColor = { r: 230, g: 35, b: 20, a: 255 } as const;
     configureSolidDab(surface, [230, 35, 20, 255], 8);
+    surface.initializeMaterialCheckpoint(0, 0, source.width);
     const checkpoint = sourceCtx.getImageData(
       0,
       0,
@@ -393,7 +437,6 @@ describe("GpuStrokeSurface", () => {
 
     for (let index = 0; index < 10; index++) {
       const centerX = 8 + index * 12;
-      surface.beginBranchBatch();
       surface.pushDab({
         x: centerX,
         y: 16,
@@ -401,7 +444,6 @@ describe("GpuStrokeSurface", () => {
         rotation: 0,
         alpha: 1,
       });
-      surface.endBranchBatch();
 
       const update = {
         baseColor,
@@ -416,9 +458,7 @@ describe("GpuStrokeSurface", () => {
         diffusionRatePerPx: 0,
         distancePx: 2,
       } as const;
-      surface.beginBranchBatch();
       surface.updateMaterialField(update);
-      surface.endBranchBatch();
       const sampled = sampleRotatedCheckpoint(
         checkpoint,
         0,
@@ -497,27 +537,6 @@ describe("GpuStrokeSurface", () => {
     for (let offset = 0; offset < expected.length; offset++) {
       expectChannelNear(actual[offset], expected[offset] ?? 0);
     }
-  });
-
-  it("branch 1 の batch 境界では pending dab を分割 flush しない", () => {
-    brushPerfDebug.enabled = true;
-    const source = new OffscreenCanvas(32, 32);
-    const surface = acquireGpuStrokeSurface(source.width, source.height);
-    expect(surface).not.toBeNull();
-    if (!surface) return;
-    surfaceUnderTest = surface;
-    surface.beginStroke(source, 1);
-    configureSolidDab(surface, [220, 50, 30, 255], 8);
-    brushPerfDebug.reset();
-
-    for (const x of [12, 20]) {
-      surface.beginBranchBatch();
-      surface.pushDab({ x, y: 16, size: 8, rotation: 0, alpha: 1 });
-      surface.endBranchBatch();
-    }
-    expect(brushPerfDebug.snapshot().stages.gpuFlush.count).toBe(0);
-    surface.flush();
-    expect(brushPerfDebug.snapshot().stages.gpuFlush.count).toBe(1);
   });
 
   it("2 batch 連続 commit で最初の deposit と layer の他領域を維持する", () => {

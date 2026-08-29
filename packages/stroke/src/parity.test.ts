@@ -1,4 +1,5 @@
 import type {
+  BrushRenderState,
   Color,
   ExpandConfig,
   Layer,
@@ -72,6 +73,16 @@ const RADIAL_EXPAND_4: ExpandConfig = {
     },
   ],
 };
+const RADIAL_EXPAND_2: ExpandConfig = {
+  levels: [
+    {
+      mode: "radial",
+      offset: { x: WIDTH / 2, y: HEIGHT / 2 },
+      angle: 0,
+      divisions: 2,
+    },
+  ],
+};
 const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };
 const RED: Color = { r: 225, g: 30, b: 30, a: 255 };
 const GREEN: Color = { r: 30, g: 185, b: 90, a: 255 };
@@ -140,6 +151,43 @@ const STAMP_MIXING_STYLE = makeStyle({
     },
   },
 });
+const FIELD_TRACE_STYLE = makeStyle({
+  color: WHITE,
+  lineWidth: 18,
+  brush: {
+    type: "stamp",
+    tip: { type: "circle", hardness: 1 },
+    dynamics: {
+      ...DEFAULT_BRUSH_DYNAMICS,
+      spacing: 0.22,
+      flow: 1,
+      emissionsPerSecond: 0,
+    },
+    pressureDynamics: { size: 0, flow: 0 },
+    mixing: {
+      ...DEFAULT_BRUSH_MIXING,
+      enabled: true,
+      pickupRatePerPx: 0.18,
+      restoreRatePerPx: 0,
+      diffusionRatePerPx: 0,
+      updateDistancePx: 1,
+      checkpointDistancePx: 4,
+    },
+  },
+});
+
+const FIELD_TRACE_INPUT_POINTS: readonly InputPoint[] = Array.from(
+  { length: 101 },
+  (_, index) => {
+    const angle = index * 0.25;
+    return {
+      x: WIDTH / 2 + Math.cos(angle) * 4,
+      y: HEIGHT / 2 + Math.sin(angle) * 4,
+      pressure: 1,
+      timestamp: 30_000 + index * 16,
+    };
+  },
+);
 
 const cases: readonly ParityCase[] = [
   {
@@ -352,6 +400,25 @@ describe.each([
 );
 
 describe("GPU mixing Expand parity", () => {
+  it("radial 2 の branch field が 5 update ごとに CPU と一致する", () => {
+    const cpuSnapshots = traceRadialFieldUpdates("off");
+    const gpuSnapshots = traceRadialFieldUpdates("webgl2");
+
+    expect(gpuSnapshots.map(snapshotKey)).toEqual(
+      cpuSnapshots.map(snapshotKey),
+    );
+    for (let index = 0; index < cpuSnapshots.length; index++) {
+      const cpu = cpuSnapshots[index];
+      const gpu = gpuSnapshots[index];
+      if (!cpu || !gpu) continue;
+      const mae = materialFieldMae(cpu.pixels, gpu.pixels);
+      expect(
+        mae,
+        `branch ${cpu.branchIndex} update ${cpu.updateCount}`,
+      ).toBeLessThanOrEqual(4 / 255);
+    }
+  });
+
   it("radial 4 の中心重なり fixture が CPU と Tier B alpha parity を満たす", () => {
     const cpuLayer = renderGpuExpandBatches("off", [
       CENTER_CROSSING_INPUT_POINTS,
@@ -364,7 +431,9 @@ describe("GPU mixing Expand parity", () => {
     ]);
 
     expectAlphaTierB(cpuLayer, gpuLayer);
-    expect(perf.snapshot().samples.gpuBranches).toEqual([4]);
+    const snapshot = perf.snapshot();
+    expect(snapshot.samples.gpuBranches).toEqual([4]);
+    expect(snapshot.stages.checkpointReadback.count).toBe(0);
   });
 
   it("radial 4 の live 分割 batch と replay 相当単一 batch が byte-identical", () => {
@@ -414,6 +483,105 @@ describe("GPU mixing Expand parity", () => {
     );
   });
 });
+
+interface MaterialFieldSnapshot {
+  readonly branchIndex: number;
+  readonly updateCount: number;
+  readonly pixels: Uint8ClampedArray;
+}
+
+function traceRadialFieldUpdates(
+  gpuDab: "off" | "webgl2",
+): readonly MaterialFieldSnapshot[] {
+  const perf = getBrushPerfTestBridge();
+  if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+  perf.enabled = true;
+  perf.reset();
+  perf.experiments.gpuDab = gpuDab;
+  perf.experiments.gpuReadback = "gpu-field";
+  perf.experiments.gpuResident = false;
+
+  const layer = createTestLayer();
+  layer.ctx.fillStyle = "rgb(35, 95, 220)";
+  layer.ctx.fillRect(0, 0, layer.width, layer.height);
+  const snapshots: MaterialFieldSnapshot[] = [];
+  const capturedUpdates = new Set<string>();
+  const renderer = createIncrementalStrokeRenderer({
+    layer,
+    style: FIELD_TRACE_STYLE,
+    filterPipeline: { filters: [] },
+    expand: RADIAL_EXPAND_2,
+    brushSeed: BRUSH_SEED,
+    alphaLocked: false,
+    onRenderUpdate: ({ brushState }) => {
+      captureFieldSnapshots(snapshots, capturedUpdates, brushState, gpuDab);
+    },
+  });
+  for (const point of FIELD_TRACE_INPUT_POINTS) renderer.feed(point);
+  renderer.finalize();
+  return snapshots;
+}
+
+function captureFieldSnapshots(
+  snapshots: MaterialFieldSnapshot[],
+  capturedUpdates: Set<string>,
+  brushState: BrushRenderState | undefined,
+  gpuDab: "off" | "webgl2",
+): void {
+  if (!brushState) return;
+  const gpuRuntime = getGpuFieldTestBridge();
+  for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
+    const branch = brushState.branches[branchIndex];
+    const updateCount = branch?.emissionCount ?? 0;
+    if (updateCount === 0 || updateCount % 5 !== 0) continue;
+    const key = `${branchIndex}:${updateCount}`;
+    if (capturedUpdates.has(key)) continue;
+    const pixels =
+      gpuDab === "webgl2"
+        ? gpuRuntime?.readMaterialFieldForTest(branchIndex)
+        : materialFieldPixels(branch?.mixing?.field);
+    if (!pixels) throw new Error("GPU material field is unavailable");
+    snapshots.push({ branchIndex, updateCount, pixels });
+    capturedUpdates.add(key);
+  }
+}
+
+function getGpuFieldTestBridge():
+  | {
+      readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
+    }
+  | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      readonly __hpGpuStrokeRuntime?: {
+        readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
+      };
+    }
+  ).__hpGpuStrokeRuntime;
+}
+
+function materialFieldPixels(
+  field: Float32Array | undefined,
+): Uint8ClampedArray {
+  if (!field) throw new Error("CPU material field is unavailable");
+  return Uint8ClampedArray.from(field, (value) => Math.round(value));
+}
+
+function materialFieldMae(
+  expected: Uint8ClampedArray,
+  actual: Uint8ClampedArray,
+): number {
+  expect(actual).toHaveLength(expected.length);
+  let absoluteDelta = 0;
+  for (let index = 0; index < expected.length; index++) {
+    absoluteDelta += Math.abs((expected[index] ?? 0) - (actual[index] ?? 0));
+  }
+  return absoluteDelta / expected.length / 255;
+}
+
+function snapshotKey(snapshot: MaterialFieldSnapshot): string {
+  return `${snapshot.branchIndex}:${snapshot.updateCount}`;
+}
 
 function renderGpuMixingBatches(
   gpuReadback: "gpu-field" | "sync",
