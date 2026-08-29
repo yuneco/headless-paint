@@ -557,3 +557,11 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - Go: dispatch p50/p95が**CPU比50%以上改善**、Undo replay（fixture strokes）も同等改善、late/early ≤1.2、screenshot目視で破綻なし。Tier B metric（CPU vs GPU）は記録のみ（この段階では合否にしない）
 - Stop: readPixels同期がgetImageDataと同等に遅い／drawImage(glCanvas→layer)がbatchごと3ms超／WebKitでcontext不安定
 - G2（WebGPU版）はG1 GoのあとChromiumで同interface実装 → STPで確認
+
+### 18.5 G1結果（2026-08-29、同期readPixels版、commit `d141bd4`）
+| 環境 | CPU dispatch p50/p95 | GPU(sync) dispatch | 所見 |
+|---|---|---|---|
+| WebKit | 8/11 | 7/10 | `readPixels` 997回1,446ms（1.45ms/回）が支配。checkpoint回数1/8で403msまで比例して減る → **同期待ちが本体**。`gpuFlush` 3,459回4ms、`gpuCommit` 241回38ms |
+| Chromium | **1/1.4** | 12.7/14 | CPU経路は元から速い（`getImageData` 42ms/997回）＝**Acrylicの重さはWebKit固有**。GPU経路は `gpuCommit` 241回×9.7ms=2.3s：2048² GL canvas全体の`drawImage`が高い。**dirty rect寸法の小さなcommit canvasへblit→drawImage**に変更する必要あり |
+- Undo9（短い合成stroke×10）はWebKitで477→579ms悪化: strokeごとのfull-layer `texImage2D`（16MB）。dirty-region uploadまたはlayer→texture copyの遅延化が必要
+- 次: (1) 非同期readback（PBO+fence、1 checkpoint遅れ）、(2) 小さなcommit canvas、(3) stroke開始uploadの削減
