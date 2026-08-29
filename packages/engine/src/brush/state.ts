@@ -105,6 +105,7 @@ export function cloneBrushRenderState(
               : undefined,
             checkpointOriginX: branch.mixing.checkpointOriginX,
             checkpointOriginY: branch.mixing.checkpointOriginY,
+            pendingGpuCheckpoint: branch.mixing.pendingGpuCheckpoint,
             lastUpdateDistance: branch.mixing.lastUpdateDistance,
             lastCheckpointDistance: branch.mixing.lastCheckpointDistance,
           }

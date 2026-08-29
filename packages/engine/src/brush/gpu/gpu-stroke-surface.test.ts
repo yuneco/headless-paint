@@ -38,38 +38,36 @@ describe("GpuStrokeSurface", () => {
     expectChannelNear(pixel[3], 128);
   });
 
-  it("async request の source pixel を数 frame 後に take できる", async () => {
+  it("snapshot 後の dab を含めず snapshot 時点の色付き pixel を返す", () => {
     const layer = createLayer(64, 48);
     layer.ctx.fillStyle = "rgba(30, 140, 220, 0.75)";
-    layer.ctx.fillRect(9, 7, 1, 1);
+    layer.ctx.fillRect(0, 0, layer.width, layer.height);
 
     const surface = acquireGpuStrokeSurface(layer.width, layer.height);
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
     surface.beginStroke(layer.canvas);
-    configureSolidDab(surface, [0, 0, 0, 0], 1);
-    surface.pushDab({ x: 9.5, y: 7.5, size: 1, rotation: 0, alpha: 1 });
-    surface.commitToLayer(layer);
-    surface.requestCheckpoint();
-
-    await waitForAnimationFrames(3);
-    let checkpoint = surface.takeCompletedCheckpoint();
-    for (let frame = 0; !checkpoint && frame < 12; frame++) {
-      await waitForAnimationFrames(1);
-      checkpoint = surface.takeCompletedCheckpoint();
-    }
+    const snapshotId = surface.snapshotCheckpoint(16, 8, 32);
+    configureSolidDab(surface, [240, 25, 10, 255], 8);
+    surface.pushDab({ x: 32, y: 24, size: 8, rotation: 0, alpha: 1 });
+    surface.flush();
+    surface.issuePendingReadbacks();
+    const checkpoint = surface.takeCheckpoint(snapshotId, { wait: true });
 
     expect(checkpoint).not.toBeNull();
     if (!checkpoint) return;
-    expect(checkpoint.originX).toBe(0);
-    expect(checkpoint.originY).toBe(0);
-    expect(checkpoint.width).toBe(layer.width);
-    expect(checkpoint.height).toBe(layer.height);
-    expectCheckpointDocumentPixel(checkpoint, 9, 7, [30, 140, 220, 191]);
+    expect(checkpoint.originX).toBe(16);
+    expect(checkpoint.originY).toBe(8);
+    expect(checkpoint.width).toBe(32);
+    expect(checkpoint.height).toBe(32);
+    expectCheckpointDocumentPixel(checkpoint, 32, 24, [30, 140, 220, 191]);
+
+    surface.commitToLayer(layer);
+    expectPixelNear(layer, 32, 24, [240, 25, 10, 255]);
   });
 
-  it("async checkpoint の document 座標が色付き source と一致する", async () => {
+  it("async checkpoint の document 座標が色付き source と一致する", () => {
     const layer = createLayer(96, 64);
     layer.ctx.fillStyle = "rgb(220, 30, 20)";
     layer.ctx.fillRect(0, 0, layer.width / 2, layer.height);
@@ -84,9 +82,10 @@ describe("GpuStrokeSurface", () => {
     configureSolidDab(surface, [0, 0, 0, 0], 8);
     surface.pushDab({ x: 48, y: 32, size: 8, rotation: 0, alpha: 1 });
     surface.flush();
-    surface.requestCheckpoint();
+    const snapshotId = surface.snapshotCheckpoint(0, 0, layer.width);
+    surface.issuePendingReadbacks();
 
-    const checkpoint = await takeCheckpointAfterFrames(surface);
+    const checkpoint = surface.takeCheckpoint(snapshotId, { wait: true });
     expect(checkpoint).not.toBeNull();
     if (!checkpoint) return;
     expectCheckpointDocumentPixel(checkpoint, 16, 12, [220, 30, 20, 255]);
@@ -185,28 +184,6 @@ describe("GpuStrokeSurface", () => {
     expect(firstMismatch).toBe(-1);
   });
 
-  it("512px を超える batch の async checkpoint を最新 dab 側の 512px 角に絞る", async () => {
-    const layer = createLayer(1200, 700);
-    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
-    expect(surface).not.toBeNull();
-    if (!surface) return;
-    surfaceUnderTest = surface;
-    surface.beginStroke(layer.canvas);
-    configureSolidDab(surface, [80, 120, 200, 255], 16);
-    surface.pushDab({ x: 100, y: 50, size: 16, rotation: 0, alpha: 1 });
-    surface.pushDab({ x: 1100, y: 650, size: 16, rotation: 0, alpha: 1 });
-    surface.commitToLayer(layer);
-    surface.requestCheckpoint();
-
-    const checkpoint = await takeCheckpointAfterFrames(surface);
-    expect(checkpoint).not.toBeNull();
-    if (!checkpoint) return;
-    expect(checkpoint.originX).toBe(688);
-    expect(checkpoint.originY).toBe(188);
-    expect(checkpoint.width).toBe(512);
-    expect(checkpoint.height).toBe(512);
-  });
-
   it('gpuDab: "off" では runtime が surface を生成しない', () => {
     brushPerfDebug.experiments.gpuDab = "off";
     const creationsBefore = getGpuStrokeSurfaceCreationCountForTest();
@@ -258,9 +235,7 @@ function expectPixelNear(
 }
 
 function expectCheckpointDocumentPixel(
-  checkpoint: NonNullable<
-    ReturnType<GpuStrokeSurface["takeCompletedCheckpoint"]>
-  >,
+  checkpoint: NonNullable<ReturnType<GpuStrokeSurface["takeCheckpoint"]>>,
   x: number,
   y: number,
   expected: readonly [number, number, number, number],
@@ -278,24 +253,4 @@ function expectCheckpointDocumentPixel(
       expected[channel] ?? 0,
     );
   }
-}
-
-async function waitForAnimationFrames(count: number): Promise<void> {
-  for (let frame = 0; frame < count; frame++) {
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
-  }
-}
-
-async function takeCheckpointAfterFrames(
-  surface: GpuStrokeSurface,
-): Promise<ReturnType<GpuStrokeSurface["takeCompletedCheckpoint"]>> {
-  await waitForAnimationFrames(3);
-  let checkpoint = surface.takeCompletedCheckpoint();
-  for (let frame = 0; !checkpoint && frame < 12; frame++) {
-    await waitForAnimationFrames(1);
-    checkpoint = surface.takeCompletedCheckpoint();
-  }
-  return checkpoint;
 }

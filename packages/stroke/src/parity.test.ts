@@ -20,7 +20,7 @@ import {
   createLayer,
 } from "@headless-paint/engine";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   beginHistoryMutation,
   createHistoryState,
@@ -28,6 +28,7 @@ import {
   redo,
   undo,
 } from "./history";
+import { createIncrementalStrokeRenderer } from "./incremental-stroke";
 import {
   expectPixelEqual,
   replayOnLayer,
@@ -67,6 +68,15 @@ const GREEN: Color = { r: 30, g: 185, b: 90, a: 255 };
 const BLUE: Color = { r: 35, g: 95, b: 235, a: 255 };
 const WHITE: Color = { r: 255, g: 255, b: 255, a: 255 };
 
+afterEach(() => {
+  const perf = getBrushPerfTestBridge();
+  if (!perf) return;
+  perf.enabled = false;
+  perf.reset();
+  perf.experiments.gpuDab = "off";
+  perf.experiments.gpuReadback = "async";
+});
+
 const INPUT_POINTS: readonly InputPoint[] = [
   { x: 24, y: 70, pressure: 0.25, timestamp: 10_000 },
   { x: 44, y: 66, pressure: 0.5, timestamp: 10_016 },
@@ -85,6 +95,30 @@ interface ParityCase {
   readonly paintBase?: (layer: Layer) => void;
   readonly filterPipeline?: FilterPipelineConfig;
 }
+
+const STAMP_MIXING_STYLE = makeStyle({
+  color: WHITE,
+  lineWidth: 26,
+  brush: {
+    type: "stamp",
+    tip: { type: "circle", hardness: 1 },
+    dynamics: {
+      ...DEFAULT_BRUSH_DYNAMICS,
+      spacing: 0.35,
+      flow: 1,
+      emissionsPerSecond: 30,
+    },
+    pressureDynamics: { size: 0.2, flow: 0 },
+    mixing: {
+      ...DEFAULT_BRUSH_MIXING,
+      enabled: true,
+      pickupRatePerPx: 10,
+      restoreRatePerPx: 0,
+      diffusionRatePerPx: 0,
+      updateDistancePx: 1,
+    },
+  },
+});
 
 const cases: readonly ParityCase[] = [
   {
@@ -141,29 +175,7 @@ const cases: readonly ParityCase[] = [
   },
   {
     name: "stamp mixing",
-    style: makeStyle({
-      color: WHITE,
-      lineWidth: 26,
-      brush: {
-        type: "stamp",
-        tip: { type: "circle", hardness: 1 },
-        dynamics: {
-          ...DEFAULT_BRUSH_DYNAMICS,
-          spacing: 0.35,
-          flow: 1,
-          emissionsPerSecond: 30,
-        },
-        pressureDynamics: { size: 0.2, flow: 0 },
-        mixing: {
-          ...DEFAULT_BRUSH_MIXING,
-          enabled: true,
-          pickupRatePerPx: 10,
-          restoreRatePerPx: 0,
-          diffusionRatePerPx: 0,
-          updateDistancePx: 1,
-        },
-      },
-    }),
+    style: STAMP_MIXING_STYLE,
     alphaLocked: false,
     paintBase: paintOpaqueBands,
   },
@@ -276,6 +288,89 @@ describe("live-vs-replay parity", () => {
     });
   }
 });
+
+describe.each(["async", "sync"] as const)(
+  "GPU mixing %s feedMany parity",
+  (gpuReadback) => {
+    it("複数 batch と replay 相当の単一 batch が byte-identical", () => {
+      const perf = getBrushPerfTestBridge();
+      if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+      perf.enabled = true;
+      perf.reset();
+      const splitLayer = renderGpuMixingBatches(gpuReadback, [
+        INPUT_POINTS.slice(0, 2),
+        INPUT_POINTS.slice(2, 5),
+        INPUT_POINTS.slice(5),
+      ]);
+      const replayLayer = renderGpuMixingBatches(gpuReadback, [INPUT_POINTS]);
+
+      expectPixelEqual(
+        splitLayer,
+        replayLayer,
+        `GPU mixing ${gpuReadback} split feedMany vs replay feedMany`,
+      );
+      expect(perf.snapshot().stages.gpuFlush.count).toBeGreaterThan(0);
+    });
+  },
+);
+
+function renderGpuMixingBatches(
+  gpuReadback: "async" | "sync",
+  batches: readonly (readonly InputPoint[])[],
+): Layer {
+  const perf = getBrushPerfTestBridge();
+  if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+  perf.experiments.gpuDab = "webgl2";
+  perf.experiments.gpuReadback = gpuReadback;
+
+  const layer = createTestLayer();
+  paintOpaqueBands(layer);
+  const renderer = createIncrementalStrokeRenderer({
+    layer,
+    style: STAMP_MIXING_STYLE,
+    filterPipeline: FILTER_PIPELINE,
+    expand: EXPAND,
+    brushSeed: BRUSH_SEED,
+    alphaLocked: false,
+  });
+  for (const batch of batches) renderer.feedMany(batch);
+  renderer.finalize();
+  return layer;
+}
+
+function getBrushPerfTestBridge():
+  | {
+      enabled: boolean;
+      readonly experiments: {
+        gpuDab: "off" | "webgl2";
+        gpuReadback: "async" | "sync";
+      };
+      reset(): void;
+      snapshot(): {
+        readonly stages: {
+          readonly gpuFlush: { readonly count: number };
+        };
+      };
+    }
+  | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      readonly __hpBrushPerf?: {
+        enabled: boolean;
+        readonly experiments: {
+          gpuDab: "off" | "webgl2";
+          gpuReadback: "async" | "sync";
+        };
+        reset(): void;
+        snapshot(): {
+          readonly stages: {
+            readonly gpuFlush: { readonly count: number };
+          };
+        };
+      };
+    }
+  ).__hpBrushPerf;
+}
 
 interface ParityRun {
   readonly beforeLayer: Layer;

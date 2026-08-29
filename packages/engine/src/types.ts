@@ -452,6 +452,7 @@ export interface BrushMixingState {
   readonly checkpointPixels?: ImageData;
   readonly checkpointOriginX?: number;
   readonly checkpointOriginY?: number;
+  readonly pendingGpuCheckpoint?: number;
   readonly lastUpdateDistance?: number;
   readonly lastCheckpointDistance?: number;
 }

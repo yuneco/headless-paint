@@ -177,9 +177,9 @@ export function createIncrementalStrokeRenderer(
   function feedMany(points: readonly InputPoint[]): void {
     if (finalized || points.length === 0) return;
     hasFed = true;
-    // Issue the previous batch's checkpoint readback before queuing new GPU work:
-    // WebKit's readPixels waits for everything queued before it.
-    if (gpuStrokeActive) gpuRuntime?.requestCheckpoint(gpuOwner);
+    // Issue deterministic snapshots from the previous batch before queuing new
+    // GPU work. WebKit's readPixels is cheapest at this boundary.
+    if (gpuStrokeActive) gpuRuntime?.issuePendingReadbacks(gpuOwner);
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
       if (gpuStrokeActive) {
@@ -224,7 +224,6 @@ export function createIncrementalStrokeRenderer(
       strokeSession = strokeResult.state;
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
       if (gpuStrokeActive) {
-        gpuRuntime?.requestCheckpoint(gpuOwner);
         gpuRuntime?.commitToLayer(gpuOwner, config.layer);
         gpuRuntime?.endStroke(gpuOwner);
       }
@@ -237,7 +236,7 @@ interface GpuStrokeRuntimeBridge {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
-  requestCheckpoint(owner: object): void;
+  issuePendingReadbacks(owner: object): void;
   endStroke(owner: object): void;
 }
 

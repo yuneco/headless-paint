@@ -38,6 +38,7 @@ export const BRUSH_PERF_SAMPLE_NAMES = [
   "samplingCopyPixels",
   "checkpoints",
   "checkpointLag",
+  "checkpointWaitMs",
   "readbackPixels",
 ] as const;
 
@@ -121,6 +122,7 @@ function createSamples(): Record<BrushPerfSampleName, number[]> {
     samplingCopyPixels: [],
     checkpoints: [],
     checkpointLag: [],
+    checkpointWaitMs: [],
     readbackPixels: [],
   };
 }
@@ -179,6 +181,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
           checkpoints: [...samples.checkpoints],
           readbackPixels: [...samples.readbackPixels],
           checkpointLag: [...samples.checkpointLag],
+          checkpointWaitMs: [...samples.checkpointWaitMs],
         },
         stageSeries: Object.fromEntries(
           BRUSH_PERF_STAGE_NAMES.map((name) => [name, [...stageSeries[name]]]),

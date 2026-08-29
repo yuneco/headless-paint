@@ -89,6 +89,7 @@ describe("brush render state", () => {
           mixing: {
             ...mixing,
             checkpointPixels: new ImageData(3, 2),
+            pendingGpuCheckpoint: 42,
             lastUpdateDistance: 10,
           },
         },
@@ -107,6 +108,7 @@ describe("brush render state", () => {
     expect(Array.from(clonedMixing?.field ?? [])).toEqual(
       Array.from(mixing.field),
     );
+    expect(clonedMixing?.pendingGpuCheckpoint).toBe(42);
     expect(clonedMixing?.lastUpdateDistance).toBe(10);
   });
 

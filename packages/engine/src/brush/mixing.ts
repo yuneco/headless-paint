@@ -169,7 +169,6 @@ export function updateMixingAfterDeposit(
       input.mixing.updateDistancePx * brushPerfDebug.experiments.updateScale
   ) {
     state = prepareInitialMixingCheckpoint(input, state);
-    state = takeCompletedGpuCheckpoint(state);
     const distancePx =
       lastUpdate === undefined
         ? input.mixing.updateDistancePx
@@ -184,13 +183,15 @@ export function updateMixingAfterDeposit(
   }
 
   const gpuSurface = getActiveGpuStrokeSurface();
-  if (!gpuSurface || brushPerfDebug.experiments.gpuReadback === "sync") {
-    const lastCheckpoint = state.lastCheckpointDistance ?? 0;
-    if (
-      input.stampDistance - lastCheckpoint >=
-      input.mixing.checkpointDistancePx *
-        brushPerfDebug.experiments.checkpointScale
-    ) {
+  const lastCheckpoint = state.lastCheckpointDistance ?? 0;
+  if (
+    input.stampDistance - lastCheckpoint >=
+    input.mixing.checkpointDistancePx *
+      brushPerfDebug.experiments.checkpointScale
+  ) {
+    if (gpuSurface && brushPerfDebug.experiments.gpuReadback === "async") {
+      state = snapshotAsyncGpuCheckpoint(input, state, gpuSurface);
+    } else {
       state = captureCheckpoint(input, state);
     }
   }
@@ -235,13 +236,7 @@ function captureCheckpoint(
   sourceCanvas: OffscreenCanvas = input.targetLayer.canvas,
   updateCheckpointDistance = true,
 ): BrushMixingState {
-  const margin = input.mixing.checkpointDistancePx;
-  const tileSize = Math.max(
-    1,
-    Math.ceil(input.checkpointFootprintSize * Math.SQRT2 + margin * 2 + 4),
-  );
-  const originX = input.x - tileSize / 2;
-  const originY = input.y - tileSize / 2;
+  const { originX, originY, tileSize } = getCheckpointTile(input);
   const gpuSurface = getActiveGpuStrokeSurface();
   if (gpuSurface) {
     const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
@@ -296,16 +291,43 @@ function captureCheckpoint(
   };
 }
 
-function takeCompletedGpuCheckpoint(
+function getCheckpointTile(input: MixingUpdateInput): {
+  readonly originX: number;
+  readonly originY: number;
+  readonly tileSize: number;
+} {
+  const margin = input.mixing.checkpointDistancePx;
+  const tileSize = Math.max(
+    1,
+    Math.ceil(input.checkpointFootprintSize * Math.SQRT2 + margin * 2 + 4),
+  );
+  const originX = input.x - tileSize / 2;
+  const originY = input.y - tileSize / 2;
+  return { originX, originY, tileSize };
+}
+
+function snapshotAsyncGpuCheckpoint(
+  input: MixingUpdateInput,
   state: BrushMixingState,
-  gpuSurface = getActiveGpuStrokeSurface(),
+  gpuSurface: NonNullable<ReturnType<typeof getActiveGpuStrokeSurface>>,
 ): BrushMixingState {
-  if (!gpuSurface || brushPerfDebug.experiments.gpuReadback !== "async") {
-    return state;
+  const { originX, originY, tileSize } = getCheckpointTile(input);
+  const previousId = state.pendingGpuCheckpoint;
+  const pendingGpuCheckpoint = gpuSurface.snapshotCheckpoint(
+    originX,
+    originY,
+    tileSize,
+  );
+  let next: BrushMixingState = {
+    ...state,
+    pendingGpuCheckpoint,
+    lastCheckpointDistance: input.stampDistance,
+  };
+  if (previousId !== undefined) {
+    const completed = gpuSurface.takeCheckpoint(previousId, { wait: true });
+    if (completed) next = applyCompletedGpuCheckpoint(next, completed);
   }
-  const completed = gpuSurface.takeCompletedCheckpoint();
-  if (!completed) return state;
-  return applyCompletedGpuCheckpoint(state, completed);
+  return next;
 }
 
 export function applyCompletedGpuCheckpoint(
