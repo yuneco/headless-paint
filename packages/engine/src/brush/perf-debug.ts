@@ -14,6 +14,7 @@ export const BRUSH_PERF_STAGE_NAMES = [
   "materialAdvance",
   "materialUpload",
   "checkpointReadback",
+  "gpuReadRequest",
   "gpuFlush",
   "gpuCommit",
   "samplingLayerCopy",
@@ -36,6 +37,7 @@ export const BRUSH_PERF_SAMPLE_NAMES = [
   "bboxAreas",
   "samplingCopyPixels",
   "checkpoints",
+  "checkpointLag",
 ] as const;
 
 export type BrushPerfSampleName = (typeof BRUSH_PERF_SAMPLE_NAMES)[number];
@@ -75,6 +77,7 @@ export interface BrushPerfDebug {
     updateScale: number;
     bitmapDab: boolean;
     gpuDab: "off" | "webgl2";
+    gpuReadback: "sync" | "async";
   };
   nullStages: BrushPerfNullStages;
   recordStage(name: BrushPerfStageName, startedAt: number): void;
@@ -116,6 +119,7 @@ function createSamples(): Record<BrushPerfSampleName, number[]> {
     bboxAreas: [],
     samplingCopyPixels: [],
     checkpoints: [],
+    checkpointLag: [],
   };
 }
 
@@ -133,6 +137,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
       updateScale: 1,
       bitmapDab: false,
       gpuDab: "off",
+      gpuReadback: "async",
     },
     nullStages: createNullStages(),
     recordStage(name, startedAt) {
@@ -170,6 +175,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
           bboxAreas: [...samples.bboxAreas],
           samplingCopyPixels: [...samples.samplingCopyPixels],
           checkpoints: [...samples.checkpoints],
+          checkpointLag: [...samples.checkpointLag],
         },
         stageSeries: Object.fromEntries(
           BRUSH_PERF_STAGE_NAMES.map((name) => [name, [...stageSeries[name]]]),

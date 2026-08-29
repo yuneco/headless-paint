@@ -3,12 +3,35 @@ import { brushPerfDebug } from "../perf-debug";
 
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 5;
+const CHECKPOINT_PBO_RING_SIZE = 3;
 
 interface DirtyRect {
   left: number;
   top: number;
   right: number;
   bottom: number;
+}
+
+interface PendingCheckpointReadback {
+  readonly buffer: WebGLBuffer;
+  readonly sync: WebGLSync;
+  readonly sequence: number;
+  readonly originX: number;
+  readonly originY: number;
+  readonly size: number;
+  readonly readOriginX: number;
+  readonly readOriginY: number;
+  readonly left: number;
+  readonly top: number;
+  readonly readWidth: number;
+  readonly readHeight: number;
+}
+
+interface CompletedGpuCheckpoint {
+  readonly originX: number;
+  readonly originY: number;
+  readonly size: number;
+  readonly pixels: Uint8ClampedArray;
 }
 
 export interface GpuDab {
@@ -33,6 +56,8 @@ export interface GpuStrokeSurface {
     originY: number,
     size: number,
   ): Uint8ClampedArray;
+  requestCheckpointAsync(originX: number, originY: number, size: number): void;
+  takeCompletedCheckpoint(): CompletedGpuCheckpoint | null;
   commitToLayer(layer: Layer): void;
   endStroke(): void;
 }
@@ -125,6 +150,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private fieldRows = 0;
   private strokeBegun = false;
   private contextLost = false;
+  private checkpointBuffers: WebGLBuffer[] = [];
+  private pendingCheckpointReadbacks: PendingCheckpointReadback[] = [];
+  private checkpointBufferSize = 0;
+  private checkpointRequestSequence = 0;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -141,6 +170,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (!gl) throw new Error("WebGL2 is unavailable");
     this.gl = gl;
     this.canvas.addEventListener("webglcontextlost", () => {
+      this.discardPendingCheckpointReadbacks();
+      for (const buffer of this.checkpointBuffers) gl.deleteBuffer(buffer);
+      this.checkpointBuffers = [];
+      this.checkpointBufferSize = 0;
       this.contextLost = true;
       gpuPermanentlyUnavailable = true;
     });
@@ -280,6 +313,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
     this.dirtyRect = null;
+    this.discardPendingCheckpointReadbacks();
+    this.checkpointRequestSequence = 0;
     this.strokeBegun = true;
   }
 
@@ -444,31 +479,131 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       premultiplied,
     );
 
-    const outputX = left - readOriginX;
-    const outputY = top - readOriginY;
-    for (let sourceRow = 0; sourceRow < readHeight; sourceRow++) {
-      const targetRow = outputY + readHeight - 1 - sourceRow;
-      for (let column = 0; column < readWidth; column++) {
-        const sourceOffset = (sourceRow * readWidth + column) * 4;
-        const targetOffset = (targetRow * tileSize + outputX + column) * 4;
-        const alpha = premultiplied[sourceOffset + 3] ?? 0;
-        output[targetOffset + 3] = alpha;
-        if (alpha === 0) continue;
-        output[targetOffset] = unpremultiply(
-          premultiplied[sourceOffset] ?? 0,
-          alpha,
-        );
-        output[targetOffset + 1] = unpremultiply(
-          premultiplied[sourceOffset + 1] ?? 0,
-          alpha,
-        );
-        output[targetOffset + 2] = unpremultiply(
-          premultiplied[sourceOffset + 2] ?? 0,
-          alpha,
-        );
+    copyUnpremultipliedCheckpoint(output, premultiplied, {
+      size: tileSize,
+      readOriginX,
+      readOriginY,
+      left,
+      top,
+      readWidth,
+      readHeight,
+    });
+    return output;
+  }
+
+  requestCheckpointAsync(originX: number, originY: number, size: number): void {
+    this.assertStrokeBegun();
+    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+    this.flush();
+    const tileSize = Math.max(0, Math.floor(size));
+    if (tileSize === 0 || this.lost) return;
+
+    this.checkpointRequestSequence++;
+    this.ensureCheckpointBuffers(tileSize * tileSize * 4);
+    const buffer = this.checkpointBuffers.find(
+      (candidate) =>
+        !this.pendingCheckpointReadbacks.some(
+          (request) => request.buffer === candidate,
+        ),
+    );
+    if (!buffer) {
+      if (brushPerfDebug.enabled) {
+        brushPerfDebug.recordStage("gpuReadRequest", startedAt);
+      }
+      return;
+    }
+
+    const readOriginX = Math.floor(originX);
+    const readOriginY = Math.floor(originY);
+    const left = Math.max(0, readOriginX);
+    const top = Math.max(0, readOriginY);
+    const right = Math.min(this.width, readOriginX + tileSize);
+    const bottom = Math.min(this.height, readOriginY + tileSize);
+    const readWidth = Math.max(0, right - left);
+    const readHeight = Math.max(0, bottom - top);
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+    if (readWidth > 0 && readHeight > 0) {
+      gl.readPixels(
+        left,
+        this.height - bottom,
+        readWidth,
+        readHeight,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        0,
+      );
+    }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    const sync = requireResource(
+      gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0),
+      "WebGL checkpoint fence",
+    );
+    gl.flush();
+    this.pendingCheckpointReadbacks.push({
+      buffer,
+      sync,
+      sequence: this.checkpointRequestSequence,
+      originX,
+      originY,
+      size: tileSize,
+      readOriginX,
+      readOriginY,
+      left,
+      top,
+      readWidth,
+      readHeight,
+    });
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("gpuReadRequest", startedAt);
+    }
+  }
+
+  takeCompletedCheckpoint(): CompletedGpuCheckpoint | null {
+    const request = this.pendingCheckpointReadbacks[0];
+    if (!request || this.lost) return null;
+    const gl = this.gl;
+    const status = gl.clientWaitSync(request.sync, 0, 0);
+    if (status === gl.TIMEOUT_EXPIRED) return null;
+    if (status === gl.WAIT_FAILED) {
+      gl.deleteSync(request.sync);
+      this.pendingCheckpointReadbacks.shift();
+      return null;
+    }
+    if (status !== gl.ALREADY_SIGNALED && status !== gl.CONDITION_SATISFIED) {
+      return null;
+    }
+
+    const premultiplied = new Uint8Array(
+      request.readWidth * request.readHeight * 4,
+    );
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, request.buffer);
+    if (premultiplied.length > 0) {
+      const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, premultiplied);
+      if (brushPerfDebug.enabled) {
+        brushPerfDebug.recordStage("checkpointReadback", readbackStartedAt);
       }
     }
-    return output;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    gl.deleteSync(request.sync);
+    this.pendingCheckpointReadbacks.shift();
+
+    const pixels = new Uint8ClampedArray(request.size * request.size * 4);
+    copyUnpremultipliedCheckpoint(pixels, premultiplied, request);
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample(
+        "checkpointLag",
+        this.checkpointRequestSequence - request.sequence,
+      );
+    }
+    return {
+      originX: request.originX,
+      originY: request.originY,
+      size: request.size,
+      pixels,
+    };
   }
 
   commitToLayer(layer: Layer): void {
@@ -525,10 +660,42 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   }
 
   endStroke(): void {
+    this.discardPendingCheckpointReadbacks();
     this.instanceCount = 0;
     this.dirtyRect = null;
     this.strokeBegun = false;
     this.tipSource = null;
+  }
+
+  private ensureCheckpointBuffers(byteLength: number): void {
+    if (
+      this.checkpointBufferSize === byteLength &&
+      this.checkpointBuffers.length === CHECKPOINT_PBO_RING_SIZE
+    ) {
+      return;
+    }
+    this.discardPendingCheckpointReadbacks();
+    const gl = this.gl;
+    for (const buffer of this.checkpointBuffers) gl.deleteBuffer(buffer);
+    this.checkpointBuffers = [];
+    this.checkpointBufferSize = byteLength;
+    for (let index = 0; index < CHECKPOINT_PBO_RING_SIZE; index++) {
+      const buffer = requireResource(
+        gl.createBuffer(),
+        "WebGL checkpoint pixel pack buffer",
+      );
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, byteLength, gl.STREAM_READ);
+      this.checkpointBuffers.push(buffer);
+    }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  }
+
+  private discardPendingCheckpointReadbacks(): void {
+    for (const request of this.pendingCheckpointReadbacks) {
+      this.gl.deleteSync(request.sync);
+    }
+    this.pendingCheckpointReadbacks = [];
   }
 
   private configureGeometry(): void {
@@ -729,4 +896,44 @@ function requireResource<T>(value: T | null, label: string): T {
 
 function unpremultiply(value: number, alpha: number): number {
   return Math.min(255, Math.round((value * 255) / alpha));
+}
+
+function copyUnpremultipliedCheckpoint(
+  output: Uint8ClampedArray,
+  premultiplied: Uint8Array,
+  request: Pick<
+    PendingCheckpointReadback,
+    | "size"
+    | "readOriginX"
+    | "readOriginY"
+    | "left"
+    | "top"
+    | "readWidth"
+    | "readHeight"
+  >,
+): void {
+  const outputX = request.left - request.readOriginX;
+  const outputY = request.top - request.readOriginY;
+  for (let sourceRow = 0; sourceRow < request.readHeight; sourceRow++) {
+    const targetRow = outputY + request.readHeight - 1 - sourceRow;
+    for (let column = 0; column < request.readWidth; column++) {
+      const sourceOffset = (sourceRow * request.readWidth + column) * 4;
+      const targetOffset = (targetRow * request.size + outputX + column) * 4;
+      const alpha = premultiplied[sourceOffset + 3] ?? 0;
+      output[targetOffset + 3] = alpha;
+      if (alpha === 0) continue;
+      output[targetOffset] = unpremultiply(
+        premultiplied[sourceOffset] ?? 0,
+        alpha,
+      );
+      output[targetOffset + 1] = unpremultiply(
+        premultiplied[sourceOffset + 1] ?? 0,
+        alpha,
+      );
+      output[targetOffset + 2] = unpremultiply(
+        premultiplied[sourceOffset + 2] ?? 0,
+        alpha,
+      );
+    }
+  }
 }

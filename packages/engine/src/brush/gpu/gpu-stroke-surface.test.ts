@@ -13,6 +13,7 @@ afterEach(() => {
   surfaceUnderTest?.endStroke();
   surfaceUnderTest = null;
   brushPerfDebug.experiments.gpuDab = "off";
+  brushPerfDebug.experiments.gpuReadback = "async";
 });
 
 describe("GpuStrokeSurface", () => {
@@ -35,6 +36,39 @@ describe("GpuStrokeSurface", () => {
     expectChannelNear(pixel[1], 40);
     expectChannelNear(pixel[2], 200);
     expectChannelNear(pixel[3], 128);
+  });
+
+  it("async request の source pixel を数 frame 後に take できる", async () => {
+    const source = new OffscreenCanvas(64, 48);
+    const ctx = source.getContext("2d");
+    expect(ctx).not.toBeNull();
+    if (!ctx) return;
+    ctx.fillStyle = "rgba(30, 140, 220, 0.75)";
+    ctx.fillRect(9, 7, 1, 1);
+
+    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(source);
+    surface.requestCheckpointAsync(9, 7, 1);
+
+    await waitForAnimationFrames(3);
+    let checkpoint = surface.takeCompletedCheckpoint();
+    for (let frame = 0; !checkpoint && frame < 12; frame++) {
+      await waitForAnimationFrames(1);
+      checkpoint = surface.takeCompletedCheckpoint();
+    }
+
+    expect(checkpoint).not.toBeNull();
+    if (!checkpoint) return;
+    expect(checkpoint.originX).toBe(9);
+    expect(checkpoint.originY).toBe(7);
+    expect(checkpoint.size).toBe(1);
+    expectChannelNear(checkpoint.pixels[0], 30);
+    expectChannelNear(checkpoint.pixels[1], 140);
+    expectChannelNear(checkpoint.pixels[2], 220);
+    expectChannelNear(checkpoint.pixels[3], 191);
   });
 
   it("単色 field と円 tip の dab を layer に commit する", () => {
@@ -96,4 +130,12 @@ describe("GpuStrokeSurface", () => {
 
 function expectChannelNear(actual: number | undefined, expected: number): void {
   expect(Math.abs((actual ?? 0) - expected)).toBeLessThanOrEqual(2);
+}
+
+async function waitForAnimationFrames(count: number): Promise<void> {
+  for (let frame = 0; frame < count; frame++) {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+  }
 }

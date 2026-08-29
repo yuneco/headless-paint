@@ -80,6 +80,8 @@ function configureBrushPerfDebugFromUrl(): void {
   perf.experiments.bitmapDab = params.get("bitmapDab") === "1";
   perf.experiments.gpuDab =
     params.get("gpuDab") === "webgl2" ? "webgl2" : "off";
+  perf.experiments.gpuReadback =
+    params.get("gpuReadback") === "sync" ? "sync" : "async";
   for (const name of Object.keys(perf.nullStages) as Array<
     keyof typeof perf.nullStages
   >) {
