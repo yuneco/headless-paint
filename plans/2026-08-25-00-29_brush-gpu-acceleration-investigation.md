@@ -715,3 +715,7 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - WebGPU版はChromiumのcommit費用が動機だがCPU経路が速いため優先度低
 - Tier B閾値・parity harnessの正式化（`pass`判定のcoverage基準が表示canvas ROIで厳しすぎる）
 - iPadでの最終確認（常駐化・Expand込み）
+
+### 19.4 ユーザー判断（2026-08-30）
+- 性能改善は認める。**現実装は棄却しない**。ただしiPad実機でradial 6でも時々**数百msのstall**（入力は取れており、後でまとめて正しく描画される）→ 要改善項目
+- 仮説: texture再確保（branch数/tile寸法変化時の`texImage2D`）、常駐miss時の16MB upload、commit packingの複数巡回、GC。Mac側で再現しにくいためアプリ内stall記録で切り分ける
