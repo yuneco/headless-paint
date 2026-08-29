@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createLayer } from "../../layer";
+import {
+  advanceMaterialField,
+  createMaterialField,
+  writeMaterialFieldPixels,
+} from "../material-field";
+import { sampleRotatedCheckpoint } from "../mixing";
 import { brushPerfDebug } from "../perf-debug";
 import {
   type GpuStrokeSurface,
@@ -13,7 +19,7 @@ afterEach(() => {
   surfaceUnderTest?.endStroke();
   surfaceUnderTest = null;
   brushPerfDebug.experiments.gpuDab = "off";
-  brushPerfDebug.experiments.gpuReadback = "async";
+  brushPerfDebug.experiments.gpuReadback = "gpu-field";
   brushPerfDebug.experiments.checkpointLagSteps = 1;
 });
 
@@ -173,6 +179,90 @@ describe("GpuStrokeSurface", () => {
     expectChannelNear(pixel[1], 50);
     expectChannelNear(pixel[2], 20);
     expectChannelNear(pixel[3], 255);
+  });
+
+  it("field update pass が CPU sampling/mix/restore/diffusion と一致する", () => {
+    const source = new OffscreenCanvas(96, 64);
+    const sourceCtx = source.getContext("2d");
+    expect(sourceCtx).not.toBeNull();
+    if (!sourceCtx) return;
+    sourceCtx.fillStyle = "rgb(20, 70, 230)";
+    sourceCtx.fillRect(0, 0, source.width, source.height);
+    sourceCtx.fillStyle = "rgb(30, 210, 80)";
+    sourceCtx.fillRect(18, 10, 31, 46);
+
+    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(source);
+
+    const columns = 18;
+    const rows = 8;
+    const baseColor = { r: 225, g: 35, b: 25, a: 210 };
+    const update = {
+      baseColor,
+      centerX: 48.25,
+      centerY: 31.75,
+      angle: 0.37,
+      sampleSize: 42,
+      columns,
+      rows,
+      pickupRatePerPx: 0.08,
+      restoreRatePerPx: 0.015,
+      diffusionRatePerPx: 0.21,
+      distancePx: 7.5,
+    } as const;
+    surface.initializeMaterialField(columns, rows, baseColor);
+    const tip = new OffscreenCanvas(16, 16);
+    const tipCtx = tip.getContext("2d");
+    expect(tipCtx).not.toBeNull();
+    if (!tipCtx) return;
+    tipCtx.fillStyle = "white";
+    tipCtx.fillRect(0, 0, tip.width, tip.height);
+    surface.setTip(tip);
+    surface.pushDab({
+      x: update.centerX,
+      y: update.centerY,
+      size: update.sampleSize,
+      rotation: update.angle,
+      alpha: 1,
+    });
+    surface.updateMaterialField(update);
+    const actual = surface.readMaterialFieldForTest();
+
+    const checkpoint = sourceCtx.getImageData(
+      0,
+      0,
+      source.width,
+      source.height,
+    );
+    const sampled = sampleRotatedCheckpoint(
+      checkpoint,
+      0,
+      0,
+      update.centerX,
+      update.centerY,
+      update.angle,
+      update.sampleSize,
+      columns,
+      rows,
+    );
+    const expectedField = advanceMaterialField(
+      createMaterialField(columns, rows, baseColor),
+      sampled,
+      columns,
+      rows,
+      baseColor,
+      update,
+    );
+    const expected = new Uint8ClampedArray(expectedField.length);
+    writeMaterialFieldPixels(expectedField, expected);
+
+    expect(actual).toHaveLength(expected.length);
+    for (let offset = 0; offset < expected.length; offset++) {
+      expectChannelNear(actual[offset], expected[offset] ?? 0);
+    }
   });
 
   it("2 batch 連続 commit で最初の deposit と layer の他領域を維持する", () => {

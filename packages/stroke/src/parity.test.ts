@@ -74,7 +74,7 @@ afterEach(() => {
   perf.enabled = false;
   perf.reset();
   perf.experiments.gpuDab = "off";
-  perf.experiments.gpuReadback = "async";
+  perf.experiments.gpuReadback = "gpu-field";
   perf.experiments.checkpointLagSteps = 1;
 });
 
@@ -292,8 +292,7 @@ describe("live-vs-replay parity", () => {
 });
 
 describe.each([
-  { gpuReadback: "async", checkpointLagSteps: 1 },
-  { gpuReadback: "async", checkpointLagSteps: 3 },
+  { gpuReadback: "gpu-field", checkpointLagSteps: 1 },
   { gpuReadback: "sync", checkpointLagSteps: 1 },
 ] as const)(
   "GPU mixing $gpuReadback lag=$checkpointLagSteps feedMany parity",
@@ -323,13 +322,18 @@ describe.each([
         replayLayer,
         `GPU mixing ${gpuReadback} lag=${checkpointLagSteps} split feedMany vs replay feedMany`,
       );
-      expect(perf.snapshot().stages.gpuFlush.count).toBeGreaterThan(0);
+      const stages = perf.snapshot().stages;
+      expect(stages.gpuFlush.count).toBeGreaterThan(0);
+      if (gpuReadback === "gpu-field") {
+        expect(stages.gpuFieldUpdate.count).toBeGreaterThan(0);
+        expect(stages.checkpointReadback.count).toBe(0);
+      }
     });
   },
 );
 
 function renderGpuMixingBatches(
-  gpuReadback: "async" | "sync",
+  gpuReadback: "gpu-field" | "sync",
   checkpointLagSteps: number,
   batches: readonly (readonly InputPoint[])[],
 ): Layer {
@@ -359,13 +363,15 @@ function getBrushPerfTestBridge():
       enabled: boolean;
       readonly experiments: {
         gpuDab: "off" | "webgl2";
-        gpuReadback: "async" | "sync";
+        gpuReadback: "gpu-field" | "sync";
         checkpointLagSteps: number;
       };
       reset(): void;
       snapshot(): {
         readonly stages: {
           readonly gpuFlush: { readonly count: number };
+          readonly gpuFieldUpdate: { readonly count: number };
+          readonly checkpointReadback: { readonly count: number };
         };
       };
     }
@@ -376,13 +382,15 @@ function getBrushPerfTestBridge():
         enabled: boolean;
         readonly experiments: {
           gpuDab: "off" | "webgl2";
-          gpuReadback: "async" | "sync";
+          gpuReadback: "gpu-field" | "sync";
           checkpointLagSteps: number;
         };
         reset(): void;
         snapshot(): {
           readonly stages: {
             readonly gpuFlush: { readonly count: number };
+            readonly gpuFieldUpdate: { readonly count: number };
+            readonly checkpointReadback: { readonly count: number };
           };
         };
       };

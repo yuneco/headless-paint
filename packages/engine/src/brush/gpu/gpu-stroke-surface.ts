@@ -56,13 +56,39 @@ export interface GpuDab {
   readonly alpha: number;
 }
 
+export interface GpuMaterialFieldUpdate {
+  readonly baseColor: {
+    readonly r: number;
+    readonly g: number;
+    readonly b: number;
+    readonly a: number;
+  };
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly angle: number;
+  readonly sampleSize: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly pickupRatePerPx: number;
+  readonly restoreRatePerPx: number;
+  readonly diffusionRatePerPx: number;
+  readonly distancePx: number;
+}
+
 export interface GpuStrokeSurface {
   readonly width: number;
   readonly height: number;
   readonly lost: boolean;
   beginStroke(sourceCanvas: OffscreenCanvas): void;
   setTip(tipCanvas: OffscreenCanvas): void;
+  initializeMaterialField(
+    columns: number,
+    rows: number,
+    baseColor: GpuMaterialFieldUpdate["baseColor"],
+  ): void;
+  updateMaterialField(update: GpuMaterialFieldUpdate): void;
   updateField(pixels: Uint8ClampedArray, columns: number, rows: number): void;
+  readMaterialFieldForTest(): Uint8ClampedArray;
   pushDab(dab: GpuDab): void;
   flush(): void;
   readCheckpoint(
@@ -145,6 +171,122 @@ void main() {
 }
 `;
 
+const FIELD_VERTEX_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+void main() {
+  vec2 position = vec2(
+    gl_VertexID == 1 ? 3.0 : -1.0,
+    gl_VertexID == 2 ? 3.0 : -1.0
+  );
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+const FIELD_MIX_FRAGMENT_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+uniform sampler2D uAccum;
+uniform sampler2D uPreviousField;
+uniform vec2 uSurfaceSize;
+uniform vec2 uFieldSize;
+uniform vec2 uCenter;
+uniform float uAngle;
+uniform float uSampleSize;
+uniform vec4 uBaseColor;
+uniform float uPickup;
+uniform float uRestore;
+
+out vec4 outColor;
+
+vec4 accumTexel(ivec2 documentPixel) {
+  ivec2 surfaceSize = ivec2(uSurfaceSize);
+  if (
+    documentPixel.x < 0 || documentPixel.y < 0 ||
+    documentPixel.x >= surfaceSize.x || documentPixel.y >= surfaceSize.y
+  ) {
+    return vec4(0.0);
+  }
+  return texelFetch(
+    uAccum,
+    ivec2(documentPixel.x, surfaceSize.y - 1 - documentPixel.y),
+    0
+  );
+}
+
+vec4 sampleAccumBilinear(vec2 documentPosition) {
+  vec2 samplePosition = documentPosition - vec2(0.5);
+  ivec2 p0 = ivec2(floor(samplePosition));
+  vec2 fraction = samplePosition - vec2(p0);
+  vec4 premultiplied = mix(
+    mix(accumTexel(p0), accumTexel(p0 + ivec2(1, 0)), fraction.x),
+    mix(
+      accumTexel(p0 + ivec2(0, 1)),
+      accumTexel(p0 + ivec2(1, 1)),
+      fraction.x
+    ),
+    fraction.y
+  );
+  if (premultiplied.a <= 0.0) return vec4(0.0);
+  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
+}
+
+void main() {
+  ivec2 fieldCoord = ivec2(gl_FragCoord.xy);
+  vec2 local = (
+    (vec2(fieldCoord) + vec2(0.5)) / uFieldSize - vec2(0.5)
+  ) * uSampleSize;
+  float cosine = cos(uAngle);
+  float sine = sin(uAngle);
+  vec2 documentPosition = uCenter + vec2(
+    local.x * cosine - local.y * sine,
+    local.x * sine + local.y * cosine
+  );
+  vec4 sampled = sampleAccumBilinear(documentPosition);
+  vec4 current = texelFetch(uPreviousField, fieldCoord, 0);
+  float pickupAmount = uPickup * sampled.a;
+  vec3 picked = mix(current.rgb, sampled.rgb, pickupAmount);
+  outColor = vec4(
+    mix(picked, uBaseColor.rgb, uRestore),
+    mix(current.a, uBaseColor.a, uRestore)
+  );
+}
+`;
+
+const FIELD_DIFFUSION_FRAGMENT_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+uniform sampler2D uPreviousField;
+uniform ivec2 uFieldDimensions;
+uniform float uStrength;
+
+out vec4 outColor;
+
+void main() {
+  ivec2 coord = ivec2(gl_FragCoord.xy);
+  vec4 current = texelFetch(uPreviousField, coord, 0);
+  vec4 sum = current;
+  float count = 1.0;
+  if (coord.x > 0) {
+    sum += texelFetch(uPreviousField, coord + ivec2(-1, 0), 0);
+    count += 1.0;
+  }
+  if (coord.x + 1 < uFieldDimensions.x) {
+    sum += texelFetch(uPreviousField, coord + ivec2(1, 0), 0);
+    count += 1.0;
+  }
+  if (coord.y > 0) {
+    sum += texelFetch(uPreviousField, coord + ivec2(0, -1), 0);
+    count += 1.0;
+  }
+  if (coord.y + 1 < uFieldDimensions.y) {
+    sum += texelFetch(uPreviousField, coord + ivec2(0, 1), 0);
+    count += 1.0;
+  }
+  outColor = mix(current, sum / count, uStrength);
+}
+`;
+
 class WebGl2StrokeSurface implements GpuStrokeSurface {
   readonly width: number;
   readonly height: number;
@@ -152,12 +294,18 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   readonly gl: WebGL2RenderingContext;
 
   private readonly program: WebGLProgram;
+  private readonly fieldMixProgram: WebGLProgram;
+  private readonly fieldDiffusionProgram: WebGLProgram;
   private readonly vertexArray: WebGLVertexArrayObject;
   private readonly instanceBuffer: WebGLBuffer;
   private accumTexture: WebGLTexture;
   private sourceTexture: WebGLTexture;
   private readonly tipTexture: WebGLTexture;
-  private readonly fieldTexture: WebGLTexture;
+  private readonly fieldTextures: readonly [WebGLTexture, WebGLTexture];
+  private readonly fieldFramebuffers: readonly [
+    WebGLFramebuffer,
+    WebGLFramebuffer,
+  ];
   private framebuffer: WebGLFramebuffer;
   private sourceFramebuffer: WebGLFramebuffer;
   private readonly surfaceSizeLocation: WebGLUniformLocation;
@@ -172,6 +320,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private tipHeight = 0;
   private fieldColumns = 0;
   private fieldRows = 0;
+  private activeFieldIndex: 0 | 1 = 0;
+  private readonly useFloatField: boolean;
   private strokeBegun = false;
   private contextLost = false;
   private checkpointSlots: CheckpointSlot[] = [];
@@ -202,7 +352,24 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gpuPermanentlyUnavailable = true;
     });
 
-    this.program = createProgram(gl);
+    this.program = createProgram(
+      gl,
+      VERTEX_SHADER_SOURCE,
+      FRAGMENT_SHADER_SOURCE,
+      "GPU stroke",
+    );
+    this.fieldMixProgram = createProgram(
+      gl,
+      FIELD_VERTEX_SHADER_SOURCE,
+      FIELD_MIX_FRAGMENT_SHADER_SOURCE,
+      "GPU material field mix",
+    );
+    this.fieldDiffusionProgram = createProgram(
+      gl,
+      FIELD_VERTEX_SHADER_SOURCE,
+      FIELD_DIFFUSION_FRAGMENT_SHADER_SOURCE,
+      "GPU material field diffusion",
+    );
     this.vertexArray = requireResource(
       gl.createVertexArray(),
       "WebGL vertex array",
@@ -220,10 +387,14 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       "WebGL source texture",
     );
     this.tipTexture = requireResource(gl.createTexture(), "WebGL tip texture");
-    this.fieldTexture = requireResource(
-      gl.createTexture(),
-      "WebGL field texture",
-    );
+    this.fieldTextures = [
+      requireResource(gl.createTexture(), "WebGL field texture"),
+      requireResource(gl.createTexture(), "WebGL field texture"),
+    ];
+    this.fieldFramebuffers = [
+      requireResource(gl.createFramebuffer(), "WebGL field framebuffer"),
+      requireResource(gl.createFramebuffer(), "WebGL field framebuffer"),
+    ];
     this.framebuffer = requireResource(
       gl.createFramebuffer(),
       "WebGL framebuffer",
@@ -241,7 +412,13 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.configureTexture(this.accumTexture, gl.NEAREST);
     this.configureTexture(this.sourceTexture, gl.NEAREST);
     this.configureTexture(this.tipTexture, gl.LINEAR);
-    this.configureTexture(this.fieldTexture, gl.LINEAR);
+    for (const texture of this.fieldTextures) {
+      this.configureTexture(texture, gl.LINEAR);
+    }
+    this.useFloatField = Boolean(
+      gl.getExtension("EXT_color_buffer_float") ??
+        gl.getExtension("EXT_color_buffer_half_float"),
+    );
     gl.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, "uTip"), 0);
     gl.uniform1i(gl.getUniformLocation(this.program, "uField"), 1);
@@ -385,35 +562,203 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       );
     }
     const gl = this.gl;
+    this.ensureMaterialFieldSize(columns, rows);
+    this.activeFieldIndex = 0;
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.bindTexture(gl.TEXTURE_2D, this.fieldTexture);
-    if (this.fieldColumns !== columns || this.fieldRows !== rows) {
-      gl.texImage2D(
+    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[0]);
+    if (this.useFloatField) {
+      const normalized = new Float32Array(pixels.length);
+      for (let index = 0; index < pixels.length; index++) {
+        normalized[index] = (pixels[index] ?? 0) / 255;
+      }
+      gl.texSubImage2D(
         gl.TEXTURE_2D,
         0,
-        gl.RGBA8,
+        0,
+        0,
         columns,
         rows,
+        gl.RGBA,
+        gl.FLOAT,
+        normalized,
+      );
+    } else {
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
         0,
+        0,
+        0,
+        columns,
+        rows,
         gl.RGBA,
         gl.UNSIGNED_BYTE,
-        null,
+        pixels,
       );
-      this.fieldColumns = columns;
-      this.fieldRows = rows;
     }
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      0,
-      0,
-      columns,
-      rows,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      pixels,
+  }
+
+  initializeMaterialField(
+    columns: number,
+    rows: number,
+    baseColor: GpuMaterialFieldUpdate["baseColor"],
+  ): void {
+    this.assertStrokeBegun();
+    this.ensureMaterialFieldSize(columns, rows);
+    const gl = this.gl;
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(
+      clampUnit(baseColor.r / 255),
+      clampUnit(baseColor.g / 255),
+      clampUnit(baseColor.b / 255),
+      clampUnit(baseColor.a / 255),
     );
+    for (const framebuffer of this.fieldFramebuffers) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.viewport(0, 0, columns, rows);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    this.activeFieldIndex = 0;
+  }
+
+  updateMaterialField(update: GpuMaterialFieldUpdate): void {
+    this.assertStrokeBegun();
+    this.ensureMaterialFieldSize(update.columns, update.rows);
+    if (brushPerfDebug.nullStages.nullFieldAdvance) return;
+    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+    const gl = this.gl;
+    const previousIndex = this.activeFieldIndex;
+    let nextIndex = oppositeFieldIndex(previousIndex);
+    const distance = sanitizeNonNegative(update.distancePx);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fieldFramebuffers[nextIndex]);
+    gl.viewport(0, 0, update.columns, update.rows);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.useProgram(this.fieldMixProgram);
+    gl.bindVertexArray(this.vertexArray);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[previousIndex]);
+    gl.uniform1i(gl.getUniformLocation(this.fieldMixProgram, "uAccum"), 0);
+    gl.uniform1i(
+      gl.getUniformLocation(this.fieldMixProgram, "uPreviousField"),
+      1,
+    );
+    gl.uniform2f(
+      gl.getUniformLocation(this.fieldMixProgram, "uSurfaceSize"),
+      this.width,
+      this.height,
+    );
+    gl.uniform2f(
+      gl.getUniformLocation(this.fieldMixProgram, "uFieldSize"),
+      update.columns,
+      update.rows,
+    );
+    gl.uniform2f(
+      gl.getUniformLocation(this.fieldMixProgram, "uCenter"),
+      update.centerX,
+      update.centerY,
+    );
+    gl.uniform1f(
+      gl.getUniformLocation(this.fieldMixProgram, "uAngle"),
+      update.angle,
+    );
+    gl.uniform1f(
+      gl.getUniformLocation(this.fieldMixProgram, "uSampleSize"),
+      Math.max(1, update.sampleSize),
+    );
+    gl.uniform4f(
+      gl.getUniformLocation(this.fieldMixProgram, "uBaseColor"),
+      clampUnit(update.baseColor.r / 255),
+      clampUnit(update.baseColor.g / 255),
+      clampUnit(update.baseColor.b / 255),
+      clampUnit(update.baseColor.a / 255),
+    );
+    gl.uniform1f(
+      gl.getUniformLocation(this.fieldMixProgram, "uPickup"),
+      distanceCoefficient(update.pickupRatePerPx, distance),
+    );
+    gl.uniform1f(
+      gl.getUniformLocation(this.fieldMixProgram, "uRestore"),
+      distanceCoefficient(update.restoreRatePerPx, distance),
+    );
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Sampling is submitted before the pending dab batch. Flush that batch
+    // with the old field, then the old texture is safe as a diffusion target.
+    this.flush();
+
+    let passAmount = sanitizeRate(update.diffusionRatePerPx) * distance;
+    while (passAmount > 1e-6) {
+      const strength = Math.min(1, passAmount);
+      const targetIndex = oppositeFieldIndex(nextIndex);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fieldFramebuffers[targetIndex]);
+      gl.viewport(0, 0, update.columns, update.rows);
+      gl.disable(gl.BLEND);
+      gl.useProgram(this.fieldDiffusionProgram);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[nextIndex]);
+      gl.uniform1i(
+        gl.getUniformLocation(this.fieldDiffusionProgram, "uPreviousField"),
+        1,
+      );
+      gl.uniform2i(
+        gl.getUniformLocation(this.fieldDiffusionProgram, "uFieldDimensions"),
+        update.columns,
+        update.rows,
+      );
+      gl.uniform1f(
+        gl.getUniformLocation(this.fieldDiffusionProgram, "uStrength"),
+        strength,
+      );
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      nextIndex = targetIndex;
+      passAmount -= strength;
+    }
+    this.activeFieldIndex = nextIndex;
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("gpuFieldUpdate", startedAt);
+    }
+  }
+
+  readMaterialFieldForTest(): Uint8ClampedArray {
+    this.assertStrokeBegun();
+    const gl = this.gl;
+    const length = this.fieldColumns * this.fieldRows * 4;
+    const output = new Uint8ClampedArray(length);
+    gl.bindFramebuffer(
+      gl.FRAMEBUFFER,
+      this.fieldFramebuffers[this.activeFieldIndex],
+    );
+    if (this.useFloatField) {
+      const floats = new Float32Array(length);
+      gl.readPixels(
+        0,
+        0,
+        this.fieldColumns,
+        this.fieldRows,
+        gl.RGBA,
+        gl.FLOAT,
+        floats,
+      );
+      for (let index = 0; index < length; index++) {
+        output[index] = Math.round(clampUnit(floats[index] ?? 0) * 255);
+      }
+    } else {
+      gl.readPixels(
+        0,
+        0,
+        this.fieldColumns,
+        this.fieldRows,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        output,
+      );
+    }
+    return output;
   }
 
   pushDab(dab: GpuDab): void {
@@ -449,7 +794,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tipTexture);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.fieldTexture);
+    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[this.activeFieldIndex]);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
     gl.bufferSubData(
       gl.ARRAY_BUFFER,
@@ -1001,6 +1346,48 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
+  private ensureMaterialFieldSize(columns: number, rows: number): void {
+    if (columns <= 0 || rows <= 0) {
+      throw new Error("GPU material field dimensions must be positive");
+    }
+    if (this.fieldColumns === columns && this.fieldRows === rows) return;
+    const gl = this.gl;
+    const internalFormat = this.useFloatField ? gl.RGBA16F : gl.RGBA8;
+    const type = this.useFloatField ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+    for (let index = 0; index < this.fieldTextures.length; index++) {
+      const texture = this.fieldTextures[index];
+      const framebuffer = this.fieldFramebuffers[index];
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        internalFormat,
+        columns,
+        rows,
+        0,
+        gl.RGBA,
+        type,
+        null,
+      );
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        texture,
+        0,
+      );
+      if (
+        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
+      ) {
+        throw new Error("GPU material field framebuffer is incomplete");
+      }
+    }
+    this.fieldColumns = columns;
+    this.fieldRows = rows;
+    this.activeFieldIndex = 0;
+  }
+
   private includeDirtyRect(
     left: number,
     top: number,
@@ -1118,17 +1505,14 @@ declare global {
 
 globalThis.__hpGpuStrokeRuntime = gpuStrokeRuntime;
 
-function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
-  const vertexShader = compileShader(
-    gl,
-    gl.VERTEX_SHADER,
-    VERTEX_SHADER_SOURCE,
-  );
-  const fragmentShader = compileShader(
-    gl,
-    gl.FRAGMENT_SHADER,
-    FRAGMENT_SHADER_SOURCE,
-  );
+function createProgram(
+  gl: WebGL2RenderingContext,
+  vertexSource: string,
+  fragmentSource: string,
+  label: string,
+): WebGLProgram {
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = requireResource(gl.createProgram(), "WebGL program");
   gl.attachShader(program, vertexShader);
   gl.attachShader(program, fragmentShader);
@@ -1138,7 +1522,7 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     const info = gl.getProgramInfoLog(program) ?? "unknown link error";
     gl.deleteProgram(program);
-    throw new Error(`Failed to link GPU stroke program: ${info}`);
+    throw new Error(`Failed to link ${label} program: ${info}`);
   }
   return program;
 }
@@ -1162,6 +1546,26 @@ function compileShader(
 function requireResource<T>(value: T | null, label: string): T {
   if (!value) throw new Error(`Failed to create ${label}`);
   return value;
+}
+
+function oppositeFieldIndex(index: 0 | 1): 0 | 1 {
+  return index === 0 ? 1 : 0;
+}
+
+function sanitizeNonNegative(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function sanitizeRate(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function distanceCoefficient(ratePerPx: number, distancePx: number): number {
+  return 1 - Math.exp(-sanitizeRate(ratePerPx) * distancePx);
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
 
 function unpremultiply(value: number, alpha: number): number {

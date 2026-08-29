@@ -146,7 +146,16 @@ export function prepareMixingState(
     renderCanvas,
     lastCheckpointDistance: 0,
   };
-  uploadMaterialCanvas(next, tipCanvas);
+  const gpuSurface = getActiveGpuStrokeSurface();
+  if (gpuSurface && brushPerfDebug.experiments.gpuReadback === "gpu-field") {
+    gpuSurface.initializeMaterialField(
+      mixing.fieldColumns,
+      mixing.fieldRows,
+      baseColor,
+    );
+  } else {
+    uploadMaterialCanvas(next, tipCanvas);
+  }
   return next;
 }
 
@@ -162,38 +171,55 @@ export function updateMixingAfterDeposit(
     input.mixing,
     input.state,
   );
+  const gpuSurface = getActiveGpuStrokeSurface();
+  const gpuFieldActive =
+    gpuSurface !== null &&
+    brushPerfDebug.experiments.gpuReadback === "gpu-field";
   const lastUpdate = state.lastUpdateDistance;
   if (
     lastUpdate === undefined ||
     input.stampDistance - lastUpdate >=
       input.mixing.updateDistancePx * brushPerfDebug.experiments.updateScale
   ) {
-    state = prepareInitialMixingCheckpoint(input, state);
     const distancePx =
       lastUpdate === undefined
         ? input.mixing.updateDistancePx
         : input.stampDistance - lastUpdate;
-    const field = advanceMixingFieldFromCheckpoint(input, state, distancePx);
-    state = {
-      ...state,
-      field,
-      lastUpdateDistance: input.stampDistance,
-    };
-    uploadMaterialCanvas(state, input.tipCanvas);
+    if (gpuFieldActive) {
+      gpuSurface.updateMaterialField({
+        baseColor: input.baseColor,
+        centerX: input.x,
+        centerY: input.y,
+        angle: Math.atan2(input.directionY, input.directionX),
+        sampleSize: Math.max(1, input.stampSize),
+        columns: input.mixing.fieldColumns,
+        rows: input.mixing.fieldRows,
+        pickupRatePerPx: input.mixing.pickupRatePerPx,
+        restoreRatePerPx: input.mixing.restoreRatePerPx,
+        diffusionRatePerPx: input.mixing.diffusionRatePerPx,
+        distancePx,
+      });
+      state = { ...state, lastUpdateDistance: input.stampDistance };
+    } else {
+      state = prepareInitialMixingCheckpoint(input, state);
+      const field = advanceMixingFieldFromCheckpoint(input, state, distancePx);
+      state = {
+        ...state,
+        field,
+        lastUpdateDistance: input.stampDistance,
+      };
+      uploadMaterialCanvas(state, input.tipCanvas);
+    }
   }
 
-  const gpuSurface = getActiveGpuStrokeSurface();
+  if (gpuFieldActive) return state;
   const lastCheckpoint = state.lastCheckpointDistance ?? 0;
   if (
     input.stampDistance - lastCheckpoint >=
     input.mixing.checkpointDistancePx *
       brushPerfDebug.experiments.checkpointScale
   ) {
-    if (gpuSurface && brushPerfDebug.experiments.gpuReadback === "async") {
-      state = snapshotAsyncGpuCheckpoint(input, state, gpuSurface);
-    } else {
-      state = captureCheckpoint(input, state);
-    }
+    state = captureCheckpoint(input, state);
   }
   return state;
 }
@@ -203,6 +229,12 @@ export function prepareInitialMixingCheckpoint(
   input: MixingUpdateInput,
   state: BrushMixingState,
 ): BrushMixingState {
+  if (
+    getActiveGpuStrokeSurface() &&
+    brushPerfDebug.experiments.gpuReadback === "gpu-field"
+  ) {
+    return state;
+  }
   if (state.checkpointPixels) return state;
   return captureCheckpoint(input, state, input.sourceLayer.canvas, false);
 }
@@ -380,7 +412,7 @@ export function advanceMixingFieldFromCheckpoint(
   );
 }
 
-function sampleRotatedCheckpoint(
+export function sampleRotatedCheckpoint(
   source: ImageData,
   sourceOriginX: number,
   sourceOriginY: number,
