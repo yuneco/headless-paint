@@ -182,6 +182,43 @@ describe("GpuStrokeSurface", () => {
     expectChannelNear(pixel[3], 255);
   });
 
+  it("branch ごとの field を独立保持し branch 順に重ねる", () => {
+    const layer = createLayer(64, 48);
+    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas, 2);
+
+    surface.selectBranch(0);
+    configureSolidDab(surface, [255, 0, 0, 255], 16);
+    surface.pushDab({
+      x: 32,
+      y: 24,
+      size: 16,
+      rotation: 0,
+      alpha: 0.75,
+      branchIndex: 0,
+    });
+    surface.selectBranch(1);
+    configureSolidDab(surface, [0, 0, 255, 255], 16);
+    surface.pushDab({
+      x: 32,
+      y: 24,
+      size: 16,
+      rotation: 0,
+      alpha: 0.75,
+      branchIndex: 1,
+    });
+    surface.commitToLayer(layer);
+
+    const branch0 = surface.readMaterialFieldForTest(0);
+    const branch1 = surface.readMaterialFieldForTest(1);
+    expect(Array.from(branch0.slice(0, 4))).toEqual([255, 0, 0, 255]);
+    expect(Array.from(branch1.slice(0, 4))).toEqual([0, 0, 255, 255]);
+    expectPixelNear(layer, 32, 24, [51, 0, 204, 239]);
+  });
+
   it("field update pass が CPU sampling/mix/restore/diffusion と一致する", () => {
     const source = new OffscreenCanvas(96, 64);
     const sourceCtx = source.getContext("2d");

@@ -267,6 +267,7 @@ function stampAt(
       size: stampSize,
       rotation,
       alpha: opacity,
+      branchIndex: gpuSurface.branchIndex,
     });
   } else if (rotation !== 0) {
     ctx.translate(x, y);

@@ -62,6 +62,16 @@ const EXPAND: ExpandConfig = {
     },
   ],
 };
+const RADIAL_EXPAND_4: ExpandConfig = {
+  levels: [
+    {
+      mode: "radial",
+      offset: { x: WIDTH / 2, y: HEIGHT / 2 },
+      angle: 0,
+      divisions: 4,
+    },
+  ],
+};
 const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };
 const RED: Color = { r: 225, g: 30, b: 30, a: 255 };
 const GREEN: Color = { r: 30, g: 185, b: 90, a: 255 };
@@ -88,6 +98,14 @@ const INPUT_POINTS: readonly InputPoint[] = [
   { x: 116, y: 69, pressure: 0.92, timestamp: 10_144 },
   { x: 116, y: 69, pressure: 0.92, timestamp: 10_224 },
   { x: 146, y: 86, pressure: 0.56, timestamp: 10_240 },
+];
+const CENTER_CROSSING_INPUT_POINTS: readonly InputPoint[] = [
+  { x: 28, y: 70, pressure: 0.75, timestamp: 20_000 },
+  { x: 54, y: 70, pressure: 0.75, timestamp: 20_016 },
+  { x: 78, y: 70, pressure: 0.75, timestamp: 20_032 },
+  { x: 102, y: 70, pressure: 0.75, timestamp: 20_048 },
+  { x: 128, y: 70, pressure: 0.75, timestamp: 20_064 },
+  { x: 152, y: 70, pressure: 0.75, timestamp: 20_080 },
 ];
 
 interface ParityCase {
@@ -333,6 +351,70 @@ describe.each([
   },
 );
 
+describe("GPU mixing Expand parity", () => {
+  it("radial 4 の中心重なり fixture が CPU と Tier B alpha parity を満たす", () => {
+    const cpuLayer = renderGpuExpandBatches("off", [
+      CENTER_CROSSING_INPUT_POINTS,
+    ]);
+    const perf = getBrushPerfTestBridge();
+    if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+    perf.reset();
+    const gpuLayer = renderGpuExpandBatches("webgl2", [
+      CENTER_CROSSING_INPUT_POINTS,
+    ]);
+
+    expectAlphaTierB(cpuLayer, gpuLayer);
+    expect(perf.snapshot().samples.gpuBranches).toEqual([4]);
+  });
+
+  it("radial 4 の live 分割 batch と replay 相当単一 batch が byte-identical", () => {
+    const splitLayer = renderGpuExpandBatches("webgl2", [
+      CENTER_CROSSING_INPUT_POINTS.slice(0, 2),
+      CENTER_CROSSING_INPUT_POINTS.slice(2, 4),
+      CENTER_CROSSING_INPUT_POINTS.slice(4),
+    ]);
+    const replayLayer = renderGpuExpandBatches("webgl2", [
+      CENTER_CROSSING_INPUT_POINTS,
+    ]);
+
+    expectPixelEqual(
+      splitLayer,
+      replayLayer,
+      "GPU radial 4 split feedMany vs replay feedMany",
+    );
+  });
+
+  it("radial 4 の live stroke と command replay が byte-identical", () => {
+    const perf = getBrushPerfTestBridge();
+    if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+    perf.enabled = true;
+    perf.experiments.gpuDab = "webgl2";
+    perf.experiments.gpuReadback = "gpu-field";
+
+    const baseLayer = createTestLayer();
+    paintExpandFixture(baseLayer);
+    const liveLayer = createTestLayer();
+    copyLayerPixels(baseLayer, liveLayer);
+    const { command } = simulateLiveStroke({
+      layer: liveLayer,
+      inputPoints: CENTER_CROSSING_INPUT_POINTS,
+      style: STAMP_MIXING_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: RADIAL_EXPAND_4,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+    });
+    const replayLayer = createTestLayer();
+    replayOnLayer(command, replayLayer, baseLayer);
+
+    expectPixelEqual(
+      liveLayer,
+      replayLayer,
+      "GPU radial 4 live stroke vs command replay",
+    );
+  });
+});
+
 function renderGpuMixingBatches(
   gpuReadback: "gpu-field" | "sync",
   checkpointLagSteps: number,
@@ -359,6 +441,57 @@ function renderGpuMixingBatches(
   return layer;
 }
 
+function renderGpuExpandBatches(
+  gpuDab: "off" | "webgl2",
+  batches: readonly (readonly InputPoint[])[],
+): Layer {
+  const perf = getBrushPerfTestBridge();
+  if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+  perf.enabled = true;
+  perf.experiments.gpuDab = gpuDab;
+  perf.experiments.gpuReadback = "gpu-field";
+
+  const layer = createTestLayer();
+  paintExpandFixture(layer);
+  const renderer = createIncrementalStrokeRenderer({
+    layer,
+    style: STAMP_MIXING_STYLE,
+    filterPipeline: FILTER_PIPELINE,
+    expand: RADIAL_EXPAND_4,
+    brushSeed: BRUSH_SEED,
+    alphaLocked: false,
+  });
+  for (const batch of batches) renderer.feedMany(batch);
+  renderer.finalize();
+  return layer;
+}
+
+function paintExpandFixture(layer: Layer): void {
+  layer.ctx.fillStyle = "rgb(225, 45, 35)";
+  layer.ctx.fillRect(28, 48, 62, 44);
+  layer.ctx.fillStyle = "rgb(30, 80, 225)";
+  layer.ctx.fillRect(90, 48, 62, 44);
+  layer.ctx.fillStyle = "rgba(35, 210, 90, 0.65)";
+  layer.ctx.beginPath();
+  layer.ctx.arc(WIDTH / 2, HEIGHT / 2, 24, 0, Math.PI * 2);
+  layer.ctx.fill();
+}
+
+function expectAlphaTierB(cpuLayer: Layer, gpuLayer: Layer): void {
+  const cpu = cpuLayer.ctx.getImageData(0, 0, WIDTH, HEIGHT).data;
+  const gpu = gpuLayer.ctx.getImageData(0, 0, WIDTH, HEIGHT).data;
+  let absoluteDelta = 0;
+  let largeDeltaPixels = 0;
+  const pixelCount = WIDTH * HEIGHT;
+  for (let offset = 3; offset < cpu.length; offset += 4) {
+    const delta = Math.abs((cpu[offset] ?? 0) - (gpu[offset] ?? 0)) / 255;
+    absoluteDelta += delta;
+    if (delta > 0.1) largeDeltaPixels++;
+  }
+  expect(absoluteDelta / pixelCount).toBeLessThanOrEqual(0.015);
+  expect(largeDeltaPixels / pixelCount).toBeLessThanOrEqual(0.01);
+}
+
 function getBrushPerfTestBridge():
   | {
       enabled: boolean;
@@ -374,6 +507,9 @@ function getBrushPerfTestBridge():
           readonly gpuFlush: { readonly count: number };
           readonly gpuFieldUpdate: { readonly count: number };
           readonly checkpointReadback: { readonly count: number };
+        };
+        readonly samples: {
+          readonly gpuBranches: readonly number[];
         };
       };
     }
@@ -394,6 +530,9 @@ function getBrushPerfTestBridge():
             readonly gpuFlush: { readonly count: number };
             readonly gpuFieldUpdate: { readonly count: number };
             readonly checkpointReadback: { readonly count: number };
+          };
+          readonly samples: {
+            readonly gpuBranches: readonly number[];
           };
         };
       };

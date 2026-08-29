@@ -32,6 +32,16 @@ const EXPAND: ExpandConfig = {
     },
   ],
 };
+const RADIAL_EXPAND_4: ExpandConfig = {
+  levels: [
+    {
+      mode: "radial",
+      offset: { x: WIDTH / 2, y: HEIGHT / 2 },
+      angle: 0,
+      divisions: 4,
+    },
+  ],
+};
 const GPU_STYLE: StrokeStyle = {
   color: { r: 245, g: 245, b: 245, a: 255 },
   lineWidth: 20,
@@ -109,6 +119,20 @@ describe("GPU layer residency", () => {
     );
   });
 
+  it("radial 4 Expand と併用して連続する2本目が residency hit する", () => {
+    const resident = renderSequence(true, false, RADIAL_EXPAND_4);
+    const uploadEveryStroke = renderSequence(false, false, RADIAL_EXPAND_4);
+
+    expect(resident.residencyHits).toEqual([0, 1]);
+    expect(resident.gpuBranches).toEqual([4, 4]);
+    expect(resident.gpuUploadCount).toBe(1);
+    expectPixelEqual(
+      resident.layer,
+      uploadEveryStroke.layer,
+      "radial 4 resident vs upload-every-stroke",
+    );
+  });
+
   it("間のCPU strokeで無効化し、次のGPU strokeを再uploadしてpixel一致する", () => {
     const resident = renderSequence(true, true);
     const uploadEveryStroke = renderSequence(false, true);
@@ -171,23 +195,26 @@ interface SequenceResult {
   readonly residencyHits: readonly number[];
   readonly gpuUploadCount: number;
   readonly samplingCopyPixels: readonly number[];
+  readonly gpuBranches: readonly number[];
 }
 
 function renderSequence(
   gpuResident: boolean,
   includeCpuStroke: boolean,
+  expand: ExpandConfig = EXPAND,
 ): SequenceResult {
   const perf = configurePerf(gpuResident);
   const layer = createTestLayer();
-  drawStroke(layer, GPU_STYLE, FIRST_GPU_POINTS, 101);
+  drawStroke(layer, GPU_STYLE, FIRST_GPU_POINTS, 101, expand);
   if (includeCpuStroke) drawStroke(layer, CPU_STYLE, CPU_POINTS, 77);
-  drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 202);
+  drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 202, expand);
   const snapshot = perf.snapshot();
   return {
     layer,
     residencyHits: snapshot.samples.gpuResidencyHit,
     gpuUploadCount: snapshot.stages.gpuUpload.count,
     samplingCopyPixels: snapshot.samples.samplingCopyPixels,
+    gpuBranches: snapshot.samples.gpuBranches,
   };
 }
 
@@ -196,12 +223,13 @@ function drawStroke(
   style: StrokeStyle,
   points: readonly InputPoint[],
   brushSeed: number,
+  expand: ExpandConfig = EXPAND,
 ): void {
   const renderer = createIncrementalStrokeRenderer({
     layer,
     style,
     filterPipeline: FILTER_PIPELINE,
-    expand: EXPAND,
+    expand,
     brushSeed,
     alphaLocked: false,
   });
@@ -241,6 +269,7 @@ interface BrushPerfTestBridge {
     readonly samples: {
       readonly gpuResidencyHit: readonly number[];
       readonly samplingCopyPixels: readonly number[];
+      readonly gpuBranches: readonly number[];
     };
   };
 }

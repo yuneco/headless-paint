@@ -7,9 +7,10 @@ import {
 } from "./gpu-layer-residency";
 
 const INSTANCE_CAPACITY = 4096;
-const INSTANCE_FLOATS = 5;
+const INSTANCE_FLOATS = 6;
 const CHECKPOINT_WAIT_TIMEOUT_NS = 1_000_000_000;
 const COMMIT_CANVAS_SIZE = 512;
+const MAX_GPU_STROKE_BRANCHES = 12;
 
 interface DirtyRect {
   left: number;
@@ -59,6 +60,7 @@ export interface GpuDab {
   readonly size: number;
   readonly rotation: number;
   readonly alpha: number;
+  readonly branchIndex?: number;
 }
 
 export interface GpuMaterialFieldUpdate {
@@ -84,7 +86,9 @@ export interface GpuStrokeSurface {
   readonly width: number;
   readonly height: number;
   readonly lost: boolean;
-  beginStroke(sourceCanvas?: OffscreenCanvas): void;
+  readonly branchIndex: number;
+  beginStroke(sourceCanvas?: OffscreenCanvas, branchCount?: number): void;
+  selectBranch(branchIndex: number): void;
   setTip(tipCanvas: OffscreenCanvas): void;
   initializeMaterialField(
     columns: number,
@@ -93,7 +97,7 @@ export interface GpuStrokeSurface {
   ): void;
   updateMaterialField(update: GpuMaterialFieldUpdate): void;
   updateField(pixels: Uint8ClampedArray, columns: number, rows: number): void;
-  readMaterialFieldForTest(): Uint8ClampedArray;
+  readMaterialFieldForTest(branchIndex?: number): Uint8ClampedArray;
   pushDab(dab: GpuDab): void;
   flush(): void;
   readCheckpoint(
@@ -117,10 +121,12 @@ export interface GpuStrokeSurface {
 }
 
 interface GpuStrokeRuntime {
+  supportsBranchCount(branchCount: number): boolean;
   beginStroke(
     owner: object,
     layer: Layer,
     sourceCanvas?: OffscreenCanvas,
+    branchCount?: number,
   ): boolean;
   enter(owner: object): void;
   leave(owner: object): void;
@@ -139,11 +145,13 @@ layout(location = 1) in vec2 aCenter;
 layout(location = 2) in float aSize;
 layout(location = 3) in float aRotation;
 layout(location = 4) in float aAlpha;
+layout(location = 5) in float aBranchIndex;
 
 uniform vec2 uSurfaceSize;
 
 out vec2 vUv;
 out float vAlpha;
+flat out int vBranchIndex;
 
 void main() {
   vec2 local = (aUnitPosition - vec2(0.5)) * aSize;
@@ -161,22 +169,25 @@ void main() {
   gl_Position = vec4(clip, 0.0, 1.0);
   vUv = aUnitPosition;
   vAlpha = aAlpha;
+  vBranchIndex = int(aBranchIndex + 0.5);
 }
 `;
 
 const FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
+precision highp sampler2DArray;
 
 uniform sampler2D uTip;
-uniform sampler2D uField;
+uniform sampler2DArray uField;
 
 in vec2 vUv;
 in float vAlpha;
+flat in int vBranchIndex;
 out vec4 outColor;
 
 void main() {
   float mask = texture(uTip, vUv).a;
-  vec4 material = texture(uField, vUv);
+  vec4 material = texture(uField, vec3(vUv, float(vBranchIndex)));
   float alpha = material.a * mask * vAlpha;
   outColor = vec4(material.rgb * alpha, alpha);
 }
@@ -196,9 +207,11 @@ void main() {
 
 const FIELD_MIX_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
+precision highp sampler2DArray;
 
 uniform sampler2D uAccum;
-uniform sampler2D uPreviousField;
+uniform sampler2DArray uPreviousField;
+uniform int uBranchIndex;
 uniform vec2 uSurfaceSize;
 uniform vec2 uFieldSize;
 uniform vec2 uCenter;
@@ -254,7 +267,11 @@ void main() {
     local.x * sine + local.y * cosine
   );
   vec4 sampled = sampleAccumBilinear(documentPosition);
-  vec4 current = texelFetch(uPreviousField, fieldCoord, 0);
+  vec4 current = texelFetch(
+    uPreviousField,
+    ivec3(fieldCoord, uBranchIndex),
+    0
+  );
   float pickupAmount = uPickup * sampled.a;
   vec3 picked = mix(current.rgb, sampled.rgb, pickupAmount);
   outColor = vec4(
@@ -266,32 +283,35 @@ void main() {
 
 const FIELD_DIFFUSION_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
+precision highp sampler2DArray;
 
-uniform sampler2D uPreviousField;
+uniform sampler2DArray uPreviousField;
 uniform ivec2 uFieldDimensions;
+uniform int uBranchIndex;
 uniform float uStrength;
 
 out vec4 outColor;
 
 void main() {
   ivec2 coord = ivec2(gl_FragCoord.xy);
-  vec4 current = texelFetch(uPreviousField, coord, 0);
+  ivec3 fieldCoord = ivec3(coord, uBranchIndex);
+  vec4 current = texelFetch(uPreviousField, fieldCoord, 0);
   vec4 sum = current;
   float count = 1.0;
   if (coord.x > 0) {
-    sum += texelFetch(uPreviousField, coord + ivec2(-1, 0), 0);
+    sum += texelFetch(uPreviousField, fieldCoord + ivec3(-1, 0, 0), 0);
     count += 1.0;
   }
   if (coord.x + 1 < uFieldDimensions.x) {
-    sum += texelFetch(uPreviousField, coord + ivec2(1, 0), 0);
+    sum += texelFetch(uPreviousField, fieldCoord + ivec3(1, 0, 0), 0);
     count += 1.0;
   }
   if (coord.y > 0) {
-    sum += texelFetch(uPreviousField, coord + ivec2(0, -1), 0);
+    sum += texelFetch(uPreviousField, fieldCoord + ivec3(0, -1, 0), 0);
     count += 1.0;
   }
   if (coord.y + 1 < uFieldDimensions.y) {
-    sum += texelFetch(uPreviousField, coord + ivec2(0, 1), 0);
+    sum += texelFetch(uPreviousField, fieldCoord + ivec3(0, 1, 0), 0);
     count += 1.0;
   }
   outColor = mix(current, sum / count, uStrength);
@@ -331,7 +351,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private tipHeight = 0;
   private fieldColumns = 0;
   private fieldRows = 0;
-  private activeFieldIndex: 0 | 1 = 0;
+  private fieldBranchCount = 0;
+  private activeFieldIndices: (0 | 1)[] = [0];
+  private branchCount = 1;
+  private currentBranchIndex = 0;
   private readonly useFloatField: boolean;
   private strokeBegun = false;
   private contextLost = false;
@@ -424,7 +447,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.configureTexture(this.sourceTexture, gl.NEAREST);
     this.configureTexture(this.tipTexture, gl.LINEAR);
     for (const texture of this.fieldTextures) {
-      this.configureTexture(texture, gl.LINEAR);
+      this.configureArrayTexture(texture, gl.LINEAR);
     }
     this.useFloatField = Boolean(
       gl.getExtension("EXT_color_buffer_float") ??
@@ -440,8 +463,23 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     return this.contextLost || this.gl.isContextLost();
   }
 
-  beginStroke(sourceCanvas?: OffscreenCanvas): void {
+  get branchIndex(): number {
+    return this.currentBranchIndex;
+  }
+
+  beginStroke(sourceCanvas?: OffscreenCanvas, branchCount = 1): void {
     this.assertUsable();
+    if (
+      !Number.isSafeInteger(branchCount) ||
+      branchCount < 1 ||
+      branchCount > MAX_GPU_STROKE_BRANCHES
+    ) {
+      throw new Error(
+        `GPU stroke branch count must be between 1 and ${MAX_GPU_STROKE_BRANCHES}`,
+      );
+    }
+    this.branchCount = branchCount;
+    this.currentBranchIndex = 0;
     const gl = this.gl;
     if (sourceCanvas) {
       if (
@@ -539,6 +577,20 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.strokeBegun = true;
   }
 
+  selectBranch(branchIndex: number): void {
+    this.assertStrokeBegun();
+    if (
+      !Number.isSafeInteger(branchIndex) ||
+      branchIndex < 0 ||
+      branchIndex >= this.branchCount
+    ) {
+      throw new Error("GPU stroke branch index is out of range");
+    }
+    if (branchIndex === this.currentBranchIndex) return;
+    this.flush();
+    this.currentBranchIndex = branchIndex;
+  }
+
   setTip(tipCanvas: OffscreenCanvas): void {
     this.assertStrokeBegun();
     if (this.tipSource === tipCanvas) return;
@@ -584,34 +636,38 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
     const gl = this.gl;
     this.ensureMaterialFieldSize(columns, rows);
-    this.activeFieldIndex = 0;
+    this.activeFieldIndices[this.currentBranchIndex] = 0;
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[0]);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.fieldTextures[0]);
     if (this.useFloatField) {
       const normalized = new Float32Array(pixels.length);
       for (let index = 0; index < pixels.length; index++) {
         normalized[index] = (pixels[index] ?? 0) / 255;
       }
-      gl.texSubImage2D(
-        gl.TEXTURE_2D,
+      gl.texSubImage3D(
+        gl.TEXTURE_2D_ARRAY,
         0,
         0,
         0,
+        this.currentBranchIndex,
         columns,
         rows,
+        1,
         gl.RGBA,
         gl.FLOAT,
         normalized,
       );
     } else {
-      gl.texSubImage2D(
-        gl.TEXTURE_2D,
+      gl.texSubImage3D(
+        gl.TEXTURE_2D_ARRAY,
         0,
         0,
         0,
+        this.currentBranchIndex,
         columns,
         rows,
+        1,
         gl.RGBA,
         gl.UNSIGNED_BYTE,
         pixels,
@@ -635,12 +691,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       clampUnit(baseColor.b / 255),
       clampUnit(baseColor.a / 255),
     );
-    for (const framebuffer of this.fieldFramebuffers) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    for (let index = 0; index < this.fieldFramebuffers.length; index++) {
+      this.bindFieldFramebuffer(index as 0 | 1, this.currentBranchIndex);
       gl.viewport(0, 0, columns, rows);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
-    this.activeFieldIndex = 0;
+    this.activeFieldIndices[this.currentBranchIndex] = 0;
   }
 
   updateMaterialField(update: GpuMaterialFieldUpdate): void {
@@ -649,11 +705,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (brushPerfDebug.nullStages.nullFieldAdvance) return;
     const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const gl = this.gl;
-    const previousIndex = this.activeFieldIndex;
+    const branchIndex = this.currentBranchIndex;
+    const previousIndex = this.getActiveFieldIndex(branchIndex);
     let nextIndex = oppositeFieldIndex(previousIndex);
     const distance = sanitizeNonNegative(update.distancePx);
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fieldFramebuffers[nextIndex]);
+    this.bindFieldFramebuffer(nextIndex, branchIndex);
     gl.viewport(0, 0, update.columns, update.rows);
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
@@ -662,11 +719,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[previousIndex]);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.fieldTextures[previousIndex]);
     gl.uniform1i(gl.getUniformLocation(this.fieldMixProgram, "uAccum"), 0);
     gl.uniform1i(
       gl.getUniformLocation(this.fieldMixProgram, "uPreviousField"),
       1,
+    );
+    gl.uniform1i(
+      gl.getUniformLocation(this.fieldMixProgram, "uBranchIndex"),
+      branchIndex,
     );
     gl.uniform2f(
       gl.getUniformLocation(this.fieldMixProgram, "uSurfaceSize"),
@@ -716,15 +777,19 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     while (passAmount > 1e-6) {
       const strength = Math.min(1, passAmount);
       const targetIndex = oppositeFieldIndex(nextIndex);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fieldFramebuffers[targetIndex]);
+      this.bindFieldFramebuffer(targetIndex, branchIndex);
       gl.viewport(0, 0, update.columns, update.rows);
       gl.disable(gl.BLEND);
       gl.useProgram(this.fieldDiffusionProgram);
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[nextIndex]);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.fieldTextures[nextIndex]);
       gl.uniform1i(
         gl.getUniformLocation(this.fieldDiffusionProgram, "uPreviousField"),
         1,
+      );
+      gl.uniform1i(
+        gl.getUniformLocation(this.fieldDiffusionProgram, "uBranchIndex"),
+        branchIndex,
       );
       gl.uniform2i(
         gl.getUniformLocation(this.fieldDiffusionProgram, "uFieldDimensions"),
@@ -739,20 +804,23 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       nextIndex = targetIndex;
       passAmount -= strength;
     }
-    this.activeFieldIndex = nextIndex;
+    this.activeFieldIndices[branchIndex] = nextIndex;
     if (brushPerfDebug.enabled) {
       brushPerfDebug.recordStage("gpuFieldUpdate", startedAt);
     }
   }
 
-  readMaterialFieldForTest(): Uint8ClampedArray {
+  readMaterialFieldForTest(
+    branchIndex = this.currentBranchIndex,
+  ): Uint8ClampedArray {
     this.assertStrokeBegun();
+    this.selectBranch(branchIndex);
     const gl = this.gl;
     const length = this.fieldColumns * this.fieldRows * 4;
     const output = new Uint8ClampedArray(length);
-    gl.bindFramebuffer(
-      gl.FRAMEBUFFER,
-      this.fieldFramebuffers[this.activeFieldIndex],
+    this.bindFieldFramebuffer(
+      this.getActiveFieldIndex(branchIndex),
+      branchIndex,
     );
     if (this.useFloatField) {
       const floats = new Float32Array(length);
@@ -784,6 +852,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   pushDab(dab: GpuDab): void {
     this.assertStrokeBegun();
+    this.selectBranch(dab.branchIndex ?? this.currentBranchIndex);
     if (this.instanceCount >= INSTANCE_CAPACITY) this.flush();
     const offset = this.instanceCount * INSTANCE_FLOATS;
     this.instances[offset] = dab.x;
@@ -791,6 +860,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.instances[offset + 2] = dab.size;
     this.instances[offset + 3] = dab.rotation;
     this.instances[offset + 4] = dab.alpha;
+    this.instances[offset + 5] = this.currentBranchIndex;
     this.instanceCount++;
 
     const halfExtent =
@@ -815,7 +885,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tipTexture);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[this.activeFieldIndex]);
+    gl.bindTexture(
+      gl.TEXTURE_2D_ARRAY,
+      this.fieldTextures[this.getActiveFieldIndex(this.currentBranchIndex)],
+    );
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
     gl.bufferSubData(
       gl.ARRAY_BUFFER,
@@ -1136,6 +1209,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.instanceCount = 0;
     this.dirtyRect = null;
     this.strokeBegun = false;
+    this.branchCount = 1;
+    this.currentBranchIndex = 0;
     this.tipSource = null;
   }
 
@@ -1355,6 +1430,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.enableVertexAttribArray(4);
     gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 4 * 4);
     gl.vertexAttribDivisor(4, 1);
+    gl.enableVertexAttribArray(5);
+    gl.vertexAttribPointer(5, 1, gl.FLOAT, false, stride, 5 * 4);
+    gl.vertexAttribDivisor(5, 1);
     gl.bindVertexArray(null);
   }
 
@@ -1367,46 +1445,69 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
+  private configureArrayTexture(texture: WebGLTexture, filter: number): void {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+
   private ensureMaterialFieldSize(columns: number, rows: number): void {
     if (columns <= 0 || rows <= 0) {
       throw new Error("GPU material field dimensions must be positive");
     }
-    if (this.fieldColumns === columns && this.fieldRows === rows) return;
+    if (
+      this.fieldColumns === columns &&
+      this.fieldRows === rows &&
+      this.fieldBranchCount === this.branchCount
+    ) {
+      return;
+    }
     const gl = this.gl;
     const internalFormat = this.useFloatField ? gl.RGBA16F : gl.RGBA8;
     const type = this.useFloatField ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
     for (let index = 0; index < this.fieldTextures.length; index++) {
       const texture = this.fieldTextures[index];
-      const framebuffer = this.fieldFramebuffers[index];
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+      gl.texImage3D(
+        gl.TEXTURE_2D_ARRAY,
         0,
         internalFormat,
         columns,
         rows,
+        this.branchCount,
         0,
         gl.RGBA,
         type,
         null,
       );
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        gl.TEXTURE_2D,
-        texture,
-        0,
-      );
-      if (
-        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
-      ) {
-        throw new Error("GPU material field framebuffer is incomplete");
-      }
+      this.bindFieldFramebuffer(index as 0 | 1, 0);
     }
     this.fieldColumns = columns;
     this.fieldRows = rows;
-    this.activeFieldIndex = 0;
+    this.fieldBranchCount = this.branchCount;
+    this.activeFieldIndices = Array<0 | 1>(this.branchCount).fill(0);
+  }
+
+  private bindFieldFramebuffer(index: 0 | 1, branchIndex: number): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fieldFramebuffers[index]);
+    gl.framebufferTextureLayer(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      this.fieldTextures[index],
+      0,
+      branchIndex,
+    );
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error("GPU material field framebuffer is incomplete");
+    }
+  }
+
+  private getActiveFieldIndex(branchIndex: number): 0 | 1 {
+    return this.activeFieldIndices[branchIndex] ?? 0;
   }
 
   private includeDirtyRect(
@@ -1478,7 +1579,14 @@ export function getGpuStrokeSurfaceCreationCountForTest(): number {
 }
 
 const gpuStrokeRuntime: GpuStrokeRuntime = {
-  beginStroke(owner, layer, sourceCanvas) {
+  supportsBranchCount(branchCount) {
+    return (
+      Number.isSafeInteger(branchCount) &&
+      branchCount >= 1 &&
+      branchCount <= MAX_GPU_STROKE_BRANCHES
+    );
+  },
+  beginStroke(owner, layer, sourceCanvas, branchCount = 1) {
     if (brushPerfDebug.experiments.gpuDab !== "webgl2") return false;
     if (activeOwner) return false;
     const surface = acquireGpuStrokeSurface(layer.width, layer.height);
@@ -1488,10 +1596,11 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
       brushPerfDebug.experiments.gpuResident && residencyAvailable;
     if (brushPerfDebug.enabled) {
       brushPerfDebug.recordSample("gpuResidencyHit", residencyHit ? 1 : 0);
+      brushPerfDebug.recordSample("gpuBranches", branchCount);
     }
     if (!residencyHit && !sourceCanvas) return false;
     try {
-      surface.beginStroke(residencyHit ? undefined : sourceCanvas);
+      surface.beginStroke(residencyHit ? undefined : sourceCanvas, branchCount);
     } catch {
       invalidateGpuLayerResidency(layer);
       return false;

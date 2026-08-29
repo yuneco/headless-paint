@@ -66,7 +66,7 @@ export function createIncrementalStrokeRenderer(
     isBrushMixingActive(config.style.brush.mixing) &&
     config.style.compositeOperation === "source-over" &&
     !config.alphaLocked &&
-    compiledExpand.outputCount === 1;
+    (gpuRuntime?.supportsBranchCount(compiledExpand.outputCount) ?? false);
   const gpuResidencyHit =
     gpuStrokeEligible && !!gpuRuntime?.isLayerResident(config.layer);
   const samplingLayer =
@@ -80,6 +80,7 @@ export function createIncrementalStrokeRenderer(
       gpuOwner,
       config.layer,
       gpuResidencyHit ? undefined : samplingLayer?.canvas,
+      compiledExpand.outputCount,
     );
 
   let filterState: FilterPipelineState = createFilterPipelineState(
@@ -245,10 +246,12 @@ export function createIncrementalStrokeRenderer(
 }
 
 interface GpuStrokeRuntimeBridge {
+  supportsBranchCount(branchCount: number): boolean;
   beginStroke(
     owner: object,
     layer: Layer,
     sourceCanvas?: OffscreenCanvas,
+    branchCount?: number,
   ): boolean;
   enter(owner: object): void;
   leave(owner: object): void;

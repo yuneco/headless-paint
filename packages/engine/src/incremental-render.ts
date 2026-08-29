@@ -8,6 +8,7 @@ import {
   renderBrushStroke,
   stateToBranch,
 } from "./brush";
+import { getActiveGpuStrokeSurface } from "./brush/gpu/gpu-stroke-surface";
 import { expandStrokePoints } from "./expand";
 import { clearLayer } from "./layer";
 import type {
@@ -45,6 +46,7 @@ export function appendToCommittedLayer(
   for (let i = 0; i < strokes.length; i++) {
     const stroke = strokes[i];
     if (stroke.length > 0) {
+      getActiveGpuStrokeSurface()?.selectBranch(i);
       const branchState = getBranchBrushState(currentState, i);
       const renderedState = renderBrushStroke(
         layer,
