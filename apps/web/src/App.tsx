@@ -96,6 +96,11 @@ function configureBrushPerfDebugFromUrl(): void {
   perf.experiments.gpuReadback =
     params.get("gpuReadback") === "sync" ? "sync" : "gpu-field";
   perf.experiments.gpuResident = params.get("gpuResident") !== "0";
+  const stallThresholdMs = Number(params.get("stallThresholdMs") ?? "60");
+  perf.experiments.stallThresholdMs =
+    Number.isFinite(stallThresholdMs) && stallThresholdMs >= 0
+      ? stallThresholdMs
+      : 60;
   for (const name of Object.keys(perf.nullStages) as Array<
     keyof typeof perf.nullStages
   >) {

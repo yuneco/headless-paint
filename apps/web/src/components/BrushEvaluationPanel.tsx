@@ -3,6 +3,11 @@ import { memo } from "react";
 import type { StrokeCallMetrics } from "../hooks/useStrokeCallMetrics";
 import { BristleGrainEvaluation } from "./BristleGrainEvaluation";
 
+type BrushPerfSnapshot = ReturnType<
+  NonNullable<(typeof globalThis)["__hpBrushPerf"]>["snapshot"]
+>;
+type BrushPerfStall = BrushPerfSnapshot["stalls"][number];
+
 interface BrushEvaluationPanelProps {
   readonly brush: BrushConfig;
   readonly metrics: StrokeCallMetrics;
@@ -28,6 +33,14 @@ function BrushEvaluationPanelComponent({
 }: BrushEvaluationPanelProps) {
   const pressureSmoothingMs =
     brush.type === "stamp" ? (brush.pressureDynamics.smoothingMs ?? 0) : null;
+  const perfDebug = globalThis.__hpBrushPerf;
+  const stalls = perfDebug?.enabled ? perfDebug.snapshot().stalls : [];
+
+  function copyStalls(): void {
+    const currentStalls = globalThis.__hpBrushPerf?.snapshot().stalls ?? [];
+    void navigator.clipboard.writeText(JSON.stringify(currentStalls, null, 2));
+  }
+
   return (
     <div style={{ display: "grid", gap: 8, fontSize: 11, lineHeight: 1.45 }}>
       {brush.type === "bristle" && (
@@ -75,6 +88,47 @@ function BrushEvaluationPanelComponent({
         </div>
       )}
 
+      {perfDebug?.enabled && (
+        <section
+          data-testid="brush-perf-stalls"
+          style={{
+            display: "grid",
+            gap: 5,
+            padding: 6,
+            border: "1px solid #d8dee4",
+            borderRadius: 4,
+            background: "#fff",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 6,
+            }}
+          >
+            <strong>Stalls ({stalls.length})</strong>
+            <button type="button" onClick={copyStalls} style={{ padding: 4 }}>
+              Copy JSON
+            </button>
+          </div>
+          {stalls.length === 0 ? (
+            <div style={{ color: "#68727c" }}>No stalls recorded</div>
+          ) : (
+            stalls.map((stall, index) => (
+              <div
+                // Timestamp remains stable while the ring buffer retains it.
+                key={`${stall.timestampMs}-${index}`}
+                style={{ overflowWrap: "anywhere" }}
+              >
+                {summarizeStall(stall)}
+              </div>
+            ))
+          )}
+        </section>
+      )}
+
       <div
         style={{
           display: "grid",
@@ -91,6 +145,89 @@ function BrushEvaluationPanelComponent({
       </button>
     </div>
   );
+}
+
+const STALL_STAGE_LABELS = {
+  gpuUpload: "gpuUpload",
+  gpuFieldUpdate: "fieldUpdate",
+  gpuFlush: "gpuFlush",
+  gpuCommit: "gpuCommit",
+  checkpointReadback: "readback",
+  dabDraw: "dabDraw",
+  samplingLayerCopy: "samplingCopy",
+  processBatch: "processBatch",
+} as const;
+
+function summarizeStall(stall: BrushPerfStall): string {
+  const parts = [
+    `${formatMs(stall.totalMs)}ms`,
+    `${stall.pointCount}pt`,
+    `${stall.branchCount}br`,
+  ];
+  const residency = stall.events.find((event) => event.name === "residency");
+  if (residency?.hit !== undefined) {
+    parts.push(`resident ${residency.hit ? "hit" : "miss"}`);
+  }
+  const uploadedBytes = stall.events.reduce(
+    (total, event) =>
+      event.name === "gpuUpload" ? total + (event.bytes ?? 0) : total,
+    0,
+  );
+  if (uploadedBytes > 0) parts.push(`upload ${formatBytes(uploadedBytes)}`);
+  for (const event of stall.events) {
+    if (!event.name.startsWith("realloc:")) continue;
+    const dimensions = [event.width, event.height, event.depth]
+      .filter((value): value is number => value !== undefined)
+      .join("x");
+    parts.push(
+      `realloc ${event.name.slice("realloc:".length)}${dimensions ? ` ${dimensions}` : ""}`,
+    );
+  }
+  const commit = stall.events.reduce(
+    (total, event) =>
+      event.name === "gpuCommit"
+        ? {
+            passes: total.passes + (event.passes ?? 0),
+            pixels: total.pixels + (event.pixels ?? 0),
+          }
+        : total,
+    { passes: 0, pixels: 0 },
+  );
+  if (commit.passes > 0 || commit.pixels > 0) {
+    parts.push(
+      `commit ${commit.passes} ${commit.passes === 1 ? "pass" : "passes"} ${formatCount(commit.pixels)} px`,
+    );
+  }
+  for (const [name, label] of Object.entries(STALL_STAGE_LABELS) as Array<
+    [keyof typeof STALL_STAGE_LABELS, string]
+  >) {
+    const stage = stall.stages[name];
+    if (stage.count > 0) {
+      parts.push(`${label} ${stage.count}/${formatMs(stage.totalMs)}ms`);
+    }
+  }
+  if (stall.gapMs !== null) parts.push(`gap ${formatMs(stall.gapMs)}ms`);
+  return parts.join(" · ");
+}
+
+function formatMs(value: number): string {
+  return value >= 100 ? Math.round(value).toString() : value.toFixed(1);
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1024 * 1024) {
+    return `${Number((value / (1024 * 1024)).toFixed(1))}MB`;
+  }
+  if (value >= 1024) return `${Number((value / 1024).toFixed(1))}KB`;
+  return `${value}B`;
+}
+
+function formatCount(value: number): string {
+  if (value >= 1_000_000) {
+    return `${Number((value / 1_000_000).toFixed(1))}m`;
+  }
+  if (value >= 1_000) return `${Number((value / 1_000).toFixed(1))}k`;
+  return value.toString();
 }
 
 function Metric({

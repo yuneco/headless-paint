@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { rasterizeBristleMask } from "./engine/src/brush/bristle-mask";
 import { renderBrushStroke } from "./engine/src/brush/index";
 import { advanceMaterialField } from "./engine/src/brush/material-field";
@@ -17,13 +17,87 @@ import {
 import { createIncrementalStrokeRenderer } from "./stroke/src/incremental-stroke";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   brushPerfDebug.enabled = false;
+  brushPerfDebug.experiments.stallThresholdMs = 60;
   for (const name of Object.keys(brushPerfDebug.nullStages) as Array<
     keyof typeof brushPerfDebug.nullStages
   >) {
     brushPerfDebug.nullStages[name] = false;
   }
   brushPerfDebug.reset();
+});
+
+describe("brush perf batch stalls", () => {
+  it("閾値超過と stroke 開始時の再確保だけを記録する", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.experiments.stallThresholdMs = 60;
+    vi.spyOn(performance, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(60)
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(161)
+      .mockReturnValueOnce(200)
+      .mockReturnValueOnce(201);
+
+    brushPerfDebug.beginBatch(2, 6);
+    brushPerfDebug.endBatch();
+
+    brushPerfDebug.beginBatch(3, 6);
+    brushPerfDebug.recordElapsed("gpuFieldUpdate", 40);
+    brushPerfDebug.recordElapsed("gpuFieldUpdate", 2);
+    brushPerfDebug.endBatch();
+
+    brushPerfDebug.beginBatch(0, 6, "strokeStart");
+    brushPerfDebug.recordEvent("realloc:fieldStrip", {
+      width: 18,
+      height: 48,
+      forceRecord: true,
+    });
+    brushPerfDebug.endBatch();
+
+    const snapshot = brushPerfDebug.snapshot();
+    expect(snapshot.stalls).toHaveLength(2);
+    expect(snapshot.stalls[0]).toMatchObject({
+      kind: "moveMany",
+      totalMs: 61,
+      pointCount: 3,
+      branchCount: 6,
+      gapMs: 40,
+      stages: { gpuFieldUpdate: { count: 2, totalMs: 42 } },
+    });
+    expect(snapshot.stalls[1]).toMatchObject({
+      kind: "strokeStart",
+      totalMs: 1,
+      events: [
+        {
+          name: "realloc:fieldStrip",
+          width: 18,
+          height: 48,
+        },
+      ],
+    });
+    expect(snapshot.stalls[1]?.events[0]).not.toHaveProperty("forceRecord");
+    brushPerfDebug.reset();
+    expect(brushPerfDebug.snapshot().stalls).toEqual([]);
+  });
+
+  it("リングバッファを最新 32 batch に制限する", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.experiments.stallThresholdMs = 0;
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => ++now);
+
+    for (let index = 0; index < 33; index++) {
+      brushPerfDebug.beginBatch(index, 6);
+      brushPerfDebug.endBatch();
+    }
+
+    const stalls = brushPerfDebug.snapshot().stalls;
+    expect(stalls).toHaveLength(32);
+    expect(stalls[0]?.pointCount).toBe(1);
+    expect(stalls[31]?.pointCount).toBe(32);
+  });
 });
 
 describe("brush perf null stages", () => {

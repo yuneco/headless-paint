@@ -99,6 +99,12 @@ const DEFAULT_RANDOM_SEED = (): number => (Math.random() * 0xffffffff) | 0;
 function getPerfDebug():
   | {
       readonly enabled: boolean;
+      beginBatch(
+        pointCount: number,
+        branchCount: number,
+        kind?: "moveMany" | "strokeStart",
+      ): void;
+      endBatch(): void;
       recordStage(name: string, startedAt: number): void;
     }
   | undefined {
@@ -106,6 +112,12 @@ function getPerfDebug():
     globalThis as typeof globalThis & {
       __hpBrushPerf?: {
         readonly enabled: boolean;
+        beginBatch(
+          pointCount: number,
+          branchCount: number,
+          kind?: "moveMany" | "strokeStart",
+        ): void;
+        endBatch(): void;
         recordStage(name: string, startedAt: number): void;
       };
     }
@@ -153,19 +165,27 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     moveMany(points) {
       if (disposed || machine.phase !== "active" || !strokeSession) return;
       const perf = getPerfDebug();
+      perf?.beginBatch(
+        points.length,
+        frozenConfig?.compiledExpand.outputCount ?? 1,
+      );
       const moveStartedAt = perf?.enabled ? performance.now() : 0;
-      let lastResult: ReturnType<typeof transition> | null = null;
-      const feedStartedAt = perf?.enabled ? performance.now() : 0;
-      for (const point of points) {
-        feedPoint(point);
-        lastResult = transition({ type: "move" });
-      }
-      if (perf?.enabled) perf.recordStage("feedPoint", feedStartedAt);
-      const effectsStartedAt = perf?.enabled ? performance.now() : 0;
-      if (lastResult) executeEffects(lastResult.effects, "move");
-      if (perf?.enabled) {
-        perf.recordStage("executeEffects", effectsStartedAt);
-        perf.recordStage("moveMany", moveStartedAt);
+      try {
+        let lastResult: ReturnType<typeof transition> | null = null;
+        const feedStartedAt = perf?.enabled ? performance.now() : 0;
+        for (const point of points) {
+          feedPoint(point);
+          lastResult = transition({ type: "move" });
+        }
+        if (perf?.enabled) perf.recordStage("feedPoint", feedStartedAt);
+        const effectsStartedAt = perf?.enabled ? performance.now() : 0;
+        if (lastResult) executeEffects(lastResult.effects, "move");
+        if (perf?.enabled) {
+          perf.recordStage("executeEffects", effectsStartedAt);
+        }
+      } finally {
+        if (perf?.enabled) perf.recordStage("moveMany", moveStartedAt);
+        perf?.endBatch();
       }
     },
     confirm() {

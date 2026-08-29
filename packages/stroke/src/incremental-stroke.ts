@@ -67,21 +67,32 @@ export function createIncrementalStrokeRenderer(
     config.style.compositeOperation === "source-over" &&
     !config.alphaLocked &&
     (gpuRuntime?.supportsBranchCount(compiledExpand.outputCount) ?? false);
-  const gpuResidencyHit =
-    gpuStrokeEligible && !!gpuRuntime?.isLayerResident(config.layer);
-  const samplingLayer =
-    config.sourceLayer ??
-    (gpuResidencyHit
-      ? undefined
-      : createSamplingLayer(config.layer, config.style));
-  const gpuStrokeActive =
-    gpuStrokeEligible &&
-    !!gpuRuntime?.beginStroke(
-      gpuOwner,
-      config.layer,
-      gpuResidencyHit ? undefined : samplingLayer?.canvas,
-      compiledExpand.outputCount,
-    );
+  const perfDebug = getBrushPerfDebug();
+  if (gpuStrokeEligible) {
+    perfDebug?.beginBatch(0, compiledExpand.outputCount, "strokeStart");
+  }
+  let gpuResidencyHit = false;
+  let samplingLayer: Layer | undefined;
+  let gpuStrokeActive = false;
+  try {
+    gpuResidencyHit =
+      gpuStrokeEligible && !!gpuRuntime?.isLayerResident(config.layer);
+    samplingLayer =
+      config.sourceLayer ??
+      (gpuResidencyHit
+        ? undefined
+        : createSamplingLayer(config.layer, config.style));
+    gpuStrokeActive =
+      gpuStrokeEligible &&
+      !!gpuRuntime?.beginStroke(
+        gpuOwner,
+        config.layer,
+        gpuResidencyHit ? undefined : samplingLayer?.canvas,
+        compiledExpand.outputCount,
+      );
+  } finally {
+    if (gpuStrokeEligible) perfDebug?.endBatch();
+  }
 
   let filterState: FilterPipelineState = createFilterPipelineState(
     compiledFilterPipeline,
@@ -260,6 +271,24 @@ interface GpuStrokeRuntimeBridge {
   endStroke(owner: object): void;
   invalidateLayerResidency(layer: Layer): void;
   isLayerResident(layer: Layer): boolean;
+}
+
+interface BrushPerfDebugBridge {
+  readonly enabled: boolean;
+  beginBatch(
+    pointCount: number,
+    branchCount: number,
+    kind?: "moveMany" | "strokeStart",
+  ): void;
+  endBatch(): void;
+}
+
+function getBrushPerfDebug(): BrushPerfDebugBridge | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      __hpBrushPerf?: BrushPerfDebugBridge;
+    }
+  ).__hpBrushPerf;
 }
 
 function getGpuStrokeRuntime(): GpuStrokeRuntimeBridge | undefined {

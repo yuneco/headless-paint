@@ -425,6 +425,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private fieldColumns = 0;
   private fieldRows = 0;
   private fieldBranchCount = 0;
+  private materialFieldInitializedThisStroke = false;
   private activeFieldIndex: 0 | 1 = 0;
   private branchCount = 1;
   private currentBranchIndex = 0;
@@ -443,6 +444,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.width = width;
     this.height = height;
     this.canvas = new OffscreenCanvas(COMMIT_CANVAS_SIZE, COMMIT_CANVAS_SIZE);
+    brushPerfDebug.recordEvent("realloc:commitCanvas", {
+      width: COMMIT_CANVAS_SIZE,
+      height: COMMIT_CANVAS_SIZE,
+      forceRecord: true,
+    });
     const gl = this.canvas.getContext("webgl2", {
       alpha: true,
       antialias: false,
@@ -564,6 +570,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
     this.branchCount = branchCount;
     this.currentBranchIndex = 0;
+    this.materialFieldInitializedThisStroke = false;
     const gl = this.gl;
     if (sourceCanvas) {
       if (
@@ -576,6 +583,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
       const uploadStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+      brushPerfDebug.recordEvent("realloc:accum", {
+        width: this.width,
+        height: this.height,
+        forceRecord: true,
+      });
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
@@ -586,6 +598,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       );
       if (brushPerfDebug.enabled) {
         brushPerfDebug.recordStage("gpuUpload", uploadStartedAt);
+        brushPerfDebug.recordEvent("gpuUpload", {
+          bytes: sourceCanvas.width * sourceCanvas.height * 4,
+        });
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
       gl.framebufferTexture2D(
@@ -1465,8 +1480,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
     let tileIndex = 0;
+    let commitPasses = 0;
     while (tileIndex < commitTiles.length) {
       const packed = packCommitRound(commitTiles, tileIndex);
+      commitPasses++;
       for (const tile of packed) {
         gl.blitFramebuffer(
           tile.left,
@@ -1510,6 +1527,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (brushPerfDebug.enabled) {
       brushPerfDebug.recordSample("gpuCommitPixels", committedPixels);
       brushPerfDebug.recordSample("gpuCommitDraws", commitTiles.length);
+      brushPerfDebug.recordEvent("gpuCommit", {
+        passes: commitPasses,
+        pixels: committedPixels,
+      });
       brushPerfDebug.recordStage("gpuCommit", startedAt);
     }
   }
@@ -1520,6 +1541,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.pendingBranchSegments = null;
     this.dirtyRects = [null];
     this.strokeBegun = false;
+    this.materialFieldInitializedThisStroke = false;
     this.branchCount = 1;
     this.currentBranchIndex = 0;
     this.tipSource = null;
@@ -1628,6 +1650,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         gl.UNSIGNED_BYTE,
         null,
       );
+      brushPerfDebug.recordEvent("realloc:snapshotArray", {
+        width: tileSize,
+        height: tileSize,
+        depth: this.branchCount,
+        forceRecord: captures.some((capture) => capture?.fromStrokeStart),
+      });
       this.materialCheckpointTextureSize = tileSize;
       this.materialCheckpointLayerCount = this.branchCount;
       gl.bindFramebuffer(
@@ -1787,6 +1815,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         gl.UNSIGNED_BYTE,
         null,
       );
+      brushPerfDebug.recordEvent("realloc:snapshotArray", {
+        width: slot.textureWidth,
+        height: slot.textureHeight,
+      });
       gl.bindFramebuffer(gl.FRAMEBUFFER, slot.framebuffer);
       gl.framebufferTexture2D(
         gl.FRAMEBUFFER,
@@ -1961,6 +1993,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (columns <= 0 || rows <= 0) {
       throw new Error("GPU material field dimensions must be positive");
     }
+    const forceRecord = !this.materialFieldInitializedThisStroke;
+    this.materialFieldInitializedThisStroke = true;
     if (
       this.fieldColumns === columns &&
       this.fieldRows === rows &&
@@ -1987,6 +2021,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       );
       this.bindFieldFramebuffer(index as 0 | 1);
     }
+    brushPerfDebug.recordEvent("realloc:fieldStrip", {
+      width: columns,
+      height: rows * this.branchCount,
+      forceRecord,
+    });
     this.fieldColumns = columns;
     this.fieldRows = rows;
     this.fieldBranchCount = this.branchCount;
@@ -2110,6 +2149,7 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
     if (brushPerfDebug.enabled) {
       brushPerfDebug.recordSample("gpuResidencyHit", residencyHit ? 1 : 0);
       brushPerfDebug.recordSample("gpuBranches", branchCount);
+      brushPerfDebug.recordEvent("residency", { hit: residencyHit });
     }
     if (!residencyHit && !sourceCanvas) return false;
     try {

@@ -50,6 +50,52 @@ export const BRUSH_PERF_SAMPLE_NAMES = [
 
 export type BrushPerfSampleName = (typeof BRUSH_PERF_SAMPLE_NAMES)[number];
 
+const BRUSH_PERF_BATCH_STAGE_NAMES = [
+  "gpuUpload",
+  "gpuFieldUpdate",
+  "gpuFlush",
+  "gpuCommit",
+  "checkpointReadback",
+  "dabDraw",
+  "samplingLayerCopy",
+  "processBatch",
+] as const satisfies readonly BrushPerfStageName[];
+
+type BrushPerfBatchStageName = (typeof BRUSH_PERF_BATCH_STAGE_NAMES)[number];
+
+type BrushPerfBatchKind = "moveMany" | "strokeStart";
+
+type BrushPerfEventName =
+  | "residency"
+  | "gpuUpload"
+  | "gpuCommit"
+  | "realloc:fieldStrip"
+  | "realloc:snapshotArray"
+  | "realloc:commitCanvas"
+  | "realloc:accum";
+
+interface BrushPerfEventDetails {
+  readonly width?: number;
+  readonly height?: number;
+  readonly depth?: number;
+  readonly bytes?: number;
+  readonly hit?: boolean;
+  readonly passes?: number;
+  readonly pixels?: number;
+  readonly forceRecord?: boolean;
+}
+
+interface BrushPerfEventSnapshot {
+  readonly name: BrushPerfEventName;
+  readonly width?: number;
+  readonly height?: number;
+  readonly depth?: number;
+  readonly bytes?: number;
+  readonly hit?: boolean;
+  readonly passes?: number;
+  readonly pixels?: number;
+}
+
 export interface BrushPerfNullStages {
   nullField: boolean;
   nullContact: boolean;
@@ -69,12 +115,26 @@ export interface BrushPerfStageSnapshot {
   readonly totalMs: number;
 }
 
+interface BrushPerfStallSnapshot {
+  readonly kind: BrushPerfBatchKind;
+  readonly timestampMs: number;
+  readonly gapMs: number | null;
+  readonly totalMs: number;
+  readonly pointCount: number;
+  readonly branchCount: number;
+  readonly stages: Readonly<
+    Record<BrushPerfBatchStageName, BrushPerfStageSnapshot>
+  >;
+  readonly events: readonly BrushPerfEventSnapshot[];
+}
+
 export interface BrushPerfSnapshot {
   readonly enabled: boolean;
   readonly nullStages: Readonly<BrushPerfNullStages>;
   readonly stages: Readonly<Record<BrushPerfStageName, BrushPerfStageSnapshot>>;
   readonly samples: Readonly<Record<BrushPerfSampleName, readonly number[]>>;
   readonly stageSeries: Readonly<Record<BrushPerfStageName, readonly number[]>>;
+  readonly stalls: readonly BrushPerfStallSnapshot[];
 }
 
 export interface BrushPerfDebug {
@@ -88,14 +148,40 @@ export interface BrushPerfDebug {
     gpuDab: "off" | "webgl2";
     gpuReadback: "sync" | "gpu-field";
     gpuResident: boolean;
+    stallThresholdMs: number;
   };
   nullStages: BrushPerfNullStages;
+  beginBatch(
+    pointCount: number,
+    branchCount: number,
+    kind?: BrushPerfBatchKind,
+  ): void;
+  endBatch(): void;
   recordStage(name: BrushPerfStageName, startedAt: number): void;
   recordElapsed(name: BrushPerfStageName, elapsedMs: number): void;
   recordSample(name: BrushPerfSampleName, value: number): void;
+  recordEvent(name: BrushPerfEventName, details?: BrushPerfEventDetails): void;
   reset(): void;
   snapshot(): BrushPerfSnapshot;
 }
+
+interface ActiveBatch {
+  readonly kind: BrushPerfBatchKind;
+  readonly startedAt: number;
+  readonly timestampMs: number;
+  readonly gapMs: number | null;
+  readonly pointCount: number;
+  readonly branchCount: number;
+  readonly stages: Record<
+    BrushPerfBatchStageName,
+    { count: number; totalMs: number }
+  >;
+  readonly events: BrushPerfEventSnapshot[];
+  forceRecord: boolean;
+}
+
+const STALL_BUFFER_CAPACITY = 32;
+const DEFAULT_STALL_THRESHOLD_MS = 60;
 
 function createNullStages(): BrushPerfNullStages {
   return {
@@ -139,12 +225,49 @@ function createSamples(): Record<BrushPerfSampleName, number[]> {
   };
 }
 
+function createBatchStageCounters(): Record<
+  BrushPerfBatchStageName,
+  { count: number; totalMs: number }
+> {
+  return Object.fromEntries(
+    BRUSH_PERF_BATCH_STAGE_NAMES.map((name) => [
+      name,
+      { count: 0, totalMs: 0 },
+    ]),
+  ) as Record<BrushPerfBatchStageName, { count: number; totalMs: number }>;
+}
+
+function isBatchStageName(
+  name: BrushPerfStageName,
+): name is BrushPerfBatchStageName {
+  return (
+    BRUSH_PERF_BATCH_STAGE_NAMES as readonly BrushPerfStageName[]
+  ).includes(name);
+}
+
+function getStallThresholdMs(value: number): number {
+  return Number.isFinite(value) && value >= 0
+    ? value
+    : DEFAULT_STALL_THRESHOLD_MS;
+}
+
+function toEventSnapshot(
+  name: BrushPerfEventName,
+  details: BrushPerfEventDetails,
+): BrushPerfEventSnapshot {
+  const { forceRecord: _forceRecord, ...snapshot } = details;
+  return { name, ...snapshot };
+}
+
 function createBrushPerfDebug(): BrushPerfDebug {
   let stages = createStageCounters();
   let samples = createSamples();
   let stageSeries = Object.fromEntries(
     BRUSH_PERF_STAGE_NAMES.map((name) => [name, [] as number[]]),
   ) as Record<BrushPerfStageName, number[]>;
+  let activeBatch: ActiveBatch | null = null;
+  let stalls: BrushPerfStallSnapshot[] = [];
+  let lastBatchEndedAt: number | null = null;
   return {
     enabled: false,
     experiments: {
@@ -156,8 +279,66 @@ function createBrushPerfDebug(): BrushPerfDebug {
       gpuDab: "off",
       gpuReadback: "gpu-field",
       gpuResident: true,
+      stallThresholdMs: DEFAULT_STALL_THRESHOLD_MS,
     },
     nullStages: createNullStages(),
+    beginBatch(pointCount, branchCount, kind = "moveMany") {
+      if (!this.enabled) return;
+      if (activeBatch) {
+        throw new Error("Brush perf batch is already active");
+      }
+      const startedAt = performance.now();
+      activeBatch = {
+        kind,
+        startedAt,
+        timestampMs: startedAt,
+        gapMs:
+          lastBatchEndedAt === null
+            ? null
+            : Math.max(0, startedAt - lastBatchEndedAt),
+        pointCount,
+        branchCount,
+        stages: createBatchStageCounters(),
+        events: [],
+        forceRecord: false,
+      };
+    },
+    endBatch() {
+      if (!activeBatch) return;
+      if (!this.enabled) {
+        activeBatch = null;
+        return;
+      }
+      const endedAt = performance.now();
+      const batch = activeBatch;
+      activeBatch = null;
+      lastBatchEndedAt = endedAt;
+      const totalMs = Math.max(0, endedAt - batch.startedAt);
+      if (
+        !batch.forceRecord &&
+        totalMs <= getStallThresholdMs(this.experiments.stallThresholdMs)
+      ) {
+        return;
+      }
+      stalls.push({
+        kind: batch.kind,
+        timestampMs: batch.timestampMs,
+        gapMs: batch.gapMs,
+        totalMs,
+        pointCount: batch.pointCount,
+        branchCount: batch.branchCount,
+        stages: Object.fromEntries(
+          BRUSH_PERF_BATCH_STAGE_NAMES.map((name) => [
+            name,
+            { ...batch.stages[name] },
+          ]),
+        ) as Record<BrushPerfBatchStageName, BrushPerfStageSnapshot>,
+        events: batch.events.map((event) => ({ ...event })),
+      });
+      if (stalls.length > STALL_BUFFER_CAPACITY) {
+        stalls = stalls.slice(-STALL_BUFFER_CAPACITY);
+      }
+    },
     recordStage(name, startedAt) {
       if (!this.enabled) return;
       this.recordElapsed(name, performance.now() - startedAt);
@@ -168,10 +349,20 @@ function createBrushPerfDebug(): BrushPerfDebug {
       counter.count++;
       counter.totalMs += elapsedMs;
       stageSeries[name].push(Number(elapsedMs.toFixed(3)));
+      if (activeBatch && isBatchStageName(name)) {
+        const batchCounter = activeBatch.stages[name];
+        batchCounter.count++;
+        batchCounter.totalMs += elapsedMs;
+      }
     },
     recordSample(name, value) {
       if (!this.enabled) return;
       samples[name].push(value);
+    },
+    recordEvent(name, details = {}) {
+      if (!this.enabled || !activeBatch) return;
+      activeBatch.events.push(toEventSnapshot(name, details));
+      if (details.forceRecord) activeBatch.forceRecord = true;
     },
     reset() {
       stages = createStageCounters();
@@ -179,6 +370,9 @@ function createBrushPerfDebug(): BrushPerfDebug {
       stageSeries = Object.fromEntries(
         BRUSH_PERF_STAGE_NAMES.map((name) => [name, [] as number[]]),
       ) as Record<BrushPerfStageName, number[]>;
+      activeBatch = null;
+      stalls = [];
+      lastBatchEndedAt = null;
     },
     snapshot() {
       return {
@@ -204,6 +398,16 @@ function createBrushPerfDebug(): BrushPerfDebug {
         stageSeries: Object.fromEntries(
           BRUSH_PERF_STAGE_NAMES.map((name) => [name, [...stageSeries[name]]]),
         ) as unknown as Record<BrushPerfStageName, readonly number[]>,
+        stalls: stalls.map((stall) => ({
+          ...stall,
+          stages: Object.fromEntries(
+            BRUSH_PERF_BATCH_STAGE_NAMES.map((name) => [
+              name,
+              { ...stall.stages[name] },
+            ]),
+          ) as Record<BrushPerfBatchStageName, BrushPerfStageSnapshot>,
+          events: stall.events.map((event) => ({ ...event })),
+        })),
       };
     },
   };
