@@ -515,3 +515,11 @@ Stop時は実験rendererを削除または実験commitへ隔離し、CPU product
 - **Acrylic**: 本命はGPU（C11）。Canvas2D内で得られる大幅改善はない。パラメタ（updateDistancePx / spacing）は目視評価前提で最大−25%程度
 - **Undo replay**: rendererの総和がそのままreplay単価（Rough ≈250ms、Acrylic ≈1s per 2秒stroke）。Acrylic GPU化が最もUndoに効く
 - 次の判断（ユーザー）: (1) Acrylic GPU-resident spike（E4b、WebGL2 first。WebGPUは実機Safariで別途bridge確認）へ進むか、(2) Acrylicはパラメタ調整で妥協するか、(3) Roughは現状維持か
+
+## 17. GPU spike方針（ユーザー決定 2026-08-29）
+
+- 小改善に限界があると判明したため、**WebGL2を軸にGPU活用を模索**する。まず実験的にどの程度性能が出るかを評価し、Production経路に繋いで十分な描画検証ができる状態を目指す。制約・未対応（当座はExpand非対応、mixing ON stampのみ、context loss未対応、Node fallbackはCPU経路）は許容
+- **Expandは当座の検証のみ省略**。最終的に性能改善が最も大きく効くのはExpandルート（branch数×dab数のinstancing）なので、正式設計では必須対象
+- WebGPUの効果も評価する。測定はChromium優先、効果が出そうならWebKit系（Safari TP）でも確認。最後はiPad実測
+- 自動測定にApple公式Safari MCP（`safaridriver --mcp`、Safari Technology Preview Release 251）を導入。`.mcp.json`に`safari-mcp-stp`として登録済み。stdioクライアント `work.local/safari-mcp-client.py`（`bridge` / `eval`モード）で計測を駆動できる。要件: STPの Developer › "Enable remote automation and external agents"（`safaridriver --enable`）
+- G0 texture方式はfull-layer 1枚、pickupは1 checkpoint遅れの非同期readback、と**シンプルで性能が出る方式を優先**（数字が出なければ先に進まない）
