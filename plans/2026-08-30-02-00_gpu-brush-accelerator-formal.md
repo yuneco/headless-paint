@@ -92,3 +92,8 @@ interface BrushAccelerator {
 
 ## 6. ペンディング
 - context loss時の進行中strokeの扱いの詳細
+
+## 7. Phase 2 決定（2026-08-30）
+- **アプリ負担を最小に**: react `usePaintEngine({ gpuBackend })` が生成・注入・mixing stamp選択時の自動 `warmUp`・unmount時 `dispose` を内包。`engine.gpuBackend` / `engine.gpuBackendReason` をデバッグUI向けに公開
+- **値名は `"auto" | "webgl2" | "cpu"` で統一**（engine / react / アプリ永続化）
+- **core直接利用（paint-app / jotai）**: エンジン再実装は不要。`createBrushAccelerator` → `createStrokeRuntime({ accelerator })` / `replayCommand(..., { accelerator })` / `executeHistoryOp(..., { accelerator })` の3箇所に渡す＋任意で `warmUp`。docsの「core利用者の最小手順」に記載

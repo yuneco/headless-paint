@@ -93,4 +93,4 @@ replay 経路の非決定性を示すため、差分ピクセル数、`maxChanne
 
 - **同一 backend**（GPU 同士、CPU 同士）: live / incremental / replay / Undo / Redo は入力点列が同じなら pixel 完全一致。GPU 経路では accelerator を注入した runtime と replay の双方で同じ経路を通ること
 - **CPU vs GPU**: byte 一致は要求しない。固定 fixture で alpha MAE ≤ 0.015、RGB MAE ≤ 0.02、`|Δ| > 0.1` の pixel 率 ≤ 1%（union coverage 基準）、bbox 差 ≤ 1px を満たす
-- replay（`replayStrokeCommand` / history rebuild）にも同じ accelerator を渡す。渡さない場合は CPU 経路で再構築され、GPU で描いた live 結果とは Tier B の範囲で差が出る
+- replay（`replayCommand` / `executeHistoryOp` の options）にも同じ accelerator を渡す。渡さない場合は CPU 経路で再構築され、GPU で描いた live 結果とは Tier B の範囲で差が出る

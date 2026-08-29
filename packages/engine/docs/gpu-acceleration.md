@@ -24,8 +24,8 @@ function createBrushAccelerator(
 ): BrushAccelerator | null;
 
 interface BrushAcceleratorOptions {
-  /** 既定 "auto": WebKit 系ブラウザかつ WebGL2 が利用可能なときのみ有効 */
-  readonly backend?: "auto" | "webgl2" | "off";
+  /** 既定 "auto": WebKit 系ブラウザかつ WebGL2 が利用可能なときのみ有効。"cpu" は常に null */
+  readonly backend?: "auto" | "webgl2" | "cpu";
   /** GPU 経路を使う Expand branch 数の上限。既定 64。超過する stroke は CPU 経路 */
   readonly maxBranches?: number;
   /** accum を stroke 間で常駐させる。既定 true */
@@ -43,21 +43,35 @@ interface BrushAccelerator {
 }
 ```
 
-- `null` を返す条件: `backend: "off"`、`"auto"` で WebKit 系でない、WebGL2 context が取得できない（Node / headless を含む）。呼び出し側は `null` をそのまま描画関数へ渡してよく、その場合は従来の CPU 経路になる
-- `"auto"` の判定は User-Agent による（WebKit 系のみ）。Chromium で使いたい場合は `"webgl2"` を明示する
+- `null` を返す条件: `backend: "cpu"`、`"auto"` で WebKit 系でない、WebGL2 context が取得できない（Node / headless を含む）。呼び出し側は `null` をそのまま描画関数へ渡してよく、その場合は従来の CPU 経路になる
+- `"auto"` の判定は User-Agent による（WebKit 系のみ）。Chromium で使いたい場合は `"webgl2"` を明示する。backend の指定値は engine / react / アプリ設定で共通に `"auto" | "webgl2" | "cpu"` を使う
 - 加速器はグローバル singleton ではなく、明示的に生成して注入する runtime resource。通常はアプリで 1 つ生成し、全レイヤーで共有する
 
-### 描画関数への注入
+### 注入点
 
-engine の `renderBrushStroke` と `appendToCommittedLayer`、stroke の `createIncrementalStrokeRenderer` / `createStrokeRuntime`、react の `usePaintEngine` は optional な `accelerator` を受け取る。省略時・`null` 時は CPU 経路。
+省略時・`null` 時は CPU 経路。core（engine + stroke）を直接使うアプリは次の 3 箇所に同じ加速器を渡す。
 
 ```typescript
-// engine
-appendToCommittedLayer(layer, points, style, expand, overlapCount, state, sourceLayer, alphaLocked, accelerator?)
-// stroke
-createIncrementalStrokeRenderer({ ..., accelerator })
-createStrokeRuntime({ ..., accelerator })
+// engine（低レベル。通常は直接呼ばない）
+renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?, accelerator?)
+appendToCommittedLayer(layer, points, style, expand, overlapCount?, state?, sourceLayer?, alphaLocked?, accelerator?)
+// stroke（core 利用者が渡す 3 箇所）
+createStrokeRuntime({ ...deps, accelerator })            // live 描画
+replayCommand(command, layers, registry, { accelerator })  // command の再生
+executeHistoryOp(op, ..., { accelerator })                 // Undo / Redo の history rebuild
 ```
+
+core 利用者の最小手順:
+
+```typescript
+const accelerator = createBrushAccelerator({ backend: settings.engineBackend }); // null なら CPU
+const runtime = createStrokeRuntime({ ...deps, accelerator });
+// Undo / Redo / replay にも同じ accelerator を渡す
+// 任意: mixing stamp を選んだときに accelerator?.warmUp(activeLayer) で初回 stroke の初期化を隠す
+// 終了時: accelerator?.dispose()
+```
+
+react（`usePaintEngine`）はこれを内包する。`gpuBackend?: "auto" | "webgl2" | "cpu"`（既定 `"auto"`）を渡すだけで、加速器の生成・runtime / replay への注入・mixing stamp 選択時の `warmUp`・unmount 時の `dispose` を hook が行う。現在の backend と auto の判定理由は `engine.gpuBackend` / `engine.gpuBackendReason` で取得でき、デバッグ UI で表示できる。
 
 詳細は [brush-api.md](./brush-api.md)、[incremental-render-api.md](./incremental-render-api.md)、stroke の docs を参照。
 

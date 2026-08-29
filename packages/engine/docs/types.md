@@ -1139,7 +1139,7 @@ GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。
 
 ```typescript
 interface BrushAcceleratorOptions {
-  readonly backend?: "auto" | "webgl2" | "off"; // 既定 "auto"（WebKit系かつWebGL2可のときのみ有効）
+  readonly backend?: "auto" | "webgl2" | "cpu"; // 既定 "auto"（WebKit系かつWebGL2可のときのみ有効）
   readonly maxBranches?: number;                 // 既定 64
   readonly resident?: boolean;                   // 既定 true
 }

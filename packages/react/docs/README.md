@@ -354,7 +354,7 @@ interface UseStrokeSessionConfig {
   /** 対称展開の設定（useExpand.config を渡す） */
   readonly expandConfig: ExpandConfig;
   /** 対称展開の構築済み変換（useExpand.compiled を渡す） */
-  readonly accelerator?: BrushAccelerator | null; // engine の createBrushAccelerator で生成した GPU 加速器。省略時は CPU 経路
+  readonly gpuBackend?: "auto" | "webgl2" | "cpu"; // GPU 加速器（既定 "auto"）。hook が生成・注入・warmUp・dispose を行う。engine.gpuBackend / gpuBackendReason で現在値を取得
   readonly compiledExpand: CompiledExpand;
   /** ストローク完了時に呼ばれるコールバック。履歴記録やコマンド生成に利用する */
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
