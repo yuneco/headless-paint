@@ -571,3 +571,14 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - full-layer accum FBOは維持しつつ、default framebufferを固定512×512へ縮小。dirty rectは最大512×512へ分割し、左上blit→局所`drawImage`でcommitする
 - async checkpoint要求を36px間隔からpointer batch commit後の1回へ集約。通常はcommit dirty rect、大きい場合は最新dab中心（layer端で内側へclamp）の512×512を使う。`checkpointLag`はmaterial update時に利用したtileのbatch遅延を記録する。sync modeの36px同期readbackは維持
 - Chromium browser testに連続2 commit保持、512px超dirty rectの全layer一致、512px超async checkpoint矩形を追加。`pnpm -r build`、`pnpm lint`、`pnpm test -- --run`はgreen
+
+### 18.7 G1結果 v2（2026-08-29、commit `a8c7f93`、backlog fixture 1920 samples）
+| 環境 | CPU dispatch p50/p95 | GPU dispatch p50/p95 | 内訳 |
+|---|---|---|---|
+| **WebKit** | 8/11 | **1/2**（−85%以上） | `gpuReadRequest` 241回17ms、`gpuCommit` 241回51ms、`gpuFlush` 2,563回5ms。pickup遅れ=ちょうど1 batch |
+| Chromium | 1/1.4 | 3.3/4.2 | `gpuCommit` 241回×2.9ms=689msが支配。ChromiumはCPU経路が元から速いのでGPU経路は不利 |
+- 鍵はreadbackの**発行タイミング**: WebKitでは`readPixels`（PBO宛でも）が直前にqueueしたGPU仕事の完了を待つ完全同期。batch末に発行すると4〜7ms/回（rect寸法に無関係）、**次batch開始時に前batchの矩形を発行**すると0.07ms/回。fenceは不要だった
+- 見た目はCPU経路と一致（スクリーンショット目視）。Tier B metricは未計測
+- Undo9（8 move合成stroke×10）はWebKitで476→515ms: strokeごとのfull-layer `texImage2D`（2048²）が原因。実strokeでは償却されるが、短いstroke連打とreplayで不利 → dirty-region uploadが次の課題
+- 未対応: Expand、mixing以外、compositeOperation≠source-over、context loss復旧、WebGPU版
+- 次: STP（実Safari）で同計測 → iPad。ChromiumはCPU経路維持（backend選択はUA/計測で決める）
