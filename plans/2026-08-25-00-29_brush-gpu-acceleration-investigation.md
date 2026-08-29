@@ -633,3 +633,4 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - live/replay byte一致テスト（gpu-field / sync）green。テスト494件green
 - Chromiumは `gpuCommit` 241回×4ms=967msが支配しCPU経路に劣る → **backend選択はWebKit系のみGPU**が現時点の結論。Chromium向けにはWebGPU版のcommit経路を評価する余地
 - 残課題: Expand、stroke開始full-layer upload（短stroke連打・undo9）、compositeOperation≠source-over、context loss、field texture format（RGBA16F/8）差の扱い、Tier B閾値の正式化
+- **実Safari（STP、Safari MCP）**: CPU dispatch 7/10・undoLong 2726ms → GPU gpu-field dispatch **1/1**・undoLong **689ms（−75%）**、undo9 471→401、checkpointReadback 0回、gpuCommit 241回87ms。Playwright WebKitと一致
