@@ -656,3 +656,13 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - 常駐の無効化hook: `clearLayer`/`copyLayerPixels`/`setPixel`、draw.ts各関数、CPU brush dispatch、merge/transform/wrap-shift、非GPU incremental stroke、checkpoint復元、command executorのUndo/Redo rebuild。外部利用者の`layer.ctx`直接操作は検出不可（正式設計の論点）
 - 常駐は直近1 layerのみ。parity不変（F1 0.0118 / 0%）。テスト497件green
 - 4KではCPU経路が2Kの2倍重くなる一方、GPU経路は一定（1/2ms）。**4Kこそ効果が大きい**
+
+### 18.17 Expand対応の結果（2026-08-29、WebKit、gpu-field、常駐ON）
+| 条件 | dispatch p50/p95 | undo9 | undoLong | GPU内訳 |
+|---|---|---|---|---|
+| radial 4 CPU | 16/24 | 1580 | 9392 | readback 3988回3480ms |
+| radial 4 GPU | 14/24 | 519 | **3215（−66%）** | gpuCommit 241回×11.8ms=2847ms、gpuFieldUpdate 9388回795ms |
+| radial 8 CPU | 28/45 | 3045 | 19137 | readback 7976回6126ms |
+| radial 8 GPU | 22/30 | 880 | **6292（−67%）** | gpuCommit 241回×14ms=3420ms、gpuFieldUpdate 18776回1543ms |
+- 実装: branchごとのfieldを`TEXTURE_2D_ARRAY`のlayerに保持、dab instanceに`branchIndex`、branch順にflushしてCPUと同じ重なり順序。parity（radial 4、中心重なり）Tier B通過、live/replay byte一致。branch上限12（超過はCPU fallback）。テスト502件green
+- **liveが伸びない原因はcommit**: dirty rectの和が対称展開でlayer全体になり、毎batch 2048²をblit+drawImage → branchごとのdirty rectでcommitする修正が必要
