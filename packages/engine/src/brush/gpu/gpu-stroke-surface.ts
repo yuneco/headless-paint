@@ -206,12 +206,16 @@ out vec4 outColor;
 
 void main() {
   float mask = texture(uTip, vUv).a;
-  vec2 fieldUv = vec2(
-    (0.5 + vUv.x * (uFieldSize.x - 1.0)) / uFieldSize.x,
-    (
-      0.5 + float(vBranchIndex) * uFieldSize.y +
-      vUv.y * (uFieldSize.y - 1.0)
-    ) / (uFieldSize.y * float(uFieldBranchCount))
+  // Preserve the Canvas2D / array-texture sampling footprint while clamping
+  // LINEAR filtering to this branch's rows inside the packed strip.
+  vec2 fieldTexel = vec2(
+    clamp(vUv.x * uFieldSize.x - 0.5, 0.0, uFieldSize.x - 1.0),
+    float(vBranchIndex) * uFieldSize.y +
+      clamp(vUv.y * uFieldSize.y - 0.5, 0.0, uFieldSize.y - 1.0)
+  );
+  vec2 fieldUv = (fieldTexel + vec2(0.5)) / vec2(
+    uFieldSize.x,
+    uFieldSize.y * float(uFieldBranchCount)
   );
   vec4 material = texture(uField, fieldUv);
   float alpha = material.a * mask * vAlpha;
@@ -613,7 +617,14 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   beginBranchBatch(): void {
     this.assertStrokeBegun();
-    if (brushPerfDebug.experiments.gpuReadback !== "gpu-field") return;
+    // A single branch already keeps dabs pending until its next field update.
+    // Segment batching would flush the final segment at every append boundary.
+    if (
+      brushPerfDebug.experiments.gpuReadback !== "gpu-field" ||
+      this.branchCount === 1
+    ) {
+      return;
+    }
     if (this.pendingBranchSegments) {
       throw new Error("GPU branch batch is already active");
     }

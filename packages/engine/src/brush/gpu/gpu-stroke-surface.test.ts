@@ -365,6 +365,161 @@ describe("GpuStrokeSurface", () => {
     }
   });
 
+  it("branch 1 の 10 回連続 field update が CPU と一致する", () => {
+    const source = new OffscreenCanvas(128, 32);
+    const sourceCtx = source.getContext("2d");
+    expect(sourceCtx).not.toBeNull();
+    if (!sourceCtx) return;
+    sourceCtx.fillStyle = "rgb(20, 50, 230)";
+    sourceCtx.fillRect(0, 0, source.width, source.height);
+
+    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(source, 1);
+
+    const columns = 18;
+    const rows = 8;
+    const baseColor = { r: 230, g: 35, b: 20, a: 255 } as const;
+    configureSolidDab(surface, [230, 35, 20, 255], 8);
+    const checkpoint = sourceCtx.getImageData(
+      0,
+      0,
+      source.width,
+      source.height,
+    );
+    let expectedField = createMaterialField(columns, rows, baseColor);
+
+    for (let index = 0; index < 10; index++) {
+      const centerX = 8 + index * 12;
+      surface.beginBranchBatch();
+      surface.pushDab({
+        x: centerX,
+        y: 16,
+        size: 8,
+        rotation: 0,
+        alpha: 1,
+      });
+      surface.endBranchBatch();
+
+      const update = {
+        baseColor,
+        centerX,
+        centerY: 16,
+        angle: 0,
+        sampleSize: 8,
+        columns,
+        rows,
+        pickupRatePerPx: 0.12,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 2,
+      } as const;
+      surface.beginBranchBatch();
+      surface.updateMaterialField(update);
+      surface.endBranchBatch();
+      const sampled = sampleRotatedCheckpoint(
+        checkpoint,
+        0,
+        0,
+        update.centerX,
+        update.centerY,
+        update.angle,
+        update.sampleSize,
+        columns,
+        rows,
+      );
+      expectedField = advanceMaterialField(
+        expectedField,
+        sampled,
+        columns,
+        rows,
+        baseColor,
+        update,
+      );
+    }
+
+    const actual = surface.readMaterialFieldForTest();
+    const expected = new Uint8ClampedArray(expectedField.length);
+    writeMaterialFieldPixels(expectedField, expected);
+    expect(actual).toHaveLength(expected.length);
+    for (let offset = 0; offset < expected.length; offset++) {
+      expectChannelNear(actual[offset], expected[offset] ?? 0);
+    }
+  });
+
+  it("strip field の dab 補間が Canvas2D の field 拡大と一致する", () => {
+    const layer = createLayer(32, 32);
+    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas, 1);
+
+    const columns = 4;
+    const rows = 4;
+    const field = new Uint8ClampedArray(columns * rows * 4);
+    for (let row = 0; row < rows; row++) {
+      for (let column = 0; column < columns; column++) {
+        const offset = (row * columns + column) * 4;
+        field[offset] = column * 70;
+        field[offset + 1] = row * 70;
+        field[offset + 2] = (column + row) * 30;
+        field[offset + 3] = 255;
+      }
+    }
+    const tip = new OffscreenCanvas(16, 16);
+    const tipCtx = tip.getContext("2d");
+    expect(tipCtx).not.toBeNull();
+    if (!tipCtx) return;
+    tipCtx.fillStyle = "white";
+    tipCtx.fillRect(0, 0, tip.width, tip.height);
+    surface.setTip(tip);
+    surface.updateField(field, columns, rows);
+    surface.pushDab({ x: 16, y: 16, size: 16, rotation: 0, alpha: 1 });
+    surface.commitToLayer(layer);
+
+    const fieldCanvas = new OffscreenCanvas(columns, rows);
+    const fieldCtx = fieldCanvas.getContext("2d");
+    expect(fieldCtx).not.toBeNull();
+    if (!fieldCtx) return;
+    fieldCtx.putImageData(new ImageData(field, columns, rows), 0, 0);
+    const expectedCanvas = new OffscreenCanvas(layer.width, layer.height);
+    const expectedCtx = expectedCanvas.getContext("2d");
+    expect(expectedCtx).not.toBeNull();
+    if (!expectedCtx) return;
+    expectedCtx.imageSmoothingEnabled = true;
+    expectedCtx.drawImage(fieldCanvas, 8, 8, 16, 16);
+
+    const actual = layer.ctx.getImageData(8, 8, 16, 16).data;
+    const expected = expectedCtx.getImageData(8, 8, 16, 16).data;
+    for (let offset = 0; offset < expected.length; offset++) {
+      expectChannelNear(actual[offset], expected[offset] ?? 0);
+    }
+  });
+
+  it("branch 1 の batch 境界では pending dab を分割 flush しない", () => {
+    brushPerfDebug.enabled = true;
+    const source = new OffscreenCanvas(32, 32);
+    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(source, 1);
+    configureSolidDab(surface, [220, 50, 30, 255], 8);
+    brushPerfDebug.reset();
+
+    for (const x of [12, 20]) {
+      surface.beginBranchBatch();
+      surface.pushDab({ x, y: 16, size: 8, rotation: 0, alpha: 1 });
+      surface.endBranchBatch();
+    }
+    expect(brushPerfDebug.snapshot().stages.gpuFlush.count).toBe(0);
+    surface.flush();
+    expect(brushPerfDebug.snapshot().stages.gpuFlush.count).toBe(1);
+  });
+
   it("2 batch 連続 commit で最初の deposit と layer の他領域を維持する", () => {
     const layer = createLayer(128, 64);
     layer.ctx.fillStyle = "rgb(10, 20, 30)";

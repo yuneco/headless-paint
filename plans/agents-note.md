@@ -30,6 +30,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## ユーザーに覚えておいて欲しいこと
 
+- **GPU field stripの補間・batch不変条件（2026-08-29）**: 2D strip上のdab samplingは、旧`sampler2DArray` / Canvas2Dの`uv * size - 0.5` footprintを保ちつつ、LINEAR filteringだけを各branchのrow範囲へclampする。`branchCount=1`へExpand用segment batchを適用するとappend末尾dabを強制flushし、次回mixが旧経路ではpendingだったdepositをpickupするため、single branchではbatchをno-opにする。静的sourceへの連続10回field update単独はCPU ±2/255内であり、row/uniform/diffusionは今回の根因ではなかった。
 - spray ブラシの `lineWidth` は「散布領域の直径」。粒子サイズは `dynamics.particleSize`（絶対px）で独立。
 - 非 mixing stamp + Expand の dab 配置・jitter は branch state 統一（2026-07-03）で意図的に変わった（branch ごと独立 seed・位相）。過去データの見た目互換はない（プロジェクト方針通り）。
 - **brush高速化調査E0〜E2の結論（2026-08-25、branch `experiment/brush-acceleration`）**: Roughはchunk≈3.3ms（≈26µs/px-arc@60px）で一定、CPU候補に20%超なし（C4 fused inkはWebKit−8%かつ毛束の隙間が残る表現差で棄却、`fa2d7dc`→revert）。GPU→Canvas2D bridgeはWebKit≈1ms/chunkでRough GPU化は25〜50%見込みに留まりHold。Acrylicは同期コストがdab数・checkpoint数・layerサイズに比例せず、material updateで書き換えた小canvasをsourceに使う際のWebKit内部flushが主因と推定。Canvas2D内の回避策（source ring、ImageBitmap）は無効で、本命はGPU instanced dab + field常駐（C11）。C14（full-copy除去）は4M pxでも1msで効果なし。詳細は`plans/2026-08-25-00-29_brush-gpu-acceleration-investigation.md` Section 15/16。
