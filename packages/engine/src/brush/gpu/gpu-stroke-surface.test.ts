@@ -195,6 +195,10 @@ describe("GpuStrokeSurface", () => {
 
     surface.selectBranch(0);
     configureSolidDab(surface, [255, 0, 0, 255], 16);
+    surface.selectBranch(1);
+    configureSolidDab(surface, [0, 0, 255, 255], 16);
+    surface.beginBranchBatch();
+    surface.selectBranch(0);
     surface.pushDab({
       x: 32,
       y: 24,
@@ -204,7 +208,6 @@ describe("GpuStrokeSurface", () => {
       branchIndex: 0,
     });
     surface.selectBranch(1);
-    configureSolidDab(surface, [0, 0, 255, 255], 16);
     surface.pushDab({
       x: 32,
       y: 24,
@@ -213,6 +216,7 @@ describe("GpuStrokeSurface", () => {
       alpha: 0.75,
       branchIndex: 1,
     });
+    surface.endBranchBatch();
     surface.commitToLayer(layer);
 
     const branch0 = surface.readMaterialFieldForTest(0);
@@ -220,6 +224,61 @@ describe("GpuStrokeSurface", () => {
     expect(Array.from(branch0.slice(0, 4))).toEqual([255, 0, 0, 255]);
     expect(Array.from(branch1.slice(0, 4))).toEqual([0, 0, 255, 255]);
     expectPixelNear(layer, 32, 24, [51, 0, 204, 239]);
+  });
+
+  it("全 branch の field を 2D strip 上の 1 update pass で独立更新する", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const source = new OffscreenCanvas(64, 32);
+    const sourceCtx = source.getContext("2d");
+    expect(sourceCtx).not.toBeNull();
+    if (!sourceCtx) return;
+    sourceCtx.fillStyle = "rgb(240, 30, 20)";
+    sourceCtx.fillRect(0, 0, 32, 32);
+    sourceCtx.fillStyle = "rgb(20, 50, 230)";
+    sourceCtx.fillRect(32, 0, 32, 32);
+
+    const surface = acquireGpuStrokeSurface(source.width, source.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(source, 2);
+    const columns = 18;
+    const rows = 8;
+    const baseColor = { r: 0, g: 0, b: 0, a: 255 } as const;
+    for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
+      surface.selectBranch(branchIndex);
+      surface.initializeMaterialField(columns, rows, baseColor);
+    }
+
+    surface.beginBranchBatch();
+    for (let branchIndex = 0; branchIndex < 2; branchIndex++) {
+      surface.selectBranch(branchIndex);
+      surface.updateMaterialField({
+        baseColor,
+        centerX: branchIndex === 0 ? 16 : 48,
+        centerY: 16,
+        angle: 0,
+        sampleSize: 8,
+        columns,
+        rows,
+        pickupRatePerPx: 10,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 1,
+      });
+    }
+    surface.endBranchBatch();
+
+    const branch0 = surface.readMaterialFieldForTest(0);
+    const branch1 = surface.readMaterialFieldForTest(1);
+    expectChannelNear(branch0[0], 240);
+    expectChannelNear(branch0[1], 30);
+    expectChannelNear(branch0[2], 20);
+    expectChannelNear(branch1[0], 20);
+    expectChannelNear(branch1[1], 50);
+    expectChannelNear(branch1[2], 230);
+    expect(brushPerfDebug.snapshot().stages.gpuFieldUpdate.count).toBe(1);
   });
 
   it("field update pass が CPU sampling/mix/restore/diffusion と一致する", () => {
@@ -328,7 +387,9 @@ describe("GpuStrokeSurface", () => {
   });
 
   it("512px を超える dirty rect を分割 commit して layer 全域を保つ", () => {
-    const layer = createLayer(1200, 700);
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(1400, 1100);
     layer.ctx.fillStyle = "rgb(12, 34, 56)";
     layer.ctx.fillRect(0, 0, layer.width, layer.height);
     const surface = acquireGpuStrokeSurface(layer.width, layer.height);
@@ -339,7 +400,7 @@ describe("GpuStrokeSurface", () => {
     configureSolidDab(surface, [210, 70, 40, 255], 16);
 
     surface.pushDab({ x: 100, y: 50, size: 16, rotation: 0, alpha: 1 });
-    surface.pushDab({ x: 1100, y: 650, size: 16, rotation: 0, alpha: 1 });
+    surface.pushDab({ x: 1300, y: 1050, size: 16, rotation: 0, alpha: 1 });
     surface.commitToLayer(layer);
 
     const actual = layer.ctx.getImageData(0, 0, layer.width, layer.height).data;
@@ -352,6 +413,7 @@ describe("GpuStrokeSurface", () => {
       }
     }
     expect(firstMismatch).toBe(-1);
+    expect(brushPerfDebug.snapshot().samples.gpuCommitDraws).toEqual([6]);
   });
 
   it("radial 4 Expand の branch 別 commit が従来の union commit と byte-identical", () => {
@@ -401,6 +463,7 @@ describe("GpuStrokeSurface", () => {
     expect(brushPerfDebug.snapshot().samples.gpuCommitPixels).toEqual([
       4 * 16 * 16,
     ]);
+    expect(brushPerfDebug.snapshot().samples.gpuCommitDraws).toEqual([4]);
   });
 
   it('gpuDab: "off" では runtime が surface を生成しない', () => {
