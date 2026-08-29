@@ -536,20 +536,20 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 
 ### 18.2 構成（実験モジュール `packages/engine/src/brush/gpu/`、public exportしない）
 - `GpuStrokeSurface`（runtime単位で1つをcache。stroke開始時に `acquire(layerWidth, layerHeight)`）
-  - WebGL2 OffscreenCanvas（layer同寸）。`accum` texture（RGBA8, premultiplied）をFBOに付ける
+  - WebGL2 OffscreenCanvasはcommit bridge用の固定512×512。layer同寸の`accum` texture（RGBA8, premultiplied）をFBOに付け、default framebufferの寸法とは分離する
   - stroke開始: `sourceLayer.canvas`（既存のstroke-start snapshot）を `texImage2D` で `accum` に1回upload
   - `tip` texture: tipCanvasをupload（tip size変更時のみ）
   - `field` texture: 18×8 RGBA8。material updateごとに `texSubImage2D`（576 byte）で更新。dab batchは「fieldのバージョン」を持つため、batch内でfieldが変わる場合は**その時点でdrawを分割**（instance配列をflushしてから更新）
   - `depositDabs(instances)`: instanced draw（1 instance = 1 dab: x, y, size, rotation, alpha(opacity)）。fragment = tip(uv).a × bilinear(field, uv) → premultiplied、blend = ONE, ONE_MINUS_SRC_ALPHA（source-over premultiplied）。`style.compositeOperation` は source-over のみ対応
-  - `readCheckpoint(x, y, size)`: 同期版は `readPixels` で `Uint8ClampedArray`（tile origin/寸法は現行`captureCheckpoint`と同一）。**async版**: PBOへ `readPixels` + `fenceSync`、次のcheckpoint時に前回分を取り出す（1 checkpoint遅れ、距離で決まるので決定的）。まず同期版で計測し、次にasync版
-  - `commitToLayer(layer, dirtyRect)`: `layer.ctx.drawImage(glCanvas, sx, sy, w, h, sx, sy, w, h)` を**pointer batchごとに1回**（点ごとではない）。dirtyRectはbatch内のdab bboxの和
+  - `readCheckpoint(x, y, size)`: 同期版は `readPixels` で `Uint8ClampedArray`（tile origin/寸法は現行`captureCheckpoint`と同一）。**async版**はpointer batch commit後に1回だけ、同じdirty rectをPBOへ`readPixels` + `fenceSync`する。512×512を超えるdirty rectは最新dab中心の512×512へ切り詰め、material update時に完了済みなら取り込む
+  - `commitToLayer(layer, dirtyRect)`: dirty rectを最大512×512へ分割し、各領域を固定default framebuffer左上へ`blitFramebuffer`してCanvas2Dへ転送する。`copy`は転送先rectでclipし、**pointer batchごとに1 commit**（点ごとではない）。dirtyRectはbatch内のdab bboxの和
 - 切替: `brushPerfDebug.experiments.gpuDab = "off" | "webgl2"`、URL `?gpuDab=webgl2`。stamp + mixing ON + Expand無効（branch 1）+ source-over のときだけGPU経路。それ以外は既存CPU経路
 - Node/headless・WebGL2取得失敗・context lost: CPU経路へfallback（spikeでは「stroke開始時に判定」で十分）
 
 ### 18.3 差し込み点
 - `stamp.ts` `stampAt`: GPU経路では `ctx.drawImage` の代わりに instance を積む（`state.mixing` に GPU surface参照は持たせず、runtime scratchで管理）
 - `mixing.ts` `captureCheckpoint`: GPU経路では `surface.readCheckpoint` の結果を `checkpointPixels` として使う。`uploadMaterialCanvas` はfield textureのupdateに置換（renderCanvasは触らない）
-- `incremental-stroke.ts` `feedMany` 末尾 / `finalize`: `surface.flush()` → `commitToLayer`
+- `incremental-stroke.ts` `feedMany` 末尾 / `finalize`: `surface.flush()` → `commitToLayer` → async modeのみ`requestCheckpoint`
 - stroke終了: 最終commit後にsurfaceをrelease（textureは再利用のためruntime cacheに残す）
 
 ### 18.4 計測とgate
@@ -565,3 +565,9 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 | Chromium | **1/1.4** | 12.7/14 | CPU経路は元から速い（`getImageData` 42ms/997回）＝**Acrylicの重さはWebKit固有**。GPU経路は `gpuCommit` 241回×9.7ms=2.3s：2048² GL canvas全体の`drawImage`が高い。**dirty rect寸法の小さなcommit canvasへblit→drawImage**に変更する必要あり |
 - Undo9（短い合成stroke×10）はWebKitで477→579ms悪化: strokeごとのfull-layer `texImage2D`（16MB）。dirty-region uploadまたはlayer→texture copyの遅延化が必要
 - 次: (1) 非同期readback（PBO+fence、1 checkpoint遅れ）、(2) 小さなcommit canvas、(3) stroke開始uploadの削減
+
+### 18.6 G1 follow-up修正（2026-08-29、未コミット）
+- `copy` commitをdirty tileでclipし、連続batchで前batchやlayer他領域を透明化しないよう修正
+- full-layer accum FBOは維持しつつ、default framebufferを固定512×512へ縮小。dirty rectは最大512×512へ分割し、左上blit→局所`drawImage`でcommitする
+- async checkpoint要求を36px間隔からpointer batch commit後の1回へ集約。通常はcommit dirty rect、大きい場合は最新dab中心（layer端で内側へclamp）の512×512を使う。`checkpointLag`はmaterial update時に利用したtileのbatch遅延を記録する。sync modeの36px同期readbackは維持
+- Chromium browser testに連続2 commit保持、512px超dirty rectの全layer一致、512px超async checkpoint矩形を追加。`pnpm -r build`、`pnpm lint`、`pnpm test -- --run`はgreen

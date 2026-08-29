@@ -4,6 +4,7 @@ import { brushPerfDebug } from "../perf-debug";
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 5;
 const CHECKPOINT_PBO_RING_SIZE = 3;
+const COMMIT_CANVAS_SIZE = 512;
 
 interface DirtyRect {
   left: number;
@@ -18,9 +19,8 @@ interface PendingCheckpointReadback {
   readonly sequence: number;
   readonly originX: number;
   readonly originY: number;
-  readonly size: number;
-  readonly readOriginX: number;
-  readonly readOriginY: number;
+  readonly width: number;
+  readonly height: number;
   readonly left: number;
   readonly top: number;
   readonly readWidth: number;
@@ -30,7 +30,8 @@ interface PendingCheckpointReadback {
 interface CompletedGpuCheckpoint {
   readonly originX: number;
   readonly originY: number;
-  readonly size: number;
+  readonly width: number;
+  readonly height: number;
   readonly pixels: Uint8ClampedArray;
 }
 
@@ -56,7 +57,7 @@ export interface GpuStrokeSurface {
     originY: number,
     size: number,
   ): Uint8ClampedArray;
-  requestCheckpointAsync(originX: number, originY: number, size: number): void;
+  requestCheckpoint(): void;
   takeCompletedCheckpoint(): CompletedGpuCheckpoint | null;
   commitToLayer(layer: Layer): void;
   endStroke(): void;
@@ -67,6 +68,7 @@ interface GpuStrokeRuntime {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
+  requestCheckpoint(owner: object): void;
   endStroke(owner: object): void;
 }
 
@@ -154,11 +156,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private pendingCheckpointReadbacks: PendingCheckpointReadback[] = [];
   private checkpointBufferSize = 0;
   private checkpointRequestSequence = 0;
+  private checkpointUsedSequence = 0;
+  private lastCommittedRect: DirtyRect | null = null;
+  private latestDabPosition: { readonly x: number; readonly y: number } | null =
+    null;
 
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
-    this.canvas = new OffscreenCanvas(width, height);
+    this.canvas = new OffscreenCanvas(COMMIT_CANVAS_SIZE, COMMIT_CANVAS_SIZE);
     const gl = this.canvas.getContext("webgl2", {
       alpha: true,
       antialias: false,
@@ -315,6 +321,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.dirtyRect = null;
     this.discardPendingCheckpointReadbacks();
     this.checkpointRequestSequence = 0;
+    this.checkpointUsedSequence = 0;
+    this.lastCommittedRect = null;
+    this.latestDabPosition = null;
     this.strokeBegun = true;
   }
 
@@ -403,6 +412,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.instances[offset + 3] = dab.rotation;
     this.instances[offset + 4] = dab.alpha;
     this.instanceCount++;
+    this.latestDabPosition = { x: dab.x, y: dab.y };
 
     const halfExtent =
       (dab.size / 2) *
@@ -480,9 +490,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     );
 
     copyUnpremultipliedCheckpoint(output, premultiplied, {
-      size: tileSize,
-      readOriginX,
-      readOriginY,
+      outputWidth: tileSize,
+      outputOriginX: readOriginX,
+      outputOriginY: readOriginY,
       left,
       top,
       readWidth,
@@ -491,15 +501,61 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     return output;
   }
 
-  requestCheckpointAsync(originX: number, originY: number, size: number): void {
+  requestCheckpoint(): void {
     this.assertStrokeBegun();
+    const committed = this.lastCommittedRect;
+    const latestDab = this.latestDabPosition;
+    this.lastCommittedRect = null;
+    if (
+      !committed ||
+      !latestDab ||
+      brushPerfDebug.experiments.gpuReadback !== "async"
+    ) {
+      return;
+    }
+    const committedWidth = committed.right - committed.left;
+    const committedHeight = committed.bottom - committed.top;
+    const exceedsLimit =
+      committedWidth > COMMIT_CANVAS_SIZE ||
+      committedHeight > COMMIT_CANVAS_SIZE;
+    const width = exceedsLimit
+      ? Math.min(COMMIT_CANVAS_SIZE, this.width)
+      : committedWidth;
+    const height = exceedsLimit
+      ? Math.min(COMMIT_CANVAS_SIZE, this.height)
+      : committedHeight;
+    const left = exceedsLimit
+      ? Math.max(
+          0,
+          Math.min(Math.floor(latestDab.x - width / 2), this.width - width),
+        )
+      : committed.left;
+    const top = exceedsLimit
+      ? Math.max(
+          0,
+          Math.min(Math.floor(latestDab.y - height / 2), this.height - height),
+        )
+      : committed.top;
+    this.requestCheckpointAsync({
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+    });
+  }
+
+  private requestCheckpointAsync(rect: DirtyRect): void {
     const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
     this.flush();
-    const tileSize = Math.max(0, Math.floor(size));
-    if (tileSize === 0 || this.lost) return;
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0 || this.lost) return;
 
     this.checkpointRequestSequence++;
-    this.ensureCheckpointBuffers(tileSize * tileSize * 4);
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample("checkpoints", 1);
+    }
+    this.ensureCheckpointBuffers();
     const buffer = this.checkpointBuffers.find(
       (candidate) =>
         !this.pendingCheckpointReadbacks.some(
@@ -513,28 +569,18 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       return;
     }
 
-    const readOriginX = Math.floor(originX);
-    const readOriginY = Math.floor(originY);
-    const left = Math.max(0, readOriginX);
-    const top = Math.max(0, readOriginY);
-    const right = Math.min(this.width, readOriginX + tileSize);
-    const bottom = Math.min(this.height, readOriginY + tileSize);
-    const readWidth = Math.max(0, right - left);
-    const readHeight = Math.max(0, bottom - top);
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
-    if (readWidth > 0 && readHeight > 0) {
-      gl.readPixels(
-        left,
-        this.height - bottom,
-        readWidth,
-        readHeight,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        0,
-      );
-    }
+    gl.readPixels(
+      rect.left,
+      this.height - rect.bottom,
+      width,
+      height,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      0,
+    );
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     const sync = requireResource(
       gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0),
@@ -545,15 +591,14 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       buffer,
       sync,
       sequence: this.checkpointRequestSequence,
-      originX,
-      originY,
-      size: tileSize,
-      readOriginX,
-      readOriginY,
-      left,
-      top,
-      readWidth,
-      readHeight,
+      originX: rect.left,
+      originY: rect.top,
+      width,
+      height,
+      left: rect.left,
+      top: rect.top,
+      readWidth: width,
+      readHeight: height,
     });
     if (brushPerfDebug.enabled) {
       brushPerfDebug.recordStage("gpuReadRequest", startedAt);
@@ -562,16 +607,24 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   takeCompletedCheckpoint(): CompletedGpuCheckpoint | null {
     const request = this.pendingCheckpointReadbacks[0];
-    if (!request || this.lost) return null;
+    if (!request || this.lost) {
+      this.recordCheckpointLag();
+      return null;
+    }
     const gl = this.gl;
     const status = gl.clientWaitSync(request.sync, 0, 0);
-    if (status === gl.TIMEOUT_EXPIRED) return null;
+    if (status === gl.TIMEOUT_EXPIRED) {
+      this.recordCheckpointLag();
+      return null;
+    }
     if (status === gl.WAIT_FAILED) {
       gl.deleteSync(request.sync);
       this.pendingCheckpointReadbacks.shift();
+      this.recordCheckpointLag();
       return null;
     }
     if (status !== gl.ALREADY_SIGNALED && status !== gl.CONDITION_SATISFIED) {
+      this.recordCheckpointLag();
       return null;
     }
 
@@ -590,18 +643,20 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.deleteSync(request.sync);
     this.pendingCheckpointReadbacks.shift();
 
-    const pixels = new Uint8ClampedArray(request.size * request.size * 4);
-    copyUnpremultipliedCheckpoint(pixels, premultiplied, request);
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample(
-        "checkpointLag",
-        this.checkpointRequestSequence - request.sequence,
-      );
-    }
+    const pixels = new Uint8ClampedArray(request.width * request.height * 4);
+    copyUnpremultipliedCheckpoint(pixels, premultiplied, {
+      outputWidth: request.width,
+      outputOriginX: request.originX,
+      outputOriginY: request.originY,
+      ...request,
+    });
+    this.checkpointUsedSequence = request.sequence;
+    this.recordCheckpointLag();
     return {
       originX: request.originX,
       originY: request.originY,
-      size: request.size,
+      width: request.width,
+      height: request.height,
       pixels,
     };
   }
@@ -610,6 +665,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     this.flush();
     const dirty = this.dirtyRect;
+    this.lastCommittedRect = null;
     if (!dirty || this.lost) return;
     const left = Math.max(0, Math.floor(dirty.left));
     const top = Math.max(0, Math.floor(dirty.top));
@@ -619,6 +675,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     const height = bottom - top;
     this.dirtyRect = null;
     if (width <= 0 || height <= 0) return;
+    this.lastCommittedRect = { left, top, right, bottom };
 
     const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const gl = this.gl;
@@ -626,34 +683,49 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
-    gl.blitFramebuffer(
-      left,
-      this.height - bottom,
-      right,
-      this.height - top,
-      left,
-      this.height - bottom,
-      right,
-      this.height - top,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-    layer.ctx.save();
-    layer.ctx.globalAlpha = 1;
-    layer.ctx.globalCompositeOperation = "copy";
-    layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    layer.ctx.drawImage(
-      this.canvas,
-      left,
-      top,
-      width,
-      height,
-      left,
-      top,
-      width,
-      height,
-    );
-    layer.ctx.restore();
+    for (let tileTop = top; tileTop < bottom; tileTop += COMMIT_CANVAS_SIZE) {
+      const tileBottom = Math.min(bottom, tileTop + COMMIT_CANVAS_SIZE);
+      const tileHeight = tileBottom - tileTop;
+      for (
+        let tileLeft = left;
+        tileLeft < right;
+        tileLeft += COMMIT_CANVAS_SIZE
+      ) {
+        const tileRight = Math.min(right, tileLeft + COMMIT_CANVAS_SIZE);
+        const tileWidth = tileRight - tileLeft;
+        gl.blitFramebuffer(
+          tileLeft,
+          this.height - tileBottom,
+          tileRight,
+          this.height - tileTop,
+          0,
+          COMMIT_CANVAS_SIZE - tileHeight,
+          tileWidth,
+          COMMIT_CANVAS_SIZE,
+          gl.COLOR_BUFFER_BIT,
+          gl.NEAREST,
+        );
+        layer.ctx.save();
+        layer.ctx.globalAlpha = 1;
+        layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        layer.ctx.beginPath();
+        layer.ctx.rect(tileLeft, tileTop, tileWidth, tileHeight);
+        layer.ctx.clip();
+        layer.ctx.globalCompositeOperation = "copy";
+        layer.ctx.drawImage(
+          this.canvas,
+          0,
+          0,
+          tileWidth,
+          tileHeight,
+          tileLeft,
+          tileTop,
+          tileWidth,
+          tileHeight,
+        );
+        layer.ctx.restore();
+      }
+    }
     if (brushPerfDebug.enabled) {
       brushPerfDebug.recordStage("gpuCommit", startedAt);
     }
@@ -663,11 +735,14 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.discardPendingCheckpointReadbacks();
     this.instanceCount = 0;
     this.dirtyRect = null;
+    this.lastCommittedRect = null;
+    this.latestDabPosition = null;
     this.strokeBegun = false;
     this.tipSource = null;
   }
 
-  private ensureCheckpointBuffers(byteLength: number): void {
+  private ensureCheckpointBuffers(): void {
+    const byteLength = COMMIT_CANVAS_SIZE * COMMIT_CANVAS_SIZE * 4;
     if (
       this.checkpointBufferSize === byteLength &&
       this.checkpointBuffers.length === CHECKPOINT_PBO_RING_SIZE
@@ -696,6 +771,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       this.gl.deleteSync(request.sync);
     }
     this.pendingCheckpointReadbacks = [];
+  }
+
+  private recordCheckpointLag(): void {
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordSample(
+        "checkpointLag",
+        this.checkpointRequestSequence - this.checkpointUsedSequence,
+      );
+    }
   }
 
   private configureGeometry(): void {
@@ -831,6 +915,10 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
     if (activeOwner !== owner) return;
     activeSurface?.commitToLayer(layer);
   },
+  requestCheckpoint(owner) {
+    if (activeOwner !== owner) return;
+    activeSurface?.requestCheckpoint();
+  },
   endStroke(owner) {
     if (activeOwner !== owner) return;
     activeSurface?.endStroke();
@@ -901,24 +989,24 @@ function unpremultiply(value: number, alpha: number): number {
 function copyUnpremultipliedCheckpoint(
   output: Uint8ClampedArray,
   premultiplied: Uint8Array,
-  request: Pick<
-    PendingCheckpointReadback,
-    | "size"
-    | "readOriginX"
-    | "readOriginY"
-    | "left"
-    | "top"
-    | "readWidth"
-    | "readHeight"
-  >,
+  request: {
+    readonly outputWidth: number;
+    readonly outputOriginX: number;
+    readonly outputOriginY: number;
+    readonly left: number;
+    readonly top: number;
+    readonly readWidth: number;
+    readonly readHeight: number;
+  },
 ): void {
-  const outputX = request.left - request.readOriginX;
-  const outputY = request.top - request.readOriginY;
+  const outputX = request.left - request.outputOriginX;
+  const outputY = request.top - request.outputOriginY;
   for (let sourceRow = 0; sourceRow < request.readHeight; sourceRow++) {
     const targetRow = outputY + request.readHeight - 1 - sourceRow;
     for (let column = 0; column < request.readWidth; column++) {
       const sourceOffset = (sourceRow * request.readWidth + column) * 4;
-      const targetOffset = (targetRow * request.size + outputX + column) * 4;
+      const targetOffset =
+        (targetRow * request.outputWidth + outputX + column) * 4;
       const alpha = premultiplied[sourceOffset + 3] ?? 0;
       output[targetOffset + 3] = alpha;
       if (alpha === 0) continue;

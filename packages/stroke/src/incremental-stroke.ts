@@ -181,6 +181,7 @@ export function createIncrementalStrokeRenderer(
       for (const point of points) processBatch([point]);
       if (gpuStrokeActive) {
         gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+        gpuRuntime?.requestCheckpoint(gpuOwner);
       }
       return;
     }
@@ -222,6 +223,7 @@ export function createIncrementalStrokeRenderer(
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
       if (gpuStrokeActive) {
         gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+        gpuRuntime?.requestCheckpoint(gpuOwner);
         gpuRuntime?.endStroke(gpuOwner);
       }
     },
@@ -233,6 +235,7 @@ interface GpuStrokeRuntimeBridge {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
+  requestCheckpoint(owner: object): void;
   endStroke(owner: object): void;
 }
 

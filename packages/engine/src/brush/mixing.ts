@@ -197,13 +197,16 @@ export function updateMixingAfterDeposit(
     uploadMaterialCanvas(state, input.tipCanvas);
   }
 
-  const lastCheckpoint = state.lastCheckpointDistance ?? 0;
-  if (
-    input.stampDistance - lastCheckpoint >=
-    input.mixing.checkpointDistancePx *
-      brushPerfDebug.experiments.checkpointScale
-  ) {
-    state = captureCheckpoint(input, state);
+  const gpuSurface = getActiveGpuStrokeSurface();
+  if (!gpuSurface || brushPerfDebug.experiments.gpuReadback === "sync") {
+    const lastCheckpoint = state.lastCheckpointDistance ?? 0;
+    if (
+      input.stampDistance - lastCheckpoint >=
+      input.mixing.checkpointDistancePx *
+        brushPerfDebug.experiments.checkpointScale
+    ) {
+      state = captureCheckpoint(input, state);
+    }
   }
   return state;
 }
@@ -255,20 +258,6 @@ function captureCheckpoint(
   const originY = input.y - tileSize / 2;
   const gpuSurface = getActiveGpuStrokeSurface();
   if (gpuSurface) {
-    if (
-      updateCheckpointDistance &&
-      brushPerfDebug.experiments.gpuReadback === "async"
-    ) {
-      gpuSurface.requestCheckpointAsync(originX, originY, tileSize);
-      if (brushPerfDebug.enabled) {
-        brushPerfDebug.recordSample("checkpoints", 1);
-      }
-      const next = takeCompletedGpuCheckpoint(state, gpuSurface);
-      return {
-        ...next,
-        lastCheckpointDistance: input.stampDistance,
-      };
-    }
     const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const checkpointPixels = new ImageData(tileSize, tileSize);
     checkpointPixels.data.set(
@@ -330,7 +319,7 @@ function takeCompletedGpuCheckpoint(
   }
   const completed = gpuSurface.takeCompletedCheckpoint();
   if (!completed) return state;
-  const checkpointPixels = new ImageData(completed.size, completed.size);
+  const checkpointPixels = new ImageData(completed.width, completed.height);
   checkpointPixels.data.set(completed.pixels);
   return {
     ...state,
