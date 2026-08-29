@@ -445,6 +445,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function releaseSession(preservePendingStart = false): void {
+    renderer?.cancel();
     strokeSession = null;
     filterState = null;
     inputPoints = [];

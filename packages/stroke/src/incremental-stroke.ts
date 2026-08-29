@@ -49,6 +49,8 @@ export interface IncrementalStrokeRenderer {
   feed(point: InputPoint): void;
   feedMany(points: readonly InputPoint[]): void;
   finalize(): void;
+  /** Abandon the stroke without a final commit (cancel / dispose). */
+  cancel(): void;
 }
 
 const BRISTLE_BATCH_INTERVAL_MS = 32;
@@ -228,6 +230,11 @@ export function createIncrementalStrokeRenderer(
       feedMany([point]);
     },
     feedMany,
+    cancel() {
+      if (finalized) return;
+      finalized = true;
+      if (gpuStrokeActive) gpuRuntime?.endStroke(gpuOwner);
+    },
     finalize() {
       if (finalized) return;
       if (!hasFed) {

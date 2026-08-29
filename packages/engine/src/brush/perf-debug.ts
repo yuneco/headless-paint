@@ -72,7 +72,8 @@ type BrushPerfEventName =
   | "realloc:fieldStrip"
   | "realloc:snapshotArray"
   | "realloc:commitCanvas"
-  | "realloc:accum";
+  | "realloc:accum"
+  | "gpuStaleOwnerRecovered";
 
 interface BrushPerfEventDetails {
   readonly width?: number;

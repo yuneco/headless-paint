@@ -2140,6 +2140,17 @@ const gpuStrokeRuntime: GpuStrokeRuntime = {
   },
   beginStroke(owner, layer, sourceCanvas, branchCount = 1) {
     if (brushPerfDebug.experiments.gpuDab !== "webgl2") return false;
+    if (activeOwner && activeOwner !== owner) {
+      // A previous stroke was abandoned without endStroke (cancel / dispose).
+      // Recover instead of silently falling back to the CPU path forever.
+      if (brushPerfDebug.enabled) {
+        brushPerfDebug.recordEvent("gpuStaleOwnerRecovered", {});
+      }
+      activeSurface?.endStroke();
+      activeOwner = null;
+      activeSurface = null;
+      currentOwner = null;
+    }
     if (activeOwner) return false;
     const surface = acquireGpuStrokeSurface(layer.width, layer.height);
     if (!surface) return false;
