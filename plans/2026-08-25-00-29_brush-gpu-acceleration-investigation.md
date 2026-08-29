@@ -598,3 +598,16 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - 修正後（async）: F1 RGB MAE 0.024 / |Δ|>0.1 0.96%、F2 0.021 / 0.99%、F3 0.0066 / 0%。目視では1 batch遅れ分がわずかに明るい程度。sync: F1 0.0045 / 0%
 - 性能（WebKit、backlog）: async dispatch **2/3ms**（tile 512²でreadback 262k px/batch: gpuReadRequest 40ms + checkpointReadback 66ms）。CPU 8/11比 −75%。tileを256²程度に縮めれば1/2msへ戻せる見込み
 - 補足: harnessの`pass`判定はcoverage相対差1%が表示canvas ROI基準で厳しすぎる（1.6〜3.7%）。閾値/測り方は正式化時に見直す
+
+### 18.10 iPad実機（2026-08-29、Apple Pencil、HTTPS）
+- 体感良好。通常描画のCall p50/p95: GPU 4/11、CPU 5/11（maxは10〜100超で変動）。**liveでは差がほぼ出ない**: 実ペン速度では1 batchあたりcheckpoint 0〜1回で同期コストが他の固定コストに埋もれる（fixtureは4回/batchの極端条件）
+- **Undoは明らかに改善**（ラグは残るが許容範囲）。replayは全点を一気に処理するので同期コストの差がそのまま出る
+- **不具合: Undo後に直前strokeの色/濃度が変わる**（12 stroke描いて1 undo → 11本目の色が変化）。asyncのcheckpoint取り込みがbatch境界（イベント配送依存）で起きるため、replay（1回の`feedMany`）ではliveと取り込み内容が変わる＝非決定性
+
+### 18.11 決定的async checkpoint（設計）
+- **snapshotは距離で確定**: `checkpointDistancePx`到達時に、accumの該当tile（最新dab中心、寸法は現行tileSize）をGPU内で小さなcheckpoint texture（ring）へ`blitFramebuffer`。GPUコマンドは順序保証されるので内容は入力点列のみで決まる
+- **readbackは都合の良い時**: 各batch開始時（WebKitで`readPixels`が安い時点）に、pendingのcheckpoint textureをPBOへ`readPixels`＋fence
+- **取り込みは次のcheckpoint距離で**: 1つ前のsnapshotを`takeCompletedCheckpoint`で取り込む。未完了なら`clientWaitSync`で**待つ**（liveでは通常完了済み、replayでは常に待つ）。取り込みのlagは「1 checkpoint距離（36px）」で固定
+- 結果: live / replay / Undo でpixel一致（同一backend）。WebKitのreadPixels費用はbatch開始時の小tile読みだけ
+- 1 batch内に複数checkpointが来る場合はsnapshot ringに溜め、readbackはbatch開始時にまとめて発行。取り込み時点で未readbackならその場で発行＋待つ（高速stroke時のみのコスト）
+- 旧async（batch矩形）モードは削除、`gpuReadback: "sync" | "async"`のasyncをこの方式に置き換える
