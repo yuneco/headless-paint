@@ -10,10 +10,15 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
+import { getActiveGpuStrokeSurface } from "./gpu/gpu-stroke-surface";
 import {
+  type MixingUpdateInput,
   getActiveMixing,
+  getDabSource,
+  prepareInitialMixingCheckpoint,
   prepareMixingState,
-  updateMixingAfterDeposit, getDabSource } from "./mixing";
+  updateMixingAfterDeposit,
+} from "./mixing";
 import { brushPerfDebug } from "./perf-debug";
 import { calculatePressureFlow } from "./pressure";
 import { smoothStampPressure } from "./pressure-smoothing";
@@ -50,7 +55,10 @@ export function renderStampBrushStroke(
 ): BrushRenderState {
   if (brushPerfDebug.nullStages.nullRender) return state;
   const { dynamics } = brush;
-  const spacingPx = style.lineWidth * dynamics.spacing * brushPerfDebug.experiments.spacingScale;
+  const spacingPx =
+    style.lineWidth *
+    dynamics.spacing *
+    brushPerfDebug.experiments.spacingScale;
   const branch = state.branches[0];
 
   if (spacingPx <= 0 || !state.tipCanvas || points.length === 0 || !branch) {
@@ -197,10 +205,13 @@ function stampAt(
   const y = point.y + scatterY;
 
   const ctx = layer.ctx;
+  const gpuSurface = mixing ? getActiveGpuStrokeSurface() : null;
   const dabDrawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  ctx.save();
-  ctx.globalAlpha = opacity;
-  ctx.globalCompositeOperation = style.compositeOperation;
+  if (!gpuSurface) {
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.globalCompositeOperation = style.compositeOperation;
+  }
 
   let drawCanvas: OffscreenCanvas | ImageBitmap = tipCanvas;
   let nextMixingState = mixingState;
@@ -218,8 +229,45 @@ function stampAt(
     }
   }
 
+  const mixingUpdateInput: MixingUpdateInput | null =
+    mixing && nextMixingState
+      ? {
+          tipCanvas,
+          baseColor: style.color,
+          x,
+          y,
+          directionX: point.directionX,
+          directionY: point.directionY,
+          stampSize,
+          checkpointFootprintSize: Math.max(style.lineWidth, stampSize),
+          stampDistance: point.distance,
+          sourceLayer,
+          targetLayer: layer,
+          mixing,
+          state: nextMixingState,
+        }
+      : null;
+
+  if (gpuSurface) {
+    gpuSurface.setTip(tipCanvas);
+    if (mixingUpdateInput && nextMixingState) {
+      nextMixingState = prepareInitialMixingCheckpoint(
+        mixingUpdateInput,
+        nextMixingState,
+      );
+    }
+  }
+
   if (brushPerfDebug.nullStages.nullDabDraw) {
     // skip deposit
+  } else if (gpuSurface) {
+    gpuSurface.pushDab({
+      x,
+      y,
+      size: stampSize,
+      rotation,
+      alpha: opacity,
+    });
   } else if (rotation !== 0) {
     ctx.translate(x, y);
     ctx.rotate(rotation);
@@ -239,25 +287,13 @@ function stampAt(
       stampSize,
     );
   }
-
-  ctx.restore();
+  if (!gpuSurface) ctx.restore();
   if (brushPerfDebug.enabled) {
     brushPerfDebug.recordStage("dabDraw", dabDrawStartedAt);
   }
-  if (mixing && nextMixingState) {
+  if (mixingUpdateInput && nextMixingState) {
     nextMixingState = updateMixingAfterDeposit({
-      tipCanvas,
-      baseColor: style.color,
-      x,
-      y,
-      directionX: point.directionX,
-      directionY: point.directionY,
-      stampSize,
-      checkpointFootprintSize: Math.max(style.lineWidth, stampSize),
-      stampDistance: point.distance,
-      sourceLayer,
-      targetLayer: layer,
-      mixing,
+      ...mixingUpdateInput,
       state: nextMixingState,
     });
   }

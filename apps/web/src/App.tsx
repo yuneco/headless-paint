@@ -44,7 +44,8 @@ import { useTransformMode } from "./hooks/useTransformMode";
 const EXPERIMENT_LAYER_SIZE = Number(
   new URLSearchParams(window.location.search).get("layerSize") ?? "0",
 );
-const LAYER_WIDTH = EXPERIMENT_LAYER_SIZE > 0 ? EXPERIMENT_LAYER_SIZE : 1024 * 2;
+const LAYER_WIDTH =
+  EXPERIMENT_LAYER_SIZE > 0 ? EXPERIMENT_LAYER_SIZE : 1024 * 2;
 const LAYER_HEIGHT = LAYER_WIDTH;
 const SETTINGS_STORAGE_KEY = "headless-paint:settings";
 
@@ -71,10 +72,14 @@ function configureBrushPerfDebugFromUrl(): void {
   if (!perf) return;
   const params = new URLSearchParams(window.location.search);
   perf.enabled = params.get("perfDebug") === "1";
-  perf.experiments.spacingScale = Number(params.get("spacingScale") ?? "1") || 1;
-  perf.experiments.checkpointScale = Number(params.get("checkpointScale") ?? "1") || 1;
+  perf.experiments.spacingScale =
+    Number(params.get("spacingScale") ?? "1") || 1;
+  perf.experiments.checkpointScale =
+    Number(params.get("checkpointScale") ?? "1") || 1;
   perf.experiments.updateScale = Number(params.get("updateScale") ?? "1") || 1;
   perf.experiments.bitmapDab = params.get("bitmapDab") === "1";
+  perf.experiments.gpuDab =
+    params.get("gpuDab") === "webgl2" ? "webgl2" : "off";
   for (const name of Object.keys(perf.nullStages) as Array<
     keyof typeof perf.nullStages
   >) {

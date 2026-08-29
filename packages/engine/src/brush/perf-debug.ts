@@ -14,6 +14,8 @@ export const BRUSH_PERF_STAGE_NAMES = [
   "materialAdvance",
   "materialUpload",
   "checkpointReadback",
+  "gpuFlush",
+  "gpuCommit",
   "samplingLayerCopy",
   "appendCommitted",
   "renderUpdateCallback",
@@ -72,6 +74,7 @@ export interface BrushPerfDebug {
     checkpointScale: number;
     updateScale: number;
     bitmapDab: boolean;
+    gpuDab: "off" | "webgl2";
   };
   nullStages: BrushPerfNullStages;
   recordStage(name: BrushPerfStageName, startedAt: number): void;
@@ -129,6 +132,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
       checkpointScale: 1,
       updateScale: 1,
       bitmapDab: false,
+      gpuDab: "off",
     },
     nullStages: createNullStages(),
     recordStage(name, startedAt) {

@@ -5,6 +5,7 @@ import {
   BRUSH_MIXING_MIN_FIELD_DIMENSION,
   DEFAULT_BRUSH_MIXING,
 } from "../types";
+import { getActiveGpuStrokeSurface } from "./gpu/gpu-stroke-surface";
 import {
   advanceMaterialField,
   createMaterialField,
@@ -164,9 +165,7 @@ export function updateMixingAfterDeposit(
     input.stampDistance - lastUpdate >=
       input.mixing.updateDistancePx * brushPerfDebug.experiments.updateScale
   ) {
-    if (!state.checkpointPixels) {
-      state = captureCheckpoint(input, state, input.sourceLayer.canvas, false);
-    }
+    state = prepareInitialMixingCheckpoint(input, state);
     const sampleStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const sample = sampleCheckpointFootprint(input, state);
     if (brushPerfDebug.enabled) {
@@ -200,11 +199,21 @@ export function updateMixingAfterDeposit(
   const lastCheckpoint = state.lastCheckpointDistance ?? 0;
   if (
     input.stampDistance - lastCheckpoint >=
-    input.mixing.checkpointDistancePx * brushPerfDebug.experiments.checkpointScale
+    input.mixing.checkpointDistancePx *
+      brushPerfDebug.experiments.checkpointScale
   ) {
     state = captureCheckpoint(input, state);
   }
   return state;
+}
+
+/** GPU 経路では最初の deposit を積む前に stroke-start snapshot を読む。 */
+export function prepareInitialMixingCheckpoint(
+  input: MixingUpdateInput,
+  state: BrushMixingState,
+): BrushMixingState {
+  if (state.checkpointPixels) return state;
+  return captureCheckpoint(input, state, input.sourceLayer.canvas, false);
 }
 
 function sampleCheckpointFootprint(
@@ -241,13 +250,34 @@ function captureCheckpoint(
     1,
     Math.ceil(input.checkpointFootprintSize * Math.SQRT2 + margin * 2 + 4),
   );
+  const originX = input.x - tileSize / 2;
+  const originY = input.y - tileSize / 2;
+  const gpuSurface = getActiveGpuStrokeSurface();
+  if (gpuSurface) {
+    const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+    const checkpointPixels = new ImageData(tileSize, tileSize);
+    checkpointPixels.data.set(
+      gpuSurface.readCheckpoint(originX, originY, tileSize),
+    );
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("checkpointReadback", readbackStartedAt);
+      brushPerfDebug.recordSample("checkpoints", 1);
+    }
+    return {
+      ...state,
+      checkpointPixels,
+      checkpointOriginX: originX,
+      checkpointOriginY: originY,
+      lastCheckpointDistance: updateCheckpointDistance
+        ? input.stampDistance
+        : state.lastCheckpointDistance,
+    };
+  }
   const checkpointCanvas = ensureCanvasSize(
     state.checkpointCanvas,
     tileSize,
     tileSize,
   );
-  const originX = input.x - tileSize / 2;
-  const originY = input.y - tileSize / 2;
   const ctx = getCached2dContext(checkpointCanvas, "material checkpoint");
   ctx.save();
   ctx.globalAlpha = 1;
@@ -359,6 +389,18 @@ function uploadMaterialCanvas(
     return;
   }
   writeMaterialFieldPixels(state.field, state.fieldPixels.data);
+  const gpuSurface = getActiveGpuStrokeSurface();
+  if (gpuSurface) {
+    gpuSurface.updateField(
+      state.fieldPixels.data,
+      state.fieldPixels.width,
+      state.fieldPixels.height,
+    );
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("materialUpload", startedAt);
+    }
+    return;
+  }
   const fieldCtx = getCached2dContext(state.fieldCanvas, "material field");
   fieldCtx.putImageData(state.fieldPixels, 0, 0);
 
@@ -379,7 +421,10 @@ function uploadMaterialCanvas(
   renderCtx.restore();
   if (brushPerfDebug.experiments.bitmapDab) {
     dabBitmapCache.get(state.renderCanvas)?.close();
-    dabBitmapCache.set(state.renderCanvas, state.renderCanvas.transferToImageBitmap());
+    dabBitmapCache.set(
+      state.renderCanvas,
+      state.renderCanvas.transferToImageBitmap(),
+    );
   }
   if (brushPerfDebug.enabled) {
     brushPerfDebug.recordStage("materialUpload", startedAt);

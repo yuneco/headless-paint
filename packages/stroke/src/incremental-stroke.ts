@@ -60,6 +60,17 @@ export function createIncrementalStrokeRenderer(
   const compiledExpand = compileExpand(config.expand);
   const samplingLayer =
     config.sourceLayer ?? createSamplingLayer(config.layer, config.style);
+  const gpuRuntime = getGpuStrokeRuntime();
+  const gpuOwner = {};
+  const gpuStrokeActive =
+    brushPerfGpuDabEnabled() &&
+    config.style.brush.type === "stamp" &&
+    isBrushMixingActive(config.style.brush.mixing) &&
+    config.style.compositeOperation === "source-over" &&
+    !config.alphaLocked &&
+    compiledExpand.outputCount === 1 &&
+    !!samplingLayer &&
+    !!gpuRuntime?.beginStroke(gpuOwner, samplingLayer.canvas);
 
   let filterState: FilterPipelineState = createFilterPipelineState(
     compiledFilterPipeline,
@@ -100,16 +111,21 @@ export function createIncrementalStrokeRenderer(
     ).__hpBrushPerf;
     const appendStartedAt = perfDebug?.enabled ? performance.now() : 0;
     if (hasNewCommitted) {
-      brushState = appendToCommittedLayer(
-        config.layer,
-        batchUpdate.newlyCommitted,
-        config.style,
-        compiledExpand,
-        batchUpdate.committedOverlapCount,
-        brushState,
-        samplingLayer,
-        config.alphaLocked,
-      );
+      if (gpuStrokeActive) gpuRuntime?.enter(gpuOwner);
+      try {
+        brushState = appendToCommittedLayer(
+          config.layer,
+          batchUpdate.newlyCommitted,
+          config.style,
+          compiledExpand,
+          batchUpdate.committedOverlapCount,
+          brushState,
+          samplingLayer,
+          config.alphaLocked,
+        );
+      } finally {
+        if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
+      }
       renderedCommittedCount = nextCommittedCount;
     }
     if (perfDebug?.enabled) {
@@ -163,6 +179,9 @@ export function createIncrementalStrokeRenderer(
     hasFed = true;
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
+      if (gpuStrokeActive) {
+        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+      }
       return;
     }
     for (const point of points) {
@@ -182,19 +201,59 @@ export function createIncrementalStrokeRenderer(
     },
     feedMany,
     finalize() {
-      if (finalized || !hasFed) return;
+      if (finalized) return;
+      if (!hasFed) {
+        finalized = true;
+        if (gpuStrokeActive) gpuRuntime?.endStroke(gpuOwner);
+        return;
+      }
       if (pendingBristlePoints.length > 0) {
         processBatch(pendingBristlePoints);
         pendingBristlePoints = [];
       }
-      if (!strokeSession) return;
+      if (!strokeSession) {
+        if (gpuStrokeActive) gpuRuntime?.endStroke(gpuOwner);
+        return;
+      }
       finalized = true;
       const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
       const strokeResult = addPointToSession(strokeSession, finalOutput);
       strokeSession = strokeResult.state;
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
+      if (gpuStrokeActive) {
+        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+        gpuRuntime?.endStroke(gpuOwner);
+      }
     },
   };
+}
+
+interface GpuStrokeRuntimeBridge {
+  beginStroke(owner: object, sourceCanvas: OffscreenCanvas): boolean;
+  enter(owner: object): void;
+  leave(owner: object): void;
+  commitToLayer(owner: object, layer: Layer): void;
+  endStroke(owner: object): void;
+}
+
+function getGpuStrokeRuntime(): GpuStrokeRuntimeBridge | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      __hpGpuStrokeRuntime?: GpuStrokeRuntimeBridge;
+    }
+  ).__hpGpuStrokeRuntime;
+}
+
+function brushPerfGpuDabEnabled(): boolean {
+  return (
+    (
+      globalThis as typeof globalThis & {
+        __hpBrushPerf?: {
+          readonly experiments: { readonly gpuDab?: "off" | "webgl2" };
+        };
+      }
+    ).__hpBrushPerf?.experiments.gpuDab === "webgl2"
+  );
 }
 
 function shouldFlushBristleBatch(

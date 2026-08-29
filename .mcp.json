@@ -2,18 +2,12 @@
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": [
-        "@playwright/mcp@latest",
-        "--browser",
-        "chrome"
-      ]
+      "args": ["@playwright/mcp@latest", "--browser", "chrome"]
     },
     "safari-mcp-stp": {
       "type": "stdio",
       "command": "/Applications/Safari Technology Preview.app/Contents/MacOS/safaridriver",
-      "args": [
-        "--mcp"
-      ],
+      "args": ["--mcp"],
       "env": {}
     }
   }

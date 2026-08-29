@@ -97,7 +97,10 @@ interface PendingStart {
 const DEFAULT_RANDOM_SEED = (): number => (Math.random() * 0xffffffff) | 0;
 
 function getPerfDebug():
-  | { readonly enabled: boolean; recordStage(name: string, startedAt: number): void }
+  | {
+      readonly enabled: boolean;
+      recordStage(name: string, startedAt: number): void;
+    }
   | undefined {
   return (
     globalThis as typeof globalThis & {

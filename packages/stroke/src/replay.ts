@@ -39,9 +39,7 @@ function replayStrokeCommand(
     alphaLocked: command.alphaLocked,
     registry,
   });
-  for (const point of command.inputPoints) {
-    renderer.feed(point);
-  }
+  renderer.feedMany(command.inputPoints);
   renderer.finalize();
 }
 
