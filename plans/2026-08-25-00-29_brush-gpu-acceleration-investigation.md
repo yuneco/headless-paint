@@ -634,3 +634,9 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - Chromiumは `gpuCommit` 241回×4ms=967msが支配しCPU経路に劣る → **backend選択はWebKit系のみGPU**が現時点の結論。Chromium向けにはWebGPU版のcommit経路を評価する余地
 - 残課題: Expand、stroke開始full-layer upload（短stroke連打・undo9）、compositeOperation≠source-over、context loss、field texture format（RGBA16F/8）差の扱い、Tier B閾値の正式化
 - **実Safari（STP、Safari MCP）**: CPU dispatch 7/10・undoLong 2726ms → GPU gpu-field dispatch **1/1**・undoLong **689ms（−75%）**、undo9 471→401、checkpointReadback 0回、gpuCommit 241回87ms。Playwright WebKitと一致
+
+### 18.14 iPad実機（gpu-field、2026-08-29）
+- **決定性OK**（Undo後に色が変わる不具合は解消）。色混ぜの感触は良好（「少し弱い？」は主観範囲。parityで経路差なしを確認済みのため個別検証はスキップ。強さはパラメタで調整可）
+- Undoの体感は前回より改善（条件によるブレあり）
+- 課題: **短strokeを間隔なく連打すると2〜3本まとめて描画される**ことがある → stroke開始のfull-layer upload（16MB）が原因。accumのstroke間常駐（18.15）で対処
+- 次: 1. accum常駐 → 2. Expand対応 → 採用判断gate → 正式設計（F1）
