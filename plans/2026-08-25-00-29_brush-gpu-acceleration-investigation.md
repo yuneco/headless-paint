@@ -591,3 +591,10 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - Playwright WebKit（8/11 → 1/2）と同傾向。**実Safariでも同期点除去の効果を確認**
 - runner: `work.local/benchmark-acrylic-stp.py`（`GPU_DAB` / `GPU_READBACK` / `BATCHES` / `SAMPLES` / `REPEATS`）。自動化ウィンドウは人がクリックして可視にする必要あり（背景実行では120秒待っても`hidden`のまま。ユーザーが`!`で実行すると成功）
 - 残課題: undo9はGPUが約10%遅い（stroke開始のfull-layer upload）。Chromiumではcommit 2.9ms/回でCPU経路に劣る
+
+### 18.9 色付きparity（2026-08-29、`work.local/benchmark-acrylic-parity.mjs`、WebKit）
+- fixture: F1 赤青境界を横切るS字、F2 黄色下地で3往復、F3 青点を通過するspot pickup。同一ページでCPU→Undo→GPUを同じ入力列で描き、Tier B metric＋CPU/GPU/差分の横並び画像（`work.local/results/parity-webkit/*-comparison.png`）
+- **バグ発見→修正**: asyncでは下地色を一切pickupしていなかった（async tileを前batchのdirty rectに縮めたため、次batchのfootprintがtile外＝全画素透明扱い）。修正: 最新dab中心の最大512²を読む
+- 修正後（async）: F1 RGB MAE 0.024 / |Δ|>0.1 0.96%、F2 0.021 / 0.99%、F3 0.0066 / 0%。目視では1 batch遅れ分がわずかに明るい程度。sync: F1 0.0045 / 0%
+- 性能（WebKit、backlog）: async dispatch **2/3ms**（tile 512²でreadback 262k px/batch: gpuReadRequest 40ms + checkpointReadback 66ms）。CPU 8/11比 −75%。tileを256²程度に縮めれば1/2msへ戻せる見込み
+- 補足: harnessの`pass`判定はcoverage相対差1%が表示canvas ROI基準で厳しすぎる（1.6〜3.7%）。閾値/測り方は正式化時に見直す

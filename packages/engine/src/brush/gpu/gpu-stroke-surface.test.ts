@@ -62,14 +62,35 @@ describe("GpuStrokeSurface", () => {
 
     expect(checkpoint).not.toBeNull();
     if (!checkpoint) return;
-    expect(checkpoint.originX).toBe(9);
-    expect(checkpoint.originY).toBe(7);
-    expect(checkpoint.width).toBe(1);
-    expect(checkpoint.height).toBe(1);
-    expectChannelNear(checkpoint.pixels[0], 30);
-    expectChannelNear(checkpoint.pixels[1], 140);
-    expectChannelNear(checkpoint.pixels[2], 220);
-    expectChannelNear(checkpoint.pixels[3], 191);
+    expect(checkpoint.originX).toBe(0);
+    expect(checkpoint.originY).toBe(0);
+    expect(checkpoint.width).toBe(layer.width);
+    expect(checkpoint.height).toBe(layer.height);
+    expectCheckpointDocumentPixel(checkpoint, 9, 7, [30, 140, 220, 191]);
+  });
+
+  it("async checkpoint の document 座標が色付き source と一致する", async () => {
+    const layer = createLayer(96, 64);
+    layer.ctx.fillStyle = "rgb(220, 30, 20)";
+    layer.ctx.fillRect(0, 0, layer.width / 2, layer.height);
+    layer.ctx.fillStyle = "rgb(20, 40, 230)";
+    layer.ctx.fillRect(layer.width / 2, 0, layer.width / 2, layer.height);
+
+    const surface = acquireGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+    configureSolidDab(surface, [0, 0, 0, 0], 8);
+    surface.pushDab({ x: 48, y: 32, size: 8, rotation: 0, alpha: 1 });
+    surface.flush();
+    surface.requestCheckpoint();
+
+    const checkpoint = await takeCheckpointAfterFrames(surface);
+    expect(checkpoint).not.toBeNull();
+    if (!checkpoint) return;
+    expectCheckpointDocumentPixel(checkpoint, 16, 12, [220, 30, 20, 255]);
+    expectCheckpointDocumentPixel(checkpoint, 80, 45, [20, 40, 230, 255]);
   });
 
   it("単色 field と円 tip の dab を layer に commit する", () => {
@@ -233,6 +254,29 @@ function expectPixelNear(
   const pixel = layer.ctx.getImageData(x, y, 1, 1).data;
   for (let channel = 0; channel < expected.length; channel++) {
     expectChannelNear(pixel[channel], expected[channel] ?? 0);
+  }
+}
+
+function expectCheckpointDocumentPixel(
+  checkpoint: NonNullable<
+    ReturnType<GpuStrokeSurface["takeCompletedCheckpoint"]>
+  >,
+  x: number,
+  y: number,
+  expected: readonly [number, number, number, number],
+): void {
+  const localX = x - checkpoint.originX;
+  const localY = y - checkpoint.originY;
+  expect(localX).toBeGreaterThanOrEqual(0);
+  expect(localX).toBeLessThan(checkpoint.width);
+  expect(localY).toBeGreaterThanOrEqual(0);
+  expect(localY).toBeLessThan(checkpoint.height);
+  const offset = (localY * checkpoint.width + localX) * 4;
+  for (let channel = 0; channel < expected.length; channel++) {
+    expectChannelNear(
+      checkpoint.pixels[offset + channel],
+      expected[channel] ?? 0,
+    );
   }
 }
 

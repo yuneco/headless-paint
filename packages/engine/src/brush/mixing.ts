@@ -5,7 +5,10 @@ import {
   BRUSH_MIXING_MIN_FIELD_DIMENSION,
   DEFAULT_BRUSH_MIXING,
 } from "../types";
-import { getActiveGpuStrokeSurface } from "./gpu/gpu-stroke-surface";
+import {
+  type CompletedGpuCheckpoint,
+  getActiveGpuStrokeSurface,
+} from "./gpu/gpu-stroke-surface";
 import {
   advanceMaterialField,
   createMaterialField,
@@ -167,28 +170,11 @@ export function updateMixingAfterDeposit(
   ) {
     state = prepareInitialMixingCheckpoint(input, state);
     state = takeCompletedGpuCheckpoint(state);
-    const sampleStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    const sample = sampleCheckpointFootprint(input, state);
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("materialSample", sampleStartedAt);
-    }
     const distancePx =
       lastUpdate === undefined
         ? input.mixing.updateDistancePx
         : input.stampDistance - lastUpdate;
-    const field = advanceMaterialField(
-      state.field,
-      sample,
-      input.mixing.fieldColumns,
-      input.mixing.fieldRows,
-      input.baseColor,
-      {
-        pickupRatePerPx: input.mixing.pickupRatePerPx,
-        restoreRatePerPx: input.mixing.restoreRatePerPx,
-        diffusionRatePerPx: input.mixing.diffusionRatePerPx,
-        distancePx,
-      },
-    );
+    const field = advanceMixingFieldFromCheckpoint(input, state, distancePx);
     state = {
       ...state,
       field,
@@ -319,6 +305,13 @@ function takeCompletedGpuCheckpoint(
   }
   const completed = gpuSurface.takeCompletedCheckpoint();
   if (!completed) return state;
+  return applyCompletedGpuCheckpoint(state, completed);
+}
+
+export function applyCompletedGpuCheckpoint(
+  state: BrushMixingState,
+  completed: CompletedGpuCheckpoint,
+): BrushMixingState {
   const checkpointPixels = new ImageData(completed.width, completed.height);
   checkpointPixels.data.set(completed.pixels);
   return {
@@ -327,6 +320,31 @@ function takeCompletedGpuCheckpoint(
     checkpointOriginX: completed.originX,
     checkpointOriginY: completed.originY,
   };
+}
+
+export function advanceMixingFieldFromCheckpoint(
+  input: MixingUpdateInput,
+  state: BrushMixingState,
+  distancePx: number,
+): Float32Array {
+  const sampleStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  const sample = sampleCheckpointFootprint(input, state);
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("materialSample", sampleStartedAt);
+  }
+  return advanceMaterialField(
+    state.field,
+    sample,
+    input.mixing.fieldColumns,
+    input.mixing.fieldRows,
+    input.baseColor,
+    {
+      pickupRatePerPx: input.mixing.pickupRatePerPx,
+      restoreRatePerPx: input.mixing.restoreRatePerPx,
+      diffusionRatePerPx: input.mixing.diffusionRatePerPx,
+      distancePx,
+    },
+  );
 }
 
 function sampleRotatedCheckpoint(

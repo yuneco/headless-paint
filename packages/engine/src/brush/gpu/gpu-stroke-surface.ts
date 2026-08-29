@@ -27,7 +27,7 @@ interface PendingCheckpointReadback {
   readonly readHeight: number;
 }
 
-interface CompletedGpuCheckpoint {
+export interface CompletedGpuCheckpoint {
   readonly originX: number;
   readonly originY: number;
   readonly width: number;
@@ -532,29 +532,21 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     ) {
       return;
     }
-    const committedWidth = committed.right - committed.left;
-    const committedHeight = committed.bottom - committed.top;
-    const exceedsLimit =
-      committedWidth > COMMIT_CANVAS_SIZE ||
-      committedHeight > COMMIT_CANVAS_SIZE;
-    const width = exceedsLimit
-      ? Math.min(COMMIT_CANVAS_SIZE, this.width)
-      : committedWidth;
-    const height = exceedsLimit
-      ? Math.min(COMMIT_CANVAS_SIZE, this.height)
-      : committedHeight;
-    const left = exceedsLimit
-      ? Math.max(
-          0,
-          Math.min(Math.floor(latestDab.x - width / 2), this.width - width),
-        )
-      : committed.left;
-    const top = exceedsLimit
-      ? Math.max(
-          0,
-          Math.min(Math.floor(latestDab.y - height / 2), this.height - height),
-        )
-      : committed.top;
+    // The completed checkpoint is sampled by the following pointer batch.
+    // A dirty rect only covers the previous batch's deposits, so even normal
+    // pointer movement places the next footprint outside that tile. Keep the
+    // bounded readback centered on the latest dab to provide spatial slack for
+    // the one-batch async lag.
+    const width = Math.min(COMMIT_CANVAS_SIZE, this.width);
+    const height = Math.min(COMMIT_CANVAS_SIZE, this.height);
+    const left = Math.max(
+      0,
+      Math.min(Math.floor(latestDab.x - width / 2), this.width - width),
+    );
+    const top = Math.max(
+      0,
+      Math.min(Math.floor(latestDab.y - height / 2), this.height - height),
+    );
     this.requestCheckpointAsync({
       left,
       top,
