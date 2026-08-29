@@ -667,3 +667,13 @@ E0で判明した主因（material updateで書き換えた小canvasをdab sourc
 - 実装: branchごとのfieldを`TEXTURE_2D_ARRAY`のlayerに保持、dab instanceに`branchIndex`、branch順にflushしてCPUと同じ重なり順序。parity（radial 4、中心重なり）Tier B通過、live/replay byte一致。branch上限12（超過はCPU fallback）。テスト502件green
 - **liveが伸びない原因はcommit**: dirty rectの和が対称展開でlayer全体になり、毎batch 2048²をblit+drawImage → branchごとのdirty rectでcommitする修正が必要
 - branchごとのdirty rect commit後（`21fe05f`）: radial 4 dispatch 12/14（commit 241回×8ms、転送p50 57k px）、radial 8 22/26（14ms/回）。**転送量に比例せず、branchごとの「blit→drawImage」往復が原因**。gpuFieldUpdateもbranch数倍（r8で1.5s）。対策: commitのパッキング（全rectを一括blit→drawImage群）と、全branchのfieldを1 passで更新するstrip化 → 委譲中
+
+### 18.18 commitパッキング＋field一括更新後（2026-08-29、WebKit、gpu-field、常駐ON）
+| 条件 | dispatch p50/p95 | undo9 | undoLong | parity F1（RGB MAE / |Δ|>0.1） |
+|---|---|---|---|---|
+| radial 1 GPU | 1/2 | 227 | 738 | 0.0116 / 0% |
+| radial 4 GPU | **2/3**（CPU 16/24） | 263（CPU 1580） | **944**（CPU 9392） | **0.051 / 45.9%（要修正）** |
+| radial 8 GPU | **2/3**（CPU 28/45） | 296（CPU 3045） | **1006**（CPU 19137） | — |
+- commitは全branch rectを1024²にshelf packingして一括blit→drawImage群（1 commit 0.2ms）。fieldは`columns × (rows×branchCount)`のstripで全branch 1 pass更新
+- strip化で単branchのparityが一度壊れた（dab shaderの補間式変更＋branch=1でも不要なflush分割→即時再pickup）→ 修正済み
+- **残: Expand時のparity**（branch間のpickup順序: CPUはbranchごとに逐次でcheckpoint tileを読む、GPUは全branchを同時にaccumから読む）。調査中
