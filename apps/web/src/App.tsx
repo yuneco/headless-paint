@@ -49,6 +49,13 @@ const LAYER_WIDTH =
 const LAYER_HEIGHT = LAYER_WIDTH;
 const SETTINGS_STORAGE_KEY = "headless-paint:settings";
 
+type EngineBackendSetting = "auto" | "webgl2" | "cpu";
+
+interface PersistedAppSettings {
+  readonly paint: PaintSettingsSnapshot;
+  readonly engineBackend: EngineBackendSetting;
+}
+
 type InputCaptureStatus = "idle" | "armed" | "capturing" | "captured";
 
 interface UndoTimingEntry {
@@ -153,20 +160,44 @@ function ensureUndoTimingDebug(): UndoTimingDebug {
 configureBrushPerfDebugFromUrl();
 ensureUndoTimingDebug();
 
-function saveSettingsSnapshot(snapshot: PaintSettingsSnapshot): void {
+function isEngineBackendSetting(value: unknown): value is EngineBackendSetting {
+  return value === "auto" || value === "webgl2" || value === "cpu";
+}
+
+function getGpuBackendUrlOverride(): EngineBackendSetting | null {
+  const value = new URLSearchParams(window.location.search).get("gpuBackend");
+  return isEngineBackendSetting(value) ? value : null;
+}
+
+function saveSettingsSnapshot(
+  snapshot: PaintSettingsSnapshot,
+  engineBackend: EngineBackendSetting,
+): void {
   try {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(snapshot));
+    localStorage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ ...snapshot, engineBackend }),
+    );
   } catch {
     // noop: localStorage の容量超過時もアプリは継続
   }
 }
 
-function loadSettingsSnapshot(): PaintSettingsSnapshot | null {
+function loadSettingsSnapshot(): PersistedAppSettings | null {
   const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return importPaintSettings(parsed);
+    const paint = importPaintSettings(parsed);
+    if (!paint) return null;
+    const engineBackend =
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "engineBackend" in parsed &&
+      isEngineBackendSetting(parsed.engineBackend)
+        ? parsed.engineBackend
+        : "auto";
+    return { paint, engineBackend };
   } catch {
     return null;
   }
@@ -175,7 +206,7 @@ function loadSettingsSnapshot(): PaintSettingsSnapshot | null {
 export function App() {
   const [sessionKey, setSessionKey] = useState(0);
   const [initialSettings, setInitialSettings] =
-    useState<PaintSettingsSnapshot | null>(() => loadSettingsSnapshot());
+    useState<PersistedAppSettings | null>(() => loadSettingsSnapshot());
 
   const handleReset = useCallback(() => {
     const confirmed = window.confirm(
@@ -197,12 +228,15 @@ export function App() {
 }
 
 interface PaintWorkspaceProps {
-  readonly initialSettings: PaintSettingsSnapshot | null;
+  readonly initialSettings: PersistedAppSettings | null;
   readonly onReset: () => void;
 }
 
 function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
-  const restoredSettings = initialSettings;
+  const restoredSettings = initialSettings?.paint ?? null;
+  const persistedGpuBackend = initialSettings?.engineBackend ?? "auto";
+  const gpuBackendUrlOverride = getGpuBackendUrlOverride();
+  const gpuBackend = gpuBackendUrlOverride ?? persistedGpuBackend;
   const [tool, setTool] = useState<ToolType>("pen");
   const { width: viewWidth, height: viewHeight } = useWindowSize();
   const {
@@ -327,6 +361,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     expandConfig: expand.config,
     compiledExpand: expand.compiled,
     registry: registryRef.current,
+    gpuBackend,
   });
   const inputCaptureArmedRef = useRef(false);
   const inputCaptureActiveRef = useRef(false);
@@ -538,10 +573,9 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     penSettings.setEraser(tool === "eraser");
   }, [tool, penSettings.setEraser]);
 
-  useEffect(() => {
-    if (!settingsHydrated) return;
-    const timerId = window.setTimeout(() => {
-      const snapshot = exportPaintSettings({
+  const createSettingsSnapshot = useCallback(
+    () =>
+      exportPaintSettings({
         tool,
         transform,
         background,
@@ -557,24 +591,42 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
           windowSize: smoothing.windowSize,
         },
         expand: expand.config,
-      });
-      saveSettingsSnapshot(snapshot);
+      }),
+    [
+      tool,
+      transform,
+      background,
+      penSettings.color,
+      penSettings.lineWidth,
+      penSettings.pressureCurve,
+      penSettings.eraser,
+      penSettings.brush,
+      smoothing.enabled,
+      smoothing.windowSize,
+      expand.config,
+    ],
+  );
+
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    const timerId = window.setTimeout(() => {
+      saveSettingsSnapshot(createSettingsSnapshot(), persistedGpuBackend);
     }, 300);
     return () => window.clearTimeout(timerId);
-  }, [
-    settingsHydrated,
-    tool,
-    transform,
-    background,
-    penSettings.color,
-    penSettings.lineWidth,
-    penSettings.pressureCurve,
-    penSettings.eraser,
-    penSettings.brush,
-    smoothing.enabled,
-    smoothing.windowSize,
-    expand.config,
-  ]);
+  }, [settingsHydrated, createSettingsSnapshot, persistedGpuBackend]);
+
+  const handleGpuBackendChange = useCallback(
+    (nextBackend: EngineBackendSetting) => {
+      saveSettingsSnapshot(createSettingsSnapshot(), nextBackend);
+      if (gpuBackendUrlOverride !== null) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("gpuBackend", nextBackend);
+        window.history.replaceState(null, "", url);
+      }
+      window.location.reload();
+    },
+    [createSettingsSnapshot, gpuBackendUrlOverride],
+  );
 
   // タッチジェスチャー
   const touchGesture = useTouchGesture({
@@ -840,6 +892,10 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         onResetOffset={engine.onResetOffset}
         showTouchDebug={showTouchDebug}
         onToggleTouchDebug={handleToggleTouchDebug}
+        gpuBackendSetting={gpuBackend}
+        gpuBackend={engine.gpuBackend}
+        gpuBackendReason={engine.gpuBackendReason}
+        onGpuBackendChange={handleGpuBackendChange}
       />
     </div>
   );

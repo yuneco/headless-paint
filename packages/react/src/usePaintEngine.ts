@@ -1,9 +1,13 @@
 import {
+  createBrushAccelerator,
   createLayer,
+  isBrushMixingActive,
   transformLayer,
   wrapShiftLayer,
 } from "@headless-paint/core";
 import type {
+  BrushAccelerator,
+  BrushAcceleratorBackend,
   BrushTipRegistry,
   CompiledExpand,
   ExpandConfig,
@@ -40,14 +44,14 @@ import type {
   LayerListOp,
 } from "@headless-paint/core";
 import type { mat3 } from "gl-matrix";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { InitialLayer, LayerEntry } from "./useLayers";
 import { useLayers } from "./useLayers";
 import type {
   StrokeCompleteData,
   StrokeStartOptions,
 } from "./useStrokeSession";
-import { useStrokeSession } from "./useStrokeSession";
+import { useStrokeSessionWithAccelerator } from "./useStrokeSession";
 
 export interface CustomCommandHandler<TCustom> {
   readonly apply: (cmd: TCustom, ctx: CustomCommandContext) => void;
@@ -71,6 +75,7 @@ export interface PaintEngineConfig<TCustom = never> {
   readonly registry?: BrushTipRegistry;
   readonly initialDocument?: PaintEngineInitialDocument;
   readonly customCommandHandler?: CustomCommandHandler<TCustom>;
+  readonly gpuBackend?: BrushAcceleratorBackend;
 }
 
 export interface PaintEngineInitialLayer {
@@ -85,6 +90,9 @@ export interface PaintEngineInitialDocument {
 }
 
 export interface PaintEngineResult<TCustom = never> {
+  readonly gpuBackend: "webgl2" | "cpu";
+  readonly gpuBackendReason: string;
+
   // ── レイヤー ──
   readonly entries: readonly LayerEntry[];
   readonly activeLayerId: string | null;
@@ -148,11 +156,39 @@ export interface PaintEngineResult<TCustom = never> {
   readonly strokePoints: readonly InputPoint[];
 }
 
+interface BrushAcceleratorState {
+  readonly requestedBackend: BrushAcceleratorBackend;
+  readonly accelerator: BrushAccelerator | null;
+}
+
 const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
   checkpointInterval: 10,
   maxCheckpoints: 10,
   checkpointCompression: "fast",
 };
+
+function isWebKitBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /AppleWebKit/i.test(navigator.userAgent) &&
+    !/(?:Chrome|Chromium|CriOS|Edg|EdgiOS|EdgA|Firefox|FxiOS)/i.test(
+      navigator.userAgent,
+    )
+  );
+}
+
+function describeBrushAcceleratorBackend(
+  requestedBackend: BrushAcceleratorBackend,
+  accelerator: BrushAccelerator | null,
+): string {
+  if (requestedBackend === "cpu") return "cpu (setting)";
+  if (!accelerator) {
+    return requestedBackend === "auto" && !isWebKitBrowser()
+      ? "auto: not webkit"
+      : "webgl2 unavailable";
+  }
+  return requestedBackend === "auto" ? "auto: webkit" : "webgl2 (setting)";
+}
 
 function createDuplicateLayerName(
   sourceName: string,
@@ -220,7 +256,36 @@ export function usePaintEngine<TCustom = never>(
     registry,
     initialDocument,
     customCommandHandler,
+    gpuBackend: requestedGpuBackend = "auto",
   } = config;
+
+  const [acceleratorState, setAcceleratorState] =
+    useState<BrushAcceleratorState>(() => ({
+      requestedBackend: requestedGpuBackend,
+      accelerator: null,
+    }));
+  useEffect(() => {
+    const nextAccelerator =
+      requestedGpuBackend === "cpu"
+        ? null
+        : createBrushAccelerator({ backend: requestedGpuBackend });
+    setAcceleratorState({
+      requestedBackend: requestedGpuBackend,
+      accelerator: nextAccelerator,
+    });
+    return () => {
+      nextAccelerator?.dispose();
+    };
+  }, [requestedGpuBackend]);
+  const accelerator =
+    acceleratorState.requestedBackend === requestedGpuBackend
+      ? acceleratorState.accelerator
+      : null;
+  const gpuBackend = accelerator?.backend ?? "cpu";
+  const gpuBackendReason = describeBrushAcceleratorBackend(
+    requestedGpuBackend,
+    accelerator,
+  );
 
   const registryRef = useRef(registry);
   registryRef.current = registry;
@@ -343,7 +408,7 @@ export function usePaintEngine<TCustom = never>(
     [findEntry, activeLayerId, entriesRef, commitHistoryState],
   );
 
-  const session = useStrokeSession({
+  const session = useStrokeSessionWithAccelerator({
     layer: activeEntry?.committedLayer ?? null,
     pendingLayer,
     strokeStyle,
@@ -352,7 +417,19 @@ export function usePaintEngine<TCustom = never>(
     compiledExpand,
     onStrokeComplete,
     registry,
+    accelerator,
   });
+
+  useEffect(() => {
+    const brush = strokeStyle.brush;
+    if (
+      brush.type === "stamp" &&
+      isBrushMixingActive(brush.mixing) &&
+      activeEntry?.committedLayer
+    ) {
+      accelerator?.warmUp(activeEntry.committedLayer);
+    }
+  }, [accelerator, activeEntry?.committedLayer, strokeStyle.brush]);
 
   const handleStrokeStart = useCallback(
     (point: InputPoint, options?: StrokeStartOptions) => {
@@ -752,6 +829,7 @@ export function usePaintEngine<TCustom = never>(
         tipRegistry: registryRef.current,
         customExecutor: createCustomExecutor(),
         shiftTempCanvas,
+        accelerator,
       });
 
       if (!result.ok) {
@@ -774,6 +852,7 @@ export function usePaintEngine<TCustom = never>(
       activeLayerId,
       entriesRef,
       shiftTempCanvas,
+      accelerator,
       createCustomExecutor,
       applyLayerListOps,
       setActiveLayerId,
@@ -819,6 +898,9 @@ export function usePaintEngine<TCustom = never>(
   );
 
   return {
+    gpuBackend,
+    gpuBackendReason,
+
     // レイヤー
     entries,
     activeLayerId,

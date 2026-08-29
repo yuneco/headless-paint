@@ -354,7 +354,6 @@ interface UseStrokeSessionConfig {
   /** 対称展開の設定（useExpand.config を渡す） */
   readonly expandConfig: ExpandConfig;
   /** 対称展開の構築済み変換（useExpand.compiled を渡す） */
-  readonly gpuBackend?: "auto" | "webgl2" | "cpu"; // GPU 加速器（既定 "auto"）。hook が生成・注入・warmUp・dispose を行う。engine.gpuBackend / gpuBackendReason で現在値を取得
   readonly compiledExpand: CompiledExpand;
   /** ストローク完了時に呼ばれるコールバック。履歴記録やコマンド生成に利用する */
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
@@ -537,6 +536,8 @@ interface PaintEngineConfig<TCustom = never> {
   readonly historyConfig?: HistoryConfig;
   /** 画像ベースチップ用のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
   readonly registry?: BrushTipRegistry;
+  /** GPU 加速器の backend（既定 "auto"）。hook が createBrushAccelerator で生成し、live runtime と Undo/Redo に注入、mixing stamp 選択時に warmUp、unmount 時に dispose する。詳細は engine docs/gpu-acceleration.md */
+  readonly gpuBackend?: "auto" | "webgl2" | "cpu";
   /** 復元用の初期ドキュメント。指定時はこの内容でレイヤー群を初期化する */
   readonly initialDocument?: PaintEngineInitialDocument;
   /** カスタムコマンドの apply/undo ハンドラ。TCustom を指定する場合は必須 */
@@ -668,6 +669,10 @@ interface PaintEngineResult<TCustom = never> {
   readonly renderVersion: number;
   /** アクティブレイヤーが描画可能な状態か */
   readonly canDraw: boolean;
+  /** 実際に使われている描画 backend（GPU 加速器が有効なら "webgl2"、それ以外は "cpu"） */
+  readonly gpuBackend: "webgl2" | "cpu";
+  /** backend の判定理由（例: "auto: webkit"、"webgl2 unavailable"、"cpu (setting)"）。デバッグ UI 向け */
+  readonly gpuBackendReason: string;
   /** 現在のストロークで蓄積された入力ポイント列（デバッグ表示用） */
   readonly strokePoints: readonly InputPoint[];
 }

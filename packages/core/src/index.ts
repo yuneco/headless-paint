@@ -71,6 +71,7 @@ export {
 } from "@headless-paint/engine";
 export {
   hashSeed,
+  isBrushMixingActive,
   mulberry32,
   renderBrushStroke,
   timeSpacingMsFromRate,
