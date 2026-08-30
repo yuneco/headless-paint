@@ -448,14 +448,14 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     // A history rebuild may start a new GPU renderer on the same accelerator.
     // Release the live owner first so recovery never needs the stale-owner path.
     const rendererUsesGpu = renderer?.usesGpu ?? false;
-    renderer?.cancel();
+    const restoredOnGpu = renderer?.cancel() ?? false;
     if (frozenConfig && committedSnapshot) {
       restoreLayerContent(
         frozenConfig.layer,
         committedSnapshot,
         deps.accelerator,
       );
-    } else if (frozenConfig && rendererUsesGpu) {
+    } else if (frozenConfig && rendererUsesGpu && !restoredOnGpu) {
       deps.restoreLayerBeforeStroke?.(frozenConfig.layer);
     }
     clearPendingLayer();

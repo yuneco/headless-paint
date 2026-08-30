@@ -473,6 +473,65 @@ describe("GpuStrokeSurface", () => {
     expectPixelNear(layer, 64, 4, [10, 20, 30, 255]);
   });
 
+  it("複数 batch の commit と未 commit dab を base から byte 一致復元する", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(128, 64);
+    layer.ctx.fillStyle = "rgb(10, 20, 30)";
+    layer.ctx.fillRect(0, 0, layer.width / 2, layer.height);
+    layer.ctx.fillStyle = "rgb(40, 50, 60)";
+    layer.ctx.fillRect(layer.width / 2, 0, layer.width / 2, layer.height);
+    const before = layer.ctx.getImageData(0, 0, layer.width, layer.height).data;
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+    configureSolidDab(surface, [220, 60, 30, 255], 8);
+
+    surface.pushDab({ x: 24, y: 32, size: 8, rotation: 0, alpha: 1 });
+    surface.commitToLayer(layer);
+    surface.pushDab({ x: 104, y: 32, size: 8, rotation: 0, alpha: 1 });
+    surface.commitToLayer(layer);
+    surface.pushDab({ x: 64, y: 32, size: 8, rotation: 0, alpha: 1 });
+    surface.flush();
+
+    surface.cancelStroke();
+
+    expect(
+      layer.ctx.getImageData(0, 0, layer.width, layer.height).data,
+    ).toEqual(before);
+    const stages = brushPerfDebug.snapshot().stages;
+    expect(stages.gpuBaseCopy.count).toBe(1);
+    expect(stages.gpuCancelRestore.count).toBe(1);
+  });
+
+  it("commit 前に accum へ flush 済みの dab も cancel で消す", () => {
+    const layer = createLayer(64, 64);
+    layer.ctx.fillStyle = "rgb(10, 20, 30)";
+    layer.ctx.fillRect(0, 0, layer.width, layer.height);
+    const before = layer.ctx.getImageData(0, 0, layer.width, layer.height).data;
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+    configureSolidDab(surface, [220, 60, 30, 255], 16);
+    surface.pushDab({ x: 32, y: 32, size: 16, rotation: 0, alpha: 1 });
+    surface.flush();
+
+    surface.cancelStroke();
+    surface.endStroke();
+    surface.beginStroke(undefined);
+    configureSolidDab(surface, [220, 60, 30, 255], 16);
+    surface.pushDab({ x: 32, y: 32, size: 16, rotation: 0, alpha: 0 });
+    surface.commitToLayer(layer);
+
+    expect(
+      layer.ctx.getImageData(0, 0, layer.width, layer.height).data,
+    ).toEqual(before);
+  });
+
   it("512px を超える dirty rect を分割 commit して layer 全域を保つ", () => {
     brushPerfDebug.enabled = true;
     brushPerfDebug.reset();

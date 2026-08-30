@@ -76,6 +76,7 @@ interface BrushAcceleratorRuntime extends BrushAccelerator {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
+  cancelStroke(owner: object): boolean;
   endStroke(owner: object): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
@@ -326,6 +327,31 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       this.invalidate(layer, "contextLost");
       this.permanentlyUnavailable = true;
     }
+  }
+
+  cancelStroke(owner: object): boolean {
+    if (this.activeOwner !== owner) return false;
+    const surface = this.activeSurface;
+    const layer = this.activeLayer;
+    if (!surface || !layer || surface.lost) {
+      if (layer) this.invalidate(layer, "contextLost");
+      if (surface?.lost) this.permanentlyUnavailable = true;
+      return false;
+    }
+    try {
+      surface.cancelStroke();
+    } catch {
+      this.invalidate(layer, "contextLost");
+      if (surface.lost) this.permanentlyUnavailable = true;
+      return false;
+    }
+    if (surface.lost) {
+      this.invalidate(layer, "contextLost");
+      this.permanentlyUnavailable = true;
+      return false;
+    }
+    this.validateResidency(layer, surface);
+    return true;
   }
 
   endStroke(owner: object): void {

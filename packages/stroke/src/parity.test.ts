@@ -23,7 +23,7 @@ import {
   createLayer,
 } from "@headless-paint/engine";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   beginHistoryMutation,
   createHistoryState,
@@ -462,6 +462,55 @@ describe("GPU mixing lifecycle fallback", () => {
     renderStrokeForLifecycle(nextActual, accelerator);
     expectPixelEqual(nextActual, nextExpected, "post-loss CPU fallback");
     expect(perf.snapshot().samples.gpuBranches).toEqual([]);
+    accelerator.dispose();
+  });
+
+  it("GPU stroke の cancel 中に context lost なら従来の layer 復元へ fallback する", async () => {
+    const accelerator = createTestAccelerator();
+    const actual = createTestLayer();
+    paintOpaqueBands(actual);
+    const before = createTestLayer();
+    copyLayerPixels(actual, before);
+    accelerator.warmUp(actual);
+    const restoreLayerBeforeStroke = vi.fn((target: Layer) => {
+      copyLayerPixels(before, target);
+    });
+    const runtime = createStrokeRuntime({
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+      now: () => INPUT_POINTS[0]?.timestamp ?? 0,
+      requestRender: () => {},
+      onCommit: () => {},
+      onDrawingChanged: () => {},
+      randomSeed: () => BRUSH_SEED,
+      accelerator,
+      restoreLayerBeforeStroke,
+    });
+    startRuntimeStroke(runtime, actual);
+    runtime.moveMany(INPUT_POINTS.slice(1, 3));
+
+    const surface = getActiveSurfaceForTest(accelerator);
+    const gl = surface.canvas.getContext("webgl2");
+    const extension = gl?.getExtension("WEBGL_lose_context");
+    if (!extension) throw new Error("WEBGL_lose_context is unavailable");
+    const contextLost = new Promise<void>((resolve) => {
+      surface.canvas.addEventListener(
+        "webglcontextlost",
+        (event) => {
+          event.preventDefault();
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    extension.loseContext();
+    await contextLost;
+
+    runtime.cancel();
+
+    expect(restoreLayerBeforeStroke).toHaveBeenCalledOnce();
+    expectPixelEqual(actual, before, "context loss cancel fallback");
+    runtime.dispose();
     accelerator.dispose();
   });
 

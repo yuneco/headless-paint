@@ -111,6 +111,7 @@ export interface GpuStrokeSurface {
   pushDab(dab: GpuDab): void;
   flush(): void;
   commitToLayer(layer: Layer): void;
+  cancelStroke(): void;
   endStroke(): void;
   dispose(): void;
 }
@@ -338,6 +339,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private readonly branchDataBuffer: WebGLBuffer;
   private accumTexture: WebGLTexture;
   private sourceTexture: WebGLTexture;
+  private readonly baseTexture: WebGLTexture;
   private readonly tipTexture: WebGLTexture;
   private readonly fieldTextures: readonly [WebGLTexture, WebGLTexture];
   private readonly fieldFramebuffers: readonly [
@@ -351,6 +353,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private materialCheckpointLayerCount = 0;
   private framebuffer: WebGLFramebuffer;
   private sourceFramebuffer: WebGLFramebuffer;
+  private readonly baseFramebuffer: WebGLFramebuffer;
   private readonly surfaceSizeLocation: WebGLUniformLocation;
   private readonly instances = new Float32Array(
     INSTANCE_CAPACITY * INSTANCE_FLOATS,
@@ -358,6 +361,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   private instanceCount = 0;
   private dirtyRects: (DirtyRect | null)[] = [null];
+  private committedDirtyRect: DirtyRect | null = null;
+  private committedLayer: Layer | null = null;
   private tipSource: OffscreenCanvas | null = null;
   private tipWidth = 0;
   private tipHeight = 0;
@@ -456,6 +461,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gl.createTexture(),
       "WebGL source texture",
     );
+    this.baseTexture = requireResource(
+      gl.createTexture(),
+      "WebGL stroke base texture",
+    );
     this.tipTexture = requireResource(gl.createTexture(), "WebGL tip texture");
     this.fieldTextures = [
       requireResource(gl.createTexture(), "WebGL field texture"),
@@ -481,6 +490,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gl.createFramebuffer(),
       "WebGL source framebuffer",
     );
+    this.baseFramebuffer = requireResource(
+      gl.createFramebuffer(),
+      "WebGL stroke base framebuffer",
+    );
     this.surfaceSizeLocation = requireResource(
       gl.getUniformLocation(this.program, "uSurfaceSize"),
       "uSurfaceSize uniform",
@@ -490,6 +503,36 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.configureBranchDataBuffer();
     this.configureTexture(this.accumTexture, gl.NEAREST);
     this.configureTexture(this.sourceTexture, gl.NEAREST);
+    this.configureTexture(this.baseTexture, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_2D, this.baseTexture);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      width,
+      height,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      null,
+    );
+    brushPerfDebug.recordEvent("realloc:strokeBase", {
+      width,
+      height,
+      bytes: width * height * 4,
+      forceRecord: true,
+    });
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.baseFramebuffer);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      this.baseTexture,
+      0,
+    );
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error("GPU stroke base framebuffer is incomplete");
+    }
     this.configureTexture(this.tipTexture, gl.LINEAR);
     for (const texture of this.fieldTextures) {
       this.configureTexture(texture, gl.LINEAR);
@@ -625,11 +668,18 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       ];
     }
     this.copyAccumToStrokeStartSource();
+    const baseCopyStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+    this.copyAccumToBase();
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("gpuBaseCopy", baseCopyStartedAt);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
     this.pendingBranchSegments = null;
     this.dirtyRects = Array<DirtyRect | null>(branchCount).fill(null);
+    this.committedDirtyRect = null;
+    this.committedLayer = null;
     this.ensureMaterialCheckpoints(branchCount);
     for (const checkpoint of this.materialCheckpoints) {
       checkpoint.initialized = false;
@@ -1172,17 +1222,45 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     this.flush();
     if (this.lost) return;
-    const commitRects = this.dirtyRects.flatMap((dirty) => {
-      if (!dirty) return [];
-      const left = Math.max(0, Math.floor(dirty.left));
-      const top = Math.max(0, Math.floor(dirty.top));
-      const right = Math.min(this.width, Math.ceil(dirty.right));
-      const bottom = Math.min(this.height, Math.ceil(dirty.bottom));
-      return right > left && bottom > top ? [{ left, top, right, bottom }] : [];
-    });
+    const commitRects = this.normalizedDirtyRects();
     this.dirtyRects = Array<DirtyRect | null>(this.branchCount).fill(null);
     if (commitRects.length === 0) return;
 
+    this.committedLayer = layer;
+    this.committedDirtyRect = unionDirtyRects([
+      this.committedDirtyRect,
+      ...commitRects,
+    ]);
+    this.commitRectsToLayer(layer, commitRects);
+  }
+
+  cancelStroke(): void {
+    this.assertStrokeBegun();
+    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+    const pendingDirtyRect = unionDirtyRects(this.normalizedDirtyRects());
+    const restoreRect = unionDirtyRects([
+      this.committedDirtyRect,
+      pendingDirtyRect,
+    ]);
+
+    // Discard queued dabs before restoring accum. Some dabs may already have
+    // reached accum through a field/checkpoint flush, so the dirty union still
+    // has to be restored even when it was never committed to the Layer.
+    this.instanceCount = 0;
+    this.pendingBranchSegments = null;
+    if (restoreRect) this.restoreBaseRectToAccum(restoreRect);
+    if (this.committedDirtyRect && this.committedLayer) {
+      this.commitRectsToLayer(this.committedLayer, [this.committedDirtyRect]);
+    }
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("gpuCancelRestore", startedAt);
+    }
+  }
+
+  private commitRectsToLayer(
+    layer: Layer,
+    commitRects: readonly DirtyRect[],
+  ): void {
     const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
     const gl = this.gl;
     const commitTiles = commitRects.flatMap(createCommitTiles);
@@ -1267,6 +1345,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.instanceCount = 0;
     this.pendingBranchSegments = null;
     this.dirtyRects = [null];
+    this.committedDirtyRect = null;
+    this.committedLayer = null;
     this.strokeBegun = false;
     this.materialFieldInitializedThisStroke = false;
     this.branchCount = 1;
@@ -1291,6 +1371,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.deleteBuffer(this.branchDataBuffer);
     gl.deleteTexture(this.accumTexture);
     gl.deleteTexture(this.sourceTexture);
+    gl.deleteTexture(this.baseTexture);
     gl.deleteTexture(this.tipTexture);
     for (const texture of this.fieldTextures) gl.deleteTexture(texture);
     for (const framebuffer of this.fieldFramebuffers) {
@@ -1300,6 +1381,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.deleteFramebuffer(this.materialCheckpointFramebuffer);
     gl.deleteFramebuffer(this.framebuffer);
     gl.deleteFramebuffer(this.sourceFramebuffer);
+    gl.deleteFramebuffer(this.baseFramebuffer);
   }
 
   private copyAccumToStrokeStartSource(): void {
@@ -1320,6 +1402,57 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gl.COLOR_BUFFER_BIT,
       gl.NEAREST,
     );
+  }
+
+  private copyAccumToBase(): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.baseFramebuffer);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.blitFramebuffer(
+      0,
+      0,
+      this.width,
+      this.height,
+      0,
+      0,
+      this.width,
+      this.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+  }
+
+  private restoreBaseRectToAccum(rect: DirtyRect): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.baseFramebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.framebuffer);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.blitFramebuffer(
+      rect.left,
+      this.height - rect.bottom,
+      rect.right,
+      this.height - rect.top,
+      rect.left,
+      this.height - rect.bottom,
+      rect.right,
+      this.height - rect.top,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+  }
+
+  private normalizedDirtyRects(): DirtyRect[] {
+    return this.dirtyRects.flatMap((dirty) => {
+      if (!dirty) return [];
+      const left = Math.max(0, Math.floor(dirty.left));
+      const top = Math.max(0, Math.floor(dirty.top));
+      const right = Math.min(this.width, Math.ceil(dirty.right));
+      const bottom = Math.min(this.height, Math.ceil(dirty.bottom));
+      return right > left && bottom > top ? [{ left, top, right, bottom }] : [];
+    });
   }
 
   private ensureMaterialCheckpoints(count: number): void {
@@ -1731,6 +1864,24 @@ function requireResource<T>(value: T | null, label: string): T {
 
 function oppositeFieldIndex(index: 0 | 1): 0 | 1 {
   return index === 0 ? 1 : 0;
+}
+
+function unionDirtyRects(
+  rects: readonly (DirtyRect | null)[],
+): DirtyRect | null {
+  let union: DirtyRect | null = null;
+  for (const rect of rects) {
+    if (!rect) continue;
+    if (!union) {
+      union = { ...rect };
+      continue;
+    }
+    union.left = Math.min(union.left, rect.left);
+    union.top = Math.min(union.top, rect.top);
+    union.right = Math.max(union.right, rect.right);
+    union.bottom = Math.max(union.bottom, rect.bottom);
+  }
+  return union;
 }
 
 function createCommitTiles(rect: DirtyRect): CommitTile[] {

@@ -55,8 +55,8 @@ export interface IncrementalStrokeRenderer {
   feed(point: InputPoint): void;
   feedMany(points: readonly InputPoint[]): void;
   finalize(): void;
-  /** Abandon the stroke without a final commit (cancel / dispose). */
-  cancel(): void;
+  /** Abandon the stroke and report whether GPU restored the committed layer. */
+  cancel(): boolean;
 }
 
 const BRISTLE_BATCH_INTERVAL_MS = 32;
@@ -262,9 +262,13 @@ export function createIncrementalStrokeRenderer(
     },
     feedMany,
     cancel() {
-      if (finalized) return;
+      if (finalized) return false;
       finalized = true;
-      if (gpuStrokeActive) gpuRuntime?.endStroke(gpuOwner);
+      if (!gpuStrokeActive) return false;
+      const restoredOnGpu =
+        !detectGpuStrokeLoss() && (gpuRuntime?.cancelStroke(gpuOwner) ?? false);
+      gpuRuntime?.endStroke(gpuOwner);
+      return restoredOnGpu && !gpuStrokeLost;
     },
     finalize() {
       if (finalized) return;
@@ -326,6 +330,7 @@ interface GpuStrokeRuntimeBridge {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
+  cancelStroke(owner: object): boolean;
   endStroke(owner: object): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;

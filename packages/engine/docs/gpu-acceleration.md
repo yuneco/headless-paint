@@ -140,11 +140,12 @@ accum と layer の同一性が崩れる操作は engine / stroke の API が内
 
 - surface は加速器ごとに layer 寸法単位で 1 つ（寸法が変わると再確保）。`dispose()` で GL リソースを解放する
 - **context lost**（および進行中の `dispose()`）: 以降の stroke は CPU 経路。進行中の stroke は GPU 側への追加・commit を止め、`finalize` 時に layer を stroke 開始前の状態へ戻してから全入力点を CPU 経路で描き直す（結果は最初から CPU で描いた場合と byte 一致）。復元は **history 機構**で行う: `createStrokeRuntime` の `restoreLayerBeforeStroke(layer)` hook を呼び出し側が注入し（react の `usePaintEngine` は `rebuildLayerFromHistory` で自動接続）、平常時に layer の読み出しや snapshot 保持は行わない。hook を注入しない低レベル利用（`createIncrementalStrokeRenderer` 直接利用など）では復元せず、部分 commit 済みの layer 上に CPU で描き直す
+- **cancel**（ジェスチャ成立などで stroke を破棄する場合）: GPU stroke は開始時に accum を GPU 内の base texture へ複製しておき、cancel 時は触った矩形だけ base から accum へ戻して通常の commit 経路で layer に書き戻す。CPU snapshot や history rebuild は使わず、常駐も維持される（context lost 中は history 復元へ fallback）。base texture は accum と同寸（2K 16MB、4K 64MB）で、stroke 開始ごとに GPU 内 blit が 1 回増える
 - stroke の cancel / dispose では GPU stroke を必ず終了する（未終了の stroke が残ると以降 CPU 経路に固定されるため）。Undo / Redo の rebuild は進行中の stroke を先に同期 cancel してから開始する（pointer-up より先に Undo が届いた場合に、rebuild と live stroke の owner が競合しないように）
 
 ## 制限
 
-- layer 寸法は 4K 程度までを想定（accum は layer 同寸で 4K = 64MB）。タイル分割は行わない
+- layer 寸法は 4K 程度までを想定（accum と base texture が layer 同寸で 4K = 64MB × 2）。タイル分割は行わない
 - branch 上限 64（既定）。UI 上それ以上作れる場合は CPU 経路になる
 - `compositeOperation` は `source-over` のみ
 - WebGPU は未対応（WebGL2 のみ）

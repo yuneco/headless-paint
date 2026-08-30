@@ -10,6 +10,7 @@ import {
   DEFAULT_PRESSURE_CURVE,
   ROUND_PEN,
   clearLayer,
+  copyLayerPixels,
   createBrushAccelerator,
   createLayer,
 } from "@headless-paint/engine";
@@ -316,6 +317,68 @@ describe("GPU layer residency", () => {
     );
   });
 
+  it.each([
+    ["通常", EXPAND, 1],
+    ["radial 4 Expand", RADIAL_EXPAND_4, 4],
+  ] as const)(
+    "%s GPU stroke の cancel は history 復元せず byte 一致し次 stroke も residency hit する",
+    (_label, expand, branchCount) => {
+      const perf = configurePerf();
+      const accelerator = requireAccelerator({ resident: true });
+      const layer = createTestLayer();
+      const before = createLayer(WIDTH, HEIGHT);
+      copyLayerPixels(layer, before);
+      const pendingLayer = createLayer(WIDTH, HEIGHT);
+      const rebuildSpy = vi.fn(rebuildLayerFromHistory);
+      const restoreLayerBeforeStroke = vi.fn((target: Layer) => {
+        rebuildSpy(
+          target,
+          createHistoryState(WIDTH, HEIGHT, { layerCount: 1 }),
+        );
+      });
+      accelerator.warmUp(layer);
+      perf.reset();
+      const runtime = createStrokeRuntime({
+        setTimeout: () => 0,
+        clearTimeout: () => {},
+        now: () => performance.now(),
+        requestRender: () => {},
+        onCommit: () => {},
+        onDrawingChanged: () => {},
+        randomSeed: () => 303,
+        accelerator,
+        restoreLayerBeforeStroke,
+      });
+
+      runtime.start(FIRST_GPU_POINTS[0], {
+        layer,
+        pendingLayer,
+        style: GPU_STYLE,
+        filterPipeline: FILTER_PIPELINE,
+        expand,
+        alphaLocked: false,
+        pendingOnly: false,
+      });
+      runtime.move(FIRST_GPU_POINTS[1]);
+      runtime.move(FIRST_GPU_POINTS[2]);
+      runtime.cancel();
+
+      expectPixelEqual(layer, before, `${branchCount} branch GPU cancel`);
+      expect(restoreLayerBeforeStroke).not.toHaveBeenCalled();
+      expect(rebuildSpy).not.toHaveBeenCalled();
+
+      drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 404, expand, accelerator);
+      const snapshot = perf.snapshot();
+      expect(snapshot.samples.gpuResidencyHit).toEqual([1, 1]);
+      expect(snapshot.samples.gpuBranches).toEqual([branchCount, branchCount]);
+      expect(snapshot.stages.gpuUpload.count).toBe(0);
+      expect(snapshot.stages.gpuBaseCopy.count).toBe(2);
+      expect(snapshot.stages.gpuCancelRestore.count).toBe(1);
+      runtime.dispose();
+      accelerator.dispose();
+    },
+  );
+
   it("React Undoボタン順序のcancel→restore→undo→遅延end後もownerを残さず次がhitする", () => {
     const perf = configurePerf();
     perf.experiments.stallThresholdMs = 0;
@@ -390,7 +453,7 @@ describe("GPU layer residency", () => {
           event.name === "residencyInvalidated" &&
           event.reason === "runtimeRestore",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       events.some(
         (event) =>
@@ -827,6 +890,8 @@ interface BrushPerfTestBridge {
   snapshot(): {
     readonly stages: {
       readonly gpuUpload: { readonly count: number };
+      readonly gpuBaseCopy: { readonly count: number };
+      readonly gpuCancelRestore: { readonly count: number };
       readonly samplingLayerCopy: { readonly count: number };
     };
     readonly samples: {

@@ -18,6 +18,8 @@ export const BRUSH_PERF_STAGE_NAMES = [
   "gpuFlush",
   "gpuCommit",
   "gpuUpload",
+  "gpuBaseCopy",
+  "gpuCancelRestore",
   "samplingLayerCopy",
   "appendCommitted",
   "renderUpdateCallback",
@@ -52,6 +54,8 @@ const BRUSH_PERF_BATCH_STAGE_NAMES = [
   "gpuFieldUpdate",
   "gpuFlush",
   "gpuCommit",
+  "gpuBaseCopy",
+  "gpuCancelRestore",
   "checkpointReadback",
   "dabDraw",
   "samplingLayerCopy",
@@ -71,6 +75,7 @@ type BrushPerfEventName =
   | "realloc:snapshotArray"
   | "realloc:commitCanvas"
   | "realloc:accum"
+  | "realloc:strokeBase"
   | "gpuStaleOwnerRecovered"
   | "warmUp"
   | "warmUpScheduled"

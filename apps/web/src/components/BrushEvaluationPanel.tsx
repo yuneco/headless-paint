@@ -161,6 +161,8 @@ const STALL_STAGE_LABELS = {
   gpuFieldUpdate: "fieldUpdate",
   gpuFlush: "gpuFlush",
   gpuCommit: "gpuCommit",
+  gpuBaseCopy: "baseCopy",
+  gpuCancelRestore: "cancelRestore",
   checkpointReadback: "readback",
   dabDraw: "dabDraw",
   samplingLayerCopy: "samplingCopy",
