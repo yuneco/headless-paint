@@ -26,11 +26,6 @@
     }
   },
   "files": {
-    "ignore": [
-      "dist",
-      "node_modules",
-      "*.config.ts",
-      "tools/bench"
-    ]
+    "ignore": ["dist", "node_modules", "*.config.ts", "tools/bench"]
   }
 }
