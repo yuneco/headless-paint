@@ -134,3 +134,21 @@ probe6（1 stroke 150 点、WebKit）:
 ランナー（`benchmark-rough-capture.mjs`、mixing OFF、REPEATS=4）: Call p95 CPU 16-22 → GPU 13-22ms、batch wall p95 14-21 → 12-17ms、undo1 115 → 128ms。**mixing OFF は Mac では誤差域**。
 
 所見: CPU 側の仕事は消えたが、WebKit(Metal) では render pass 1 本あたり ≈0.2-0.3ms の GPU 側固定費があり、chunk × 3 pass の設計だと pass 本数が支配的。次の一手は mask / ink を同一 FBO に置いて pass を 3→2 にする（mixing ON で効く）。mixing OFF は 1 flush = 1 chunk なので pass 統合の余地が小さく、Mac では CPU 同等が上限。iPad（CPU raster が遅い）で逆転する可能性は未計測。
+
+### 5.3 mask+ink 同一 pass 化後（コミット `0792080`、spike 到達点）
+
+probe6（1 stroke 150 点、WebKit）:
+
+| 条件 | CPU | GPU | 差 |
+|---|---|---|---|
+| mixing OFF（31 chunk） | 85ms | 53 + gpuCommit 41 = 94ms | 同等 |
+| mixing ON（210 run） | 411ms | 89 + gpuCommit 153 = 242ms | **−41%** |
+
+ランナー（mixing OFF、REPEATS=4）: Call p95 CPU 16-22 → GPU 13-19ms、batch wall p95 14-21 → 12-16ms（−15% 前後、誤差域）、undo1 115 → 130ms。
+
+### 5.4 spike の判定材料
+
+- **mixing ON の Rough**: Go 条件（−20%）を満たす（−41%）。目標 −50% には未達。残る支配項は flush ごとの render pass 数（run × 2 + field 更新）で、field 更新を挟まない run の mask/ink を 1 pass にまとめる queue 化（surface 側）で更に削れる見込み
+- **mixing OFF の Rough**: Mac では CPU 同等（CPU raster が速く、GPU 側は pass 固定費 + commit 床で相殺）。Go 条件未達。ただし iPad は CPU raster が相対的に遅いため逆転しうる（未計測。次の実機確認で判断）
+- undo が GPU で +15ms（rebuild replay の GPU 再 upload）。Acrylic と同じ性質で許容範囲だが要観察
+- 見た目の parity: §5.5 に記録
