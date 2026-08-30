@@ -671,7 +671,7 @@ interface PaintEngineResult<TCustom = never> {
   readonly canDraw: boolean;
   /** 実際に使われている描画 backend（GPU 加速器が有効なら "webgl2"、それ以外は "cpu"） */
   readonly gpuBackend: "webgl2" | "cpu";
-  /** backend の判定理由（例: "auto: webkit"、"webgl2 unavailable"、"cpu (setting)"）。デバッグ UI 向け */
+  /** backend の判定理由（engine の resolveBrushAcceleratorBackend。"auto: webkit" / "auto: not webkit" / "webgl2: unavailable" / "webgl2: setting" / "cpu: setting"）。デバッグ UI 向け */
   readonly gpuBackendReason: string;
   /** 現在のストロークで蓄積された入力ポイント列（デバッグ表示用） */
   readonly strokePoints: readonly InputPoint[];

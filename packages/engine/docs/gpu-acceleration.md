@@ -49,6 +49,24 @@ interface BrushAccelerator {
 - `"auto"` の判定は User-Agent による（WebKit 系のみ）。Chromium で使いたい場合は `"webgl2"` を明示する。backend の指定値は engine / react / アプリ設定で共通に `"auto" | "webgl2" | "cpu"` を使う
 - 加速器はグローバル singleton ではなく、明示的に生成して注入する runtime resource。通常はアプリで 1 つ生成し、全レイヤーで共有する
 
+### resolveBrushAcceleratorBackend
+
+生成せずに「どの backend になるか」と理由だけを得る。デバッグ UI の表示や、`createBrushAccelerator` の判定の一元化に使う。
+
+```typescript
+function resolveBrushAcceleratorBackend(
+  options?: BrushAcceleratorOptions,
+  env?: { readonly userAgent?: string; readonly webgl2Available?: () => boolean },
+): BrushAcceleratorResolution;
+
+interface BrushAcceleratorResolution {
+  readonly backend: "webgl2" | "cpu";
+  readonly reason: string; // "auto: webkit" | "auto: not webkit" | "webgl2: unavailable" | "webgl2: setting" | "cpu: setting"
+}
+```
+
+`env` を省略すると `navigator.userAgent` と WebGL2 の取得試行で判定する。テストでは `env` を注入する。
+
 ### 注入点
 
 省略時・`null` 時は CPU 経路。core（engine + stroke）を直接使うアプリは次の 3 箇所に同じ加速器を渡す。

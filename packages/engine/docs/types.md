@@ -1133,7 +1133,7 @@ const nextState = renderBrushStroke(layer, points, style, 0, initialState);
 // nextState.branches[branchIndex] を pending 描画に使う
 ```
 
-## BrushAccelerator / BrushAcceleratorOptions / BrushAcceleratorBackend
+## BrushAccelerator / BrushAcceleratorOptions / BrushAcceleratorBackend / BrushAcceleratorResolution
 
 GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。
 
@@ -1151,6 +1151,11 @@ interface BrushAccelerator {
   warmUp(layer: Layer): void;
   invalidate(layer: Layer): void;
   dispose(): void;
+}
+
+interface BrushAcceleratorResolution {
+  readonly backend: "webgl2" | "cpu";
+  readonly reason: string;
 }
 ```
 
