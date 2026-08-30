@@ -23,9 +23,11 @@ function createBrushAccelerator(
   options?: BrushAcceleratorOptions,
 ): BrushAccelerator | null;
 
+type BrushAcceleratorBackend = "auto" | "webgl2" | "cpu";
+
 interface BrushAcceleratorOptions {
   /** 既定 "auto": WebKit 系ブラウザかつ WebGL2 が利用可能なときのみ有効。"cpu" は常に null */
-  readonly backend?: "auto" | "webgl2" | "cpu";
+  readonly backend?: BrushAcceleratorBackend;
   /** GPU 経路を使う Expand branch 数の上限。既定 64。超過する stroke は CPU 経路 */
   readonly maxBranches?: number;
   /** accum を stroke 間で常駐させる。既定 true */
@@ -117,7 +119,7 @@ accum と layer の同一性が崩れる操作は engine / stroke の API が内
 ## lifecycle と障害
 
 - surface は加速器ごとに layer 寸法単位で 1 つ（寸法が変わると再確保）。`dispose()` で GL リソースを解放する
-- **context lost**: 以降の stroke は CPU 経路。進行中の stroke は GPU 結果を捨て、確定した `StrokeCommand` を CPU 経路で再実行して layer を確定する（rebuild 単位で決定性を保つ）
+- **context lost**（および進行中の `dispose()`）: 以降の stroke は CPU 経路。進行中の stroke は GPU 側への追加・commit を止め、`finalize` 時に stroke 開始時の layer 内容へ戻してから全入力点を CPU 経路で描き直す（結果は最初から CPU で描いた場合と byte 一致）。このため GPU stroke は開始時に rollback 用の layer snapshot（常駐 miss 時は既存の stroke-start snapshot を流用、hit 時は Canvas2D copy 1 回）を保持する
 - stroke の cancel / dispose では GPU stroke を必ず終了する（未終了の stroke が残ると以降 CPU 経路に固定されるため）
 
 ## 制限

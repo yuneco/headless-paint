@@ -631,3 +631,13 @@ interface HistoryMetrics {
   }[];
 }
 ```
+
+## ReplayOptions
+
+`replayCommand` / `replayCommands` の options。
+
+```typescript
+interface ReplayOptions {
+  readonly accelerator?: BrushAccelerator | null; // GPU加速器（engine docs/gpu-acceleration.md）。省略時は CPU 経路
+}
+```

@@ -1133,13 +1133,15 @@ const nextState = renderBrushStroke(layer, points, style, 0, initialState);
 // nextState.branches[branchIndex] を pending 描画に使う
 ```
 
-## BrushAccelerator / BrushAcceleratorOptions
+## BrushAccelerator / BrushAcceleratorOptions / BrushAcceleratorBackend
 
 GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。
 
 ```typescript
+type BrushAcceleratorBackend = "auto" | "webgl2" | "cpu";
+
 interface BrushAcceleratorOptions {
-  readonly backend?: "auto" | "webgl2" | "cpu"; // 既定 "auto"（WebKit系かつWebGL2可のときのみ有効）
+  readonly backend?: BrushAcceleratorBackend; // 既定 "auto"（WebKit系かつWebGL2可のときのみ有効）
   readonly maxBranches?: number;                 // 既定 64
   readonly resident?: boolean;                   // 既定 true
 }
