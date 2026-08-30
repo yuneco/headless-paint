@@ -856,12 +856,38 @@ export function usePaintEngine<TCustom = never>(
 
       commitHistoryState(result.next);
       bumpRenderVersion();
+
+      // The rebuild usually ends with a checkpoint restore (CPU write), which
+      // invalidates GPU residency. Re-upload during the idle gap right after
+      // the history op instead of at the next stroke start.
+      const brush = strokeStyle.brush;
+      if (
+        accelerator &&
+        brush.type === "stamp" &&
+        isBrushMixingActive(brush.mixing) &&
+        typeof requestAnimationFrame === "function"
+      ) {
+        const targetLayerId = shouldApplyActiveLayerHint(
+          op,
+          result,
+          activeLayerId,
+        )
+          ? (result.activeLayerIdHint ?? activeLayerId)
+          : activeLayerId;
+        requestAnimationFrame(() => {
+          const entry = entriesRef.current.find(
+            (candidate) => candidate.id === targetLayerId,
+          );
+          if (entry) accelerator.warmUp(entry.committedLayer);
+        });
+      }
     },
     [
       activeLayerId,
       entriesRef,
       shiftTempCanvas,
       accelerator,
+      strokeStyle.brush,
       createCustomExecutor,
       applyLayerListOps,
       setActiveLayerId,
