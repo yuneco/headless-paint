@@ -93,7 +93,7 @@ const runtime = createStrokeRuntime({ ...deps, accelerator });
 // 終了時: accelerator?.dispose()
 ```
 
-react（`usePaintEngine`）はこれを内包する。`gpuBackend?: "auto" | "webgl2" | "cpu"`（既定 `"auto"`）を渡すだけで、加速器の生成・runtime / replay への注入・mixing stamp 選択時の `warmUp`・unmount 時の `dispose` を hook が行う。現在の backend と auto の判定理由は `engine.gpuBackend` / `engine.gpuBackendReason` で取得でき、デバッグ UI で表示できる。
+react（`usePaintEngine`）はこれを内包する。`gpuBackend?: "auto" | "webgl2" | "cpu"`（既定 `"auto"`）を渡すだけで、加速器の生成・runtime / replay への注入・mixing stamp 選択時と Undo / Redo 直後（次 frame）の `warmUp`・unmount 時の `dispose` を hook が行う。Undo / Redo は通常 checkpoint 復元（CPU 書き込み）で終わるため常駐が無効化されるが、直後の warmUp で次の stroke 開始前に再 upload を済ませる。現在の backend と auto の判定理由は `engine.gpuBackend` / `engine.gpuBackendReason` で取得でき、デバッグ UI で表示できる。
 
 詳細は [brush-api.md](./brush-api.md)、[incremental-render-api.md](./incremental-render-api.md)、stroke の docs を参照。
 

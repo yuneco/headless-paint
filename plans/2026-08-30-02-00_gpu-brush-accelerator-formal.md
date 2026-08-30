@@ -148,3 +148,8 @@ interface BrushAccelerator {
 - デバッグ用 `commitMode`（`?gpuCommit=direct|bitmap`）を残置。Debug Info に commit mode を表示
 - iPad: stall 解消、Undo/Redo 正常、GPU 経路有効（auto: webkit）
 - テスト 533 件 green。**Phase 4 完了**。次はマージ方針の決定
+
+## 13. Undo直後のstall対策（2026-08-30）
+- 実機ログで stale owner は解消（`fe05360`: Undo/Redo入口で進行中strokeを同期cancel）。残った `residencyInvalidated: executorUndo` は、Undo 1段では復元先にcheckpointがあり replay すべき command が無いため「最後の書き込み＝checkpoint復元」になる設計上の帰結
+- 対策: `usePaintEngine` が Undo/Redo 完了の次 frame に `warmUp(activeLayer)` を実行し、upload（2K 16MB、iPad ≈25〜30ms）を stroke 開始前の空き時間へ移す（`32bbe89`）
+- 実機確認待ち: Undo → 次の stroke の strokeStart に `gpuUpload` が出ないこと（warmUp 側で行われるため、閾値未満で記録されない）
