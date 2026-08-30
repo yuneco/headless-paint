@@ -131,3 +131,10 @@ interface BrushAccelerator {
 - 残stall（kaleido 6）: **`gpuCommit` 1回50〜100ms（最大357ms）**。iOS WebKitはWebGL canvasをdrawImage sourceにするたびにsnapshot copy＋GPU同期を行うため、branch別rectのdrawImage×12が重い（Macでは0.2ms）。対策: commit passごとに `transferToImageBitmap()` 1回→bitmapからN回drawImage
 - **`realloc:snapshotArray` の頻発**: 筆圧連動stampSizeでtile寸法が毎回変わり12層texture arrayを再確保。対策: stampSize上限でtile寸法を固定し、確保済み以上なら再確保しない（縮小しない）
 - 委譲中（Phase 4-c）
+
+## 10. Phase 4 追加修正の結果（2026-08-30）
+- p4c: commit を pass ごと `transferToImageBitmap` 1 回＋bitmap から N 回 drawImage に変更（iOS の source 化コスト対策）。GPU checkpoint tile を筆圧上限で固定し再確保を抑制。Mac WebKit では commit が +1ms/batch 程度（r1 dispatch 2/3 のまま、r8 3/4→4/6）
+- p4d: context loss の rollback 退避を廃止し、`restoreLayerBeforeStroke` hook（react は `rebuildLayerFromHistory`）で復元。平常時に `layer.ctx` を source として読まない
+- 最終回帰（Mac WebKit）: CPU 8/11・undoLong 2581 / GPU r1 2/3・852 / GPU r8 4/6・2394 / parity none・radial 4 全 pass（F1 RGB MAE 0.003〜0.005、|Δ|>0.1 0%）
+- 「r8 undoLong が 1006→2394 に後退」と見えたのは誤認。1006 は parity が壊れていた `0a3fb89`（live accum 直読み）の値で、snapshot 方式（`8c9c3a4`）以降は ≈2.4s が基準（CPU 19137 比 −87%）。bisect で確認済み
+- iPad 再確認待ち（kaleido 6 の commit stall が解消しているか）
