@@ -114,3 +114,10 @@ Mac WebKit / STP / iPad で計測、stall・undo/redo・ジェスチャの再確
 | cpu（ベースライン） | 4-5 / 17-23 / 73 | 14-20 / 73 | 118 / 195 |
 
 注: runner の undo 計測で `NotFoundError` が複数出るが timing は取れている（runner 側の locator 問題、要確認）。
+
+### 5.1 spike 途中経過（2026-08-31、コミット `b4faa1a`）
+
+- 初回計測で GPU と CPU が同値だった原因: mixing OFF の bristle は sampling layer を作らないため常駐ミス時に `beginStroke` へ source canvas が渡らず `false` → 毎 batch CPU 経路 + `residencyInvalidated`。`b4faa1a` で layer 自身を upload 元にして解消（undo 後 warmUp も bristle を対象に）
+- 計測ランナー `benchmark-rough-capture.mjs` の stageSnapshot は以前から空（Call / batch wall / undo は有効）。stage 内訳は `tools/bench/results/probe6.mjs`（pen PointerEvent を直接 dispatch）で取得
+- **mixing OFF（Mac WebKit、1 stroke 150 点 / 30 chunk）**: CPU appendCommitted 74ms（maskField 22 / maskRaster 28 / maskUpload 9）→ GPU 110ms（maskField 23 / gpuBristleInk 57 / gpuCommit 36）。ランナーの p95 は 14-18 vs 15-20ms で横ばい。Chromium attribution では 3 pass 合計 ≈8ms/31 chunk なので WebKit の「ink 57ms」は GPU 同期待ちの付け替え（疑い: chunk ごとに寸法が変わる maskField texture の `texImage2D` 再確保）。ただし commit 床 1.2ms × chunk と CPU 側 maskField 23ms が残るため、**mixing OFF の Mac では最良でも CPU と同等**の見込み
+- **mixing ON（同条件）**: CPU 377ms（maskUpload 149 + checkpointReadback 149 = WebKit 同期）→ GPU 242ms（−36%）。GPU 側の残りは `gpuFieldUpdate` 164ms/182 回（run ごとの field 更新、0.9ms/回）
