@@ -125,3 +125,9 @@ interface BrushAccelerator {
 - `work.local` の benchmark / parity harness は正式 API に追従済みだが、リポジトリ管理下の再現手段へ移す判断は未
 - perf-debug 計測（stage / stall）は `perfDebug` 時のみ有効で残置。削除可否は安定後に判断
 - 外部からの `layer.ctx` 直接書き込みは `invalidate` 契約に依存（自動検出しない）
+
+## 9. iPad確認（2026-08-30、正式API後）
+- Debug Infoに「webgl2 (auto: webkit)」表示OK。GPU経路は有効（12 branchで `checkpointReadback` 0）
+- 残stall（kaleido 6）: **`gpuCommit` 1回50〜100ms（最大357ms）**。iOS WebKitはWebGL canvasをdrawImage sourceにするたびにsnapshot copy＋GPU同期を行うため、branch別rectのdrawImage×12が重い（Macでは0.2ms）。対策: commit passごとに `transferToImageBitmap()` 1回→bitmapからN回drawImage
+- **`realloc:snapshotArray` の頻発**: 筆圧連動stampSizeでtile寸法が毎回変わり12層texture arrayを再確保。対策: stampSize上限でtile寸法を固定し、確保済み以上なら再確保しない（縮小しない）
+- 委譲中（Phase 4-c）
