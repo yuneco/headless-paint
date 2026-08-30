@@ -763,9 +763,12 @@ function DebugPanelComponent({
             borderBottom: "1px solid #444",
             color: "#ebebeb",
             fontSize: 11,
+            minWidth: 0,
+            maxWidth: "100%",
+            overflowWrap: "anywhere",
           }}
         >
-          <div>
+          <div style={{ whiteSpace: "normal" }}>
             Engine: <strong>{gpuBackend}</strong> ({gpuBackendReason}) · commit:{" "}
             {gpuCommitMode} · build: {__HP_BUILD_ID__}
           </div>
