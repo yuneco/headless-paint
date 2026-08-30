@@ -109,10 +109,7 @@ describe("GPU layer residency", () => {
 
     expect(resident.residencyHits).toEqual([0, 1]);
     expect(resident.gpuUploadCount).toBe(1);
-    expect(resident.samplingCopyPixels).toEqual([
-      WIDTH * HEIGHT,
-      WIDTH * HEIGHT,
-    ]);
+    expect(resident.samplingCopyPixels).toEqual([WIDTH * HEIGHT]);
     expect(uploadEveryStroke.residencyHits).toEqual([0, 0]);
     expect(uploadEveryStroke.gpuUploadCount).toBe(2);
     expect(uploadEveryStroke.samplingCopyPixels).toEqual([
@@ -124,6 +121,21 @@ describe("GPU layer residency", () => {
       uploadEveryStroke.layer,
       "resident vs upload-every-stroke",
     );
+  });
+
+  it("residency hit の通常 stroke は全面 sampling copy を行わない", () => {
+    const accelerator = requireAccelerator({ resident: true });
+    const layer = createTestLayer();
+    accelerator.warmUp(layer);
+    const perf = configurePerf();
+
+    drawStroke(layer, GPU_STYLE, FIRST_GPU_POINTS, 101, EXPAND, accelerator);
+
+    const snapshot = perf.snapshot();
+    expect(snapshot.samples.gpuResidencyHit).toEqual([1]);
+    expect(snapshot.stages.samplingLayerCopy.count).toBe(0);
+    expect(snapshot.samples.samplingCopyPixels).toEqual([]);
+    accelerator.dispose();
   });
 
   it("radial 4 Expand と併用して連続する2本目が residency hit する", () => {
@@ -280,6 +292,7 @@ interface BrushPerfTestBridge {
   snapshot(): {
     readonly stages: {
       readonly gpuUpload: { readonly count: number };
+      readonly samplingLayerCopy: { readonly count: number };
     };
     readonly samples: {
       readonly gpuResidencyHit: readonly number[];

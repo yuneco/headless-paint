@@ -109,7 +109,15 @@ export interface GpuStrokeSurface {
   readMaterialFieldForTest(branchIndex?: number): Uint8ClampedArray;
   pushDab(dab: GpuDab): void;
   flush(): void;
-  commitToLayer(layer: Layer): void;
+  commitToLayer(
+    layer: Layer,
+    beforeCommitTile?: (
+      left: number,
+      top: number,
+      width: number,
+      height: number,
+    ) => void,
+  ): void;
   endStroke(): void;
   dispose(): void;
 }
@@ -1161,7 +1169,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
   }
 
-  commitToLayer(layer: Layer): void {
+  commitToLayer(
+    layer: Layer,
+    beforeCommitTile?: (
+      left: number,
+      top: number,
+      width: number,
+      height: number,
+    ) => void,
+  ): void {
     this.assertStrokeBegun();
     this.flush();
     if (this.lost) return;
@@ -1210,6 +1226,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       // the round ahead of every snapshot so one packed canvas incurs one GPU
       // completion boundary instead of one boundary per branch/tile.
       for (const tile of packed) {
+        beforeCommitTile?.(tile.left, tile.top, tile.width, tile.height);
         layer.ctx.save();
         layer.ctx.globalAlpha = 1;
         layer.ctx.setTransform(1, 0, 0, 1, 0, 0);

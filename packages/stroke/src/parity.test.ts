@@ -402,7 +402,7 @@ describe("GPU mixing feedMany parity", () => {
 });
 
 describe("GPU mixing lifecycle fallback", () => {
-  it("stroke途中のWEBGL_lose_context後はsnapshotからCPUで全入力を再実行する", async () => {
+  it("residency hit stroke途中のWEBGL_lose_context後はdirty rollbackしてCPUで全入力を再実行する", async () => {
     const expected = createTestLayer();
     paintOpaqueBands(expected);
     const expectedRenderer = createIncrementalStrokeRenderer({
@@ -424,6 +424,8 @@ describe("GPU mixing lifecycle fallback", () => {
     const accelerator = createTestAccelerator();
     const actual = createTestLayer();
     paintOpaqueBands(actual);
+    accelerator.warmUp(actual);
+    perf.reset();
     const renderer = createIncrementalStrokeRenderer({
       layer: actual,
       style: STAMP_MIXING_STYLE,
@@ -433,7 +435,8 @@ describe("GPU mixing lifecycle fallback", () => {
       alphaLocked: false,
       accelerator,
     });
-    renderer.feedMany(INPUT_POINTS.slice(0, 3));
+    renderer.feedMany(INPUT_POINTS.slice(0, 2));
+    renderer.feedMany(INPUT_POINTS.slice(2, 3));
 
     const surface = getActiveSurfaceForTest(accelerator);
     const gl = surface.canvas.getContext("webgl2");
@@ -455,6 +458,7 @@ describe("GPU mixing lifecycle fallback", () => {
     renderer.feedMany(INPUT_POINTS.slice(3));
     renderer.finalize();
     expectPixelEqual(actual, expected, "context loss CPU recovery");
+    expect(perf.snapshot().samples.gpuResidencyHit).toEqual([1]);
 
     const nextExpected = createTestLayer();
     copyLayerPixels(actual, nextExpected);
@@ -466,6 +470,43 @@ describe("GPU mixing lifecycle fallback", () => {
     expectPixelEqual(nextActual, nextExpected, "post-loss CPU fallback");
     expect(perf.snapshot().samples.gpuBranches).toEqual([]);
     accelerator.dispose();
+  });
+
+  it("residency hit stroke途中のdispose後もdirty rollbackしてCPUで全入力を再実行する", () => {
+    const expected = createTestLayer();
+    paintOpaqueBands(expected);
+    const expectedRenderer = createIncrementalStrokeRenderer({
+      layer: expected,
+      style: STAMP_MIXING_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+      accelerator: null,
+    });
+    expectedRenderer.feedMany(INPUT_POINTS);
+    expectedRenderer.finalize();
+
+    const accelerator = createTestAccelerator();
+    const actual = createTestLayer();
+    paintOpaqueBands(actual);
+    accelerator.warmUp(actual);
+    const renderer = createIncrementalStrokeRenderer({
+      layer: actual,
+      style: STAMP_MIXING_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+      accelerator,
+    });
+    renderer.feedMany(INPUT_POINTS.slice(0, 2));
+    renderer.feedMany(INPUT_POINTS.slice(2, 3));
+    accelerator.dispose();
+    renderer.feedMany(INPUT_POINTS.slice(3));
+    renderer.finalize();
+
+    expectPixelEqual(actual, expected, "active dispose CPU recovery");
   });
 
   it("dispose済みacceleratorはstroke全体をCPU経路で描く", () => {
@@ -811,6 +852,7 @@ function getBrushPerfTestBridge():
         };
         readonly samples: {
           readonly gpuBranches: readonly number[];
+          readonly gpuResidencyHit: readonly number[];
         };
       };
     }
@@ -828,6 +870,7 @@ function getBrushPerfTestBridge():
           };
           readonly samples: {
             readonly gpuBranches: readonly number[];
+            readonly gpuResidencyHit: readonly number[];
           };
         };
       };

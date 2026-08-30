@@ -95,11 +95,12 @@ export function createIncrementalStrokeRenderer(
         gpuResidencyHit ? undefined : samplingLayer?.canvas,
         compiledExpand.outputCount,
       );
-    strokeStartSnapshot = gpuStrokeActive
-      ? samplingLayer && samplingLayer.canvas !== config.layer.canvas
-        ? samplingLayer
-        : copySamplingLayer(config.layer)
-      : undefined;
+    strokeStartSnapshot =
+      gpuStrokeActive && !gpuResidencyHit
+        ? samplingLayer && samplingLayer.canvas !== config.layer.canvas
+          ? samplingLayer
+          : copySamplingLayer(config.layer)
+        : undefined;
   } finally {
     if (gpuStrokeEligible) perfDebug?.endBatch();
   }
@@ -282,21 +283,26 @@ export function createIncrementalStrokeRenderer(
           gpuRuntime?.commitToLayer(gpuOwner, config.layer);
           detectGpuStrokeLoss();
         }
+        const dirtyRollbackRestored = gpuStrokeLost
+          ? (gpuRuntime?.restoreStrokeLayer(gpuOwner, config.layer) ?? false)
+          : false;
         gpuRuntime?.endStroke(gpuOwner);
-        if (gpuStrokeLost) recoverLostGpuStroke();
+        if (gpuStrokeLost) recoverLostGpuStroke(dirtyRollbackRestored);
       }
     },
   };
 
-  function recoverLostGpuStroke(): void {
-    if (!strokeStartSnapshot) {
-      throw new Error("GPU stroke recovery requires a stroke-start snapshot");
+  function recoverLostGpuStroke(dirtyRollbackRestored: boolean): void {
+    if (!dirtyRollbackRestored) {
+      if (!strokeStartSnapshot) {
+        throw new Error("GPU stroke recovery requires rollback pixels");
+      }
+      copyLayerPixels(strokeStartSnapshot, config.layer);
     }
-    copyLayerPixels(strokeStartSnapshot, config.layer);
     let recoveredUpdate: IncrementalStrokeRenderUpdate | undefined;
     const cpuRenderer = createIncrementalStrokeRenderer({
       ...config,
-      sourceLayer: strokeStartSnapshot,
+      sourceLayer: dirtyRollbackRestored ? undefined : strokeStartSnapshot,
       accelerator: null,
       onRenderUpdate: (update) => {
         recoveredUpdate = update;
@@ -319,6 +325,7 @@ interface GpuStrokeRuntimeBridge {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
+  restoreStrokeLayer(owner: object, layer: Layer): boolean;
   endStroke(owner: object): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
