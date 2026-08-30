@@ -1,4 +1,10 @@
 import type { BristleDynamics } from "../types";
+import {
+  brushPerfDebug,
+  perfElapsed,
+  perfSample,
+  perfStage,
+} from "./perf-debug";
 import { hashSeed } from "./prng";
 
 export interface BristleMaskSample {
@@ -39,6 +45,7 @@ const REPEAT_CONTACT_EXPOSURE_PER_PASS = 0.24;
 const FIXED_CONTACT_HASH_SALT = 0x243f6a88;
 const REPEAT_CONTACT_HASH_SALT = 0x85a308d3;
 const grainHeightCache = new Map<string, Float32Array<ArrayBuffer>>();
+const nullRasterCache = new Map<string, ImageData>();
 
 interface SurfaceContactRaster {
   readonly amount: number;
@@ -70,7 +77,10 @@ export function rasterizeBristleMask(
   width: number,
   height: number,
 ): OffscreenCanvas {
-  const canvas = new OffscreenCanvas(width, height);
+  const canvas = perfStage(
+    "canvasAlloc",
+    () => new OffscreenCanvas(width, height),
+  );
   const ctx = getContext(canvas, "bristle swept mask");
   if (samples.length < 2) return canvas;
 
@@ -81,72 +91,109 @@ export function rasterizeBristleMask(
     pressureCoverageResponse,
     seed,
   );
-  const target = ctx.createImageData(width, height);
+  const uploadCreateStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  const target = brushPerfDebug.nullStages.nullRaster
+    ? getNullRasterImageData(ctx, width, height)
+    : ctx.createImageData(width, height);
+  let uploadElapsed = brushPerfDebug.enabled
+    ? performance.now() - uploadCreateStartedAt
+    : 0;
   const halfWidth = brushSize / 2;
   const maxV = field.height - 1;
-  const surface = createSurfaceContactRaster(dynamics, seed, originX, originY);
-  for (let index = 1; index < samples.length; index++) {
-    const from = samples[index - 1];
-    const to = samples[index];
-    if (!from || !to || to.breakBefore) continue;
-    if (Math.hypot(to.x - from.x, to.y - from.y) < 0.001) continue;
-    const trialId = Math.round(
-      ((from.distance + to.distance) * 0.5) /
-        Math.max(0.5, dynamics.geometryStepPx),
+  perfStage("maskRaster", () => {
+    const surface = createSurfaceContactRaster(
+      dynamics,
+      seed,
+      originX,
+      originY,
     );
+    if (brushPerfDebug.nullStages.nullRaster) return;
+    for (let index = 1; index < samples.length; index++) {
+      const from = samples[index - 1];
+      const to = samples[index];
+      if (!from || !to || to.breakBefore) continue;
+      if (Math.hypot(to.x - from.x, to.y - from.y) < 0.001) continue;
+      const trialId = Math.round(
+        ((from.distance + to.distance) * 0.5) /
+          Math.max(0.5, dynamics.geometryStepPx),
+      );
 
-    const fromLeft: RasterVertex = {
-      x: from.x + from.frameY * halfWidth - originX,
-      y: from.y - from.frameX * halfWidth - originY,
-      u: index - 1,
-      v: 0,
-    };
-    const fromRight: RasterVertex = {
-      x: from.x - from.frameY * halfWidth - originX,
-      y: from.y + from.frameX * halfWidth - originY,
-      u: index - 1,
-      v: maxV,
-    };
-    const toLeft: RasterVertex = {
-      x: to.x + to.frameY * halfWidth - originX,
-      y: to.y - to.frameX * halfWidth - originY,
-      u: index,
-      v: 0,
-    };
-    const toRight: RasterVertex = {
-      x: to.x - to.frameY * halfWidth - originX,
-      y: to.y + to.frameX * halfWidth - originY,
-      u: index,
-      v: maxV,
-    };
-    rasterizeTriangle(
-      field,
-      target,
-      fromLeft,
-      fromRight,
-      toRight,
-      dynamics.depositHardness,
-      samples,
-      surface,
-      trialId,
-    );
-    rasterizeTriangle(
-      field,
-      target,
-      fromLeft,
-      toRight,
-      toLeft,
-      dynamics.depositHardness,
-      samples,
-      surface,
-      trialId,
-    );
-  }
+      const fromLeft: RasterVertex = {
+        x: from.x + from.frameY * halfWidth - originX,
+        y: from.y - from.frameX * halfWidth - originY,
+        u: index - 1,
+        v: 0,
+      };
+      const fromRight: RasterVertex = {
+        x: from.x - from.frameY * halfWidth - originX,
+        y: from.y + from.frameX * halfWidth - originY,
+        u: index - 1,
+        v: maxV,
+      };
+      const toLeft: RasterVertex = {
+        x: to.x + to.frameY * halfWidth - originX,
+        y: to.y - to.frameX * halfWidth - originY,
+        u: index,
+        v: 0,
+      };
+      const toRight: RasterVertex = {
+        x: to.x - to.frameY * halfWidth - originX,
+        y: to.y + to.frameX * halfWidth - originY,
+        u: index,
+        v: maxV,
+      };
+      rasterizeTriangle(
+        field,
+        target,
+        fromLeft,
+        fromRight,
+        toRight,
+        dynamics.depositHardness,
+        samples,
+        surface,
+        trialId,
+      );
+      rasterizeTriangle(
+        field,
+        target,
+        fromLeft,
+        toRight,
+        toLeft,
+        dynamics.depositHardness,
+        samples,
+        surface,
+        trialId,
+      );
+    }
+  });
+  const uploadPutStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   ctx.putImageData(target, 0, 0);
+  if (brushPerfDebug.enabled) {
+    uploadElapsed += performance.now() - uploadPutStartedAt;
+    perfElapsed("maskUpload", uploadElapsed);
+  }
   return canvas;
 }
 
 function createBristleMaskField(
+  samples: readonly BristleMaskSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  pressureCoverageResponse: number,
+  seed: number,
+): BristleMaskField {
+  return perfStage("maskField", () =>
+    createBristleMaskFieldUnmeasured(
+      samples,
+      brushSize,
+      dynamics,
+      pressureCoverageResponse,
+      seed,
+    ),
+  );
+}
+
+function createBristleMaskFieldUnmeasured(
   samples: readonly BristleMaskSample[],
   brushSize: number,
   dynamics: BristleDynamics,
@@ -160,6 +207,12 @@ function createBristleMaskField(
   );
   const values = new Float32Array(width * bands);
   const coverageResponse = clamp(pressureCoverageResponse, 0, 1);
+
+  if (brushPerfDebug.nullStages.nullField) {
+    values.fill(1);
+    perfSample("fieldCells", values.length);
+    return { width, height: bands, values };
+  }
 
   for (let band = 0; band < bands; band++) {
     const crossPx = (-0.5 + (band + 0.5) / bands) * brushSize;
@@ -196,6 +249,7 @@ function createBristleMaskField(
       values[band * width + index] = signal - threshold;
     }
   }
+  perfSample("fieldCells", values.length);
   return { width, height: bands, values };
 }
 
@@ -324,6 +378,7 @@ function hasSurfaceContact(
   pressure: number,
   trialId: number,
 ): boolean {
+  if (brushPerfDebug.nullStages.nullContact) return true;
   const documentX = surface.originX + localX;
   const documentY = surface.originY + localY;
   const tileX = positiveModulo(documentX, GRAIN_TILE_SIZE);
@@ -358,6 +413,19 @@ function hasSurfaceContact(
       documentY,
     ) < probability
   );
+}
+
+function getNullRasterImageData(
+  ctx: OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+): ImageData {
+  const key = `${width}x${height}`;
+  const cached = nullRasterCache.get(key);
+  if (cached) return cached;
+  const image = ctx.createImageData(width, height);
+  nullRasterCache.set(key, image);
+  return image;
 }
 
 function samplePressure(

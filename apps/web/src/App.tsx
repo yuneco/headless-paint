@@ -1,18 +1,8 @@
-import {
-  DEFAULT_BACKGROUND_COLOR,
-  createBrushTipRegistry,
-} from "@headless-paint/engine";
-import type { BackgroundSettings } from "@headless-paint/engine";
-import {
-  compileFilterPipeline,
-  createViewTransform,
-} from "@headless-paint/input";
+import { createBrushTipRegistry } from "@headless-paint/engine";
+import { compileFilterPipeline } from "@headless-paint/input";
 import type { InputPoint } from "@headless-paint/input";
 import {
-  type PaintSettingsSnapshot,
   type ToolType,
-  exportPaintSettings,
-  importPaintSettings,
   useExpand,
   usePaintEngine,
   usePenSettings,
@@ -22,11 +12,6 @@ import {
   useWindowSize,
 } from "@headless-paint/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  BRISTLE_S_CURVE_FIXTURE_HEIGHT,
-  BRISTLE_S_CURVE_FIXTURE_WIDTH,
-  createBristleSCurveEvaluationPoints,
-} from "./brush-evaluation-fixtures";
 import { registerAppBrushTips } from "./brush-presets";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
@@ -36,47 +21,37 @@ import { Toolbar } from "./components/Toolbar";
 import { TouchDebugOverlay } from "./components/TouchDebugOverlay";
 import { TransformOverlay } from "./components/TransformOverlay";
 import { DEFAULT_PEN_CONFIG, DEFAULT_SMOOTHING_CONFIG } from "./config";
+import { usePerfDebugBridge } from "./debug/perf-debug-bridge";
+import { useStrokeDebugControls } from "./debug/useStrokeDebugControls";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePatternPreview } from "./hooks/usePatternPreview";
-import { useStrokeCallMetrics } from "./hooks/useStrokeCallMetrics";
 import { useTransformMode } from "./hooks/useTransformMode";
+import {
+  type PersistedAppSettings,
+  clearSettingsSnapshot,
+  getGpuBackendUrlOverride,
+  getGpuCommitModeUrlOverride,
+  loadSettingsSnapshot,
+  useSettingsStorage,
+} from "./settings-storage";
 
-const LAYER_WIDTH = 1024 * 2;
-const LAYER_HEIGHT = 1024 * 2;
-const SETTINGS_STORAGE_KEY = "headless-paint:settings";
-
-type InputCaptureStatus = "idle" | "armed" | "capturing" | "captured";
-
-function saveSettingsSnapshot(snapshot: PaintSettingsSnapshot): void {
-  try {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(snapshot));
-  } catch {
-    // noop: localStorage の容量超過時もアプリは継続
-  }
-}
-
-function loadSettingsSnapshot(): PaintSettingsSnapshot | null {
-  const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return importPaintSettings(parsed);
-  } catch {
-    return null;
-  }
-}
-
+const EXPERIMENT_LAYER_SIZE = Number(
+  new URLSearchParams(window.location.search).get("layerSize") ?? "0",
+);
+const LAYER_WIDTH =
+  EXPERIMENT_LAYER_SIZE > 0 ? EXPERIMENT_LAYER_SIZE : 1024 * 2;
+const LAYER_HEIGHT = LAYER_WIDTH;
 export function App() {
   const [sessionKey, setSessionKey] = useState(0);
   const [initialSettings, setInitialSettings] =
-    useState<PaintSettingsSnapshot | null>(() => loadSettingsSnapshot());
+    useState<PersistedAppSettings | null>(() => loadSettingsSnapshot());
 
   const handleReset = useCallback(() => {
     const confirmed = window.confirm(
       "設定と現在の描画内容をリセットします。保存されるのは設定のみです。よろしいですか？",
     );
     if (!confirmed) return;
-    localStorage.removeItem(SETTINGS_STORAGE_KEY);
+    clearSettingsSnapshot();
     setInitialSettings(null);
     setSessionKey((prev) => prev + 1);
   }, []);
@@ -91,12 +66,16 @@ export function App() {
 }
 
 interface PaintWorkspaceProps {
-  readonly initialSettings: PaintSettingsSnapshot | null;
+  readonly initialSettings: PersistedAppSettings | null;
   readonly onReset: () => void;
 }
 
 function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
-  const restoredSettings = initialSettings;
+  const restoredSettings = initialSettings?.paint ?? null;
+  const persistedGpuBackend = initialSettings?.engineBackend ?? "auto";
+  const gpuBackendUrlOverride = getGpuBackendUrlOverride();
+  const gpuBackend = gpuBackendUrlOverride ?? persistedGpuBackend;
+  const gpuCommitMode = getGpuCommitModeUrlOverride() ?? "bitmap";
   const [tool, setTool] = useState<ToolType>("pen");
   const { width: viewWidth, height: viewHeight } = useWindowSize();
   const {
@@ -165,7 +144,27 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     [smoothing.compiledFilterPipeline, usesStatefulMaterial],
   );
   const expand = useExpand(LAYER_WIDTH, LAYER_HEIGHT);
+  const handleDebugSetSymmetry = useCallback(
+    (mode: string, divisions: number) => {
+      expand.setMode(mode as Parameters<typeof expand.setMode>[0]);
+      expand.setDivisions(divisions);
+    },
+    [expand.setMode, expand.setDivisions],
+  );
   const patternPreview = usePatternPreview();
+  const { background, handleToggleBackground, handleGpuBackendChange } =
+    useSettingsStorage({
+      restoredSettings,
+      persistedGpuBackend,
+      gpuBackendUrlOverride,
+      tool,
+      setTool,
+      transform,
+      handleSetTransform,
+      penSettings,
+      smoothing,
+      expand,
+    });
 
   // メインエンジン
   const engine = usePaintEngine({
@@ -176,134 +175,44 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     expandConfig: expand.config,
     compiledExpand: expand.compiled,
     registry: registryRef.current,
+    gpuBackend,
+    gpuCommitMode,
   });
-  const inputCaptureArmedRef = useRef(false);
-  const inputCaptureActiveRef = useRef(false);
-  const inputCapturePointsRef = useRef<InputPoint[]>([]);
-  const inputCaptureBatchSizesRef = useRef<number[]>([]);
-  const inputCaptureSettingsRef = useRef<{
-    readonly brush: typeof penSettings.brush;
-    readonly lineWidth: number;
-    readonly pressureCurve: typeof penSettings.pressureCurve;
-    readonly filterPipeline:
-      | { readonly type: "causal-adaptive" }
-      | {
-          readonly type: "common-smoothing" | "none";
-          readonly windowSize: number;
-        };
-  } | null>(null);
-  const [inputCaptureStatus, setInputCaptureStatus] =
-    useState<InputCaptureStatus>("idle");
-  const [inputCaptureJson, setInputCaptureJson] = useState<string | null>(null);
-
-  const handleArmInputCapture = useCallback(() => {
-    inputCaptureArmedRef.current = true;
-    inputCaptureActiveRef.current = false;
-    inputCapturePointsRef.current = [];
-    inputCaptureBatchSizesRef.current = [];
-    inputCaptureSettingsRef.current = null;
-    setInputCaptureJson(null);
-    setInputCaptureStatus("armed");
-  }, []);
-
-  const appendCapturedInput = useCallback((points: readonly InputPoint[]) => {
-    if (!inputCaptureActiveRef.current) return;
-    inputCapturePointsRef.current.push(...points);
-    inputCaptureBatchSizesRef.current.push(points.length);
-  }, []);
-
-  const finalizeInputCapture = useCallback(() => {
-    if (!inputCaptureActiveRef.current) return;
-    inputCaptureActiveRef.current = false;
-    const json = JSON.stringify({
-      format: "headless-paint-production-input",
-      version: 1,
-      settings: inputCaptureSettingsRef.current,
-      batchSizes: inputCaptureBatchSizesRef.current,
-      points: inputCapturePointsRef.current,
-    });
-    setInputCaptureJson(json);
-    setInputCaptureStatus("captured");
-    console.log(`[ProductionInputCapture] ${json}`);
-  }, []);
-
-  const handleCopyInputCapture = useCallback(async () => {
-    if (!inputCaptureJson) return;
-    await navigator.clipboard.writeText(inputCaptureJson);
-  }, [inputCaptureJson]);
   const {
-    metrics: strokeCallMetrics,
-    measure: measureStrokeCall,
-    flush: flushStrokeCallMetrics,
-    reset: resetStrokeCallMetrics,
-  } = useStrokeCallMetrics();
-  const handleMeasuredStrokeMove = useCallback(
-    (point: InputPoint) => {
-      appendCapturedInput([point]);
-      measureStrokeCall(() => engine.onStrokeMove(point));
-    },
-    [appendCapturedInput, engine.onStrokeMove, measureStrokeCall],
-  );
-  const handleMeasuredStrokeMoves = useCallback(
-    (points: readonly InputPoint[]) => {
-      appendCapturedInput(points);
-      measureStrokeCall(() => engine.onStrokeMoves(points));
-    },
-    [appendCapturedInput, engine.onStrokeMoves, measureStrokeCall],
-  );
-  const handleMeasuredTouchStrokeStart = useCallback(
-    (point: InputPoint) => {
-      measureStrokeCall(() => engine.onStrokeStart(point));
-    },
-    [engine.onStrokeStart, measureStrokeCall],
-  );
-  const handleMeasuredStrokeEnd = useCallback(() => {
-    measureStrokeCall(engine.onStrokeEnd);
-    flushStrokeCallMetrics();
-    finalizeInputCapture();
-  }, [
-    engine.onStrokeEnd,
-    finalizeInputCapture,
-    flushStrokeCallMetrics,
-    measureStrokeCall,
-  ]);
-
-  const handleDrawBristleSCurve = useCallback(() => {
-    if (
-      penSettings.brush.type !== "bristle" ||
-      !engine.canDraw ||
-      engine.isDrawing
-    ) {
-      return;
-    }
-
-    const points = createBristleSCurveEvaluationPoints(
-      (LAYER_WIDTH - BRISTLE_S_CURVE_FIXTURE_WIDTH) / 2,
-      (LAYER_HEIGHT - BRISTLE_S_CURVE_FIXTURE_HEIGHT) / 2,
-    );
-    const firstPoint = points[0];
-    if (!firstPoint) return;
-
-    resetStrokeCallMetrics();
-    measureStrokeCall(() => engine.onStrokeStart(firstPoint, { brushSeed: 1 }));
-    for (let index = 1; index < points.length; index += 4) {
-      handleMeasuredStrokeMoves(points.slice(index, index + 4));
-    }
-    handleMeasuredStrokeEnd();
-  }, [
-    engine.canDraw,
-    engine.isDrawing,
-    engine.onStrokeStart,
-    handleMeasuredStrokeEnd,
-    handleMeasuredStrokeMoves,
-    penSettings.brush.type,
-    measureStrokeCall,
+    strokeCallMetrics,
     resetStrokeCallMetrics,
-  ]);
-
-  const [background, setBackground] = useState<BackgroundSettings>({
-    color: restoredSettings?.background.color ?? DEFAULT_BACKGROUND_COLOR,
-    visible: restoredSettings?.background.visible ?? true,
+    handleStrokeStart: handleMeasuredStrokeStart,
+    handleTouchStrokeStart: handleMeasuredTouchStrokeStart,
+    handleStrokeMove: handleMeasuredStrokeMove,
+    handleStrokeMoves: handleMeasuredStrokeMoves,
+    handleStrokeEnd: handleMeasuredStrokeEnd,
+    handleDrawBristleSCurve,
+    inputCaptureStatus,
+    inputCapturePointCount,
+    handleArmInputCapture,
+    handleCopyInputCapture,
+  } = useStrokeDebugControls({
+    brush: penSettings.brush,
+    lineWidth: penSettings.lineWidth,
+    pressureCurve: penSettings.pressureCurve,
+    usesStatefulMaterial,
+    smoothingEnabled: smoothing.enabled,
+    smoothingWindowSize: smoothing.windowSize,
+    layerWidth: LAYER_WIDTH,
+    layerHeight: LAYER_HEIGHT,
+    canDraw: engine.canDraw,
+    isDrawing: engine.isDrawing,
+    onStrokeStart: engine.onStrokeStart,
+    onStrokeMove: engine.onStrokeMove,
+    onStrokeMoves: engine.onStrokeMoves,
+    onStrokeEnd: engine.onStrokeEnd,
+  });
+  const { handleTimedUndo } = usePerfDebugBridge({
+    setColor: penSettings.setColor,
+    setLineWidth: penSettings.setLineWidth,
+    setBrush: penSettings.setBrush,
+    setSymmetry: handleDebugSetSymmetry,
+    undo: engine.undo,
   });
 
   // 変換モード
@@ -325,60 +234,11 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   );
 
   const [showTouchDebug, setShowTouchDebug] = useState(false);
-  const [settingsHydrated, setSettingsHydrated] = useState(false);
-
-  useEffect(() => {
-    if (!restoredSettings) {
-      setSettingsHydrated(true);
-      return;
-    }
-
-    const restoredTransform = createViewTransform();
-    for (let i = 0; i < 9; i++) {
-      restoredTransform[i] = restoredSettings.transform[i];
-    }
-    handleSetTransform(restoredTransform);
-
-    const root = restoredSettings.expand.levels[0];
-    if (root) {
-      expand.setMode(root.mode);
-      expand.setDivisions(root.divisions);
-      expand.setAngle(root.angle);
-    }
-
-    const sub = restoredSettings.expand.levels[1];
-    if (sub) {
-      expand.setSubEnabled(true);
-      expand.setSubMode(sub.mode);
-      expand.setSubDivisions(sub.divisions);
-      expand.setSubAngle(sub.angle);
-      expand.setSubOffset(sub.offset);
-    } else {
-      expand.setSubEnabled(false);
-    }
-
-    setTool(restoredSettings.tool);
-    setSettingsHydrated(true);
-  }, [
-    restoredSettings,
-    handleSetTransform,
-    expand.setMode,
-    expand.setDivisions,
-    expand.setAngle,
-    expand.setSubEnabled,
-    expand.setSubMode,
-    expand.setSubDivisions,
-    expand.setSubAngle,
-    expand.setSubOffset,
-  ]);
 
   const handleToolChange = useCallback((newTool: ToolType) => {
     setTool(newTool);
   }, []);
 
-  const handleToggleBackground = useCallback(() => {
-    setBackground((prev) => ({ ...prev, visible: !prev.visible }));
-  }, []);
   const handleToggleTouchDebug = useCallback(() => {
     setShowTouchDebug((prev) => !prev);
   }, []);
@@ -386,44 +246,6 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   useEffect(() => {
     penSettings.setEraser(tool === "eraser");
   }, [tool, penSettings.setEraser]);
-
-  useEffect(() => {
-    if (!settingsHydrated) return;
-    const timerId = window.setTimeout(() => {
-      const snapshot = exportPaintSettings({
-        tool,
-        transform,
-        background,
-        pen: {
-          color: penSettings.color,
-          lineWidth: penSettings.lineWidth,
-          pressureCurve: penSettings.pressureCurve,
-          eraser: penSettings.eraser,
-          brush: penSettings.brush,
-        },
-        smoothing: {
-          enabled: smoothing.enabled,
-          windowSize: smoothing.windowSize,
-        },
-        expand: expand.config,
-      });
-      saveSettingsSnapshot(snapshot);
-    }, 300);
-    return () => window.clearTimeout(timerId);
-  }, [
-    settingsHydrated,
-    tool,
-    transform,
-    background,
-    penSettings.color,
-    penSettings.lineWidth,
-    penSettings.pressureCurve,
-    penSettings.eraser,
-    penSettings.brush,
-    smoothing.enabled,
-    smoothing.windowSize,
-    expand.config,
-  ]);
 
   // タッチジェスチャー
   const touchGesture = useTouchGesture({
@@ -456,43 +278,12 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   // Shift+ドラッグで直線モード
   const handleStrokeStart = useCallback(
     (point: InputPoint) => {
-      if (inputCaptureArmedRef.current) {
-        inputCaptureArmedRef.current = false;
-        inputCaptureActiveRef.current = true;
-        inputCapturePointsRef.current = [point];
-        inputCaptureBatchSizesRef.current = [1];
-        inputCaptureSettingsRef.current = {
-          brush: penSettings.brush,
-          lineWidth: penSettings.lineWidth,
-          pressureCurve: penSettings.pressureCurve,
-          filterPipeline: usesStatefulMaterial
-            ? { type: "causal-adaptive" }
-            : {
-                type: smoothing.enabled ? "common-smoothing" : "none",
-                windowSize: smoothing.windowSize,
-              },
-        };
-        setInputCaptureStatus("capturing");
-      }
-      measureStrokeCall(() =>
-        engine.onStrokeStart(point, { straightLine: shiftHeld.current }),
-      );
+      handleMeasuredStrokeStart(point, { straightLine: shiftHeld.current });
     },
-    [
-      engine.onStrokeStart,
-      measureStrokeCall,
-      penSettings.brush,
-      penSettings.lineWidth,
-      penSettings.pressureCurve,
-      shiftHeld,
-      smoothing.enabled,
-      smoothing.windowSize,
-      usesStatefulMaterial,
-    ],
+    [handleMeasuredStrokeStart, shiftHeld],
   );
 
   const strokeCount = engine.historyState.currentIndex + 1;
-
   // レイヤーID→表示名の解決関数
   const layerIdToName = useCallback(
     (layerId: string) => {
@@ -592,7 +383,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         <Toolbar
           currentTool={tool}
           onToolChange={handleToolChange}
-          onUndo={engine.undo}
+          onUndo={handleTimedUndo}
           onRedo={engine.redo}
           canUndo={engine.canUndo}
           canRedo={engine.canRedo}
@@ -609,7 +400,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         mainCanvasHeight={viewHeight}
         renderVersion={engine.renderVersion}
         historyState={engine.historyState}
-        onUndo={engine.undo}
+        onUndo={handleTimedUndo}
         onRedo={engine.redo}
         canUndo={engine.canUndo}
         canRedo={engine.canRedo}
@@ -625,11 +416,9 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
             : undefined
         }
         inputCaptureStatus={inputCaptureStatus}
-        inputCapturePointCount={inputCapturePointsRef.current.length}
+        inputCapturePointCount={inputCapturePointCount}
         onArmInputCapture={handleArmInputCapture}
-        onCopyInputCapture={
-          inputCaptureJson ? handleCopyInputCapture : undefined
-        }
+        onCopyInputCapture={handleCopyInputCapture}
         entries={engine.entries}
         activeLayerId={engine.activeLayerId}
         background={background}
@@ -660,6 +449,11 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         onResetOffset={engine.onResetOffset}
         showTouchDebug={showTouchDebug}
         onToggleTouchDebug={handleToggleTouchDebug}
+        gpuBackendSetting={gpuBackend}
+        gpuBackend={engine.gpuBackend}
+        gpuBackendReason={engine.gpuBackendReason}
+        gpuCommitMode={gpuCommitMode}
+        onGpuBackendChange={handleGpuBackendChange}
       />
     </div>
   );

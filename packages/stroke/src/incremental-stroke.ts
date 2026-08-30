@@ -1,7 +1,9 @@
 import type {
+  BrushAccelerator,
   BrushRenderState,
   BrushTipRegistry,
   ExpandConfig,
+  GpuStrokeOwnerLabel,
   Layer,
   StrokeStyle,
 } from "@headless-paint/engine";
@@ -24,6 +26,7 @@ import type {
   FilterPipelineState,
   InputPoint,
 } from "@headless-paint/input";
+import { getBrushPerfDebug, perfSample, perfStage } from "./perf-debug";
 import { addPointToSession, startStrokeSession } from "./session";
 import type { RenderUpdate, StrokeSessionState } from "./types";
 
@@ -36,6 +39,9 @@ export interface IncrementalStrokeRendererConfig {
   readonly alphaLocked: boolean;
   readonly sourceLayer?: Layer;
   readonly registry?: BrushTipRegistry;
+  readonly accelerator?: BrushAccelerator | null;
+  readonly gpuOwnerLabel?: GpuStrokeOwnerLabel;
+  readonly restoreLayerOnGpuLoss?: () => void;
   readonly onRenderUpdate?: (update: IncrementalStrokeRenderUpdate) => void;
 }
 
@@ -46,9 +52,12 @@ export interface IncrementalStrokeRenderUpdate {
 }
 
 export interface IncrementalStrokeRenderer {
+  readonly usesGpu: boolean;
   feed(point: InputPoint): void;
   feedMany(points: readonly InputPoint[]): void;
   finalize(): void;
+  /** Abandon the stroke and report whether GPU restored the committed layer. */
+  cancel(): boolean;
 }
 
 const BRISTLE_BATCH_INTERVAL_MS = 32;
@@ -58,8 +67,51 @@ export function createIncrementalStrokeRenderer(
 ): IncrementalStrokeRenderer {
   const compiledFilterPipeline = compileFilterPipeline(config.filterPipeline);
   const compiledExpand = compileExpand(config.expand);
-  const samplingLayer =
-    config.sourceLayer ?? createSamplingLayer(config.layer, config.style);
+  const gpuRuntime = getGpuStrokeRuntime(config.accelerator);
+  const gpuOwner = {
+    label: config.gpuOwnerLabel ?? "live",
+    startedAtMs: 0,
+  };
+  const gpuStrokeEligible =
+    gpuRuntime !== null &&
+    config.style.brush.type === "stamp" &&
+    isBrushMixingActive(config.style.brush.mixing) &&
+    config.style.compositeOperation === "source-over" &&
+    !config.alphaLocked &&
+    (gpuRuntime?.supportsBranchCount(compiledExpand.outputCount) ?? false);
+  const perfDebug = getBrushPerfDebug();
+  if (gpuStrokeEligible) {
+    perfDebug?.beginBatch(
+      0,
+      compiledExpand.outputCount,
+      "strokeStart",
+      config.gpuOwnerLabel ?? "live",
+    );
+  }
+  let gpuResidencyHit = false;
+  let samplingLayer: Layer | undefined;
+  let gpuStrokeActive = false;
+  try {
+    gpuResidencyHit =
+      gpuStrokeEligible && !!gpuRuntime?.isLayerResident(config.layer);
+    samplingLayer =
+      config.sourceLayer ??
+      (gpuResidencyHit
+        ? undefined
+        : createSamplingLayer(config.layer, config.style));
+    if (gpuStrokeEligible) {
+      gpuOwner.startedAtMs = performance.now();
+      gpuStrokeActive = !!gpuRuntime?.beginStroke(
+        gpuOwner,
+        config.layer,
+        gpuResidencyHit ? undefined : samplingLayer?.canvas,
+        compiledExpand.outputCount,
+      );
+    }
+    if (gpuStrokeActive) samplingLayer = undefined;
+  } finally {
+    if (gpuStrokeEligible) perfDebug?.endBatch();
+  }
 
   let filterState: FilterPipelineState = createFilterPipelineState(
     compiledFilterPipeline,
@@ -74,6 +126,14 @@ export function createIncrementalStrokeRenderer(
   let finalized = false;
   let renderedCommittedCount = 0;
   let pendingBristlePoints: InputPoint[] = [];
+  const gpuInputPoints: InputPoint[] = [];
+  let gpuStrokeLost = false;
+
+  function detectGpuStrokeLoss(): boolean {
+    if (!gpuStrokeActive) return false;
+    gpuStrokeLost ||= gpuRuntime?.isStrokeLost(gpuOwner) ?? true;
+    return gpuStrokeLost;
+  }
 
   function appendProcessedBatch(
     nextSession: StrokeSessionState,
@@ -90,51 +150,81 @@ export function createIncrementalStrokeRenderer(
         : [],
       committedOverlapCount: hasNewCommitted ? overlapCount : 0,
     };
-    if (hasNewCommitted) {
-      brushState = appendToCommittedLayer(
-        config.layer,
-        batchUpdate.newlyCommitted,
-        config.style,
-        compiledExpand,
-        batchUpdate.committedOverlapCount,
-        brushState,
-        samplingLayer,
-        config.alphaLocked,
-      );
-      renderedCommittedCount = nextCommittedCount;
-    }
-    config.onRenderUpdate?.({
-      session: nextSession,
-      renderUpdate: batchUpdate,
-      brushState,
+    perfStage("appendCommitted", () => {
+      if (hasNewCommitted) {
+        if (!detectGpuStrokeLoss()) {
+          if (gpuStrokeActive) gpuRuntime?.enter(gpuOwner);
+          try {
+            brushState = appendToCommittedLayer(
+              config.layer,
+              batchUpdate.newlyCommitted,
+              config.style,
+              compiledExpand,
+              batchUpdate.committedOverlapCount,
+              brushState,
+              samplingLayer,
+              config.alphaLocked,
+              config.accelerator,
+            );
+            if (!gpuStrokeActive) {
+              config.accelerator?.invalidate(config.layer, "cpuBrush");
+            }
+          } catch (error) {
+            if (!detectGpuStrokeLoss()) throw error;
+          } finally {
+            if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
+          }
+        }
+        renderedCommittedCount = nextCommittedCount;
+      }
+    });
+    perfStage("renderUpdateCallback", () => {
+      if (!gpuStrokeLost) {
+        config.onRenderUpdate?.({
+          session: nextSession,
+          renderUpdate: batchUpdate,
+          brushState,
+        });
+      }
     });
   }
 
   function processBatch(points: readonly InputPoint[]): void {
-    let lastUpdate: RenderUpdate | null = null;
-    for (const point of points) {
-      const filterResult = processPoint(
-        filterState,
-        point,
-        compiledFilterPipeline,
-      );
-      filterState = filterResult.state;
-      const strokeResult = strokeSession
-        ? addPointToSession(strokeSession, filterResult.output)
-        : startStrokeSession(filterResult.output, config.style, config.expand);
-      strokeSession = strokeResult.state;
-      lastUpdate = strokeResult.renderUpdate;
-    }
-    if (strokeSession && lastUpdate) {
-      appendProcessedBatch(strokeSession, lastUpdate);
-    }
+    perfStage("processBatch", () => {
+      let lastUpdate: RenderUpdate | null = null;
+      for (const point of points) {
+        const filterResult = processPoint(
+          filterState,
+          point,
+          compiledFilterPipeline,
+        );
+        filterState = filterResult.state;
+        const strokeResult = strokeSession
+          ? addPointToSession(strokeSession, filterResult.output)
+          : startStrokeSession(
+              filterResult.output,
+              config.style,
+              config.expand,
+            );
+        strokeSession = strokeResult.state;
+        lastUpdate = strokeResult.renderUpdate;
+      }
+      if (strokeSession && lastUpdate) {
+        appendProcessedBatch(strokeSession, lastUpdate);
+      }
+    });
   }
 
   function feedMany(points: readonly InputPoint[]): void {
     if (finalized || points.length === 0) return;
     hasFed = true;
+    if (gpuStrokeActive) gpuInputPoints.push(...points);
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
+      if (gpuStrokeActive && !detectGpuStrokeLoss()) {
+        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+        detectGpuStrokeLoss();
+      }
       return;
     }
     for (const point of points) {
@@ -149,24 +239,95 @@ export function createIncrementalStrokeRenderer(
   }
 
   return {
+    usesGpu: gpuStrokeActive,
     feed(point) {
       feedMany([point]);
     },
     feedMany,
+    cancel() {
+      if (finalized) return false;
+      finalized = true;
+      if (!gpuStrokeActive) return false;
+      const restoredOnGpu =
+        !detectGpuStrokeLoss() && (gpuRuntime?.cancelStroke(gpuOwner) ?? false);
+      gpuRuntime?.endStroke(gpuOwner);
+      return restoredOnGpu && !gpuStrokeLost;
+    },
     finalize() {
-      if (finalized || !hasFed) return;
+      if (finalized) return;
+      if (!hasFed) {
+        finalized = true;
+        if (gpuStrokeActive) gpuRuntime?.endStroke(gpuOwner);
+        return;
+      }
       if (pendingBristlePoints.length > 0) {
         processBatch(pendingBristlePoints);
         pendingBristlePoints = [];
       }
-      if (!strokeSession) return;
+      if (!strokeSession) {
+        if (gpuStrokeActive) gpuRuntime?.endStroke(gpuOwner);
+        return;
+      }
       finalized = true;
       const finalOutput = finalizePipeline(filterState, compiledFilterPipeline);
       const strokeResult = addPointToSession(strokeSession, finalOutput);
       strokeSession = strokeResult.state;
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
+      if (gpuStrokeActive) {
+        if (!detectGpuStrokeLoss()) {
+          gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+          detectGpuStrokeLoss();
+        }
+        gpuRuntime?.endStroke(gpuOwner);
+        if (gpuStrokeLost) recoverLostGpuStroke();
+      }
     },
   };
+
+  function recoverLostGpuStroke(): void {
+    config.restoreLayerOnGpuLoss?.();
+    let recoveredUpdate: IncrementalStrokeRenderUpdate | undefined;
+    const cpuRenderer = createIncrementalStrokeRenderer({
+      ...config,
+      sourceLayer: undefined,
+      accelerator: null,
+      restoreLayerOnGpuLoss: undefined,
+      onRenderUpdate: (update) => {
+        recoveredUpdate = update;
+      },
+    });
+    cpuRenderer.feedMany(gpuInputPoints);
+    cpuRenderer.finalize();
+    if (recoveredUpdate) config.onRenderUpdate?.(recoveredUpdate);
+  }
+}
+
+interface GpuStrokeRuntimeBridge {
+  supportsBranchCount(branchCount: number): boolean;
+  beginStroke(
+    owner: object,
+    layer: Layer,
+    sourceCanvas?: OffscreenCanvas,
+    branchCount?: number,
+  ): boolean;
+  enter(owner: object): void;
+  leave(owner: object): void;
+  commitToLayer(owner: object, layer: Layer): void;
+  cancelStroke(owner: object): boolean;
+  endStroke(owner: object): void;
+  isStrokeLost(owner: object): boolean;
+  isLayerResident(layer: Layer): boolean;
+}
+
+function getGpuStrokeRuntime(
+  accelerator: BrushAccelerator | null | undefined,
+): GpuStrokeRuntimeBridge | null {
+  if (!accelerator) return null;
+  const runtime = accelerator as BrushAccelerator &
+    Partial<GpuStrokeRuntimeBridge>;
+  return typeof runtime.beginStroke === "function"
+    ? (runtime as GpuStrokeRuntimeBridge)
+    : null;
 }
 
 function shouldFlushBristleBatch(
@@ -263,7 +424,21 @@ function createSamplingLayer(
   ) {
     return undefined;
   }
-  const samplingLayer = createLayer(layer.width, layer.height);
-  copyLayerPixels(layer, samplingLayer);
+  const perf = getBrushPerfDebug();
+  if (perf?.nullStages.nullFullCopy) {
+    perfStage("samplingLayerCopy", () => undefined);
+    perfSample("samplingCopyPixels", 0);
+    return layer;
+  }
+  return copySamplingLayer(layer);
+}
+
+function copySamplingLayer(layer: Layer): Layer {
+  const samplingLayer = perfStage("samplingLayerCopy", () => {
+    const next = createLayer(layer.width, layer.height);
+    copyLayerPixels(layer, next);
+    return next;
+  });
+  perfSample("samplingCopyPixels", layer.width * layer.height);
   return samplingLayer;
 }

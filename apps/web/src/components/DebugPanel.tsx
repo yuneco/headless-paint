@@ -33,6 +33,11 @@ interface DebugPanelProps {
   onResetOffset?: () => void;
   showTouchDebug?: boolean;
   onToggleTouchDebug?: () => void;
+  gpuBackendSetting: "auto" | "webgl2" | "cpu";
+  gpuBackend: "webgl2" | "cpu";
+  gpuBackendReason: string;
+  gpuCommitMode: "bitmap" | "direct";
+  onGpuBackendChange: (backend: "auto" | "webgl2" | "cpu") => void;
 }
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
@@ -63,6 +68,11 @@ function DebugPanelComponent({
   onResetOffset,
   showTouchDebug = false,
   onToggleTouchDebug,
+  gpuBackendSetting,
+  gpuBackend,
+  gpuBackendReason,
+  gpuCommitMode,
+  onGpuBackendChange,
 }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
@@ -744,6 +754,46 @@ function DebugPanelComponent({
             "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif",
         }}
       >
+        <div
+          style={{
+            display: "grid",
+            gap: 5,
+            marginBottom: 8,
+            paddingBottom: 8,
+            borderBottom: "1px solid #444",
+            color: "#ebebeb",
+            fontSize: 11,
+            minWidth: 0,
+            maxWidth: "100%",
+            overflowWrap: "anywhere",
+          }}
+        >
+          <div style={{ whiteSpace: "normal" }}>
+            Engine: <strong>{gpuBackend}</strong> ({gpuBackendReason}) · commit:{" "}
+            {gpuCommitMode} · build: {__HP_BUILD_ID__}
+          </div>
+          <label style={{ display: "grid", gridTemplateColumns: "1fr 110px" }}>
+            Backend
+            <select
+              value={gpuBackendSetting}
+              onChange={(event) => {
+                const nextBackend = event.currentTarget.value as
+                  | "auto"
+                  | "webgl2"
+                  | "cpu";
+                if (!window.confirm("リロードして切り替えます")) {
+                  event.currentTarget.value = gpuBackendSetting;
+                  return;
+                }
+                onGpuBackendChange(nextBackend);
+              }}
+            >
+              <option value="auto">auto</option>
+              <option value="webgl2">webgl2</option>
+              <option value="cpu">cpu</option>
+            </select>
+          </label>
+        </div>
         <div
           style={{
             fontSize: 11,

@@ -1,9 +1,11 @@
 import type {
+  BrushAccelerator,
   BrushTipRegistry,
   Layer,
   LayerMeta,
 } from "@headless-paint/engine";
 import { createLayer, wrapShiftLayer } from "@headless-paint/engine";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import {
   canRedo,
   canUndo,
@@ -25,6 +27,7 @@ export interface ExecutorDeps<TCustom = never> {
   readonly tipRegistry?: BrushTipRegistry;
   readonly customExecutor?: CustomCommandExecutor<TCustom>;
   readonly shiftTempCanvas?: OffscreenCanvas;
+  readonly accelerator?: BrushAccelerator | null;
 }
 
 export interface ExecutorFailure {
@@ -241,7 +244,10 @@ function executeLayerDraw<TCustom>(
     const layer = deps.layers.find((candidate) => candidate.id === layerId);
     if (!layer) continue;
 
-    const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry);
+    const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
+      accelerator: deps.accelerator,
+      invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
+    });
     if (!result.ok) {
       return createFailureResult(
         state,
@@ -306,6 +312,28 @@ function executeCustom<TCustom>(
     );
   }
 
+  const dirty = outcome.dirty ?? DIRTY_NONE;
+  if (dirty.type === "all") {
+    for (const layer of deps.layers) {
+      invalidateGpuLayerResidency(
+        layer,
+        deps.accelerator,
+        op === "undo" ? "executorUndo" : "executorRedo",
+      );
+    }
+  } else if (dirty.type === "layers") {
+    for (const layerId of dirty.layerIds) {
+      const layer = deps.layers.find((candidate) => candidate.id === layerId);
+      if (layer) {
+        invalidateGpuLayerResidency(
+          layer,
+          deps.accelerator,
+          op === "undo" ? "executorUndo" : "executorRedo",
+        );
+      }
+    }
+  }
+
   return {
     ok: true,
     next,
@@ -313,7 +341,7 @@ function executeCustom<TCustom>(
     layerListOps: outcome.layerListOps ?? EMPTY_LAYER_LIST_OPS,
     activeLayerIdHint: outcome.activeLayerIdHint,
     visibilityFixLayerIds: outcome.visibilityFixLayerIds ?? EMPTY_LAYER_IDS,
-    dirty: outcome.dirty ?? DIRTY_NONE,
+    dirty,
     persistence,
   };
 }
@@ -397,7 +425,10 @@ function executeStructural<TCustom>(
         command.layerId,
         command.meta,
       );
-      const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry);
+      const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
+        accelerator: deps.accelerator,
+        invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
+      });
       if (!result.ok) {
         return createFailureResult(
           state,
@@ -527,6 +558,10 @@ function executeStructural<TCustom>(
         sourceLayer,
         next,
         deps.tipRegistry,
+        {
+          accelerator: deps.accelerator,
+          invalidationReason: "executorUndo",
+        },
       );
       if (!sourceResult.ok) {
         return createFailureResult(
@@ -562,6 +597,10 @@ function executeStructural<TCustom>(
         targetLayer,
         next,
         deps.tipRegistry,
+        {
+          accelerator: deps.accelerator,
+          invalidationReason: "executorUndo",
+        },
       );
       if (!targetResult.ok) {
         return createFailureResult(
@@ -575,7 +614,6 @@ function executeStructural<TCustom>(
           persistence,
         );
       }
-
       return {
         ok: true,
         next,

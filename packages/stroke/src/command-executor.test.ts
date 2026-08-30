@@ -1,4 +1,8 @@
-import type { Layer, LayerMeta } from "@headless-paint/engine";
+import type {
+  BrushAccelerator,
+  Layer,
+  LayerMeta,
+} from "@headless-paint/engine";
 import { createLayer, getPixel, setPixel } from "@headless-paint/engine";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -235,9 +239,13 @@ describe("command executor", () => {
   it("interrupts a normal draw redo when rebuild fails", () => {
     const command = createClearCommand("a");
     const state = createState([command], -1);
+    const layer = makeLayer("a");
+    const invalidate = vi.fn();
+    const accelerator = { invalidate } as unknown as BrushAccelerator;
 
     const result = executeHistoryOp("redo", state, {
-      layers: [makeLayer("a")],
+      layers: [layer],
+      accelerator,
     });
 
     expect(result.ok).toBe(false);
@@ -249,6 +257,7 @@ describe("command executor", () => {
     });
     expect(result.dirty).toEqual({ type: "none" });
     expect(result.persistence).toEqual({ type: "append-command", command });
+    expect(invalidate).toHaveBeenCalledWith(layer, "replayFailure");
   });
 
   it("undoes add-layer with a remove list op and nearest active hint", () => {

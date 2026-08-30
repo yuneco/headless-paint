@@ -64,7 +64,18 @@ export {
 } from "@headless-paint/engine";
 
 export {
+  createBrushAccelerator,
+  resolveBrushAcceleratorBackend,
+  type BrushAccelerator,
+  type BrushAcceleratorBackend,
+  type BrushAcceleratorOptions,
+  type BrushAcceleratorResolution,
+  type GpuResidencyInvalidationReason,
+  type GpuStrokeOwnerLabel,
+} from "@headless-paint/engine";
+export {
   hashSeed,
+  isBrushMixingActive,
   mulberry32,
   renderBrushStroke,
   timeSpacingMsFromRate,

@@ -22,6 +22,9 @@ function localHttpsOptions() {
 
 export default defineConfig(({ command }) => ({
   base: command === "build" ? "/headless-paint/" : "/",
+  define: {
+    __HP_BUILD_ID__: JSON.stringify(new Date().toISOString().slice(0, 19)),
+  },
   plugins: [react()],
   server: {
     https: localHttpsOptions(),

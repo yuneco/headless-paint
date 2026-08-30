@@ -39,7 +39,7 @@ useSmoothing ─────── 入力スムージング
 useExpand ─────────── 対称展開（使う場合のみ）
 ```
 
-`usePaintEngine` は内部で `useStrokeSession` と `useLayers` を使用している。利用する機能のうち不要なものがあれば（例: Wrap shift を使わない）、対応するコールバックを接続しなければよい。
+`usePaintEngine` は内部で `useStrokeSession` と `useLayers` を使用している。レイヤー操作と履歴操作のオーケストレーションは `src/paint-engine/` の内部モジュールに分離されているが、公開 API と利用方法は変わらない。利用する機能のうち不要なものがあれば（例: Wrap shift を使わない）、対応するコールバックを接続しなければよい。
 
 ### 中間: 自前の履歴管理をしたい場合
 
@@ -536,6 +536,8 @@ interface PaintEngineConfig<TCustom = never> {
   readonly historyConfig?: HistoryConfig;
   /** 画像ベースチップ用のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
   readonly registry?: BrushTipRegistry;
+  /** GPU 加速器の backend（既定 "auto"）。hook が createBrushAccelerator で生成し、live runtime と Undo/Redo に注入、mixing stamp 選択時に warmUp、unmount 時に dispose する。詳細は engine docs/gpu-acceleration.md */
+  readonly gpuBackend?: "auto" | "webgl2" | "cpu";
   /** 復元用の初期ドキュメント。指定時はこの内容でレイヤー群を初期化する */
   readonly initialDocument?: PaintEngineInitialDocument;
   /** カスタムコマンドの apply/undo ハンドラ。TCustom を指定する場合は必須 */
@@ -667,6 +669,10 @@ interface PaintEngineResult<TCustom = never> {
   readonly renderVersion: number;
   /** アクティブレイヤーが描画可能な状態か */
   readonly canDraw: boolean;
+  /** 実際に使われている描画 backend（GPU 加速器が有効なら "webgl2"、それ以外は "cpu"） */
+  readonly gpuBackend: "webgl2" | "cpu";
+  /** backend の判定理由（engine の resolveBrushAcceleratorBackend。"auto: webkit" / "auto: not webkit" / "webgl2: unavailable" / "webgl2: setting" / "cpu: setting"）。デバッグ UI 向け */
+  readonly gpuBackendReason: string;
   /** 現在のストロークで蓄積された入力ポイント列（デバッグ表示用） */
   readonly strokePoints: readonly InputPoint[];
 }

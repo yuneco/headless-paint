@@ -81,6 +81,7 @@ describe("replayCommand", () => {
       undefined,
       undefined,
       true,
+      undefined,
     );
   });
 
@@ -96,6 +97,7 @@ describe("replayCommand", () => {
       undefined,
       undefined,
       false,
+      undefined,
     );
   });
 });

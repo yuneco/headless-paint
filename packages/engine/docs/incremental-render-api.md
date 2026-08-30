@@ -81,6 +81,7 @@ function appendToCommittedLayer(
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
   alphaLocked?: boolean,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState
 ```
 
@@ -95,6 +96,7 @@ function appendToCommittedLayer(
 | `brushState` | `BrushRenderState` | - | ブラシレンダリング状態。`tipCanvas` と branch ごとの `accumulatedDistance` / `emissionCount` / `distanceEmissionProgress` / `lastTimestamp` / `nextTimeEmissionAt`、混色有効時の `branches[].mixing` を含む。`round-pen` では省略可 |
 | `sourceLayer` | `Layer` | 条件付き | 混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
 | `alphaLocked` | `boolean` | - | 通常描画を既存 alpha に制限するか。省略時は `layer.meta.alphaLocked` を使用する |
+| `accelerator` | `BrushAccelerator \| null` | - | GPU加速器。各branchの `renderBrushStroke` へそのまま渡す。GPU経路ではbranch順（0 → 1 → …）のflushでCPU経路と同じ重なり順を保つ。詳細は [gpu-acceleration.md](./gpu-acceleration.md) |
 
 **動作**:
 1. pointsを`expandStrokePoints`で展開（pressure/timestamp保持）

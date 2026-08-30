@@ -6,7 +6,13 @@ import type {
   StrokeStyle,
 } from "../types";
 import { renderBristleBrushStroke } from "./bristle";
+import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./gpu/accelerator";
+import { invalidateGpuLayerResidency } from "./gpu/gpu-layer-residency";
 import { isBrushMixingActive } from "./mixing";
+import { brushPerfDebug } from "./perf-debug";
 import { renderSprayBrushStroke } from "./spray";
 import { renderStampBrushStroke } from "./stamp";
 import { DEFAULT_BRUSH_RENDER_STATE } from "./state";
@@ -45,7 +51,12 @@ export function renderBrushStroke(
   overlapCount = 0,
   state?: BrushRenderState,
   sourceLayer?: Layer,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  if (points.length > 0 && style.brush.type !== "round-pen" && !gpuSurface) {
+    invalidateGpuLayerResidency(layer, "cpuBrush");
+  }
   switch (style.brush.type) {
     case "round-pen":
       drawVariableWidthPath(
@@ -62,7 +73,9 @@ export function renderBrushStroke(
     case "stamp":
       if (
         isBrushMixingActive(style.brush.mixing) &&
-        (!sourceLayer || sourceLayer.canvas === layer.canvas)
+        (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !gpuSurface &&
+        !brushPerfDebug.nullStages.nullFullCopy
       ) {
         throw new Error(
           "Stamp mixing requires a distinct stroke-start sourceLayer snapshot",
@@ -76,6 +89,7 @@ export function renderBrushStroke(
         state ?? DEFAULT_BRUSH_RENDER_STATE,
         overlapCount,
         sourceLayer ?? layer,
+        accelerator,
       );
     case "spray":
       return renderSprayBrushStroke(
@@ -89,7 +103,8 @@ export function renderBrushStroke(
     case "bristle":
       if (
         isBrushMixingActive(style.brush.mixing) &&
-        (!sourceLayer || sourceLayer.canvas === layer.canvas)
+        (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !brushPerfDebug.nullStages.nullFullCopy
       ) {
         throw new Error(
           "Bristle mixing requires a distinct stroke-start sourceLayer snapshot",

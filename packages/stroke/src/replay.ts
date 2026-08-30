@@ -1,4 +1,10 @@
-import type { BrushTipRegistry, Layer } from "@headless-paint/engine";
+import type {
+  BrushAccelerator,
+  BrushTipRegistry,
+  GpuResidencyInvalidationReason,
+  GpuStrokeOwnerLabel,
+  Layer,
+} from "@headless-paint/engine";
 import {
   clearLayer,
   copyLayerPixels,
@@ -9,6 +15,7 @@ import {
 } from "@headless-paint/engine";
 import type { mat3 } from "gl-matrix";
 import { restoreFromCheckpoint } from "./checkpoint";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import { findBestCheckpointForLayer, getCommandAt } from "./history";
 import { createIncrementalStrokeRenderer } from "./incremental-stroke";
 import type {
@@ -29,6 +36,8 @@ function replayStrokeCommand(
   layer: Layer,
   command: StrokeCommand,
   registry?: BrushTipRegistry,
+  accelerator?: BrushAccelerator | null,
+  gpuOwnerLabel: GpuStrokeOwnerLabel = "replay",
 ): void {
   const renderer = createIncrementalStrokeRenderer({
     layer,
@@ -38,10 +47,10 @@ function replayStrokeCommand(
     brushSeed: command.brushSeed,
     alphaLocked: command.alphaLocked,
     registry,
+    accelerator,
+    gpuOwnerLabel,
   });
-  for (const point of command.inputPoints) {
-    renderer.feed(point);
-  }
+  renderer.feedMany(command.inputPoints);
   renderer.finalize();
 }
 
@@ -91,13 +100,20 @@ export function replayCommand<TCustom = never>(
   layer: Layer,
   command: Command<TCustom>,
   registry?: BrushTipRegistry,
+  options: ReplayOptions = {},
 ): void {
   if (!isDrawCommand(command)) {
     return;
   }
   switch (command.type) {
     case "stroke":
-      replayStrokeCommand(layer, command, registry);
+      replayStrokeCommand(
+        layer,
+        command,
+        registry,
+        options.accelerator,
+        options.gpuOwnerLabel,
+      );
       break;
     case "clear":
       clearLayer(layer);
@@ -118,9 +134,10 @@ export function replayCommands<TCustom = never>(
   layer: Layer,
   commands: readonly Command<TCustom>[],
   registry?: BrushTipRegistry,
+  options: ReplayOptions = {},
 ): void {
   for (const command of commands) {
-    replayCommand(layer, command, registry);
+    replayCommand(layer, command, registry, options);
   }
 }
 
@@ -132,17 +149,33 @@ export function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
   registry?: BrushTipRegistry,
+  options: ReplayOptions = {},
 ): RebuildLayerResult {
   const checkpoint = findBestCheckpointForLayer(state, layer.id);
 
   if (checkpoint) {
-    restoreFromCheckpoint(layer, checkpoint);
+    restoreFromCheckpoint(
+      layer,
+      checkpoint,
+      options.accelerator,
+      options.invalidationReason,
+    );
   } else if (
     state.currentIndex < state.historyStartIndex ||
     hasLayerCreationCommand(state, layer.id)
   ) {
-    clearLayer(layer);
+    if (options.invalidationReason) {
+      invalidateGpuLayerResidency(
+        layer,
+        options.accelerator,
+        options.invalidationReason,
+      );
+      layer.ctx.clearRect(0, 0, layer.width, layer.height);
+    } else {
+      clearLayer(layer);
+    }
   } else {
+    invalidateGpuLayerResidency(layer, options.accelerator, "replayFailure");
     return {
       ok: false,
       reason: "missing-checkpoint",
@@ -157,7 +190,10 @@ export function rebuildLayerFromHistory<TCustom = never>(
     const command = getCommandAt(state, i);
     if (!command) continue;
     if (isDrawCommand(command)) {
-      replayCommand(layer, command, registry);
+      replayCommand(layer, command, registry, {
+        ...options,
+        gpuOwnerLabel: "rebuild",
+      });
       continue;
     }
     if (!isStructuralCommand(command)) continue;
@@ -169,8 +205,16 @@ export function rebuildLayerFromHistory<TCustom = never>(
         sourceLayer,
         { ...state, currentIndex: i - 1 },
         registry,
+        options,
       );
-      if (!result.ok) return result;
+      if (!result.ok) {
+        invalidateGpuLayerResidency(
+          layer,
+          options.accelerator,
+          "replayFailure",
+        );
+        return result;
+      }
       copyLayerPixels(sourceLayer, layer);
       setLayerMeta(layer, command.meta);
       continue;
@@ -191,14 +235,28 @@ export function rebuildLayerFromHistory<TCustom = never>(
         sourceLayer,
         { ...state, currentIndex: i - 1 },
         registry,
+        options,
       );
-      if (!result.ok) return result;
+      if (!result.ok) {
+        invalidateGpuLayerResidency(
+          layer,
+          options.accelerator,
+          "replayFailure",
+        );
+        return result;
+      }
       mergeLayerDown(layer, sourceLayer, {
         resultMeta: command.targetMetaAfter,
       });
     }
   }
   return { ok: true, source: checkpoint ? "checkpoint" : "empty" };
+}
+
+export interface ReplayOptions {
+  readonly accelerator?: BrushAccelerator | null;
+  readonly gpuOwnerLabel?: GpuStrokeOwnerLabel;
+  readonly invalidationReason?: GpuResidencyInvalidationReason;
 }
 
 /**

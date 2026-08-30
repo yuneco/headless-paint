@@ -6,15 +6,25 @@ import {
   DEFAULT_BRUSH_MIXING,
 } from "../types";
 import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./gpu/accelerator";
+import {
   advanceMaterialField,
   createMaterialField,
   writeMaterialFieldPixels,
 } from "./material-field";
+import { brushPerfDebug, perfSample, perfStage } from "./perf-debug";
 
 const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
 >();
+const nullCheckpointCache = new Map<string, ImageData>();
+
+export function getDabSource(renderCanvas: OffscreenCanvas): OffscreenCanvas {
+  return renderCanvas;
+}
 
 export interface MixingUpdateInput {
   readonly tipCanvas: OffscreenCanvas;
@@ -25,6 +35,7 @@ export interface MixingUpdateInput {
   readonly directionY: number;
   readonly stampSize: number;
   readonly checkpointFootprintSize: number;
+  readonly gpuCheckpointFootprintSize?: number;
   readonly stampDistance: number;
   readonly sourceLayer: Layer;
   readonly targetLayer: Layer;
@@ -88,6 +99,7 @@ export function prepareMixingState(
   baseColor: Color,
   mixing: BrushMixing,
   state: BrushMixingState | undefined,
+  accelerator?: BrushAccelerator | null,
 ): BrushMixingState {
   if (
     state &&
@@ -104,11 +116,14 @@ export function prepareMixingState(
     mixing.fieldRows,
     baseColor,
   );
-  const fieldCanvas = new OffscreenCanvas(
-    mixing.fieldColumns,
-    mixing.fieldRows,
+  const fieldCanvas = perfStage(
+    "canvasAlloc",
+    () => new OffscreenCanvas(mixing.fieldColumns, mixing.fieldRows),
   );
-  const renderCanvas = new OffscreenCanvas(tipCanvas.width, tipCanvas.height);
+  const renderCanvas = perfStage(
+    "canvasAlloc",
+    () => new OffscreenCanvas(tipCanvas.width, tipCanvas.height),
+  );
   const fieldCtx = getCached2dContext(fieldCanvas, "material field");
   const fieldPixels = fieldCtx.createImageData(
     mixing.fieldColumns,
@@ -121,7 +136,16 @@ export function prepareMixingState(
     renderCanvas,
     lastCheckpointDistance: 0,
   };
-  uploadMaterialCanvas(next, tipCanvas);
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  if (gpuSurface) {
+    gpuSurface.initializeMaterialField(
+      mixing.fieldColumns,
+      mixing.fieldRows,
+      baseColor,
+    );
+  } else {
+    uploadMaterialCanvas(next, tipCanvas, accelerator);
+  }
   return next;
 }
 
@@ -130,45 +154,51 @@ export function prepareMixingState(
  */
 export function updateMixingAfterDeposit(
   input: MixingUpdateInput,
+  accelerator?: BrushAccelerator | null,
 ): BrushMixingState {
   let state = prepareMixingState(
     input.tipCanvas,
     input.baseColor,
     input.mixing,
     input.state,
+    accelerator,
   );
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  const gpuFieldActive = gpuSurface !== null;
   const lastUpdate = state.lastUpdateDistance;
   if (
     lastUpdate === undefined ||
     input.stampDistance - lastUpdate >= input.mixing.updateDistancePx
   ) {
-    if (!state.checkpointPixels) {
-      state = captureCheckpoint(input, state, input.sourceLayer.canvas, false);
-    }
-    const sample = sampleCheckpointFootprint(input, state);
     const distancePx =
       lastUpdate === undefined
         ? input.mixing.updateDistancePx
         : input.stampDistance - lastUpdate;
-    const field = advanceMaterialField(
-      state.field,
-      sample,
-      input.mixing.fieldColumns,
-      input.mixing.fieldRows,
-      input.baseColor,
-      {
+    if (gpuFieldActive) {
+      gpuSurface.updateMaterialField({
+        baseColor: input.baseColor,
+        centerX: input.x,
+        centerY: input.y,
+        angle: Math.atan2(input.directionY, input.directionX),
+        sampleSize: Math.max(1, input.stampSize),
+        columns: input.mixing.fieldColumns,
+        rows: input.mixing.fieldRows,
         pickupRatePerPx: input.mixing.pickupRatePerPx,
         restoreRatePerPx: input.mixing.restoreRatePerPx,
         diffusionRatePerPx: input.mixing.diffusionRatePerPx,
         distancePx,
-      },
-    );
-    state = {
-      ...state,
-      field,
-      lastUpdateDistance: input.stampDistance,
-    };
-    uploadMaterialCanvas(state, input.tipCanvas);
+      });
+      state = { ...state, lastUpdateDistance: input.stampDistance };
+    } else {
+      state = prepareInitialMixingCheckpoint(input, state, accelerator);
+      const field = advanceMixingFieldFromCheckpoint(input, state, distancePx);
+      state = {
+        ...state,
+        field,
+        lastUpdateDistance: input.stampDistance,
+      };
+      uploadMaterialCanvas(state, input.tipCanvas, accelerator);
+    }
   }
 
   const lastCheckpoint = state.lastCheckpointDistance ?? 0;
@@ -176,9 +206,39 @@ export function updateMixingAfterDeposit(
     input.stampDistance - lastCheckpoint >=
     input.mixing.checkpointDistancePx
   ) {
-    state = captureCheckpoint(input, state);
+    if (gpuFieldActive) {
+      const { originX, originY, tileSize } = getGpuCheckpointTile(input);
+      gpuSurface.snapshotMaterialCheckpoint(originX, originY, tileSize);
+      state = {
+        ...state,
+        lastCheckpointDistance: input.stampDistance,
+      };
+    } else {
+      state = captureCheckpoint(input, state);
+    }
   }
   return state;
+}
+
+/** GPU 経路では最初の deposit を積む前に stroke-start snapshot を読む。 */
+export function prepareInitialMixingCheckpoint(
+  input: MixingUpdateInput,
+  state: BrushMixingState,
+  accelerator?: BrushAccelerator | null,
+): BrushMixingState {
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  if (gpuSurface) {
+    const { originX, originY, tileSize } = getGpuCheckpointTile(input);
+    gpuSurface.initializeMaterialCheckpoint(originX, originY, tileSize);
+    return state;
+  }
+  if (state.checkpointPixels) return state;
+  // The first pickup is anchored to the immutable stroke-start source. A
+  // resident GPU accumulation may already contain deposits from an earlier
+  // Expand branch by the time the next branch initializes.
+  return captureCheckpoint(input, state, input.sourceLayer.canvas, {
+    updateCheckpointDistance: false,
+  });
 }
 
 function sampleCheckpointFootprint(
@@ -208,20 +268,17 @@ function captureCheckpoint(
   input: MixingUpdateInput,
   state: BrushMixingState,
   sourceCanvas: OffscreenCanvas = input.targetLayer.canvas,
-  updateCheckpointDistance = true,
+  options: {
+    readonly updateCheckpointDistance?: boolean;
+  } = {},
 ): BrushMixingState {
-  const margin = input.mixing.checkpointDistancePx;
-  const tileSize = Math.max(
-    1,
-    Math.ceil(input.checkpointFootprintSize * Math.SQRT2 + margin * 2 + 4),
-  );
+  const updateCheckpointDistance = options.updateCheckpointDistance ?? true;
+  const { originX, originY, tileSize } = getCheckpointTile(input);
   const checkpointCanvas = ensureCanvasSize(
     state.checkpointCanvas,
     tileSize,
     tileSize,
   );
-  const originX = input.x - tileSize / 2;
-  const originY = input.y - tileSize / 2;
   const ctx = getCached2dContext(checkpointCanvas, "material checkpoint");
   ctx.save();
   ctx.globalAlpha = 1;
@@ -230,7 +287,12 @@ function captureCheckpoint(
   ctx.clearRect(0, 0, tileSize, tileSize);
   ctx.drawImage(sourceCanvas, -originX, -originY);
   ctx.restore();
-  const checkpointPixels = ctx.getImageData(0, 0, tileSize, tileSize);
+  const checkpointPixels = perfStage("checkpointReadback", () =>
+    brushPerfDebug.nullStages.nullCheckpoint
+      ? getNullCheckpointImageData(ctx, tileSize, tileSize)
+      : ctx.getImageData(0, 0, tileSize, tileSize),
+  );
+  perfSample("checkpoints", 1);
   return {
     ...state,
     checkpointCanvas,
@@ -243,7 +305,57 @@ function captureCheckpoint(
   };
 }
 
-function sampleRotatedCheckpoint(
+function getCheckpointTile(input: MixingUpdateInput): {
+  readonly originX: number;
+  readonly originY: number;
+  readonly tileSize: number;
+} {
+  const margin = input.mixing.checkpointDistancePx;
+  const tileSize = Math.max(
+    1,
+    Math.ceil(input.checkpointFootprintSize * Math.SQRT2 + margin * 2 + 4),
+  );
+  const originX = input.x - tileSize / 2;
+  const originY = input.y - tileSize / 2;
+  return { originX, originY, tileSize };
+}
+
+function getGpuCheckpointTile(input: MixingUpdateInput): {
+  readonly originX: number;
+  readonly originY: number;
+  readonly tileSize: number;
+} {
+  return getCheckpointTile({
+    ...input,
+    checkpointFootprintSize:
+      input.gpuCheckpointFootprintSize ?? input.checkpointFootprintSize,
+  });
+}
+
+export function advanceMixingFieldFromCheckpoint(
+  input: MixingUpdateInput,
+  state: BrushMixingState,
+  distancePx: number,
+): Float32Array {
+  const sample = perfStage("materialSample", () =>
+    sampleCheckpointFootprint(input, state),
+  );
+  return advanceMaterialField(
+    state.field,
+    sample,
+    input.mixing.fieldColumns,
+    input.mixing.fieldRows,
+    input.baseColor,
+    {
+      pickupRatePerPx: input.mixing.pickupRatePerPx,
+      restoreRatePerPx: input.mixing.restoreRatePerPx,
+      diffusionRatePerPx: input.mixing.diffusionRatePerPx,
+      distancePx,
+    },
+  );
+}
+
+export function sampleRotatedCheckpoint(
   source: ImageData,
   sourceOriginX: number,
   sourceOriginY: number,
@@ -317,26 +429,39 @@ function sampleBilinear(
 function uploadMaterialCanvas(
   state: BrushMixingState,
   tipCanvas: OffscreenCanvas,
+  accelerator?: BrushAccelerator | null,
 ): void {
-  writeMaterialFieldPixels(state.field, state.fieldPixels.data);
-  const fieldCtx = getCached2dContext(state.fieldCanvas, "material field");
-  fieldCtx.putImageData(state.fieldPixels, 0, 0);
+  perfStage("materialUpload", () => {
+    if (brushPerfDebug.nullStages.nullMaterialUpload) return;
+    writeMaterialFieldPixels(state.field, state.fieldPixels.data);
+    const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+    if (gpuSurface) {
+      gpuSurface.updateField(
+        state.fieldPixels.data,
+        state.fieldPixels.width,
+        state.fieldPixels.height,
+      );
+      return;
+    }
+    const fieldCtx = getCached2dContext(state.fieldCanvas, "material field");
+    fieldCtx.putImageData(state.fieldPixels, 0, 0);
 
-  const renderCtx = getCached2dContext(state.renderCanvas, "material tip");
-  renderCtx.save();
-  renderCtx.globalAlpha = 1;
-  renderCtx.globalCompositeOperation = "copy";
-  renderCtx.imageSmoothingEnabled = true;
-  renderCtx.drawImage(
-    state.fieldCanvas,
-    0,
-    0,
-    state.renderCanvas.width,
-    state.renderCanvas.height,
-  );
-  renderCtx.globalCompositeOperation = "destination-in";
-  renderCtx.drawImage(tipCanvas, 0, 0);
-  renderCtx.restore();
+    const renderCtx = getCached2dContext(state.renderCanvas, "material tip");
+    renderCtx.save();
+    renderCtx.globalAlpha = 1;
+    renderCtx.globalCompositeOperation = "copy";
+    renderCtx.imageSmoothingEnabled = true;
+    renderCtx.drawImage(
+      state.fieldCanvas,
+      0,
+      0,
+      state.renderCanvas.width,
+      state.renderCanvas.height,
+    );
+    renderCtx.globalCompositeOperation = "destination-in";
+    renderCtx.drawImage(tipCanvas, 0, 0);
+    renderCtx.restore();
+  });
 }
 
 function ensureCanvasSize(
@@ -346,7 +471,20 @@ function ensureCanvasSize(
 ): OffscreenCanvas {
   if (canvas && canvas.width === width && canvas.height === height)
     return canvas;
-  return new OffscreenCanvas(width, height);
+  return perfStage("canvasAlloc", () => new OffscreenCanvas(width, height));
+}
+
+function getNullCheckpointImageData(
+  ctx: OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+): ImageData {
+  const key = `${width}x${height}`;
+  const cached = nullCheckpointCache.get(key);
+  if (cached) return cached;
+  const image = ctx.createImageData(width, height);
+  nullCheckpointCache.set(key, image);
+  return image;
 }
 
 function getCached2dContext(

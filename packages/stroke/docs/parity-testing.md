@@ -86,3 +86,11 @@ mixing 用 sampling layer の作成タイミングを統一する。
 
 (b) が失敗した場合は checkpoint 設定または undo rebuild のテスト手順を疑う。(c) が失敗した場合は
 replay 経路の非決定性を示すため、差分ピクセル数、`maxChannelDelta`、原因仮説を記録して停止する。
+
+## GPU加速器との parity（Tier B）
+
+`accelerator` を注入した混色 stamp は WebGL2 で描かれる。契約は次のとおり（engine の [gpu-acceleration.md](../../engine/docs/gpu-acceleration.md) を参照）。
+
+- **同一 backend**（GPU 同士、CPU 同士）: live / incremental / replay / Undo / Redo は入力点列が同じなら pixel 完全一致。GPU 経路では accelerator を注入した runtime と replay の双方で同じ経路を通ること
+- **CPU vs GPU**: byte 一致は要求しない。固定 fixture で alpha MAE ≤ 0.015、RGB MAE ≤ 0.02、`|Δ| > 0.1` の pixel 率 ≤ 1%（union coverage 基準）、bbox 差 ≤ 1px を満たす
+- replay（`replayCommand` / `executeHistoryOp` の options）にも同じ accelerator を渡す。渡さない場合は CPU 経路で再構築され、GPU で描いた live 結果とは Tier B の範囲で差が出る

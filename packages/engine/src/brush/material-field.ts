@@ -1,4 +1,5 @@
 import type { Color } from "../types";
+import { brushPerfDebug } from "./perf-debug";
 
 export interface MaterialFieldUpdate {
   readonly pickupRatePerPx: number;
@@ -35,11 +36,18 @@ export function advanceMaterialField(
   baseColor: Color,
   update: MaterialFieldUpdate,
 ): Float32Array {
+  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const width = sanitizeDimension(columns);
   const height = sanitizeDimension(rows);
   const expectedLength = width * height * 4;
   if (field.length !== expectedLength || sampled.length !== expectedLength) {
     throw new Error("Material field dimensions do not match its buffers");
+  }
+  if (brushPerfDebug.nullStages.nullFieldAdvance) {
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("materialAdvance", startedAt);
+    }
+    return field;
   }
 
   const distance = sanitizeNonNegative(update.distancePx);
@@ -80,6 +88,9 @@ export function advanceMaterialField(
     diffuseMaterialField(source, target, width, height, strength);
     source = target;
     passAmount -= strength;
+  }
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordStage("materialAdvance", startedAt);
   }
   return source;
 }

@@ -32,6 +32,7 @@ interface ExecutorDeps<TCustom> {
   readonly tipRegistry?: BrushTipRegistry;    // rebuild 用
   readonly customExecutor?: CustomCommandExecutor<TCustom>;
   readonly shiftTempCanvas?: Layer;           // wrap-shift 用ワーク
+  readonly accelerator?: BrushAccelerator | null; // GPU加速器。rebuild / replay に伝播（engine docs/gpu-acceleration.md）
 }
 
 // custom コマンドは apply/unapply の純粋な実行表として注入（app 側: appCustomCommandExecutor）

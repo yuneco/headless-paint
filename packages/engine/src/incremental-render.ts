@@ -8,6 +8,10 @@ import {
   renderBrushStroke,
   stateToBranch,
 } from "./brush";
+import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./brush/gpu/accelerator";
 import { expandStrokePoints } from "./expand";
 import { clearLayer } from "./layer";
 import type {
@@ -33,6 +37,7 @@ export function appendToCommittedLayer(
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
   alphaLocked = layer.meta.alphaLocked,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
   if (points.length === 0) {
     return brushState ?? createDefaultBrushState();
@@ -42,22 +47,30 @@ export function appendToCommittedLayer(
   const strokes = expandStrokePoints(points, compiledExpand);
   let currentState = ensureBrushRenderState(brushState, strokes.length);
   const nextBranches: BrushBranchRenderState[] = [...currentState.branches];
-  for (let i = 0; i < strokes.length; i++) {
-    const stroke = strokes[i];
-    if (stroke.length > 0) {
-      const branchState = getBranchBrushState(currentState, i);
-      const renderedState = renderBrushStroke(
-        layer,
-        stroke,
-        committedStyle,
-        overlapCount,
-        branchState,
-        sourceLayer,
-      );
-      const renderedBranch = stateToBranch(renderedState);
-      nextBranches[i] = renderedBranch;
-      currentState = mergeBrushState(currentState, nextBranches);
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  gpuSurface?.beginBranchBatch();
+  try {
+    for (let i = 0; i < strokes.length; i++) {
+      const stroke = strokes[i];
+      if (stroke.length > 0) {
+        gpuSurface?.selectBranch(i);
+        const branchState = getBranchBrushState(currentState, i);
+        const renderedState = renderBrushStroke(
+          layer,
+          stroke,
+          committedStyle,
+          overlapCount,
+          branchState,
+          sourceLayer,
+          accelerator,
+        );
+        const renderedBranch = stateToBranch(renderedState);
+        nextBranches[i] = renderedBranch;
+        currentState = mergeBrushState(currentState, nextBranches);
+      }
     }
+  } finally {
+    gpuSurface?.endBranchBatch();
   }
   return currentState;
 }

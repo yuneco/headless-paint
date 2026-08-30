@@ -1132,3 +1132,37 @@ const initialState: BrushRenderState = {
 const nextState = renderBrushStroke(layer, points, style, 0, initialState);
 // nextState.branches[branchIndex] を pending 描画に使う
 ```
+
+## BrushAccelerator / BrushAcceleratorOptions / BrushAcceleratorBackend / BrushAcceleratorResolution
+
+GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。
+
+```typescript
+type BrushAcceleratorBackend = "auto" | "webgl2" | "cpu";
+
+interface BrushAcceleratorOptions {
+  readonly backend?: BrushAcceleratorBackend; // 既定 "auto"（WebKit系かつWebGL2可のときのみ有効）
+  readonly maxBranches?: number;                 // 既定 64
+  readonly resident?: boolean;                   // 既定 true
+  readonly commitMode?: "bitmap" | "direct";    // デバッグ用。既定 "bitmap"
+}
+
+interface BrushAccelerator {
+  readonly backend: "webgl2";
+  warmUp(layer: Layer): void;
+  invalidate(layer: Layer): void;
+  dispose(): void;
+}
+
+interface BrushAcceleratorResolution {
+  readonly backend: "webgl2" | "cpu";
+  readonly reason: string;
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `backend` | 実際に使われているbackend。現状は `"webgl2"` のみ |
+| `warmUp(layer)` | surface確保とlayer内容のuploadを先行実行する。ブラシ選択時に呼ぶと初回strokeの初期化コストを隠せる |
+| `invalidate(layer)` | engine API外で `layer.ctx` に直接描いた後に呼ぶ。常駐accumを無効化する |
+| `dispose()` | GLリソースを解放する |

@@ -220,6 +220,7 @@ export function PaintCanvas({
   return (
     <canvas
       ref={canvasRef}
+      data-headless-paint-main
       style={{
         width,
         height,

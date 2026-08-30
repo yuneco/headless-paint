@@ -1,9 +1,11 @@
 import {
   createLayer,
+  isBrushMixingActive,
   transformLayer,
   wrapShiftLayer,
 } from "@headless-paint/core";
 import type {
+  BrushAcceleratorBackend,
   BrushTipRegistry,
   CompiledExpand,
   ExpandConfig,
@@ -18,47 +20,40 @@ import {
   canRedo as checkCanRedo,
   canUndo as checkCanUndo,
   computeCumulativeOffset,
-  createAddLayerCommand,
   createHistoryState,
-  createRemoveLayerCommand,
-  createReorderLayerCommand,
   createStrokeCommand,
   createTransformLayerCommand,
   createWrapShiftCommand,
-  duplicateLayerAtomic,
-  executeHistoryOp,
-  mergeLayerDownAtomic,
   pushCommand,
+  rebuildLayerFromHistory,
 } from "@headless-paint/core";
-import type {
-  Command,
-  CustomCommandExecutor,
-  CustomCommandOutcome,
-  ExecutorResult,
-  HistoryConfig,
-  HistoryState,
-  LayerListOp,
-} from "@headless-paint/core";
+import type { HistoryConfig, HistoryState } from "@headless-paint/core";
 import type { mat3 } from "gl-matrix";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DEFAULT_HISTORY_CONFIG,
+  useHistoryActions,
+  usePushCustomCommand,
+} from "./paint-engine/history-ops";
+import { useLayerActions, useLayerListOps } from "./paint-engine/layer-ops";
+import { usePaintRenderState } from "./paint-engine/render-state";
+import type {
+  CustomCommandContext,
+  CustomCommandHandler,
+} from "./paint-engine/types";
+import { useBrushAccelerator } from "./paint-engine/useBrushAccelerator";
 import type { InitialLayer, LayerEntry } from "./useLayers";
 import { useLayers } from "./useLayers";
 import type {
   StrokeCompleteData,
   StrokeStartOptions,
 } from "./useStrokeSession";
-import { useStrokeSession } from "./useStrokeSession";
+import { useStrokeSessionWithAccelerator } from "./useStrokeSession";
 
-export interface CustomCommandHandler<TCustom> {
-  readonly apply: (cmd: TCustom, ctx: CustomCommandContext) => void;
-  readonly undo: (cmd: TCustom, ctx: CustomCommandContext) => void;
-}
-
-export interface CustomCommandContext {
-  readonly entries: readonly LayerEntry[];
-  readonly findEntry: (layerId: string) => LayerEntry | undefined;
-  readonly bumpRenderVersion: () => void;
-}
+export type {
+  CustomCommandContext,
+  CustomCommandHandler,
+} from "./paint-engine/types";
 
 export interface PaintEngineConfig<TCustom = never> {
   readonly layerWidth: number;
@@ -71,6 +66,8 @@ export interface PaintEngineConfig<TCustom = never> {
   readonly registry?: BrushTipRegistry;
   readonly initialDocument?: PaintEngineInitialDocument;
   readonly customCommandHandler?: CustomCommandHandler<TCustom>;
+  readonly gpuBackend?: BrushAcceleratorBackend;
+  readonly gpuCommitMode?: "bitmap" | "direct";
 }
 
 export interface PaintEngineInitialLayer {
@@ -85,6 +82,9 @@ export interface PaintEngineInitialDocument {
 }
 
 export interface PaintEngineResult<TCustom = never> {
+  readonly gpuBackend: "webgl2" | "cpu";
+  readonly gpuBackendReason: string;
+
   // ── レイヤー ──
   readonly entries: readonly LayerEntry[];
   readonly activeLayerId: string | null;
@@ -148,64 +148,6 @@ export interface PaintEngineResult<TCustom = never> {
   readonly strokePoints: readonly InputPoint[];
 }
 
-const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
-  checkpointInterval: 10,
-  maxCheckpoints: 10,
-  checkpointCompression: "fast",
-};
-
-function createDuplicateLayerName(
-  sourceName: string,
-  entries: readonly LayerEntry[],
-): string {
-  const existing = new Set(
-    entries.map((entry) => entry.committedLayer.meta.name),
-  );
-  const baseName = `${sourceName} copy`;
-  if (!existing.has(baseName)) return baseName;
-  let index = 2;
-  while (existing.has(`${baseName} ${index}`)) {
-    index += 1;
-  }
-  return `${baseName} ${index}`;
-}
-
-function getCommandType(command: unknown): string {
-  const typed = command as { readonly type?: unknown } | undefined;
-  return typeof typed?.type === "string" ? typed.type : "custom";
-}
-
-function shouldApplyActiveLayerHint<TCustom>(
-  op: "undo" | "redo",
-  result: ExecutorResult<TCustom>,
-  currentActiveLayerId: string | null,
-): boolean {
-  if (!result.activeLayerIdHint) return false;
-
-  const commandType = getCommandType(result.command);
-  const isNearbyRemoveHint =
-    (op === "undo" && commandType === "add-layer") ||
-    (op === "redo" && commandType === "remove-layer");
-  if (!isNearbyRemoveHint) return true;
-
-  return result.layerListOps.some(
-    (listOp) =>
-      listOp.type === "remove" && listOp.layerId === currentActiveLayerId,
-  );
-}
-
-function warnHistoryExecutorFailure<TCustom>(
-  op: "undo" | "redo",
-  result: ExecutorResult<TCustom>,
-): void {
-  const failure = result.failure;
-  const commandType = failure?.commandType ?? getCommandType(result.command);
-  const layerPart = failure?.layerId ? ` layerId=${failure.layerId}` : "";
-  console.warn(
-    `[headless-paint] ${op} skipped ${commandType}: ${failure?.reason ?? "unknown"}${layerPart}`,
-  );
-}
-
 export function usePaintEngine<TCustom = never>(
   config: PaintEngineConfig<TCustom>,
 ): PaintEngineResult<TCustom> {
@@ -220,7 +162,14 @@ export function usePaintEngine<TCustom = never>(
     registry,
     initialDocument,
     customCommandHandler,
+    gpuBackend: requestedGpuBackend = "auto",
+    gpuCommitMode: requestedGpuCommitMode = "bitmap",
   } = config;
+
+  const { accelerator, gpuBackend, gpuBackendReason } = useBrushAccelerator(
+    requestedGpuBackend,
+    requestedGpuCommitMode,
+  );
 
   const registryRef = useRef(registry);
   registryRef.current = registry;
@@ -343,7 +292,24 @@ export function usePaintEngine<TCustom = never>(
     [findEntry, activeLayerId, entriesRef, commitHistoryState],
   );
 
-  const session = useStrokeSession({
+  const restoreLayerBeforeStroke = useCallback(
+    (layer: Layer) => {
+      const result = rebuildLayerFromHistory(
+        layer,
+        historyStateRef.current,
+        registryRef.current,
+        { accelerator, invalidationReason: "runtimeRestore" },
+      );
+      if (!result.ok) {
+        throw new Error(
+          `[headless-paint] GPU stroke recovery failed: ${result.reason} layerId=${result.layerId}`,
+        );
+      }
+    },
+    [accelerator],
+  );
+
+  const session = useStrokeSessionWithAccelerator({
     layer: activeEntry?.committedLayer ?? null,
     pendingLayer,
     strokeStyle,
@@ -352,7 +318,20 @@ export function usePaintEngine<TCustom = never>(
     compiledExpand,
     onStrokeComplete,
     registry,
+    accelerator,
+    restoreLayerBeforeStroke,
   });
+
+  useEffect(() => {
+    const brush = strokeStyle.brush;
+    if (
+      brush.type === "stamp" &&
+      isBrushMixingActive(brush.mixing) &&
+      activeEntry?.committedLayer
+    ) {
+      accelerator?.warmUp(activeEntry.committedLayer);
+    }
+  }, [accelerator, activeEntry?.committedLayer, strokeStyle.brush]);
 
   const handleStrokeStart = useCallback(
     (point: InputPoint, options?: StrokeStartOptions) => {
@@ -382,151 +361,22 @@ export function usePaintEngine<TCustom = never>(
   }, [commitHistoryState, session.onDrawCancel]);
 
   // ── レイヤー操作（履歴付き） ──
-  const handleAddLayer = useCallback(() => {
-    const { entry, insertIndex } = addLayerRaw();
-    const command = createAddLayerCommand(
-      entry.id,
-      insertIndex,
-      layerWidth,
-      layerHeight,
-      entry.committedLayer.meta,
-    );
-    const next = pushCommand(
-      historyStateRef.current,
-      command,
-      { layerCount: entriesRef.current.length },
-      historyConfigRef.current,
-    );
-    commitHistoryState(next);
-  }, [addLayerRaw, layerWidth, layerHeight, entriesRef, commitHistoryState]);
-
-  const handleRemoveLayer = useCallback(
-    (layerId: string) => {
-      const entry = findEntry(layerId);
-      if (!entry) return;
-      const removedIndex = getLayerIndex(layerId);
-      const command = createRemoveLayerCommand(
-        layerId,
-        removedIndex,
-        entry.committedLayer.meta,
-      );
-      beginForLayers([entry.committedLayer]);
-      const next = pushCommand(
-        historyStateRef.current,
-        command,
-        {
-          afterLayer: entry.committedLayer,
-          layerCount: entriesRef.current.length,
-        },
-        historyConfigRef.current,
-      );
-      commitHistoryState(next);
-      removeLayerById(layerId);
-    },
-    [
-      findEntry,
-      getLayerIndex,
-      entriesRef,
-      beginForLayers,
-      commitHistoryState,
-      removeLayerById,
-    ],
-  );
-
-  const handleMoveLayerUp = useCallback(
-    (layerId: string) => {
-      const result = moveLayerUpRaw(layerId);
-      if (!result) return;
-      const command = createReorderLayerCommand(
-        layerId,
-        result.fromIndex,
-        result.toIndex,
-      );
-      const next = pushCommand(
-        historyStateRef.current,
-        command,
-        { layerCount: entriesRef.current.length },
-        historyConfigRef.current,
-      );
-      commitHistoryState(next);
-    },
-    [moveLayerUpRaw, entriesRef, commitHistoryState],
-  );
-
-  const handleMoveLayerDown = useCallback(
-    (layerId: string) => {
-      const result = moveLayerDownRaw(layerId);
-      if (!result) return;
-      const command = createReorderLayerCommand(
-        layerId,
-        result.fromIndex,
-        result.toIndex,
-      );
-      const next = pushCommand(
-        historyStateRef.current,
-        command,
-        { layerCount: entriesRef.current.length },
-        historyConfigRef.current,
-      );
-      commitHistoryState(next);
-    },
-    [moveLayerDownRaw, entriesRef, commitHistoryState],
-  );
-
-  const handleDuplicateLayer = useCallback(
-    (layerId: string) => {
-      const entry = findEntry(layerId);
-      if (!entry) return;
-      const name = createDuplicateLayerName(
-        entry.committedLayer.meta.name,
-        entriesRef.current,
-      );
-      beginForLayers([entry.committedLayer]);
-      const result = duplicateLayerAtomic(
-        entriesRef.current.map((e) => e.committedLayer),
-        {
-          sourceLayerId: layerId,
-          meta: { name },
-        },
-      );
-      if (!result) return;
-      const next = pushCommand(
-        historyStateRef.current,
-        result.command,
-        { layerCount: result.layers.length },
-        historyConfigRef.current,
-      );
-      commitHistoryState(next);
-      replaceEntries(result.layers, result.layer.id);
-    },
-    [findEntry, entriesRef, beginForLayers, commitHistoryState, replaceEntries],
-  );
-
-  const handleMergeLayerDown = useCallback(
-    (layerId: string) => {
-      const currentEntries = entriesRef.current;
-      const sourceIndex = currentEntries.findIndex((e) => e.id === layerId);
-      const targetIndex = sourceIndex - 1;
-      if (sourceIndex < 0 || targetIndex < 0) return;
-      const sourceEntry = currentEntries[sourceIndex];
-      const targetEntry = currentEntries[targetIndex];
-      beginForLayers([sourceEntry.committedLayer, targetEntry.committedLayer]);
-      const result = mergeLayerDownAtomic(
-        currentEntries.map((e) => e.committedLayer),
-        { sourceLayerId: layerId },
-      );
-      if (!result) return;
-      const next = pushCommand(
-        historyStateRef.current,
-        result.command,
-        { layerCount: result.layers.length },
-        historyConfigRef.current,
-      );
-      commitHistoryState(next);
-      replaceEntries(result.layers, result.targetLayerId);
-    },
-    [entriesRef, beginForLayers, commitHistoryState, replaceEntries],
-  );
+  const layerActions = useLayerActions({
+    layerWidth,
+    layerHeight,
+    entriesRef,
+    addLayer: addLayerRaw,
+    removeLayer: removeLayerById,
+    replaceEntries,
+    moveLayerUp: moveLayerUpRaw,
+    moveLayerDown: moveLayerDownRaw,
+    findEntry,
+    getLayerIndex,
+    beginForLayers,
+    historyStateRef,
+    historyConfigRef,
+    commitHistoryState,
+  });
 
   // ── Wrap shift ──
   const handleWrapShift = useCallback(
@@ -637,188 +487,58 @@ export function usePaintEngine<TCustom = never>(
   ]);
 
   // ── Custom Commands ──
-  const handlePushCustomCommand = useCallback(
-    (cmd: TCustom) => {
-      const handler = customCommandHandlerRef.current;
-      if (!handler) return;
-      const next = pushCommand(
-        historyStateRef.current,
-        cmd as Command<TCustom>,
-        { layerCount: entriesRef.current.length },
-        historyConfigRef.current,
-      );
-      commitHistoryState(next);
-      handler.apply(cmd, {
-        entries: entriesRef.current,
-        findEntry,
-        bumpRenderVersion,
-      });
-    },
-    [entriesRef, findEntry, commitHistoryState, bumpRenderVersion],
-  );
+  const handlePushCustomCommand = usePushCustomCommand({
+    handlerRef: customCommandHandlerRef,
+    historyStateRef,
+    historyConfigRef,
+    entriesRef,
+    findEntry,
+    bumpRenderVersion,
+    commitHistoryState,
+  });
 
   // ── Undo/Redo ──
-  const applyMoveLayerListOp = useCallback(
-    (fromIndex: number, toIndex: number) => {
-      const currentEntries = entriesRef.current;
-      const movedEntry = currentEntries[fromIndex];
-      if (!movedEntry || toIndex < 0 || toIndex >= currentEntries.length) {
-        return;
-      }
+  const applyLayerListOps = useLayerListOps({
+    entriesRef,
+    removeLayer: removeLayerById,
+    replaceEntries,
+    moveLayerUp: moveLayerUpRaw,
+    moveLayerDown: moveLayerDownRaw,
+  });
+  const historyActions = useHistoryActions({
+    activeLayerId,
+    entriesRef,
+    historyStateRef,
+    registryRef,
+    customCommandHandlerRef,
+    shiftTempCanvas,
+    accelerator,
+    brush: strokeStyle.brush,
+    applyLayerListOps,
+    setActiveLayerId,
+    setLayerVisible,
+    findEntry,
+    bumpRenderVersion,
+    commitHistoryState,
+    cancelDrawing: handleDrawCancel,
+  });
 
-      if (toIndex === fromIndex + 1) {
-        moveLayerUpRaw(movedEntry.id);
-        return;
-      }
-      if (toIndex === fromIndex - 1) {
-        moveLayerDownRaw(movedEntry.id);
-        return;
-      }
-
-      const layers = currentEntries.map((entry) => entry.committedLayer);
-      const [movedLayer] = layers.splice(fromIndex, 1);
-      layers.splice(toIndex, 0, movedLayer);
-      replaceEntries(layers);
-    },
-    [entriesRef, moveLayerUpRaw, moveLayerDownRaw, replaceEntries],
-  );
-
-  const applyLayerListOps = useCallback(
-    (ops: readonly LayerListOp[]) => {
-      for (const listOp of ops) {
-        switch (listOp.type) {
-          case "insert": {
-            const layers = entriesRef.current.map(
-              (entry) => entry.committedLayer,
-            );
-            const index = Math.max(0, Math.min(listOp.index, layers.length));
-            layers.splice(index, 0, listOp.layer);
-            replaceEntries(layers);
-            break;
-          }
-          case "remove":
-            removeLayerById(listOp.layerId);
-            break;
-          case "move":
-            applyMoveLayerListOp(listOp.fromIndex, listOp.toIndex);
-            break;
-          case "replace":
-            replaceEntries(listOp.layers, listOp.activeLayerId);
-            break;
-        }
-      }
-    },
-    [entriesRef, removeLayerById, replaceEntries, applyMoveLayerListOp],
-  );
-
-  const createCustomExecutor = useCallback(():
-    | CustomCommandExecutor<TCustom>
-    | undefined => {
-    const handler = customCommandHandlerRef.current;
-    if (!handler) return undefined;
-
-    const createOutcome = (run: () => void): CustomCommandOutcome => {
-      run();
-      return { ok: true };
-    };
-
-    return {
-      apply: (cmd) =>
-        createOutcome(() => {
-          handler.apply(cmd, {
-            entries: entriesRef.current,
-            findEntry,
-            bumpRenderVersion,
-          });
-        }),
-      unapply: (cmd) =>
-        createOutcome(() => {
-          handler.undo(cmd, {
-            entries: entriesRef.current,
-            findEntry,
-            bumpRenderVersion,
-          });
-        }),
-    };
-  }, [entriesRef, findEntry, bumpRenderVersion]);
-
-  const executeAndApplyHistoryOp = useCallback(
-    (op: "undo" | "redo") => {
-      const prev = historyStateRef.current;
-      if (op === "undo" ? !checkCanUndo(prev) : !checkCanRedo(prev)) return;
-
-      const result = executeHistoryOp(op, prev, {
-        layers: entriesRef.current.map((entry) => entry.committedLayer),
-        tipRegistry: registryRef.current,
-        customExecutor: createCustomExecutor(),
-        shiftTempCanvas,
-      });
-
-      if (!result.ok) {
-        warnHistoryExecutorFailure(op, result);
-        return;
-      }
-
-      applyLayerListOps(result.layerListOps);
-      if (shouldApplyActiveLayerHint(op, result, activeLayerId)) {
-        setActiveLayerId(result.activeLayerIdHint ?? null);
-      }
-      for (const layerId of result.visibilityFixLayerIds) {
-        setLayerVisible(layerId, true);
-      }
-
-      commitHistoryState(result.next);
-      bumpRenderVersion();
-    },
-    [
-      activeLayerId,
-      entriesRef,
-      shiftTempCanvas,
-      createCustomExecutor,
-      applyLayerListOps,
-      setActiveLayerId,
-      setLayerVisible,
-      commitHistoryState,
-      bumpRenderVersion,
-    ],
-  );
-
-  const handleUndo = useCallback(() => {
-    executeAndApplyHistoryOp("undo");
-  }, [executeAndApplyHistoryOp]);
-
-  const handleRedo = useCallback(() => {
-    executeAndApplyHistoryOp("redo");
-  }, [executeAndApplyHistoryOp]);
-
-  // ── レイヤー配列構築 ──
-  const combinedRenderVersion = layerRenderVersion + session.renderVersion;
-
-  const layers: readonly Layer[] = useMemo(
-    () => entries.map((e) => e.committedLayer),
-    [entries],
-  );
-
-  // プレ合成用ワークレイヤー
-  const workLayer = useMemo(
-    () => createLayer(layerWidth, layerHeight, { name: "__work" }),
-    [layerWidth, layerHeight],
-  );
-
-  const pendingOverlay: PendingOverlay | undefined = activeLayerId
-    ? { layer: pendingLayer, targetLayerId: activeLayerId, workLayer }
-    : undefined;
-
-  // ── Cumulative offset ──
-  const cumulativeOffsetFromHistory = computeCumulativeOffset(historyState);
-  const cumulativeX = cumulativeOffsetFromHistory.x + dragShiftRef.current.x;
-  const cumulativeY = cumulativeOffsetFromHistory.y + dragShiftRef.current.y;
-  const cumulativeOffset = useMemo(
-    () => ({ x: cumulativeX, y: cumulativeY }),
-    [cumulativeX, cumulativeY],
-  );
+  const renderState = usePaintRenderState({
+    entries,
+    activeLayerId,
+    pendingLayer,
+    layerWidth,
+    layerHeight,
+    layerRenderVersion,
+    sessionRenderVersion: session.renderVersion,
+    historyState,
+    dragShift: dragShiftRef.current,
+  });
 
   return {
+    gpuBackend,
+    gpuBackendReason,
+
     // レイヤー
     entries,
     activeLayerId,
@@ -832,12 +552,12 @@ export function usePaintEngine<TCustom = never>(
     toggleAlphaLock,
 
     // レイヤー操作（履歴付き）
-    addLayer: handleAddLayer,
-    removeLayer: handleRemoveLayer,
-    moveLayerUp: handleMoveLayerUp,
-    moveLayerDown: handleMoveLayerDown,
-    duplicateLayer: handleDuplicateLayer,
-    mergeLayerDown: handleMergeLayerDown,
+    addLayer: layerActions.addLayer,
+    removeLayer: layerActions.removeLayer,
+    moveLayerUp: layerActions.moveLayerUp,
+    moveLayerDown: layerActions.moveLayerDown,
+    duplicateLayer: layerActions.duplicateLayer,
+    mergeLayerDown: layerActions.mergeLayerDown,
 
     // ストローク
     onStrokeStart: handleStrokeStart,
@@ -857,20 +577,20 @@ export function usePaintEngine<TCustom = never>(
     onWrapShift: handleWrapShift,
     onWrapShiftEnd: handleWrapShiftEnd,
     onResetOffset: handleResetOffset,
-    cumulativeOffset,
+    cumulativeOffset: renderState.cumulativeOffset,
 
     // 履歴
-    undo: handleUndo,
-    redo: handleRedo,
+    undo: historyActions.undo,
+    redo: historyActions.redo,
     canUndo: checkCanUndo(historyState),
     canRedo: checkCanRedo(historyState),
     historyState,
 
     // レンダリング
     pendingLayer,
-    layers,
-    pendingOverlay,
-    renderVersion: combinedRenderVersion,
+    layers: renderState.layers,
+    pendingOverlay: renderState.pendingOverlay,
+    renderVersion: renderState.renderVersion,
     canDraw: session.canDraw,
     isDrawing: session.isDrawing,
     strokePoints: session.strokePoints,
