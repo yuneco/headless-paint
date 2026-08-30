@@ -71,7 +71,8 @@ type BrushPerfEventName =
   | "realloc:snapshotArray"
   | "realloc:commitCanvas"
   | "realloc:accum"
-  | "gpuStaleOwnerRecovered";
+  | "gpuStaleOwnerRecovered"
+  | "warmUp";
 
 interface BrushPerfEventDetails {
   readonly mode?: "bitmap" | "direct";

@@ -178,15 +178,36 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   }
 
   warmUp(layer: Layer): void {
-    if (this.disposed || this.activeOwner) return;
+    const record = (outcome: string) => {
+      if (brushPerfDebug.enabled) {
+        brushPerfDebug.recordEvent("warmUp", { reason: outcome });
+      }
+    };
+    if (this.disposed) {
+      record("skipped:disposed");
+      return;
+    }
+    if (this.activeOwner) {
+      record("skipped:activeOwner");
+      return;
+    }
+    if (this.isLayerResident(layer)) {
+      record("hit");
+      return;
+    }
     const surface = this.acquireSurface(layer.width, layer.height);
-    if (!surface) return;
+    if (!surface) {
+      record("noSurface");
+      return;
+    }
     try {
       surface.beginStroke(layer.canvas, 1);
       surface.endStroke();
       this.validateResidency(layer, surface);
+      record("uploaded");
     } catch {
       this.invalidate(layer, "warmUpFailure");
+      record("failed");
     }
   }
 
