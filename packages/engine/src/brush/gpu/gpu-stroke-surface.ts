@@ -1188,10 +1188,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       (total, tile) => total + tile.width * tile.height,
       0,
     );
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
     let tileIndex = 0;
     let commitPasses = 0;
     let bitmapMs = 0;
@@ -1199,52 +1195,46 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     while (tileIndex < commitTiles.length) {
       const packed = packCommitRound(commitTiles, tileIndex);
       commitPasses++;
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-      for (const tile of packed) {
-        gl.blitFramebuffer(
-          tile.left,
-          this.height - tile.bottom,
-          tile.right,
-          this.height - tile.top,
-          tile.packedX,
-          COMMIT_CANVAS_SIZE - tile.packedY - tile.height,
-          tile.packedX + tile.width,
-          COMMIT_CANVAS_SIZE - tile.packedY,
-          gl.COLOR_BUFFER_BIT,
-          gl.NEAREST,
-        );
-      }
+      blitCommitPass(gl, this.framebuffer, this.height, packed);
       let bitmap: ImageBitmap | null = null;
       if (typeof this.canvas.transferToImageBitmap === "function") {
         const bitmapStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-        bitmap = this.canvas.transferToImageBitmap();
+        try {
+          bitmap = this.canvas.transferToImageBitmap();
+        } catch {
+          // Some iOS WebKit versions fail the transfer sporadically. Re-blit
+          // before using the WebGL canvas because a failed transfer may still
+          // have discarded its default framebuffer.
+          blitCommitPass(gl, this.framebuffer, this.height, packed);
+        }
         if (brushPerfDebug.enabled) {
           bitmapMs += performance.now() - bitmapStartedAt;
         }
       }
+      if (
+        bitmap &&
+        (bitmap.width !== COMMIT_CANVAS_SIZE ||
+          bitmap.height !== COMMIT_CANVAS_SIZE)
+      ) {
+        bitmap.close();
+        bitmap = null;
+        blitCommitPass(gl, this.framebuffer, this.height, packed);
+      }
       const drawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
       try {
-        const source = bitmap ?? this.canvas;
-        for (const tile of packed) {
-          layer.ctx.save();
-          layer.ctx.globalAlpha = 1;
-          layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
-          layer.ctx.beginPath();
-          layer.ctx.rect(tile.left, tile.top, tile.width, tile.height);
-          layer.ctx.clip();
-          layer.ctx.globalCompositeOperation = "copy";
-          layer.ctx.drawImage(
-            source,
-            tile.packedX,
-            tile.packedY,
-            tile.width,
-            tile.height,
-            tile.left,
-            tile.top,
-            tile.width,
-            tile.height,
-          );
-          layer.ctx.restore();
+        if (bitmap) {
+          try {
+            drawCommitTiles(layer, bitmap, packed);
+          } catch {
+            // The bitmap can be accepted by transferToImageBitmap but rejected
+            // by Canvas2D on iOS. Recreate the pass and draw the WebGL canvas.
+            bitmap.close();
+            bitmap = null;
+            blitCommitPass(gl, this.framebuffer, this.height, packed);
+            drawCommitTiles(layer, this.canvas, packed);
+          }
+        } else {
+          drawCommitTiles(layer, this.canvas, packed);
         }
       } finally {
         if (brushPerfDebug.enabled) {
@@ -1780,6 +1770,66 @@ function packCommitRound(
     throw new Error("GPU commit tile does not fit the commit canvas");
   }
   return packed;
+}
+
+function blitCommitPass(
+  gl: WebGL2RenderingContext,
+  sourceFramebuffer: WebGLFramebuffer,
+  sourceHeight: number,
+  tiles: readonly PackedCommitTile[],
+): void {
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sourceFramebuffer);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  for (const tile of tiles) {
+    gl.blitFramebuffer(
+      tile.left,
+      sourceHeight - tile.bottom,
+      tile.right,
+      sourceHeight - tile.top,
+      tile.packedX,
+      COMMIT_CANVAS_SIZE - tile.packedY - tile.height,
+      tile.packedX + tile.width,
+      COMMIT_CANVAS_SIZE - tile.packedY,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+  }
+  gl.flush();
+}
+
+function drawCommitTiles(
+  layer: Layer,
+  source: ImageBitmap | OffscreenCanvas,
+  tiles: readonly PackedCommitTile[],
+): void {
+  for (const tile of tiles) {
+    layer.ctx.save();
+    try {
+      layer.ctx.globalAlpha = 1;
+      layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      layer.ctx.beginPath();
+      layer.ctx.rect(tile.left, tile.top, tile.width, tile.height);
+      layer.ctx.clip();
+      layer.ctx.globalCompositeOperation = "copy";
+      layer.ctx.drawImage(
+        source,
+        tile.packedX,
+        tile.packedY,
+        tile.width,
+        tile.height,
+        tile.left,
+        tile.top,
+        tile.width,
+        tile.height,
+      );
+    } finally {
+      layer.ctx.restore();
+    }
+  }
 }
 
 function roundUpGpuAllocation(value: number): number {

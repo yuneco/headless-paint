@@ -501,6 +501,52 @@ describe("GpuStrokeSurface", () => {
     expect(transferSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("transferToImageBitmapが0寸法を返したらWebGL canvas直接描画へfallbackする", () => {
+    const close = vi.fn();
+    vi.spyOn(
+      OffscreenCanvas.prototype,
+      "transferToImageBitmap",
+    ).mockReturnValue({ width: 0, height: 0, close } as unknown as ImageBitmap);
+    const layer = createLayer(64, 64);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+    configureSolidDab(surface, [210, 70, 40, 255], 16);
+
+    surface.pushDab({ x: 32, y: 32, size: 16, rotation: 0, alpha: 1 });
+    surface.commitToLayer(layer);
+
+    expect(close).toHaveBeenCalledOnce();
+    expectPixelNear(layer, 32, 32, [210, 70, 40, 255]);
+  });
+
+  it("ImageBitmapのdrawImageが例外ならWebGL canvas直接描画へfallbackする", () => {
+    const close = vi.fn();
+    vi.spyOn(
+      OffscreenCanvas.prototype,
+      "transferToImageBitmap",
+    ).mockReturnValue({
+      width: 1024,
+      height: 1024,
+      close,
+    } as unknown as ImageBitmap);
+    const layer = createLayer(64, 64);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+    configureSolidDab(surface, [210, 70, 40, 255], 16);
+
+    surface.pushDab({ x: 32, y: 32, size: 16, rotation: 0, alpha: 1 });
+    surface.commitToLayer(layer);
+
+    expect(close).toHaveBeenCalledOnce();
+    expectPixelNear(layer, 32, 32, [210, 70, 40, 255]);
+  });
+
   it("radial 4 Expand の branch 別 commit が従来の union commit と byte-identical", () => {
     brushPerfDebug.enabled = true;
     brushPerfDebug.reset();

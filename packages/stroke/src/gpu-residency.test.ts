@@ -13,7 +13,7 @@ import {
   createLayer,
 } from "@headless-paint/engine";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { executeHistoryOp } from "./command-executor";
 import {
   beginHistoryMutation,
@@ -95,6 +95,60 @@ const CPU_POINTS: readonly InputPoint[] = [
   { x: 20, y: 42, pressure: 0.6, timestamp: 50 },
   { x: 108, y: 42, pressure: 0.6, timestamp: 66 },
 ];
+const LARGE_WIDTH = 1200;
+const LARGE_HEIGHT = 1200;
+const LARGE_EXPAND: ExpandConfig = {
+  levels: [
+    {
+      mode: "none",
+      offset: { x: LARGE_WIDTH / 2, y: LARGE_HEIGHT / 2 },
+      angle: 0,
+      divisions: 1,
+    },
+  ],
+};
+const LARGE_GPU_STYLE: StrokeStyle = {
+  color: { r: 225, g: 30, b: 30, a: 255 },
+  lineWidth: 48,
+  pressureCurve: DEFAULT_PRESSURE_CURVE,
+  compositeOperation: "source-over",
+  brush: {
+    type: "stamp",
+    tip: { type: "circle", hardness: 0.78 },
+    dynamics: {
+      ...DEFAULT_BRUSH_DYNAMICS,
+      spacing: 0.12,
+      spacingSizeCoupling: 1,
+      flow: 0.72,
+    },
+    pressureDynamics: { size: 0.3, flow: 0.4, smoothingMs: 50 },
+    mixing: {
+      ...DEFAULT_BRUSH_MIXING,
+      enabled: true,
+      pickupRatePerPx: 0.007,
+      restoreRatePerPx: 0.004,
+      diffusionRatePerPx: 0.05,
+      updateDistancePx: 15,
+      checkpointDistancePx: 36,
+      fieldColumns: 18,
+      fieldRows: 8,
+    },
+  },
+};
+const LARGE_HATCH_STROKES: readonly (readonly InputPoint[])[] = [
+  createLinePoints(40, 180, 1160, 700, 0),
+  createLinePoints(40, 300, 1160, 820, 1_000),
+  createLinePoints(40, 420, 1160, 940, 2_000),
+  createLinePoints(40, 540, 1160, 1060, 3_000),
+];
+const LARGE_MULTI_PASS_STROKE: readonly InputPoint[] = createLinePoints(
+  20,
+  20,
+  1180,
+  1180,
+  10_000,
+  13,
+);
 
 afterEach(() => {
   const perf = getPerf();
@@ -286,7 +340,123 @@ describe("GPU layer residency", () => {
     expect(snapshot.stages.gpuUpload.count).toBe(1);
     accelerator.dispose();
   });
+
+  it("4本のAcrylic hatchをUndo→RedoしてもUndoなしのlayerとbyte一致する", () => {
+    expectHistoryRedoPixelParity(LARGE_HATCH_STROKES);
+  });
+
+  it("dirty rectが1024²を超える単一Acrylic strokeのRedoを複数passでbyte一致commitする", () => {
+    const transferSpy = vi.spyOn(
+      OffscreenCanvas.prototype,
+      "transferToImageBitmap",
+    );
+    try {
+      let transfersBeforeRedo = 0;
+      expectHistoryRedoPixelParity(
+        [LARGE_MULTI_PASS_STROKE],
+        () => {
+          transfersBeforeRedo = transferSpy.mock.calls.length;
+        },
+        () => {
+          const redoTransfers =
+            transferSpy.mock.calls.length - transfersBeforeRedo;
+          expect(redoTransfers).toBeGreaterThanOrEqual(2);
+        },
+      );
+    } finally {
+      transferSpy.mockRestore();
+    }
+  });
 });
+
+function createLinePoints(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  timestampBase: number,
+  pointCount = 9,
+): readonly InputPoint[] {
+  return Array.from({ length: pointCount }, (_, index) => {
+    const progress = index / (pointCount - 1);
+    return {
+      x: startX + (endX - startX) * progress,
+      y: startY + (endY - startY) * progress,
+      pressure: 0.8,
+      timestamp: timestampBase + index * 16,
+    };
+  });
+}
+
+function expectHistoryRedoPixelParity(
+  strokes: readonly (readonly InputPoint[])[],
+  beforeRedo?: () => void,
+  afterRedo?: () => void,
+): void {
+  const expected = createLargeTestLayer();
+  const expectedAccelerator = requireAccelerator({ resident: true });
+  try {
+    for (const [index, points] of strokes.entries()) {
+      simulateLiveStroke({
+        layer: expected,
+        inputPoints: points,
+        style: LARGE_GPU_STYLE,
+        filterPipeline: FILTER_PIPELINE,
+        expand: LARGE_EXPAND,
+        brushSeed: 8_000 + index,
+        alphaLocked: false,
+        accelerator: expectedAccelerator,
+      });
+    }
+  } finally {
+    expectedAccelerator.dispose();
+  }
+
+  const actual = createLargeTestLayer();
+  const accelerator = requireAccelerator({ resident: true });
+  try {
+    let history = createHistoryState(LARGE_WIDTH, LARGE_HEIGHT, {
+      layerCount: 1,
+    });
+    for (const [index, points] of strokes.entries()) {
+      history = beginHistoryMutation(history, {
+        affectedLayers: [actual],
+        layerCount: 1,
+      });
+      const { command } = simulateLiveStroke({
+        layer: actual,
+        inputPoints: points,
+        style: LARGE_GPU_STYLE,
+        filterPipeline: FILTER_PIPELINE,
+        expand: LARGE_EXPAND,
+        brushSeed: 8_000 + index,
+        alphaLocked: false,
+        accelerator,
+      });
+      history = pushCommand(history, command, {
+        afterLayer: actual,
+        layerCount: 1,
+      });
+    }
+    expectPixelEqual(actual, expected, "Acrylic before history operation");
+
+    const undoResult = executeHistoryOp("undo", history, {
+      layers: [actual],
+      accelerator,
+    });
+    expect(undoResult.ok).toBe(true);
+    beforeRedo?.();
+    const redoResult = executeHistoryOp("redo", undoResult.next, {
+      layers: [actual],
+      accelerator,
+    });
+    expect(redoResult.ok).toBe(true);
+    afterRedo?.();
+    expectPixelEqual(actual, expected, "Acrylic history redo vs no undo");
+  } finally {
+    accelerator.dispose();
+  }
+}
 
 interface SequenceResult {
   readonly layer: Layer;
@@ -348,6 +518,15 @@ function createTestLayer(): Layer {
   layer.ctx.fillRect(0, 0, WIDTH / 2, HEIGHT);
   layer.ctx.fillStyle = "rgb(35, 80, 225)";
   layer.ctx.fillRect(WIDTH / 2, 0, WIDTH / 2, HEIGHT);
+  return layer;
+}
+
+function createLargeTestLayer(): Layer {
+  const layer = createLayer(LARGE_WIDTH, LARGE_HEIGHT);
+  layer.ctx.fillStyle = "rgb(225, 190, 145)";
+  layer.ctx.fillRect(0, 0, LARGE_WIDTH, LARGE_HEIGHT);
+  layer.ctx.fillStyle = "rgb(55, 110, 185)";
+  layer.ctx.fillRect(0, LARGE_HEIGHT / 2, LARGE_WIDTH, LARGE_HEIGHT / 2);
   return layer;
 }
 
