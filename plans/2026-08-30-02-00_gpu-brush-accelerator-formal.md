@@ -142,3 +142,9 @@ interface BrushAccelerator {
 ## 11. iPad再確認（2026-08-30 18:00）
 - stall は解消
 - **不具合**: Acrylic（GPU）で複数stroke → Undo → Redo 後に矩形状（commit tile相当）の描画欠け。Expandの有無に関係なし。replay（1回の`feedMany`＝大きなdirty rect→複数tile・複数pass）でのImageBitmap commit（p4c）がiOSで壊れている疑い。再現テスト（複数stroke・2 pass以上）と修正を委譲中。CPU経路（`?gpuBackend=cpu`）での再現有無をユーザーに確認依頼
+
+## 12. 完了（2026-08-30）
+- Undo/Redo 後の矩形欠け: Mac では未再現。commit pass ごとの `gl.clear`、`transferToImageBitmap` 前の `gl.flush`、失敗時の直接 drawImage fallback を追加したところ iPad でも解消（bitmap / direct の両方で欠けなし）。性能影響は誤差範囲（Mac WebKit r1 2/3・undoLong 929、r8 5/7・2473）
+- デバッグ用 `commitMode`（`?gpuCommit=direct|bitmap`）を残置。Debug Info に commit mode を表示
+- iPad: stall 解消、Undo/Redo 正常、GPU 経路有効（auto: webkit）
+- テスト 533 件 green。**Phase 4 完了**。次はマージ方針の決定

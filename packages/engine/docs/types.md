@@ -1144,6 +1144,7 @@ interface BrushAcceleratorOptions {
   readonly backend?: BrushAcceleratorBackend; // 既定 "auto"（WebKit系かつWebGL2可のときのみ有効）
   readonly maxBranches?: number;                 // 既定 64
   readonly resident?: boolean;                   // 既定 true
+  readonly commitMode?: "bitmap" | "direct";    // デバッグ用。既定 "bitmap"
 }
 
 interface BrushAccelerator {
