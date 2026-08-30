@@ -741,8 +741,10 @@ function DebugPanelComponent({
         top: 0,
         right: 0,
         zIndex: 100,
+        width: 250,
         maxHeight: "100vh",
         overflowY: "auto",
+        overflowX: "hidden",
       }}
     >
       <div ref={containerRef} />
