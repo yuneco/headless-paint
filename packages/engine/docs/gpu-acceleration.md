@@ -119,7 +119,7 @@ accum と layer の同一性が崩れる操作は engine / stroke の API が内
 ## lifecycle と障害
 
 - surface は加速器ごとに layer 寸法単位で 1 つ（寸法が変わると再確保）。`dispose()` で GL リソースを解放する
-- **context lost**（および進行中の `dispose()`）: 以降の stroke は CPU 経路。進行中の stroke は GPU 側への追加・commit を止め、`finalize` 時に stroke 開始時の layer 内容へ戻してから全入力点を CPU 経路で描き直す（結果は最初から CPU で描いた場合と byte 一致）。このため GPU stroke は開始時に rollback 用の layer snapshot（常駐 miss 時は既存の stroke-start snapshot を流用、hit 時は Canvas2D copy 1 回）を保持する
+- **context lost**（および進行中の `dispose()`）: 以降の stroke は CPU 経路。進行中の stroke は GPU 側への追加・commit を止め、`finalize` 時に stroke 開始時の layer 内容へ戻してから全入力点を CPU 経路で描き直す（結果は最初から CPU で描いた場合と byte 一致）。復元元として、常駐 miss 時は既存の stroke-start snapshot を流用し、常駐 hit 時は **commit 直前にその commit で上書きする領域だけ**を rollback canvas（layer 同寸、加速器内で再利用）へ退避する。通常の stroke で layer 全面の copy は行わない
 - stroke の cancel / dispose では GPU stroke を必ず終了する（未終了の stroke が残ると以降 CPU 経路に固定されるため）
 
 ## 制限
