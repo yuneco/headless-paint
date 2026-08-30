@@ -114,7 +114,7 @@ Rough bristle・spray・非混色 stamp は対象外（現状は CPU 経路の�
 - **混色 field**: `fieldColumns × fieldRows` を branch 数分縦に並べた strip texture（RGBA16F。無ければ RGBA8）。`updateDistancePx` ごとに pickup / restore / diffusion を全 branch 1 pass で更新（式は CPU の `advanceMaterialField` と同一）
 - **checkpoint snapshot**: `checkpointDistancePx` ごとに、accum の局所 tile を branch 別の snapshot texture へ GPU 内で blit する。tile の中心は CPU の `captureCheckpoint` と同じだが、寸法は stroke 中に変わらないよう筆圧による stampSize の上限（`lineWidth × (1 + pressureDynamics.size)`）から決め、32px 単位で確保して縮小しない（sampling 位置は CPU と同一で、tile が大きい分は読まれない）。field の sampling 元はこの snapshot であり、CPU 経路の「直近 checkpoint 時点の tile を読む」時間基準を再現する
 - **commit**: pointer batch ごとに 1 回、branch 別 dirty rect を commit canvas（1024²）へ敷き詰めて一括 blit し、`transferToImageBitmap()` で得た 1 枚の ImageBitmap から rect ごとに `layer.ctx.drawImage` で書き戻す（WebGL canvas を drawImage の source にする回数を pass あたり 1 回に抑える。iOS WebKit では source 化ごとに snapshot copy が走るため）。dab ごとや点ごとには書き戻さない
-- **readback なし**: 上記のどこにも `getImageData` / `readPixels` は無い
+- **readback なし**: 上記のどこにも `getImageData` / `readPixels` は無く、GPU stroke 中は `layer.ctx` を drawImage の source にもしない（iOS WebKit では GPU-backed canvas の source 化ごとに snapshot copy が走るため）
 
 ## 常駐（residency）と無効化の契約
 
@@ -137,7 +137,7 @@ accum と layer の同一性が崩れる操作は engine / stroke の API が内
 ## lifecycle と障害
 
 - surface は加速器ごとに layer 寸法単位で 1 つ（寸法が変わると再確保）。`dispose()` で GL リソースを解放する
-- **context lost**（および進行中の `dispose()`）: 以降の stroke は CPU 経路。進行中の stroke は GPU 側への追加・commit を止め、`finalize` 時に stroke 開始時の layer 内容へ戻してから全入力点を CPU 経路で描き直す（結果は最初から CPU で描いた場合と byte 一致）。復元元として、常駐 miss 時は既存の stroke-start snapshot を流用し、常駐 hit 時は **commit 直前にその commit で上書きする領域だけ**を rollback canvas（layer 同寸、加速器内で再利用）へ退避する。通常の stroke で layer 全面の copy は行わない
+- **context lost**（および進行中の `dispose()`）: 以降の stroke は CPU 経路。進行中の stroke は GPU 側への追加・commit を止め、`finalize` 時に layer を stroke 開始前の状態へ戻してから全入力点を CPU 経路で描き直す（結果は最初から CPU で描いた場合と byte 一致）。復元は **history 機構**で行う: `createStrokeRuntime` の `restoreLayerBeforeStroke(layer)` hook を呼び出し側が注入し（react の `usePaintEngine` は `rebuildLayerFromHistory` で自動接続）、平常時に layer の読み出しや snapshot 保持は行わない。hook を注入しない低レベル利用（`createIncrementalStrokeRenderer` 直接利用など）では復元せず、部分 commit 済みの layer 上に CPU で描き直す
 - stroke の cancel / dispose では GPU stroke を必ず終了する（未終了の stroke が残ると以降 CPU 経路に固定されるため）
 
 ## 制限
