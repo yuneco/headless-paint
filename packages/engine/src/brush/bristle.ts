@@ -11,10 +11,21 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
-import { rasterizeBristleMask } from "./bristle-mask";
+import {
+  createBristleMaskField,
+  getFineToothHeightTile,
+  rasterizeBristleMask,
+} from "./bristle-mask";
 import { getBristleProfileAtlas } from "./bristle-profile";
 import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./gpu/accelerator";
+import type { GpuSweepSegment } from "./gpu/gpu-stroke-surface";
+import {
+  type MixingUpdateInput,
   getActiveMixing,
+  prepareInitialMixingCheckpoint,
   prepareMixingState,
   updateMixingAfterDeposit,
 } from "./mixing";
@@ -37,6 +48,7 @@ export function renderBristleBrushStroke(
   state: BrushRenderState,
   overlapCount: number,
   sourceLayer: Layer,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
   const branch = state.branches[0];
   if (!branch || points.length === 0 || style.lineWidth <= 0) return state;
@@ -85,7 +97,13 @@ export function renderBristleBrushStroke(
   );
   const mixing = getActiveMixing(brush.mixing);
   let mixingState = mixing
-    ? prepareMixingState(profile, style.color, mixing, branch.mixing)
+    ? prepareMixingState(
+        profile,
+        style.color,
+        mixing,
+        branch.mixing,
+        accelerator,
+      )
     : undefined;
   const renderResult = renderRuns(
     layer,
@@ -97,6 +115,7 @@ export function renderBristleBrushStroke(
     sourceLayer,
     mixing,
     mixingState,
+    accelerator,
   );
   mixingState = renderResult.mixing;
 
@@ -266,6 +285,7 @@ function renderRuns(
   sourceLayer: Layer,
   mixing: BrushMixing | null,
   initialMixingState: BrushMixingState | undefined,
+  accelerator?: BrushAccelerator | null,
 ): BristleRenderResult {
   if (points.length < 2) {
     return { mixing: initialMixingState };
@@ -280,34 +300,48 @@ function renderRuns(
   for (let index = 1; index < points.length; index++) {
     const point = points[index];
     if (!point || point.distance + 0.0001 < nextUpdateDistance) continue;
+    const mixingUpdateInput =
+      mixing && mixingState
+        ? createMixingUpdateInput(
+            point,
+            profile,
+            style,
+            sourceLayer,
+            layer,
+            mixing,
+            mixingState,
+          )
+        : null;
+    if (
+      mixingUpdateInput &&
+      mixingState &&
+      getActiveGpuStrokeSurface(accelerator)
+    ) {
+      mixingState = prepareInitialMixingCheckpoint(
+        mixingUpdateInput,
+        mixingState,
+        accelerator,
+      );
+    }
     renderSweepRun(
       layer,
       points.slice(runStart, index + 1),
       style,
       brush,
       mixingState?.renderCanvas ?? profile,
+      profile,
       seed,
       !!mixing,
+      accelerator,
     );
-    if (mixing && mixingState) {
-      mixingState = updateMixingAfterDeposit({
-        tipCanvas: profile,
-        baseColor: style.color,
-        x: point.x,
-        y: point.y,
-        directionX: point.directionX,
-        directionY: point.directionY,
-        stampSize: style.lineWidth,
-        checkpointFootprintSize: style.lineWidth,
-        stampDistance: point.distance,
-        sourceLayer,
-        targetLayer: layer,
-        mixing,
-        state: mixingState,
-      });
+    if (mixingUpdateInput && mixingState) {
+      mixingState = updateMixingAfterDeposit(
+        { ...mixingUpdateInput, state: mixingState },
+        accelerator,
+      );
       nextUpdateDistance =
         (mixingState.lastUpdateDistance ?? point.distance) +
-        mixing.updateDistancePx;
+        mixingUpdateInput.mixing.updateDistancePx;
     }
     runStart = index;
   }
@@ -319,8 +353,10 @@ function renderRuns(
       style,
       brush,
       mixingState?.renderCanvas ?? profile,
+      profile,
       seed,
       !!mixing,
+      accelerator,
     );
   }
   return { mixing: mixingState };
@@ -332,8 +368,10 @@ function renderSweepRun(
   style: StrokeStyle,
   brush: BristleBrushConfig,
   paintProfile: OffscreenCanvas,
+  profileAtlas: OffscreenCanvas,
   seed: number,
   coloredProfile: boolean,
+  accelerator?: BrushAccelerator | null,
 ): void {
   if (points.length < 2) return;
   const margin = style.lineWidth / 2 + 4;
@@ -345,6 +383,42 @@ function renderSweepRun(
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
   perfSample("bboxAreas", width * height);
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  if (gpuSurface) {
+    const field = createBristleMaskField(
+      points,
+      style.lineWidth,
+      brush.dynamics,
+      brush.pressureDynamics.coverage,
+      seed,
+    );
+    gpuSurface.pushBristleChunk({
+      segments: createGpuSweepSegments(points, style.lineWidth, brush),
+      maskField: field.values,
+      maskFieldColumns: field.width,
+      maskFieldRows: field.height,
+      profileAtlas,
+      grain: {
+        amount: brushPerfDebug.nullStages.nullContact
+          ? 0
+          : clamp(brush.dynamics.surfaceGrain.amount, 0, 1),
+        softness:
+          0.01 + (1 - clamp(brush.dynamics.surfaceGrain.hardness, 0, 1)) * 0.24,
+        grainSeed: brush.dynamics.surfaceGrain.seed,
+        strokeSeed: seed,
+        toothHeights: getFineToothHeightTile(
+          brush.dynamics.surfaceGrain.seed,
+          brush.dynamics.surfaceGrain.scalePx,
+        ),
+      },
+      bboxRect: { left: minX, top: minY, right: maxX, bottom: maxY },
+      brushSize: style.lineWidth,
+      depositHardness: brush.dynamics.depositHardness,
+      color: style.color,
+      useMaterialField: coloredProfile,
+    });
+    return;
+  }
   const ink = perfStage(
     "canvasAlloc",
     () => new OffscreenCanvas(width, height),
@@ -390,6 +464,66 @@ function renderSweepRun(
     layer.ctx.drawImage(ink, minX, minY);
     layer.ctx.restore();
   });
+}
+
+function createMixingUpdateInput(
+  point: ResolvedSweepPoint,
+  profile: OffscreenCanvas,
+  style: StrokeStyle,
+  sourceLayer: Layer,
+  targetLayer: Layer,
+  mixing: BrushMixing,
+  state: BrushMixingState,
+): MixingUpdateInput {
+  return {
+    tipCanvas: profile,
+    baseColor: style.color,
+    x: point.x,
+    y: point.y,
+    directionX: point.directionX,
+    directionY: point.directionY,
+    stampSize: style.lineWidth,
+    checkpointFootprintSize: style.lineWidth,
+    stampDistance: point.distance,
+    sourceLayer,
+    targetLayer,
+    mixing,
+    state,
+  };
+}
+
+function createGpuSweepSegments(
+  points: readonly ResolvedSweepPoint[],
+  brushSize: number,
+  brush: BristleBrushConfig,
+): GpuSweepSegment[] {
+  const segments: GpuSweepSegment[] = [];
+  for (let index = 1; index < points.length; index++) {
+    const from = points[index - 1];
+    const to = points[index];
+    if (!from || !to || to.breakBefore) continue;
+    if (Math.hypot(to.x - from.x, to.y - from.y) < 0.001) continue;
+    segments.push({
+      fromX: from.x,
+      fromY: from.y,
+      toX: to.x,
+      toY: to.y,
+      fromFrameX: from.frameX,
+      fromFrameY: from.frameY,
+      toFrameX: to.frameX,
+      toFrameY: to.frameY,
+      fromPressure: from.pressure,
+      toPressure: to.pressure,
+      fromFieldColumn: index - 1,
+      toFieldColumn: index,
+      overlap: segmentOverlap(from, to, brushSize),
+      trialId: Math.round(
+        ((from.distance + to.distance) * 0.5) /
+          Math.max(0.5, brush.dynamics.geometryStepPx),
+      ),
+    });
+  }
+  return segments;
 }
 
 function resolvePointBounds(points: readonly ResolvedSweepPoint[]): {

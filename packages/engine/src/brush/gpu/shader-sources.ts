@@ -72,6 +72,235 @@ void main() {
 }
 `;
 
+export const BRISTLE_MASK_VERTEX_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aFieldCoord;
+layout(location = 2) in float aPressure;
+layout(location = 3) in float aTrialId;
+
+uniform vec2 uTargetSize;
+
+out vec2 vFieldCoord;
+out float vPressure;
+flat out float vTrialId;
+
+void main() {
+  gl_Position = vec4(
+    aPosition.x / uTargetSize.x * 2.0 - 1.0,
+    1.0 - aPosition.y / uTargetSize.y * 2.0,
+    0.0,
+    1.0
+  );
+  vFieldCoord = aFieldCoord;
+  vPressure = aPressure;
+  vTrialId = aTrialId;
+}
+`;
+
+export const BRISTLE_MASK_FRAGMENT_SHADER_SOURCE = `#version 300 es
+precision highp float;
+precision highp int;
+
+uniform sampler2D uMaskField;
+uniform sampler2D uTooth;
+uniform ivec2 uFieldSize;
+uniform vec2 uTargetSize;
+uniform ivec2 uDocumentOrigin;
+uniform float uDepositHardness;
+uniform float uGrainAmount;
+uniform float uGrainSoftness;
+uniform uint uGrainSeed;
+uniform uint uStrokeSeed;
+
+in vec2 vFieldCoord;
+in float vPressure;
+flat in float vTrialId;
+out vec4 outColor;
+
+uint hashSeed(uint seed, int index) {
+  int quantized = int(round(float(index) * 100.0));
+  uint h = seed ^ uint(quantized);
+  h = (h ^ (h >> 16u)) * 0x045d9f3bu;
+  h = (h ^ (h >> 13u)) * 0x045d9f3bu;
+  return h ^ (h >> 16u);
+}
+
+float hashUnit(uint seed, int x, int y) {
+  return float(hashSeed(hashSeed(seed, x), y)) / 4294967296.0;
+}
+
+float sampleField(vec2 coord) {
+  vec2 clamped = clamp(coord, vec2(0.0), vec2(uFieldSize - ivec2(1)));
+  ivec2 p0 = ivec2(floor(clamped));
+  ivec2 p1 = min(p0 + ivec2(1), uFieldSize - ivec2(1));
+  vec2 fraction = clamped - vec2(p0);
+  return mix(
+    mix(
+      texelFetch(uMaskField, p0, 0).r,
+      texelFetch(uMaskField, ivec2(p1.x, p0.y), 0).r,
+      fraction.x
+    ),
+    mix(
+      texelFetch(uMaskField, ivec2(p0.x, p1.y), 0).r,
+      texelFetch(uMaskField, p1, 0).r,
+      fraction.x
+    ),
+    fraction.y
+  );
+}
+
+float activationFromDistance(float distance, float hardness) {
+  float transition = 0.018 + 0.282 * pow(1.0 - clamp(hardness, 0.0, 1.0), 2.0);
+  return smoothstep(0.0, 1.0, (distance + transition * 0.5) / transition);
+}
+
+bool hasSurfaceContact(ivec2 documentPixel, float pressure, int trialId) {
+  if (uGrainAmount <= 0.0) return true;
+  ivec2 tile = ivec2(
+    ((documentPixel.x % 128) + 128) % 128,
+    ((documentPixel.y % 128) + 128) % 128
+  );
+  float height = texelFetch(uTooth, tile, 0).r;
+  float contact = clamp(pressure, 0.0, 1.0);
+  float directCoverage = smoothstep(
+    0.0,
+    1.0,
+    (contact - height + uGrainSoftness) / (uGrainSoftness * 2.0)
+  );
+  float directProbability =
+    1.0 - uGrainAmount + uGrainAmount * directCoverage;
+  if (
+    hashUnit(uGrainSeed ^ 0x243f6a88u, documentPixel.x, documentPixel.y) <
+    directProbability
+  ) {
+    return true;
+  }
+  float gap = max(0.0, height - contact);
+  float rate = uGrainAmount * 0.75 * exp(-gap / 0.18);
+  float probability = 1.0 - exp(-rate * 0.24);
+  uint repeatSeed = hashSeed(uStrokeSeed ^ 0x85a308d3u, trialId);
+  return hashUnit(repeatSeed, documentPixel.x, documentPixel.y) < probability;
+}
+
+void main() {
+  float alpha = activationFromDistance(
+    sampleField(vFieldCoord),
+    uDepositHardness
+  );
+  ivec2 localPixel = ivec2(
+    int(floor(gl_FragCoord.x)),
+    int(uTargetSize.y) - 1 - int(floor(gl_FragCoord.y))
+  );
+  if (
+    !hasSurfaceContact(
+      uDocumentOrigin + localPixel,
+      vPressure,
+      int(vTrialId + 0.5)
+    )
+  ) {
+    alpha = 0.0;
+  }
+  outColor = vec4(alpha);
+}
+`;
+
+export const BRISTLE_INK_VERTEX_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aUv;
+uniform vec2 uTargetSize;
+out vec2 vUv;
+
+void main() {
+  gl_Position = vec4(
+    aPosition.x / uTargetSize.x * 2.0 - 1.0,
+    1.0 - aPosition.y / uTargetSize.y * 2.0,
+    0.0,
+    1.0
+  );
+  vUv = aUv;
+}
+`;
+
+export const BRISTLE_INK_FRAGMENT_SHADER_SOURCE = `#version 300 es
+precision highp float;
+uniform sampler2D uProfile;
+in vec2 vUv;
+out vec4 outColor;
+
+void main() {
+  float alpha = texture(uProfile, vUv).a;
+  outColor = vec4(alpha);
+}
+`;
+
+export const BRISTLE_COMPOSITE_VERTEX_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+void main() {
+  vec2 position = vec2(
+    gl_VertexID == 1 ? 3.0 : -1.0,
+    gl_VertexID == 2 ? 3.0 : -1.0
+  );
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+export const BRISTLE_COMPOSITE_FRAGMENT_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+uniform sampler2D uMask;
+uniform sampler2D uInk;
+uniform sampler2D uField;
+uniform ivec2 uSurfaceSize;
+uniform ivec2 uTargetSize;
+uniform ivec2 uChunkSize;
+uniform ivec2 uDocumentOrigin;
+uniform ivec2 uFieldSize;
+uniform ivec2 uFieldTextureSize;
+uniform int uFieldRowStride;
+uniform int uBranchIndex;
+uniform bool uUseField;
+uniform vec4 uColor;
+out vec4 outColor;
+
+vec4 sampleMaterial(vec2 localPosition) {
+  if (!uUseField) return uColor;
+  vec2 normalized = clamp(
+    localPosition / vec2(uChunkSize),
+    vec2(0.0),
+    vec2(1.0)
+  );
+  vec2 fieldTexel = vec2(
+    clamp(normalized.x * float(uFieldSize.x) - 0.5, 0.0, float(uFieldSize.x - 1)),
+    float(uBranchIndex * uFieldRowStride) +
+      clamp(normalized.y * float(uFieldSize.y) - 0.5, 0.0, float(uFieldSize.y - 1))
+  );
+  return texture(uField, (fieldTexel + vec2(0.5)) / vec2(uFieldTextureSize));
+}
+
+void main() {
+  vec2 documentPosition = vec2(
+    gl_FragCoord.x,
+    float(uSurfaceSize.y) - gl_FragCoord.y
+  );
+  vec2 localPosition = documentPosition - vec2(uDocumentOrigin);
+  ivec2 localPixel = ivec2(floor(localPosition));
+  ivec2 texturePixel = ivec2(
+    localPixel.x,
+    uTargetSize.y - 1 - localPixel.y
+  );
+  float mask = texelFetch(uMask, texturePixel, 0).a;
+  float ink = texelFetch(uInk, texturePixel, 0).a;
+  vec4 material = sampleMaterial(localPosition);
+  float alpha = material.a * mask * ink;
+  outColor = vec4(material.rgb * alpha, alpha);
+}
+`;
+
 export const FIELD_VERTEX_SHADER_SOURCE = `#version 300 es
 precision highp float;
 

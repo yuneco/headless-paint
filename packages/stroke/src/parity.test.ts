@@ -402,6 +402,66 @@ describe("GPU mixing feedMany parity", () => {
   });
 });
 
+describe("GPU rough bristle parity", () => {
+  it("mixing OFF の live/replay/undo/redo が同一 backend 内で byte-identical", () => {
+    const accelerator = createTestAccelerator();
+    const style = makeStyle({
+      color: { r: 205, g: 55, b: 25, a: 255 },
+      lineWidth: 30,
+      brush: ROUGH_BRISTLE,
+    });
+    const baseLayer = createTestLayer();
+    const liveLayer = createTestLayer();
+    copyLayerPixels(baseLayer, liveLayer);
+    let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+    history = beginHistoryMutation(
+      history,
+      { affectedLayers: [liveLayer], layerCount: 1 },
+      HISTORY_CONFIG,
+    );
+    const { command } = simulateLiveStroke({
+      layer: liveLayer,
+      inputPoints: INPUT_POINTS,
+      style,
+      filterPipeline: CAUSAL_FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+      accelerator,
+    });
+    const replayLayer = createTestLayer();
+    replayOnLayer(command, replayLayer, baseLayer, accelerator);
+    expectPixelEqual(liveLayer, replayLayer, "GPU rough live vs replay");
+
+    history = pushCommand(
+      history,
+      command,
+      { afterLayer: liveLayer, layerCount: 1 },
+      HISTORY_CONFIG,
+    );
+    const undoLayer = createTestLayer();
+    const undoResult = rebuildLayerFromHistory(
+      undoLayer,
+      undo(history),
+      undefined,
+      { accelerator },
+    );
+    expect(undoResult.ok).toBe(true);
+    expectPixelEqual(undoLayer, baseLayer, "GPU rough undo");
+
+    const redoLayer = createTestLayer();
+    const redoResult = rebuildLayerFromHistory(
+      redoLayer,
+      redo(undo(history)),
+      undefined,
+      { accelerator },
+    );
+    expect(redoResult.ok).toBe(true);
+    expectPixelEqual(redoLayer, replayLayer, "GPU rough redo");
+    accelerator.dispose();
+  });
+});
+
 describe("GPU mixing lifecycle fallback", () => {
   it("runtimeはWEBGL_lose_context後にhistory復元してCPUで全入力を再実行する", async () => {
     const expected = createTestLayer();

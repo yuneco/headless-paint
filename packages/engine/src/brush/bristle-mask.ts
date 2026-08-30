@@ -20,7 +20,7 @@ export interface BristleMaskSweepSample extends BristleMaskSample {
   readonly breakBefore?: boolean;
 }
 
-interface BristleMaskField {
+export interface BristleMaskField {
   readonly width: number;
   readonly height: number;
   readonly values: Float32Array<ArrayBuffer>;
@@ -175,7 +175,7 @@ export function rasterizeBristleMask(
   return canvas;
 }
 
-function createBristleMaskField(
+export function createBristleMaskField(
   samples: readonly BristleMaskSample[],
   brushSize: number,
   dynamics: BristleDynamics,
@@ -450,7 +450,7 @@ function positiveModulo(value: number, modulus: number): number {
   return remainder < 0 ? remainder + modulus : remainder;
 }
 
-function getFineToothHeightTile(
+export function getFineToothHeightTile(
   seed: number,
   scalePx: number,
 ): Float32Array<ArrayBuffer> {

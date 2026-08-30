@@ -9,6 +9,7 @@ import {
 import { sampleRotatedCheckpoint } from "../mixing";
 import { brushPerfDebug } from "../perf-debug";
 import {
+  type GpuBristleChunk,
   type GpuStrokeSurface,
   createGpuStrokeSurface,
 } from "./gpu-stroke-surface";
@@ -24,6 +25,66 @@ afterEach(() => {
 });
 
 describe("GpuStrokeSurface", () => {
+  it("bristle chunk の重複 mask を MAX 蓄積して layer に commit する", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(64, 48);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const lowDistance = -0.0031;
+    const highDistance = 0.0031;
+    const chunk: GpuBristleChunk = {
+      segments: [makeSweepSegment(0, 1), makeSweepSegment(2, 3)],
+      maskField: new Float32Array([
+        lowDistance,
+        lowDistance,
+        highDistance,
+        highDistance,
+        lowDistance,
+        lowDistance,
+        highDistance,
+        highDistance,
+      ]),
+      maskFieldColumns: 4,
+      maskFieldRows: 2,
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: { r: 220, g: 40, b: 20, a: 255 },
+      useMaterialField: false,
+    };
+    surface.pushBristleChunk(chunk);
+    surface.commitToLayer(layer);
+
+    const pixel = layer.ctx.getImageData(30, 32, 1, 1).data;
+    expect(pixel[0]).toBeGreaterThan(200);
+    expect(pixel[1]).toBeGreaterThan(25);
+    expect(pixel[3]).toBeGreaterThan(170);
+    expect(pixel[3]).toBeLessThan(205);
+    const stages = brushPerfDebug.snapshot().stages;
+    expect(stages.gpuBristleMask.count).toBe(1);
+    expect(stages.gpuBristleInk.count).toBe(1);
+    expect(stages.gpuBristleComposite.count).toBe(1);
+  });
+
   it("単色 field と円 tip の dab を layer に commit する", () => {
     const layer = createLayer(64, 48);
     const surface = createGpuStrokeSurface(layer.width, layer.height);
@@ -690,6 +751,25 @@ describe("GpuStrokeSurface", () => {
     expect(brushPerfDebug.snapshot().samples.gpuCommitDraws).toEqual([4]);
   });
 });
+
+function makeSweepSegment(fromFieldColumn: number, toFieldColumn: number) {
+  return {
+    fromX: 20,
+    fromY: 32,
+    toX: 40,
+    toY: 32,
+    fromFrameX: 1,
+    fromFrameY: 0,
+    toFrameX: 1,
+    toFrameY: 0,
+    fromPressure: 1,
+    toPressure: 1,
+    fromFieldColumn,
+    toFieldColumn,
+    overlap: 1,
+    trialId: fromFieldColumn,
+  } as const;
+}
 
 function expectChannelNear(actual: number | undefined, expected: number): void {
   expect(Math.abs((actual ?? 0) - expected)).toBeLessThanOrEqual(2);

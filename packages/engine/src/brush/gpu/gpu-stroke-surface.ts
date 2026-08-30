@@ -1,5 +1,9 @@
-import type { Layer } from "../../types";
+import type { Color, Layer } from "../../types";
 import { brushPerfDebug, perfMark, perfStage } from "../perf-debug";
+import {
+  type GpuBristlePassResources,
+  createGpuBristlePassResources,
+} from "./bristle-pass";
 import {
   type DirtyRect,
   commitRectsToLayer,
@@ -36,6 +40,45 @@ export interface GpuDab {
   readonly rotation: number;
   readonly alpha: number;
   readonly branchIndex?: number;
+}
+
+export interface GpuSweepSegment {
+  readonly fromX: number;
+  readonly fromY: number;
+  readonly toX: number;
+  readonly toY: number;
+  readonly fromFrameX: number;
+  readonly fromFrameY: number;
+  readonly toFrameX: number;
+  readonly toFrameY: number;
+  readonly fromPressure: number;
+  readonly toPressure: number;
+  readonly fromFieldColumn: number;
+  readonly toFieldColumn: number;
+  readonly overlap: number;
+  readonly trialId: number;
+}
+
+export interface GpuGrainParams {
+  readonly amount: number;
+  readonly softness: number;
+  readonly grainSeed: number;
+  readonly strokeSeed: number;
+  readonly toothHeights: Float32Array<ArrayBuffer>;
+}
+
+export interface GpuBristleChunk {
+  readonly segments: readonly GpuSweepSegment[];
+  readonly maskField: Float32Array<ArrayBuffer>;
+  readonly maskFieldColumns: number;
+  readonly maskFieldRows: number;
+  readonly profileAtlas: OffscreenCanvas;
+  readonly grain: GpuGrainParams;
+  readonly bboxRect: DirtyRect;
+  readonly brushSize: number;
+  readonly depositHardness: number;
+  readonly color: Color;
+  readonly useMaterialField: boolean;
 }
 
 export interface GpuMaterialFieldUpdate {
@@ -87,6 +130,7 @@ export interface GpuStrokeSurface {
   updateField(pixels: Uint8ClampedArray, columns: number, rows: number): void;
   readMaterialFieldForTest(branchIndex?: number): Uint8ClampedArray;
   pushDab(dab: GpuDab): void;
+  pushBristleChunk(chunk: GpuBristleChunk): void;
   flush(): void;
   commitToLayer(layer: Layer): void;
   cancelStroke(): void;
@@ -100,6 +144,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   readonly canvas: OffscreenCanvas;
   readonly gl: WebGL2RenderingContext;
   private readonly glResources: GpuStrokeGlResources;
+  private readonly bristleResources: GpuBristlePassResources;
 
   private readonly program: WebGLProgram;
   private readonly fieldMixProgram: WebGLProgram;
@@ -185,6 +230,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.surfaceSizeLocation = resources.surfaceSizeLocation;
     this.maxBranchCount = resources.maxBranchCount;
     this.useFloatField = resources.useFloatField;
+    this.bristleResources = createGpuBristlePassResources(
+      this.gl,
+      width,
+      height,
+    );
   }
 
   get lost(): boolean {
@@ -333,7 +383,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.flush();
     this.pendingBranchSegments = Array.from(
       { length: this.branchCount },
-      () => [{ dabs: [] }],
+      () => [{ dabs: [], bristleChunks: [] }],
     );
   }
 
@@ -367,7 +417,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
           branchIndex < this.branchCount;
           branchIndex++
         ) {
-          this.drawDabs(segments[branchIndex]?.dabs ?? []);
+          this.drawDeposits(segments[branchIndex], branchIndex);
           const checkpoint = checkpoints[branchIndex];
           if (!checkpoint) continue;
           const captures = Array<PendingMaterialCheckpointCapture | undefined>(
@@ -378,7 +428,13 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         }
       } else {
         // flatMap preserves branch 0 -> 1 -> ... order inside the draw batch.
-        this.drawDabs(segments.flatMap((segment) => segment?.dabs ?? []));
+        for (
+          let branchIndex = 0;
+          branchIndex < segments.length;
+          branchIndex++
+        ) {
+          this.drawDeposits(segments[branchIndex], branchIndex);
+        }
       }
       if (updates.some((update) => update !== undefined)) {
         this.executeMaterialFieldDiffusionBatch(updates, fieldUpdateStartedAt);
@@ -513,7 +569,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       const segment = branchSegments[branchSegments.length - 1];
       if (!segment) throw new Error("GPU branch segment is unavailable");
       segment.update = update;
-      branchSegments.push({ dabs: [] });
+      branchSegments.push({ dabs: [], bristleChunks: [] });
       return;
     }
     const updates = Array<GpuMaterialFieldUpdate | undefined>(
@@ -650,6 +706,27 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.includeDabDirtyRect(dab, this.currentBranchIndex);
   }
 
+  pushBristleChunk(chunk: GpuBristleChunk): void {
+    this.assertStrokeBegun();
+    const branchSegments =
+      this.pendingBranchSegments?.[this.currentBranchIndex];
+    if (branchSegments) {
+      const segment = branchSegments[branchSegments.length - 1];
+      if (!segment) throw new Error("GPU branch segment is unavailable");
+      segment.bristleChunks.push(chunk);
+    } else {
+      this.flush();
+      this.drawBristleChunks([chunk], this.currentBranchIndex);
+    }
+    this.includeDirtyRect(
+      this.currentBranchIndex,
+      chunk.bboxRect.left,
+      chunk.bboxRect.top,
+      chunk.bboxRect.right,
+      chunk.bboxRect.bottom,
+    );
+  }
+
   flush(): void {
     if (this.instanceCount === 0 || this.lost) return;
     perfStage("gpuFlush", () => {
@@ -706,6 +783,32 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       }
       this.instanceCount = end - start;
       this.flush();
+    }
+  }
+
+  private drawDeposits(
+    segment: PendingBranchSegment | undefined,
+    branchIndex: number,
+  ): void {
+    if (!segment) return;
+    this.drawDabs(segment.dabs);
+    this.drawBristleChunks(segment.bristleChunks, branchIndex);
+  }
+
+  private drawBristleChunks(
+    chunks: readonly GpuBristleChunk[],
+    branchIndex: number,
+  ): void {
+    for (const chunk of chunks) {
+      this.bristleResources.draw(chunk, {
+        accumFramebuffer: this.framebuffer,
+        fieldTexture: this.fieldTextures[this.activeFieldIndex],
+        fieldColumns: this.fieldColumns,
+        fieldRows: this.fieldRows,
+        fieldTextureWidth: this.fieldTextureWidth,
+        fieldTextureHeight: this.fieldTextureHeight,
+        branchIndex,
+      });
     }
   }
 
@@ -817,6 +920,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (this.disposed) return;
     this.disposed = true;
     this.endStroke();
+    this.bristleResources.dispose();
     disposeGpuStrokeGlResources(this.glResources);
   }
 

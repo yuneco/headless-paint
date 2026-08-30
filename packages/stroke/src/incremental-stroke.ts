@@ -74,8 +74,9 @@ export function createIncrementalStrokeRenderer(
   };
   const gpuStrokeEligible =
     gpuRuntime !== null &&
-    config.style.brush.type === "stamp" &&
-    isBrushMixingActive(config.style.brush.mixing) &&
+    ((config.style.brush.type === "stamp" &&
+      isBrushMixingActive(config.style.brush.mixing)) ||
+      config.style.brush.type === "bristle") &&
     config.style.compositeOperation === "source-over" &&
     !config.alphaLocked &&
     (gpuRuntime?.supportsBranchCount(compiledExpand.outputCount) ?? false);
@@ -234,6 +235,10 @@ export function createIncrementalStrokeRenderer(
       ) {
         processBatch(pendingBristlePoints);
         pendingBristlePoints = [];
+        if (gpuStrokeActive && !detectGpuStrokeLoss()) {
+          gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+          detectGpuStrokeLoss();
+        }
       }
     }
   }
