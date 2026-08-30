@@ -257,8 +257,7 @@ void main() {
 export const BRISTLE_COMPOSITE_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 
-uniform sampler2D uMask;
-uniform sampler2D uInk;
+uniform sampler2D uAtlas;
 uniform sampler2D uField;
 uniform ivec2 uSurfaceSize;
 uniform ivec2 uTargetSize;
@@ -298,8 +297,12 @@ void main() {
     localPixel.x,
     uTargetSize.y - 1 - localPixel.y
   );
-  float mask = texelFetch(uMask, texturePixel, 0).a;
-  float ink = texelFetch(uInk, texturePixel, 0).a;
+  float mask = texelFetch(uAtlas, texturePixel, 0).a;
+  float ink = texelFetch(
+    uAtlas,
+    texturePixel + ivec2(uTargetSize.x, 0),
+    0
+  ).a;
   vec4 material = sampleMaterial(localPosition);
   float alpha = material.a * mask * ink;
   outColor = vec4(material.rgb * alpha, alpha);

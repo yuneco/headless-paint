@@ -140,29 +140,28 @@ export function createGpuBristlePassResources(
     gl.createTexture(),
     "GPU bristle fallback material texture",
   );
-  const maskTexture = requireResource(
+  const atlasTexture = requireResource(
     gl.createTexture(),
-    "GPU bristle mask texture",
+    "GPU bristle atlas texture",
   );
-  const inkTexture = requireResource(
-    gl.createTexture(),
-    "GPU bristle ink texture",
-  );
-  const maskFramebuffer = requireResource(
+  const atlasFramebuffer = requireResource(
     gl.createFramebuffer(),
-    "GPU bristle mask framebuffer",
-  );
-  const inkFramebuffer = requireResource(
-    gl.createFramebuffer(),
-    "GPU bristle ink framebuffer",
+    "GPU bristle atlas framebuffer",
   );
 
   configureTexture(gl, maskFieldTexture, gl.NEAREST);
   configureTexture(gl, toothTexture, gl.NEAREST);
   configureTexture(gl, profileTexture, gl.LINEAR);
   configureTexture(gl, fallbackMaterialTexture, gl.NEAREST);
-  configureTexture(gl, maskTexture, gl.NEAREST);
-  configureTexture(gl, inkTexture, gl.NEAREST);
+  configureTexture(gl, atlasTexture, gl.NEAREST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    atlasTexture,
+    0,
+  );
   gl.bindTexture(gl.TEXTURE_2D, toothTexture);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 128, 128, 0, gl.RED, gl.FLOAT, null);
   gl.bindTexture(gl.TEXTURE_2D, fallbackMaterialTexture);
@@ -184,9 +183,8 @@ export function createGpuBristlePassResources(
   gl.useProgram(inkProgram);
   gl.uniform1i(uniformLocation(gl, inkProgram, "uProfile"), 0);
   gl.useProgram(compositeProgram);
-  gl.uniform1i(uniformLocation(gl, compositeProgram, "uMask"), 0);
-  gl.uniform1i(uniformLocation(gl, compositeProgram, "uInk"), 1);
-  gl.uniform1i(uniformLocation(gl, compositeProgram, "uField"), 2);
+  gl.uniform1i(uniformLocation(gl, compositeProgram, "uAtlas"), 0);
+  gl.uniform1i(uniformLocation(gl, compositeProgram, "uField"), 1);
   gl.uniform2i(compositeUniforms.surfaceSize, surfaceWidth, surfaceHeight);
 
   let targetWidth = 0;
@@ -196,6 +194,7 @@ export function createGpuBristlePassResources(
   let profileTextureWidth = 0;
   let profileTextureHeight = 0;
   let vertexBufferCapacity = 0;
+  let atlasStatusNeedsCheck = false;
   let profileSource: OffscreenCanvas | null = null;
   let toothSource: Float32Array<ArrayBuffer> | null = null;
 
@@ -209,8 +208,7 @@ export function createGpuBristlePassResources(
     uploadMaskField(chunk);
     uploadTooth(chunk);
     uploadProfile(chunk.profileAtlas);
-    drawMask(chunk);
-    drawInk(chunk);
+    drawAtlas(chunk);
     composite(chunk, target);
   }
 
@@ -218,40 +216,19 @@ export function createGpuBristlePassResources(
     if (width <= targetWidth && height <= targetHeight) return;
     targetWidth = Math.max(targetWidth, width);
     targetHeight = Math.max(targetHeight, height);
-    for (const texture of [maskTexture, inkTexture]) {
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA8,
-        targetWidth,
-        targetHeight,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null,
-      );
-    }
-    attachTarget(maskFramebuffer, maskTexture, "mask");
-    attachTarget(inkFramebuffer, inkTexture, "ink");
-  }
-
-  function attachTarget(
-    framebuffer: WebGLFramebuffer,
-    texture: WebGLTexture,
-    label: string,
-  ): void {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.COLOR_ATTACHMENT0,
+    gl.bindTexture(gl.TEXTURE_2D, atlasTexture);
+    gl.texImage2D(
       gl.TEXTURE_2D,
-      texture,
       0,
+      gl.RGBA8,
+      targetWidth * 2,
+      targetHeight,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      null,
     );
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`GPU bristle ${label} framebuffer is incomplete`);
-    }
+    atlasStatusNeedsCheck = true;
   }
 
   function uploadMaskField(chunk: GpuBristleChunk): void {
@@ -349,84 +326,92 @@ export function createGpuBristlePassResources(
     profileSource = profile;
   }
 
-  function clearTarget(
-    framebuffer: WebGLFramebuffer,
-    width: number,
-    height: number,
-  ): void {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.viewport(0, 0, targetWidth, targetHeight);
+  function clearAtlas(width: number, height: number): void {
     gl.disable(gl.BLEND);
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(0, targetHeight - height, width, height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.scissor(targetWidth, targetHeight - height, width, height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.disable(gl.SCISSOR_TEST);
   }
 
-  function drawMask(chunk: GpuBristleChunk): void {
+  function drawAtlas(chunk: GpuBristleChunk): void {
     perfStage("gpuBristleMask", () => {
       const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
       const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
-      clearTarget(maskFramebuffer, chunkWidth, chunkHeight);
-      const vertices = createMaskVertices(chunk);
-      uploadGeometry(vertices);
-      gl.bindVertexArray(maskVertexArray);
-      gl.useProgram(maskProgram);
-      gl.uniform2f(maskUniforms.targetSize, targetWidth, targetHeight);
-      gl.uniform2i(
-        maskUniforms.fieldSize,
-        chunk.maskFieldColumns,
-        chunk.maskFieldRows,
-      );
-      gl.uniform2i(
-        maskUniforms.fieldTextureSize,
-        maskFieldTextureWidth,
-        maskFieldTextureHeight,
-      );
-      gl.uniform2i(
-        maskUniforms.documentOrigin,
-        chunk.bboxRect.left,
-        chunk.bboxRect.top,
-      );
-      gl.uniform1f(maskUniforms.depositHardness, chunk.depositHardness);
-      gl.uniform1f(maskUniforms.grainAmount, chunk.grain.amount);
-      gl.uniform1f(maskUniforms.grainSoftness, chunk.grain.softness);
-      gl.uniform1ui(maskUniforms.grainSeed, chunk.grain.grainSeed >>> 0);
-      gl.uniform1ui(maskUniforms.strokeSeed, chunk.grain.strokeSeed >>> 0);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, toothTexture);
-      gl.enable(gl.BLEND);
-      gl.blendEquation(gl.MAX);
-      gl.blendFunc(gl.ONE, gl.ONE);
-      gl.drawArrays(gl.TRIANGLES, 0, vertices.length / MASK_VERTEX_FLOATS);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
+      if (atlasStatusNeedsCheck) {
+        atlasStatusNeedsCheck = false;
+        if (
+          gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
+        ) {
+          throw new Error("GPU bristle atlas framebuffer is incomplete");
+        }
+      }
+      clearAtlas(chunkWidth, chunkHeight);
+      drawMask(chunk);
+      drawInk(chunk);
     });
+    perfStage("gpuBristleInk", () => {});
+  }
+
+  function drawMask(chunk: GpuBristleChunk): void {
+    gl.viewport(0, 0, targetWidth, targetHeight);
+    const vertices = createMaskVertices(chunk);
+    uploadGeometry(vertices);
+    gl.bindVertexArray(maskVertexArray);
+    gl.useProgram(maskProgram);
+    gl.uniform2f(maskUniforms.targetSize, targetWidth, targetHeight);
+    gl.uniform2i(
+      maskUniforms.fieldSize,
+      chunk.maskFieldColumns,
+      chunk.maskFieldRows,
+    );
+    gl.uniform2i(
+      maskUniforms.fieldTextureSize,
+      maskFieldTextureWidth,
+      maskFieldTextureHeight,
+    );
+    gl.uniform2i(
+      maskUniforms.documentOrigin,
+      chunk.bboxRect.left,
+      chunk.bboxRect.top,
+    );
+    gl.uniform1f(maskUniforms.depositHardness, chunk.depositHardness);
+    gl.uniform1f(maskUniforms.grainAmount, chunk.grain.amount);
+    gl.uniform1f(maskUniforms.grainSoftness, chunk.grain.softness);
+    gl.uniform1ui(maskUniforms.grainSeed, chunk.grain.grainSeed >>> 0);
+    gl.uniform1ui(maskUniforms.strokeSeed, chunk.grain.strokeSeed >>> 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, toothTexture);
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.MAX);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / MASK_VERTEX_FLOATS);
   }
 
   function drawInk(chunk: GpuBristleChunk): void {
-    perfStage("gpuBristleInk", () => {
-      const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
-      const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
-      clearTarget(inkFramebuffer, chunkWidth, chunkHeight);
-      const vertices = createInkVertices(chunk);
-      uploadGeometry(vertices);
-      gl.bindVertexArray(inkVertexArray);
-      gl.useProgram(inkProgram);
-      gl.uniform2f(inkUniforms.targetSize, targetWidth, targetHeight);
-      gl.uniform2f(
-        inkUniforms.profileScale,
-        chunk.profileAtlas.width / profileTextureWidth,
-        chunk.profileAtlas.height / profileTextureHeight,
-      );
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, profileTexture);
-      gl.enable(gl.BLEND);
-      gl.blendEquation(gl.FUNC_ADD);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-      gl.drawArrays(gl.TRIANGLES, 0, vertices.length / INK_VERTEX_FLOATS);
-    });
+    gl.viewport(targetWidth, 0, targetWidth, targetHeight);
+    const vertices = createInkVertices(chunk);
+    uploadGeometry(vertices);
+    gl.bindVertexArray(inkVertexArray);
+    gl.useProgram(inkProgram);
+    gl.uniform2f(inkUniforms.targetSize, targetWidth, targetHeight);
+    gl.uniform2f(
+      inkUniforms.profileScale,
+      chunk.profileAtlas.width / profileTextureWidth,
+      chunk.profileAtlas.height / profileTextureHeight,
+    );
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, profileTexture);
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / INK_VERTEX_FLOATS);
   }
 
   function composite(chunk: GpuBristleChunk, target: BristlePassTarget): void {
@@ -491,10 +476,8 @@ export function createGpuBristlePassResources(
       chunk.color.a / 255,
     );
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, maskTexture);
+    gl.bindTexture(gl.TEXTURE_2D, atlasTexture);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, inkTexture);
-    gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(
       gl.TEXTURE_2D,
       chunk.useMaterialField && target.fieldColumns > 0
@@ -523,10 +506,8 @@ export function createGpuBristlePassResources(
     gl.deleteTexture(toothTexture);
     gl.deleteTexture(profileTexture);
     gl.deleteTexture(fallbackMaterialTexture);
-    gl.deleteTexture(maskTexture);
-    gl.deleteTexture(inkTexture);
-    gl.deleteFramebuffer(maskFramebuffer);
-    gl.deleteFramebuffer(inkFramebuffer);
+    gl.deleteTexture(atlasTexture);
+    gl.deleteFramebuffer(atlasFramebuffer);
   }
 
   return { draw, dispose };
