@@ -76,6 +76,7 @@ type BrushPerfEventName =
   | "warmUpScheduled"
   | "warmUpCheck"
   | "historyOpError"
+  | "historyOpResult"
   | "warmUpFired";
 
 interface BrushPerfEventDetails {

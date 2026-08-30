@@ -835,12 +835,36 @@ export function usePaintEngine<TCustom = never>(
       const prev = historyStateRef.current;
       if (op === "undo" ? !checkCanUndo(prev) : !checkCanRedo(prev)) return;
 
-      const result = executeHistoryOp(op, prev, {
-        layers: entriesRef.current.map((entry) => entry.committedLayer),
-        tipRegistry: registryRef.current,
-        customExecutor: createCustomExecutor(),
-        shiftTempCanvas,
-        accelerator,
+      const perfDebugGlobal = (
+        globalThis as {
+          __hpBrushPerf?: {
+            recordEvent(name: string, details?: object): void;
+          };
+        }
+      ).__hpBrushPerf;
+      let result: ReturnType<typeof executeHistoryOp<TCustom>>;
+      try {
+        result = executeHistoryOp(op, prev, {
+          layers: entriesRef.current.map((entry) => entry.committedLayer),
+          tipRegistry: registryRef.current,
+          customExecutor: createCustomExecutor(),
+          shiftTempCanvas,
+          accelerator,
+        });
+      } catch (error) {
+        perfDebugGlobal?.recordEvent?.("historyOpError", {
+          reason: `executeHistoryOp threw: ${
+            error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error)
+          }`,
+        });
+        throw error;
+      }
+      perfDebugGlobal?.recordEvent?.("historyOpResult", {
+        reason: result.ok
+          ? `${op} ok`
+          : `${op} failed: ${JSON.stringify(result.failure ?? result).slice(0, 200)}`,
       });
 
       if (!result.ok) {
