@@ -55,6 +55,7 @@ export interface BristlePassTarget {
 
 export interface GpuBristlePassResources {
   draw(chunk: GpuBristleChunk, target: BristlePassTarget): void;
+  readMaskForTest(chunk: GpuBristleChunk): Uint8ClampedArray;
   dispose(): void;
 }
 
@@ -210,6 +211,36 @@ export function createGpuBristlePassResources(
     uploadProfile(chunk.profileAtlas);
     drawAtlas(chunk);
     composite(chunk, target);
+  }
+
+  function readMaskForTest(chunk: GpuBristleChunk): Uint8ClampedArray {
+    const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
+    const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
+    ensureTargetSize(chunkWidth, chunkHeight);
+    uploadMaskField(chunk);
+    uploadTooth(chunk);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
+    clearAtlas(chunkWidth, chunkHeight);
+    drawMask(chunk);
+    const pixels = new Uint8Array(chunkWidth * chunkHeight * 4);
+    gl.readPixels(
+      0,
+      targetHeight - chunkHeight,
+      chunkWidth,
+      chunkHeight,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixels,
+    );
+    const alpha = new Uint8ClampedArray(chunkWidth * chunkHeight);
+    for (let y = 0; y < chunkHeight; y++) {
+      const sourceY = chunkHeight - 1 - y;
+      for (let x = 0; x < chunkWidth; x++) {
+        alpha[y * chunkWidth + x] =
+          pixels[(sourceY * chunkWidth + x) * 4 + 3] ?? 0;
+      }
+    }
+    return alpha;
   }
 
   function ensureTargetSize(width: number, height: number): void {
@@ -510,7 +541,7 @@ export function createGpuBristlePassResources(
     gl.deleteFramebuffer(atlasFramebuffer);
   }
 
-  return { draw, dispose };
+  return { draw, readMaskForTest, dispose };
 }
 
 function createMaskVertices(chunk: GpuBristleChunk): Float32Array {

@@ -91,6 +91,61 @@ export function rasterizeBristleMask(
     pressureCoverageResponse,
     seed,
   );
+  rasterizeBristleMaskFieldIntoCanvas(
+    field,
+    samples,
+    brushSize,
+    dynamics,
+    seed,
+    originX,
+    originY,
+    canvas,
+    ctx,
+  );
+  return canvas;
+}
+
+export function rasterizeBristleMaskFieldForTest(
+  field: BristleMaskField,
+  samples: readonly BristleMaskSweepSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  seed: number,
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+): OffscreenCanvas {
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = getContext(canvas, "bristle swept mask field test");
+  if (samples.length < 2) return canvas;
+  rasterizeBristleMaskFieldIntoCanvas(
+    field,
+    samples,
+    brushSize,
+    dynamics,
+    seed,
+    originX,
+    originY,
+    canvas,
+    ctx,
+  );
+  return canvas;
+}
+
+function rasterizeBristleMaskFieldIntoCanvas(
+  field: BristleMaskField,
+  samples: readonly BristleMaskSweepSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  seed: number,
+  originX: number,
+  originY: number,
+  canvas: OffscreenCanvas,
+  ctx: OffscreenCanvasRenderingContext2D,
+): void {
+  const width = canvas.width;
+  const height = canvas.height;
   const uploadCreateStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const target = brushPerfDebug.nullStages.nullRaster
     ? getNullRasterImageData(ctx, width, height)
@@ -172,7 +227,6 @@ export function rasterizeBristleMask(
     uploadElapsed += performance.now() - uploadPutStartedAt;
     perfElapsed("maskUpload", uploadElapsed);
   }
-  return canvas;
 }
 
 export function createBristleMaskField(
