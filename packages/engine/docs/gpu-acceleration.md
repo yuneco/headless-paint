@@ -125,7 +125,7 @@ Rough bristle・spray・非混色 stamp は対象外（現状は CPU 経路の�
 accum と layer の同一性が崩れる操作は engine / stroke の API が内部で自動的に無効化する:
 
 - engine: `clearLayer`、`copyLayerPixels`、`setPixel`、`drawLine` / `drawCircle` / `drawPath` / `drawVariableWidthPath`、CPU 経路のブラシ描画、`mergeLayerDown` 系、`transformLayer`、`wrapShift`
-- stroke: 非 GPU stroke の commit、checkpoint 復元、Undo / Redo の history rebuild、layer を書き換える command executor
+- stroke: 非 GPU stroke の commit、checkpoint 復元、layer を書き換える command executor。Undo / Redo の history rebuild は一律には無効化せず、rebuild 中の最後の書き込みが GPU stroke の commit なら常駐を維持する（checkpoint 復元や CPU 書き込みで終わった場合、rebuild 失敗時は無効化）
 
 **engine / stroke の API を経由せずに `layer.ctx` へ直接描いた場合は、呼び出し側が `accelerator.invalidate(layer)` を呼ぶ必要がある**。呼ばないと次の GPU stroke が古い accum の上に描かれる。
 
