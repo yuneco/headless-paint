@@ -847,17 +847,42 @@ export function usePaintEngine<TCustom = never>(
         warnHistoryExecutorFailure(op, result);
         return;
       }
+      (
+        globalThis as {
+          __hpBrushPerf?: {
+            recordEvent(name: string, details?: object): void;
+          };
+        }
+      ).__hpBrushPerf?.recordEvent?.("warmUpCheck", {
+        reason: `${op} executed`,
+      });
 
-      applyLayerListOps(result.layerListOps);
-      if (shouldApplyActiveLayerHint(op, result, activeLayerId)) {
-        setActiveLayerId(result.activeLayerIdHint ?? null);
-      }
-      for (const layerId of result.visibilityFixLayerIds) {
-        setLayerVisible(layerId, true);
-      }
+      try {
+        applyLayerListOps(result.layerListOps);
+        if (shouldApplyActiveLayerHint(op, result, activeLayerId)) {
+          setActiveLayerId(result.activeLayerIdHint ?? null);
+        }
+        for (const layerId of result.visibilityFixLayerIds) {
+          setLayerVisible(layerId, true);
+        }
 
-      commitHistoryState(result.next);
-      bumpRenderVersion();
+        commitHistoryState(result.next);
+        bumpRenderVersion();
+      } catch (error) {
+        (
+          globalThis as {
+            __hpBrushPerf?: {
+              recordEvent(name: string, details?: object): void;
+            };
+          }
+        ).__hpBrushPerf?.recordEvent?.("historyOpError", {
+          reason:
+            error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error),
+        });
+        throw error;
+      }
 
       // The rebuild usually ends with a checkpoint restore (CPU write), which
       // invalidates GPU residency. Re-upload during the idle gap right after
