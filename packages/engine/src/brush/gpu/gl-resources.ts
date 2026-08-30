@@ -35,6 +35,27 @@ export interface GpuStrokeGlResources {
   readonly sourceFramebuffer: WebGLFramebuffer;
   readonly baseFramebuffer: WebGLFramebuffer;
   readonly surfaceSizeLocation: WebGLUniformLocation;
+  readonly strokeFieldUniforms: {
+    readonly size: WebGLUniformLocation;
+    readonly textureSize: WebGLUniformLocation;
+    readonly rowStride: WebGLUniformLocation;
+  };
+  readonly fieldMixUniforms: {
+    readonly fieldDimensions: WebGLUniformLocation;
+  };
+  readonly fieldDiffusionUniforms: {
+    readonly fieldDimensions: WebGLUniformLocation;
+    readonly strengths: WebGLUniformLocation;
+  };
+  readonly fieldPassScratch: {
+    readonly branchData: Float32Array<ArrayBuffer>;
+    readonly passAmounts: Float32Array<ArrayBuffer>;
+    readonly strengths: Float32Array<ArrayBuffer>;
+    mixColumns: number;
+    mixRows: number;
+    diffusionColumns: number;
+    diffusionRows: number;
+  };
   readonly maxBranchCount: number;
   readonly useFloatField: boolean;
 }
@@ -155,6 +176,45 @@ export function createGpuStrokeGlResources(
     gl.getUniformLocation(program, "uSurfaceSize"),
     "uSurfaceSize uniform",
   );
+  const strokeFieldUniforms = {
+    size: requireResource(
+      gl.getUniformLocation(program, "uFieldSize"),
+      "GPU stroke field size uniform",
+    ),
+    textureSize: requireResource(
+      gl.getUniformLocation(program, "uFieldTextureSize"),
+      "GPU stroke field texture size uniform",
+    ),
+    rowStride: requireResource(
+      gl.getUniformLocation(program, "uFieldRowStride"),
+      "GPU stroke field row stride uniform",
+    ),
+  };
+  const fieldMixUniforms = {
+    fieldDimensions: requireResource(
+      gl.getUniformLocation(fieldMixProgram, "uFieldDimensions"),
+      "GPU material field mix dimensions uniform",
+    ),
+  };
+  const fieldDiffusionUniforms = {
+    fieldDimensions: requireResource(
+      gl.getUniformLocation(fieldDiffusionProgram, "uFieldDimensions"),
+      "GPU material field diffusion dimensions uniform",
+    ),
+    strengths: requireResource(
+      gl.getUniformLocation(fieldDiffusionProgram, "uStrengths[0]"),
+      "GPU material field diffusion strengths uniform",
+    ),
+  };
+  const fieldPassScratch = {
+    branchData: new Float32Array(BRANCH_DATA_FLOATS),
+    passAmounts: new Float32Array(maxBranchCount),
+    strengths: new Float32Array(maxBranchCount),
+    mixColumns: 0,
+    mixRows: 0,
+    diffusionColumns: 0,
+    diffusionRows: 0,
+  };
 
   const quadBuffer = configureStrokeGeometry(
     gl,
@@ -209,6 +269,29 @@ export function createGpuStrokeGlResources(
   gl.uniform1i(gl.getUniformLocation(program, "uTip"), 0);
   gl.uniform1i(gl.getUniformLocation(program, "uField"), 1);
   gl.uniform2f(surfaceSizeLocation, width, height);
+  gl.useProgram(fieldMixProgram);
+  gl.uniform1i(
+    requireResource(
+      gl.getUniformLocation(fieldMixProgram, "uCheckpoints"),
+      "GPU material field checkpoint sampler uniform",
+    ),
+    0,
+  );
+  gl.uniform1i(
+    requireResource(
+      gl.getUniformLocation(fieldMixProgram, "uPreviousField"),
+      "GPU material field previous sampler uniform",
+    ),
+    1,
+  );
+  gl.useProgram(fieldDiffusionProgram);
+  gl.uniform1i(
+    requireResource(
+      gl.getUniformLocation(fieldDiffusionProgram, "uPreviousField"),
+      "GPU material field diffusion sampler uniform",
+    ),
+    1,
+  );
 
   return {
     canvas,
@@ -233,6 +316,10 @@ export function createGpuStrokeGlResources(
     sourceFramebuffer,
     baseFramebuffer,
     surfaceSizeLocation,
+    strokeFieldUniforms,
+    fieldMixUniforms,
+    fieldDiffusionUniforms,
+    fieldPassScratch,
     maxBranchCount,
     useFloatField,
   };

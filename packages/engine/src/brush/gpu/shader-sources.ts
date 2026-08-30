@@ -106,6 +106,7 @@ precision highp int;
 uniform sampler2D uMaskField;
 uniform sampler2D uTooth;
 uniform ivec2 uFieldSize;
+uniform ivec2 uMaskFieldTextureSize;
 uniform vec2 uTargetSize;
 uniform ivec2 uDocumentOrigin;
 uniform float uDepositHardness;
@@ -136,15 +137,18 @@ float sampleField(vec2 coord) {
   ivec2 p0 = ivec2(floor(clamped));
   ivec2 p1 = min(p0 + ivec2(1), uFieldSize - ivec2(1));
   vec2 fraction = clamped - vec2(p0);
+  vec2 fieldUvScale = vec2(uFieldSize) / vec2(uMaskFieldTextureSize);
+  vec2 p0Uv = (vec2(p0) + vec2(0.5)) / vec2(uFieldSize) * fieldUvScale;
+  vec2 p1Uv = (vec2(p1) + vec2(0.5)) / vec2(uFieldSize) * fieldUvScale;
   return mix(
     mix(
-      texelFetch(uMaskField, p0, 0).r,
-      texelFetch(uMaskField, ivec2(p1.x, p0.y), 0).r,
+      texture(uMaskField, p0Uv).r,
+      texture(uMaskField, vec2(p1Uv.x, p0Uv.y)).r,
       fraction.x
     ),
     mix(
-      texelFetch(uMaskField, ivec2(p0.x, p1.y), 0).r,
-      texelFetch(uMaskField, p1, 0).r,
+      texture(uMaskField, vec2(p0Uv.x, p1Uv.y)).r,
+      texture(uMaskField, p1Uv).r,
       fraction.x
     ),
     fraction.y
@@ -228,11 +232,12 @@ void main() {
 export const BRISTLE_INK_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 uniform sampler2D uProfile;
+uniform vec2 uProfileScale;
 in vec2 vUv;
 out vec4 outColor;
 
 void main() {
-  float alpha = texture(uProfile, vUv).a;
+  float alpha = texture(uProfile, vUv * uProfileScale).a;
   outColor = vec4(alpha);
 }
 `;

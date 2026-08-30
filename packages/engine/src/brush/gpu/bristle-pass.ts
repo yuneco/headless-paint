@@ -13,6 +13,36 @@ import {
 const MASK_VERTEX_FLOATS = 6;
 const INK_VERTEX_FLOATS = 4;
 
+interface MaskUniforms {
+  readonly targetSize: WebGLUniformLocation;
+  readonly fieldSize: WebGLUniformLocation;
+  readonly fieldTextureSize: WebGLUniformLocation;
+  readonly documentOrigin: WebGLUniformLocation;
+  readonly depositHardness: WebGLUniformLocation;
+  readonly grainAmount: WebGLUniformLocation;
+  readonly grainSoftness: WebGLUniformLocation;
+  readonly grainSeed: WebGLUniformLocation;
+  readonly strokeSeed: WebGLUniformLocation;
+}
+
+interface InkUniforms {
+  readonly targetSize: WebGLUniformLocation;
+  readonly profileScale: WebGLUniformLocation;
+}
+
+interface CompositeUniforms {
+  readonly surfaceSize: WebGLUniformLocation;
+  readonly targetSize: WebGLUniformLocation;
+  readonly chunkSize: WebGLUniformLocation;
+  readonly documentOrigin: WebGLUniformLocation;
+  readonly fieldSize: WebGLUniformLocation;
+  readonly fieldTextureSize: WebGLUniformLocation;
+  readonly fieldRowStride: WebGLUniformLocation;
+  readonly branchIndex: WebGLUniformLocation;
+  readonly useField: WebGLUniformLocation;
+  readonly color: WebGLUniformLocation;
+}
+
 export interface BristlePassTarget {
   readonly accumFramebuffer: WebGLFramebuffer;
   readonly fieldTexture: WebGLTexture;
@@ -51,9 +81,44 @@ export function createGpuBristlePassResources(
     BRISTLE_COMPOSITE_FRAGMENT_SHADER_SOURCE,
     "GPU bristle composite",
   );
-  const vertexArray = requireResource(
+  const maskUniforms: MaskUniforms = {
+    targetSize: uniformLocation(gl, maskProgram, "uTargetSize"),
+    fieldSize: uniformLocation(gl, maskProgram, "uFieldSize"),
+    fieldTextureSize: uniformLocation(gl, maskProgram, "uMaskFieldTextureSize"),
+    documentOrigin: uniformLocation(gl, maskProgram, "uDocumentOrigin"),
+    depositHardness: uniformLocation(gl, maskProgram, "uDepositHardness"),
+    grainAmount: uniformLocation(gl, maskProgram, "uGrainAmount"),
+    grainSoftness: uniformLocation(gl, maskProgram, "uGrainSoftness"),
+    grainSeed: uniformLocation(gl, maskProgram, "uGrainSeed"),
+    strokeSeed: uniformLocation(gl, maskProgram, "uStrokeSeed"),
+  };
+  const inkUniforms: InkUniforms = {
+    targetSize: uniformLocation(gl, inkProgram, "uTargetSize"),
+    profileScale: uniformLocation(gl, inkProgram, "uProfileScale"),
+  };
+  const compositeUniforms: CompositeUniforms = {
+    surfaceSize: uniformLocation(gl, compositeProgram, "uSurfaceSize"),
+    targetSize: uniformLocation(gl, compositeProgram, "uTargetSize"),
+    chunkSize: uniformLocation(gl, compositeProgram, "uChunkSize"),
+    documentOrigin: uniformLocation(gl, compositeProgram, "uDocumentOrigin"),
+    fieldSize: uniformLocation(gl, compositeProgram, "uFieldSize"),
+    fieldTextureSize: uniformLocation(
+      gl,
+      compositeProgram,
+      "uFieldTextureSize",
+    ),
+    fieldRowStride: uniformLocation(gl, compositeProgram, "uFieldRowStride"),
+    branchIndex: uniformLocation(gl, compositeProgram, "uBranchIndex"),
+    useField: uniformLocation(gl, compositeProgram, "uUseField"),
+    color: uniformLocation(gl, compositeProgram, "uColor"),
+  };
+  const maskVertexArray = requireResource(
     gl.createVertexArray(),
-    "GPU bristle vertex array",
+    "GPU bristle mask vertex array",
+  );
+  const inkVertexArray = requireResource(
+    gl.createVertexArray(),
+    "GPU bristle ink vertex array",
   );
   const vertexBuffer = requireResource(
     gl.createBuffer(),
@@ -98,6 +163,8 @@ export function createGpuBristlePassResources(
   configureTexture(gl, fallbackMaterialTexture, gl.NEAREST);
   configureTexture(gl, maskTexture, gl.NEAREST);
   configureTexture(gl, inkTexture, gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, toothTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 128, 128, 0, gl.RED, gl.FLOAT, null);
   gl.bindTexture(gl.TEXTURE_2D, fallbackMaterialTexture);
   gl.texImage2D(
     gl.TEXTURE_2D,
@@ -110,9 +177,25 @@ export function createGpuBristlePassResources(
     gl.UNSIGNED_BYTE,
     new Uint8Array([255, 255, 255, 255]),
   );
+  configureGeometry(gl, maskVertexArray, inkVertexArray, vertexBuffer);
+  gl.useProgram(maskProgram);
+  gl.uniform1i(uniformLocation(gl, maskProgram, "uMaskField"), 0);
+  gl.uniform1i(uniformLocation(gl, maskProgram, "uTooth"), 1);
+  gl.useProgram(inkProgram);
+  gl.uniform1i(uniformLocation(gl, inkProgram, "uProfile"), 0);
+  gl.useProgram(compositeProgram);
+  gl.uniform1i(uniformLocation(gl, compositeProgram, "uMask"), 0);
+  gl.uniform1i(uniformLocation(gl, compositeProgram, "uInk"), 1);
+  gl.uniform1i(uniformLocation(gl, compositeProgram, "uField"), 2);
+  gl.uniform2i(compositeUniforms.surfaceSize, surfaceWidth, surfaceHeight);
 
   let targetWidth = 0;
   let targetHeight = 0;
+  let maskFieldTextureWidth = 0;
+  let maskFieldTextureHeight = 0;
+  let profileTextureWidth = 0;
+  let profileTextureHeight = 0;
+  let vertexBufferCapacity = 0;
   let profileSource: OffscreenCanvas | null = null;
   let toothSource: Float32Array<ArrayBuffer> | null = null;
 
@@ -175,13 +258,37 @@ export function createGpuBristlePassResources(
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
-    gl.texImage2D(
+    if (
+      chunk.maskFieldColumns > maskFieldTextureWidth ||
+      chunk.maskFieldRows > maskFieldTextureHeight
+    ) {
+      maskFieldTextureWidth = Math.max(
+        maskFieldTextureWidth,
+        chunk.maskFieldColumns,
+      );
+      maskFieldTextureHeight = Math.max(
+        maskFieldTextureHeight,
+        chunk.maskFieldRows,
+      );
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.R32F,
+        maskFieldTextureWidth,
+        maskFieldTextureHeight,
+        0,
+        gl.RED,
+        gl.FLOAT,
+        null,
+      );
+    }
+    gl.texSubImage2D(
       gl.TEXTURE_2D,
       0,
-      gl.R32F,
+      0,
+      0,
       chunk.maskFieldColumns,
       chunk.maskFieldRows,
-      0,
       gl.RED,
       gl.FLOAT,
       chunk.maskField,
@@ -193,13 +300,13 @@ export function createGpuBristlePassResources(
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.bindTexture(gl.TEXTURE_2D, toothTexture);
-    gl.texImage2D(
+    gl.texSubImage2D(
       gl.TEXTURE_2D,
       0,
-      gl.R32F,
-      128,
-      128,
       0,
+      0,
+      128,
+      128,
       gl.RED,
       gl.FLOAT,
       chunk.grain.toothHeights,
@@ -212,10 +319,29 @@ export function createGpuBristlePassResources(
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.bindTexture(gl.TEXTURE_2D, profileTexture);
-    gl.texImage2D(
+    if (
+      profile.width > profileTextureWidth ||
+      profile.height > profileTextureHeight
+    ) {
+      profileTextureWidth = Math.max(profileTextureWidth, profile.width);
+      profileTextureHeight = Math.max(profileTextureHeight, profile.height);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        profileTextureWidth,
+        profileTextureHeight,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+    }
+    gl.texSubImage2D(
       gl.TEXTURE_2D,
       0,
-      gl.RGBA8,
+      0,
+      0,
       gl.RGBA,
       gl.UNSIGNED_BYTE,
       profile,
@@ -223,62 +349,55 @@ export function createGpuBristlePassResources(
     profileSource = profile;
   }
 
-  function clearTarget(framebuffer: WebGLFramebuffer): void {
+  function clearTarget(
+    framebuffer: WebGLFramebuffer,
+    width: number,
+    height: number,
+  ): void {
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
     gl.viewport(0, 0, targetWidth, targetHeight);
     gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, targetHeight - height, width, height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.disable(gl.SCISSOR_TEST);
   }
 
   function drawMask(chunk: GpuBristleChunk): void {
     perfStage("gpuBristleMask", () => {
-      clearTarget(maskFramebuffer);
+      const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
+      const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
+      clearTarget(maskFramebuffer, chunkWidth, chunkHeight);
       const vertices = createMaskVertices(chunk);
-      configureMaskGeometry(vertices);
+      uploadGeometry(vertices);
+      gl.bindVertexArray(maskVertexArray);
       gl.useProgram(maskProgram);
-      gl.uniform2f(
-        gl.getUniformLocation(maskProgram, "uTargetSize"),
-        targetWidth,
-        targetHeight,
-      );
+      gl.uniform2f(maskUniforms.targetSize, targetWidth, targetHeight);
       gl.uniform2i(
-        gl.getUniformLocation(maskProgram, "uFieldSize"),
+        maskUniforms.fieldSize,
         chunk.maskFieldColumns,
         chunk.maskFieldRows,
       );
       gl.uniform2i(
-        gl.getUniformLocation(maskProgram, "uDocumentOrigin"),
+        maskUniforms.fieldTextureSize,
+        maskFieldTextureWidth,
+        maskFieldTextureHeight,
+      );
+      gl.uniform2i(
+        maskUniforms.documentOrigin,
         chunk.bboxRect.left,
         chunk.bboxRect.top,
       );
-      gl.uniform1f(
-        gl.getUniformLocation(maskProgram, "uDepositHardness"),
-        chunk.depositHardness,
-      );
-      gl.uniform1f(
-        gl.getUniformLocation(maskProgram, "uGrainAmount"),
-        chunk.grain.amount,
-      );
-      gl.uniform1f(
-        gl.getUniformLocation(maskProgram, "uGrainSoftness"),
-        chunk.grain.softness,
-      );
-      gl.uniform1ui(
-        gl.getUniformLocation(maskProgram, "uGrainSeed"),
-        chunk.grain.grainSeed >>> 0,
-      );
-      gl.uniform1ui(
-        gl.getUniformLocation(maskProgram, "uStrokeSeed"),
-        chunk.grain.strokeSeed >>> 0,
-      );
+      gl.uniform1f(maskUniforms.depositHardness, chunk.depositHardness);
+      gl.uniform1f(maskUniforms.grainAmount, chunk.grain.amount);
+      gl.uniform1f(maskUniforms.grainSoftness, chunk.grain.softness);
+      gl.uniform1ui(maskUniforms.grainSeed, chunk.grain.grainSeed >>> 0);
+      gl.uniform1ui(maskUniforms.strokeSeed, chunk.grain.strokeSeed >>> 0);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
-      gl.uniform1i(gl.getUniformLocation(maskProgram, "uMaskField"), 0);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, toothTexture);
-      gl.uniform1i(gl.getUniformLocation(maskProgram, "uTooth"), 1);
       gl.enable(gl.BLEND);
       gl.blendEquation(gl.MAX);
       gl.blendFunc(gl.ONE, gl.ONE);
@@ -288,18 +407,21 @@ export function createGpuBristlePassResources(
 
   function drawInk(chunk: GpuBristleChunk): void {
     perfStage("gpuBristleInk", () => {
-      clearTarget(inkFramebuffer);
+      const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
+      const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
+      clearTarget(inkFramebuffer, chunkWidth, chunkHeight);
       const vertices = createInkVertices(chunk);
-      configureInkGeometry(vertices);
+      uploadGeometry(vertices);
+      gl.bindVertexArray(inkVertexArray);
       gl.useProgram(inkProgram);
+      gl.uniform2f(inkUniforms.targetSize, targetWidth, targetHeight);
       gl.uniform2f(
-        gl.getUniformLocation(inkProgram, "uTargetSize"),
-        targetWidth,
-        targetHeight,
+        inkUniforms.profileScale,
+        chunk.profileAtlas.width / profileTextureWidth,
+        chunk.profileAtlas.height / profileTextureHeight,
       );
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, profileTexture);
-      gl.uniform1i(gl.getUniformLocation(inkProgram, "uProfile"), 0);
       gl.enable(gl.BLEND);
       gl.blendEquation(gl.FUNC_ADD);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -319,7 +441,7 @@ export function createGpuBristlePassResources(
       gl.enable(gl.SCISSOR_TEST);
       gl.scissor(left, surfaceHeight - bottom, right - left, bottom - top);
       gl.useProgram(compositeProgram);
-      gl.bindVertexArray(vertexArray);
+      gl.bindVertexArray(maskVertexArray);
       setCompositeUniforms(chunk, target);
       gl.enable(gl.BLEND);
       gl.blendEquation(gl.FUNC_ADD);
@@ -333,53 +455,36 @@ export function createGpuBristlePassResources(
     chunk: GpuBristleChunk,
     target: BristlePassTarget,
   ): void {
-    const program = compositeProgram;
     const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
     const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
+    gl.uniform2i(compositeUniforms.targetSize, targetWidth, targetHeight);
+    gl.uniform2i(compositeUniforms.chunkSize, chunkWidth, chunkHeight);
     gl.uniform2i(
-      gl.getUniformLocation(program, "uSurfaceSize"),
-      surfaceWidth,
-      surfaceHeight,
-    );
-    gl.uniform2i(
-      gl.getUniformLocation(program, "uTargetSize"),
-      targetWidth,
-      targetHeight,
-    );
-    gl.uniform2i(
-      gl.getUniformLocation(program, "uChunkSize"),
-      chunkWidth,
-      chunkHeight,
-    );
-    gl.uniform2i(
-      gl.getUniformLocation(program, "uDocumentOrigin"),
+      compositeUniforms.documentOrigin,
       chunk.bboxRect.left,
       chunk.bboxRect.top,
     );
     gl.uniform2i(
-      gl.getUniformLocation(program, "uFieldSize"),
+      compositeUniforms.fieldSize,
       Math.max(1, target.fieldColumns),
       Math.max(1, target.fieldRows),
     );
     gl.uniform2i(
-      gl.getUniformLocation(program, "uFieldTextureSize"),
+      compositeUniforms.fieldTextureSize,
       Math.max(1, target.fieldTextureWidth),
       Math.max(1, target.fieldTextureHeight),
     );
     gl.uniform1i(
-      gl.getUniformLocation(program, "uFieldRowStride"),
+      compositeUniforms.fieldRowStride,
       Math.max(1, target.fieldRows),
     );
+    gl.uniform1i(compositeUniforms.branchIndex, target.branchIndex);
     gl.uniform1i(
-      gl.getUniformLocation(program, "uBranchIndex"),
-      target.branchIndex,
-    );
-    gl.uniform1i(
-      gl.getUniformLocation(program, "uUseField"),
+      compositeUniforms.useField,
       chunk.useMaterialField && target.fieldColumns > 0 ? 1 : 0,
     );
     gl.uniform4f(
-      gl.getUniformLocation(program, "uColor"),
+      compositeUniforms.color,
       chunk.color.r / 255,
       chunk.color.g / 255,
       chunk.color.b / 255,
@@ -387,10 +492,8 @@ export function createGpuBristlePassResources(
     );
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, maskTexture);
-    gl.uniform1i(gl.getUniformLocation(program, "uMask"), 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, inkTexture);
-    gl.uniform1i(gl.getUniformLocation(program, "uInk"), 1);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(
       gl.TEXTURE_2D,
@@ -398,41 +501,23 @@ export function createGpuBristlePassResources(
         ? target.fieldTexture
         : fallbackMaterialTexture,
     );
-    gl.uniform1i(gl.getUniformLocation(program, "uField"), 2);
   }
 
-  function configureMaskGeometry(vertices: Float32Array): void {
-    gl.bindVertexArray(vertexArray);
+  function uploadGeometry(vertices: Float32Array): void {
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
-    const stride = MASK_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
-    for (let location = 0; location < 4; location++) {
-      gl.enableVertexAttribArray(location);
+    if (vertices.byteLength > vertexBufferCapacity) {
+      vertexBufferCapacity = vertices.byteLength;
+      gl.bufferData(gl.ARRAY_BUFFER, vertexBufferCapacity, gl.DYNAMIC_DRAW);
     }
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, stride, 0);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 2 * 4);
-    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, stride, 4 * 4);
-    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 5 * 4);
-  }
-
-  function configureInkGeometry(vertices: Float32Array): void {
-    gl.bindVertexArray(vertexArray);
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
-    const stride = INK_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
-    gl.enableVertexAttribArray(0);
-    gl.enableVertexAttribArray(1);
-    gl.disableVertexAttribArray(2);
-    gl.disableVertexAttribArray(3);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, stride, 0);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 2 * 4);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, vertices);
   }
 
   function dispose(): void {
     gl.deleteProgram(maskProgram);
     gl.deleteProgram(inkProgram);
     gl.deleteProgram(compositeProgram);
-    gl.deleteVertexArray(vertexArray);
+    gl.deleteVertexArray(maskVertexArray);
+    gl.deleteVertexArray(inkVertexArray);
     gl.deleteBuffer(vertexBuffer);
     gl.deleteTexture(maskFieldTexture);
     gl.deleteTexture(toothTexture);
@@ -598,6 +683,43 @@ function normalize(
 ): { readonly x: number; readonly y: number } {
   const length = Math.hypot(x, y);
   return length > 0.000001 ? { x: x / length, y: y / length } : { x: 1, y: 0 };
+}
+
+function uniformLocation(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  name: string,
+): WebGLUniformLocation {
+  return requireResource(
+    gl.getUniformLocation(program, name),
+    `GPU bristle ${name} uniform`,
+  );
+}
+
+function configureGeometry(
+  gl: WebGL2RenderingContext,
+  maskVertexArray: WebGLVertexArrayObject,
+  inkVertexArray: WebGLVertexArrayObject,
+  vertexBuffer: WebGLBuffer,
+): void {
+  gl.bindVertexArray(maskVertexArray);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  const maskStride = MASK_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+  for (let location = 0; location < 4; location++) {
+    gl.enableVertexAttribArray(location);
+  }
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, maskStride, 0);
+  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, maskStride, 2 * 4);
+  gl.vertexAttribPointer(2, 1, gl.FLOAT, false, maskStride, 4 * 4);
+  gl.vertexAttribPointer(3, 1, gl.FLOAT, false, maskStride, 5 * 4);
+
+  gl.bindVertexArray(inkVertexArray);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  const inkStride = INK_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+  gl.enableVertexAttribArray(0);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, inkStride, 0);
+  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, inkStride, 2 * 4);
 }
 
 function configureTexture(

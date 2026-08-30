@@ -10,6 +10,7 @@ import {
   unionDirtyRects,
 } from "./commit-packing";
 import {
+  type FieldPassResources,
   allocateFieldStrip,
   clampUnit,
   executeMaterialFieldDiffusionPass,
@@ -145,6 +146,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   readonly gl: WebGL2RenderingContext;
   private readonly glResources: GpuStrokeGlResources;
   private readonly bristleResources: GpuBristlePassResources;
+  private readonly cachedFieldPassResources: FieldPassResources;
 
   private readonly program: WebGLProgram;
   private readonly fieldMixProgram: WebGLProgram;
@@ -161,6 +163,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     WebGLFramebuffer,
     WebGLFramebuffer,
   ];
+  private readonly fieldFramebuffersAttached: [boolean, boolean] = [
+    false,
+    false,
+  ];
   private readonly materialCheckpointTexture: WebGLTexture;
   private readonly materialCheckpointFramebuffer: WebGLFramebuffer;
   private readonly materialCheckpoints: MaterialCheckpoint[] = [];
@@ -173,6 +179,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private readonly instances = new Float32Array(
     INSTANCE_CAPACITY * INSTANCE_FLOATS,
   );
+  private readonly singleFieldUpdateBatch: (
+    | GpuMaterialFieldUpdate
+    | undefined
+  )[];
 
   private instanceCount = 0;
   private dirtyRects: (DirtyRect | null)[] = [null];
@@ -185,6 +195,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private fieldRows = 0;
   private fieldTextureWidth = 0;
   private fieldTextureHeight = 0;
+  private strokeUniformFieldColumns = -1;
+  private strokeUniformFieldRows = -1;
+  private strokeUniformTextureWidth = -1;
+  private strokeUniformTextureHeight = -1;
   private materialFieldInitializedThisStroke = false;
   private activeFieldIndex: 0 | 1 = 0;
   private branchCount = 1;
@@ -229,12 +243,33 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.baseFramebuffer = resources.baseFramebuffer;
     this.surfaceSizeLocation = resources.surfaceSizeLocation;
     this.maxBranchCount = resources.maxBranchCount;
+    this.singleFieldUpdateBatch = Array<GpuMaterialFieldUpdate | undefined>(
+      resources.maxBranchCount,
+    ).fill(undefined);
     this.useFloatField = resources.useFloatField;
     this.bristleResources = createGpuBristlePassResources(
       this.gl,
       width,
       height,
     );
+    this.cachedFieldPassResources = {
+      gl: this.gl,
+      branchCount: this.branchCount,
+      fieldColumns: this.fieldColumns,
+      fieldRows: this.fieldRows,
+      activeFieldIndex: this.activeFieldIndex,
+      checkpoints: this.materialCheckpoints,
+      fieldTextures: this.fieldTextures,
+      materialCheckpointTexture: this.materialCheckpointTexture,
+      branchDataBuffer: this.branchDataBuffer,
+      vertexArray: this.vertexArray,
+      fieldMixProgram: this.fieldMixProgram,
+      fieldDiffusionProgram: this.fieldDiffusionProgram,
+      fieldMixUniforms: this.glResources.fieldMixUniforms,
+      fieldDiffusionUniforms: this.glResources.fieldDiffusionUniforms,
+      fieldPassScratch: this.glResources.fieldPassScratch,
+      bindFieldFramebuffer: (index) => this.bindFieldFramebuffer(index),
+    };
   }
 
   get lost(): boolean {
@@ -572,15 +607,17 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       branchSegments.push({ dabs: [], bristleChunks: [] });
       return;
     }
-    const updates = Array<GpuMaterialFieldUpdate | undefined>(
-      this.branchCount,
-    ).fill(undefined);
+    const updates = this.singleFieldUpdateBatch;
     updates[this.currentBranchIndex] = update;
-    const startedAt = this.executeMaterialFieldUpdateBatch(updates);
-    // Sampling is submitted before the pending dab batch. Flush that batch
-    // with the old field, then the old texture is safe as a diffusion target.
-    this.flush();
-    this.executeMaterialFieldDiffusionBatch(updates, startedAt);
+    try {
+      const startedAt = this.executeMaterialFieldUpdateBatch(updates);
+      // Sampling is submitted before the pending dab batch. Flush that batch
+      // with the old field, then the old texture is safe as a diffusion target.
+      this.flush();
+      this.executeMaterialFieldDiffusionBatch(updates, startedAt);
+    } finally {
+      updates[this.currentBranchIndex] = undefined;
+    }
   }
 
   initializeMaterialCheckpoint(
@@ -739,20 +776,34 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gl.bindTexture(gl.TEXTURE_2D, this.tipTexture);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[this.activeFieldIndex]);
-      gl.uniform2f(
-        gl.getUniformLocation(this.program, "uFieldSize"),
-        this.fieldColumns,
-        this.fieldRows,
-      );
-      gl.uniform2f(
-        gl.getUniformLocation(this.program, "uFieldTextureSize"),
-        this.fieldTextureWidth,
-        this.fieldTextureHeight,
-      );
-      gl.uniform1f(
-        gl.getUniformLocation(this.program, "uFieldRowStride"),
-        this.fieldRows,
-      );
+      if (
+        this.strokeUniformFieldColumns !== this.fieldColumns ||
+        this.strokeUniformFieldRows !== this.fieldRows
+      ) {
+        gl.uniform2f(
+          this.glResources.strokeFieldUniforms.size,
+          this.fieldColumns,
+          this.fieldRows,
+        );
+        gl.uniform1f(
+          this.glResources.strokeFieldUniforms.rowStride,
+          this.fieldRows,
+        );
+        this.strokeUniformFieldColumns = this.fieldColumns;
+        this.strokeUniformFieldRows = this.fieldRows;
+      }
+      if (
+        this.strokeUniformTextureWidth !== this.fieldTextureWidth ||
+        this.strokeUniformTextureHeight !== this.fieldTextureHeight
+      ) {
+        gl.uniform2f(
+          this.glResources.strokeFieldUniforms.textureSize,
+          this.fieldTextureWidth,
+          this.fieldTextureHeight,
+        );
+        this.strokeUniformTextureWidth = this.fieldTextureWidth;
+        this.strokeUniformTextureHeight = this.fieldTextureHeight;
+      }
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
       gl.bufferSubData(
         gl.ARRAY_BUFFER,
@@ -812,23 +863,13 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
   }
 
-  private fieldPassResources() {
-    return {
-      gl: this.gl,
-      branchCount: this.branchCount,
-      maxBranchCount: this.maxBranchCount,
-      fieldColumns: this.fieldColumns,
-      fieldRows: this.fieldRows,
-      activeFieldIndex: this.activeFieldIndex,
-      checkpoints: this.materialCheckpoints,
-      fieldTextures: this.fieldTextures,
-      materialCheckpointTexture: this.materialCheckpointTexture,
-      branchDataBuffer: this.branchDataBuffer,
-      vertexArray: this.vertexArray,
-      fieldMixProgram: this.fieldMixProgram,
-      fieldDiffusionProgram: this.fieldDiffusionProgram,
-      bindFieldFramebuffer: (index: 0 | 1) => this.bindFieldFramebuffer(index),
-    };
+  private fieldPassResources(): FieldPassResources {
+    const resources = this.cachedFieldPassResources;
+    resources.branchCount = this.branchCount;
+    resources.fieldColumns = this.fieldColumns;
+    resources.fieldRows = this.fieldRows;
+    resources.activeFieldIndex = this.activeFieldIndex;
+    return resources;
   }
 
   private executeMaterialFieldUpdateBatch(
@@ -1048,6 +1089,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private bindFieldFramebuffer(index: 0 | 1): void {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fieldFramebuffers[index]);
+    if (this.fieldFramebuffersAttached[index]) return;
     gl.framebufferTexture2D(
       gl.FRAMEBUFFER,
       gl.COLOR_ATTACHMENT0,
@@ -1058,6 +1100,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       throw new Error("GPU material field framebuffer is incomplete");
     }
+    this.fieldFramebuffersAttached[index] = true;
   }
 
   private includeDirtyRect(

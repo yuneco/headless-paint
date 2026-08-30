@@ -1,10 +1,6 @@
 import { brushPerfDebug, perfMark } from "../perf-debug";
 import type { GpuMaterialFieldUpdate } from "./gpu-stroke-surface";
-import {
-  BRANCH_DATA_BINDING,
-  BRANCH_DATA_FLOATS,
-  MAX_GPU_STROKE_BRANCHES,
-} from "./shader-sources";
+import { MAX_GPU_STROKE_BRANCHES } from "./shader-sources";
 import type { MaterialCheckpoint } from "./snapshot-manager";
 
 const GPU_ALLOCATION_QUANTUM_PX = 32;
@@ -38,13 +34,12 @@ export function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-interface FieldPassResources {
+export interface FieldPassResources {
   readonly gl: WebGL2RenderingContext;
-  readonly branchCount: number;
-  readonly maxBranchCount: number;
-  readonly fieldColumns: number;
-  readonly fieldRows: number;
-  readonly activeFieldIndex: 0 | 1;
+  branchCount: number;
+  fieldColumns: number;
+  fieldRows: number;
+  activeFieldIndex: 0 | 1;
   readonly checkpoints: readonly MaterialCheckpoint[];
   readonly fieldTextures: readonly [WebGLTexture, WebGLTexture];
   readonly materialCheckpointTexture: WebGLTexture;
@@ -52,6 +47,22 @@ interface FieldPassResources {
   readonly vertexArray: WebGLVertexArrayObject;
   readonly fieldMixProgram: WebGLProgram;
   readonly fieldDiffusionProgram: WebGLProgram;
+  readonly fieldMixUniforms: {
+    readonly fieldDimensions: WebGLUniformLocation;
+  };
+  readonly fieldDiffusionUniforms: {
+    readonly fieldDimensions: WebGLUniformLocation;
+    readonly strengths: WebGLUniformLocation;
+  };
+  readonly fieldPassScratch: {
+    readonly branchData: Float32Array<ArrayBuffer>;
+    readonly passAmounts: Float32Array<ArrayBuffer>;
+    readonly strengths: Float32Array<ArrayBuffer>;
+    mixColumns: number;
+    mixRows: number;
+    diffusionColumns: number;
+    diffusionRows: number;
+  };
   readonly bindFieldFramebuffer: (index: 0 | 1) => void;
 }
 
@@ -60,7 +71,8 @@ export function executeMaterialFieldMixPass(
   updates: readonly (GpuMaterialFieldUpdate | undefined)[],
 ): number {
   const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  const branchData = new Float32Array(BRANCH_DATA_FLOATS);
+  const branchData = resources.fieldPassScratch.branchData;
+  branchData.fill(0);
   const checkpointRectsOffset = 0;
   const geometryOffset = MAX_GPU_STROKE_BRANCHES * 4;
   const baseColorsOffset = MAX_GPU_STROKE_BRANCHES * 8;
@@ -77,15 +89,11 @@ export function executeMaterialFieldMixPass(
       throw new Error("GPU material checkpoint has not been initialized");
     }
     if (checkpoint?.initialized) {
-      branchData.set(
-        [
-          checkpoint.originX,
-          checkpoint.originY,
-          checkpoint.textureSize,
-          checkpoint.textureSize,
-        ],
-        checkpointRectsOffset + branchIndex * 4,
-      );
+      const offset = checkpointRectsOffset + branchIndex * 4;
+      branchData[offset] = checkpoint.originX;
+      branchData[offset + 1] = checkpoint.originY;
+      branchData[offset + 2] = checkpoint.textureSize;
+      branchData[offset + 3] = checkpoint.textureSize;
     }
     if (!update) continue;
     if (
@@ -95,33 +103,27 @@ export function executeMaterialFieldMixPass(
       throw new Error("GPU material field batch dimensions do not match");
     }
     const distance = sanitizeNonNegative(update.distancePx);
-    branchData.set(
-      [
-        update.centerX,
-        update.centerY,
-        update.angle,
-        Math.max(1, update.sampleSize),
-      ],
-      geometryOffset + branchIndex * 4,
+    const geometryIndex = geometryOffset + branchIndex * 4;
+    branchData[geometryIndex] = update.centerX;
+    branchData[geometryIndex + 1] = update.centerY;
+    branchData[geometryIndex + 2] = update.angle;
+    branchData[geometryIndex + 3] = Math.max(1, update.sampleSize);
+    const baseColorIndex = baseColorsOffset + branchIndex * 4;
+    branchData[baseColorIndex] = clampUnit(update.baseColor.r / 255);
+    branchData[baseColorIndex + 1] = clampUnit(update.baseColor.g / 255);
+    branchData[baseColorIndex + 2] = clampUnit(update.baseColor.b / 255);
+    branchData[baseColorIndex + 3] = clampUnit(update.baseColor.a / 255);
+    const ratesIndex = ratesOffset + branchIndex * 4;
+    branchData[ratesIndex] = distanceCoefficient(
+      update.pickupRatePerPx,
+      distance,
     );
-    branchData.set(
-      [
-        clampUnit(update.baseColor.r / 255),
-        clampUnit(update.baseColor.g / 255),
-        clampUnit(update.baseColor.b / 255),
-        clampUnit(update.baseColor.a / 255),
-      ],
-      baseColorsOffset + branchIndex * 4,
+    branchData[ratesIndex + 1] = distanceCoefficient(
+      update.restoreRatePerPx,
+      distance,
     );
-    branchData.set(
-      [
-        distanceCoefficient(update.pickupRatePerPx, distance),
-        distanceCoefficient(update.restoreRatePerPx, distance),
-        1,
-        0,
-      ],
-      ratesOffset + branchIndex * 4,
-    );
+    branchData[ratesIndex + 2] = 1;
+    branchData[ratesIndex + 3] = 0;
   }
 
   const { gl } = resources;
@@ -144,26 +146,21 @@ export function executeMaterialFieldMixPass(
     gl.TEXTURE_2D,
     resources.fieldTextures[resources.activeFieldIndex],
   );
-  gl.uniform1i(
-    gl.getUniformLocation(resources.fieldMixProgram, "uCheckpoints"),
-    0,
-  );
-  gl.uniform1i(
-    gl.getUniformLocation(resources.fieldMixProgram, "uPreviousField"),
-    1,
-  );
-  gl.uniform2i(
-    gl.getUniformLocation(resources.fieldMixProgram, "uFieldDimensions"),
-    resources.fieldColumns,
-    resources.fieldRows,
-  );
+  const scratch = resources.fieldPassScratch;
+  if (
+    scratch.mixColumns !== resources.fieldColumns ||
+    scratch.mixRows !== resources.fieldRows
+  ) {
+    gl.uniform2i(
+      resources.fieldMixUniforms.fieldDimensions,
+      resources.fieldColumns,
+      resources.fieldRows,
+    );
+    scratch.mixColumns = resources.fieldColumns;
+    scratch.mixRows = resources.fieldRows;
+  }
   gl.bindBuffer(gl.UNIFORM_BUFFER, resources.branchDataBuffer);
   gl.bufferSubData(gl.UNIFORM_BUFFER, 0, branchData);
-  gl.bindBufferBase(
-    gl.UNIFORM_BUFFER,
-    BRANCH_DATA_BINDING,
-    resources.branchDataBuffer,
-  );
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   return startedAt;
 }
@@ -174,7 +171,10 @@ export function executeMaterialFieldDiffusionPass(
   startedAt: number,
 ): 0 | 1 {
   const { gl } = resources;
-  const passAmounts = new Float32Array(resources.maxBranchCount);
+  const scratch = resources.fieldPassScratch;
+  const passAmounts = scratch.passAmounts;
+  const strengths = scratch.strengths;
+  passAmounts.fill(0);
   for (
     let branchIndex = 0;
     branchIndex < resources.branchCount;
@@ -188,40 +188,43 @@ export function executeMaterialFieldDiffusionPass(
   }
 
   let sourceIndex = oppositeFieldIndex(resources.activeFieldIndex);
+  if (!passAmounts.some((amount) => amount > 1e-6)) {
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordStage("gpuFieldUpdate", startedAt);
+    }
+    return sourceIndex;
+  }
+  gl.viewport(
+    0,
+    0,
+    resources.fieldColumns,
+    resources.fieldRows * resources.branchCount,
+  );
+  gl.disable(gl.BLEND);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.useProgram(resources.fieldDiffusionProgram);
+  gl.bindVertexArray(resources.vertexArray);
+  gl.activeTexture(gl.TEXTURE1);
+  if (
+    scratch.diffusionColumns !== resources.fieldColumns ||
+    scratch.diffusionRows !== resources.fieldRows
+  ) {
+    gl.uniform2i(
+      resources.fieldDiffusionUniforms.fieldDimensions,
+      resources.fieldColumns,
+      resources.fieldRows,
+    );
+    scratch.diffusionColumns = resources.fieldColumns;
+    scratch.diffusionRows = resources.fieldRows;
+  }
   while (passAmounts.some((amount) => amount > 1e-6)) {
-    const strengths = new Float32Array(resources.maxBranchCount);
     for (let index = 0; index < resources.branchCount; index++) {
       strengths[index] = Math.min(1, passAmounts[index] ?? 0);
     }
     const targetIndex = oppositeFieldIndex(sourceIndex);
     resources.bindFieldFramebuffer(targetIndex);
-    gl.viewport(
-      0,
-      0,
-      resources.fieldColumns,
-      resources.fieldRows * resources.branchCount,
-    );
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.useProgram(resources.fieldDiffusionProgram);
-    gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, resources.fieldTextures[sourceIndex]);
-    gl.uniform1i(
-      gl.getUniformLocation(resources.fieldDiffusionProgram, "uPreviousField"),
-      1,
-    );
-    gl.uniform2i(
-      gl.getUniformLocation(
-        resources.fieldDiffusionProgram,
-        "uFieldDimensions",
-      ),
-      resources.fieldColumns,
-      resources.fieldRows,
-    );
-    gl.uniform1fv(
-      gl.getUniformLocation(resources.fieldDiffusionProgram, "uStrengths[0]"),
-      strengths,
-    );
+    gl.uniform1fv(resources.fieldDiffusionUniforms.strengths, strengths);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     sourceIndex = targetIndex;
     for (let index = 0; index < resources.branchCount; index++) {
