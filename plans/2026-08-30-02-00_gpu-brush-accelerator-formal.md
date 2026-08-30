@@ -4,7 +4,7 @@
 
 - Created: 2026-08-30 02:00 JST
 - Base: `experiment/brush-acceleration`（spike結果は `plans/2026-08-25-00-29_brush-gpu-acceleration-investigation.md` Section 18〜19）
-- State: **Phase 2承認済み（2026-08-30）。Phase 3 実装中**（3-A engine公開API化 → 3-B stroke注入点 → 3-C react/apps/web → 3-D テスト移植・整理）
+- State: **Phase 4 完了（2026-08-30）。実装済み・ユーザー確認待ち**
 - Scope: Acrylic（stamp + mixing）のGPU経路（WebGL2）を engine の内部acceleratorとして正式化する。Rough bristleは第2フェーズ（本計画ではplug-in点の定義のみ）
 
 ## 1. 要求（spikeで確定した事実）
@@ -97,3 +97,31 @@ interface BrushAccelerator {
 - **アプリ負担を最小に**: react `usePaintEngine({ gpuBackend })` が生成・注入・mixing stamp選択時の自動 `warmUp`・unmount時 `dispose` を内包。`engine.gpuBackend` / `engine.gpuBackendReason` をデバッグUI向けに公開
 - **値名は `"auto" | "webgl2" | "cpu"` で統一**（engine / react / アプリ永続化）
 - **core直接利用（paint-app / jotai）**: エンジン再実装は不要。`createBrushAccelerator` → `createStrokeRuntime({ accelerator })` / `replayCommand(..., { accelerator })` / `executeHistoryOp(..., { accelerator })` の3箇所に渡す＋任意で `warmUp`。docsの「core利用者の最小手順」に記載
+
+## 8. 実装結果（2026-08-30）
+
+### 実装された仕様（要約。詳細は `packages/engine/docs/gpu-acceleration.md`）
+- engine 公開API: `createBrushAccelerator(options?)` / `resolveBrushAcceleratorBackend(options?, env?)`、型 `BrushAccelerator` / `BrushAcceleratorOptions` / `BrushAcceleratorBackend` / `BrushAcceleratorResolution`。`renderBrushStroke` / `appendToCommittedLayer` に optional `accelerator`
+- stroke: `StrokeRuntimeDeps.accelerator`、`ReplayOptions.accelerator`（`replayCommand` / `replayCommands`）、`ExecutorDeps.accelerator`（`executeHistoryOp` / rebuild）。cancel / dispose で GPU stroke を確実に終了。context lost / dispose 時は commit 直前に退避した dirty rect を復元し、全入力点を CPU 経路で描き直す（byte 一致）
+- react: `usePaintEngine({ gpuBackend })`（既定 auto）。hook が生成・注入・mixing stamp 選択時の `warmUp`・unmount 時 `dispose`。戻り値 `gpuBackend` / `gpuBackendReason`
+- apps/web: `engineBackend` を localStorage に永続化、デバッグパネルで表示・切替（confirm → reload）、`?gpuBackend=` が優先
+- GPU 内部: layer 同寸 accum（常駐、直近1 layer、engine/stroke の書き込みAPIで自動無効化）、instanced dab、field strip（全 branch 1 pass）、branch 別 checkpoint snapshot（GPU 内 blit、CPU の時間基準を再現）、commit packing（1024²、batch ごと1往復）、branch 上限 64（UBO）、readback ゼロ
+- 適格条件: stamp + mixing + source-over + alphaLock 無し + branch ≤ 64 + surface 確保成功。auto は WebKit 系のみ
+
+### 最終数値（WebKit Playwright、backlog fixture、正式API後）
+- CPU dispatch p50/p95 8/12ms・undoLong 2611ms → GPU 2/3ms・882ms
+- parity（Tier B）: none / radial 4 とも全 fixture pass（F1 RGB MAE 0.003〜0.005、|Δ|>0.1 0%）。Undo 後差分 0
+- テスト 523 件 green（live/replay byte 一致、Expand parity、residency、context loss、backend 判定）
+
+### 実装時の調整内容（補足）
+- readback を CPU に戻す設計（sync / async / lag N）は WebKit の GPU 往復レイテンシが床となり採用せず、field 更新と checkpoint snapshot を GPU 内に置く方式へ転換（spike 計画 Section 18.12〜18.19）
+- iPad の stall は cancel 経路で GPU stroke が未終了のまま残り CPU 経路に固定されていたことが原因。cancel / dispose で確実に終了し、stale owner からも回復する
+- context loss の rollback は当初 stroke 開始時の全面 copy だったが、常時コストのため commit 直前の dirty rect 退避に変更
+- backend の UA 判定は react 側の重複実装を排し engine の `resolveBrushAcceleratorBackend` に一元化
+
+### ペンディング
+- iPad 実機での最終確認（常駐・Expand・context loss 復旧の体感）
+- Rough bristle の GPU 化（第2フェーズ。plug-in 点は `GpuStrokeSurface` 内部 IF に残す）
+- `work.local` の benchmark / parity harness は正式 API に追従済みだが、リポジトリ管理下の再現手段へ移す判断は未
+- perf-debug 計測（stage / stall）は `perfDebug` 時のみ有効で残置。削除可否は安定後に判断
+- 外部からの `layer.ctx` 直接書き込みは `invalidate` 契約に依存（自動検出しない）
