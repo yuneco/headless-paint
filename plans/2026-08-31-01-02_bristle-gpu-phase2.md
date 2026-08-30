@@ -121,3 +121,16 @@ Mac WebKit / STP / iPad で計測、stall・undo/redo・ジェスチャの再確
 - 計測ランナー `benchmark-rough-capture.mjs` の stageSnapshot は以前から空（Call / batch wall / undo は有効）。stage 内訳は `tools/bench/results/probe6.mjs`（pen PointerEvent を直接 dispatch）で取得
 - **mixing OFF（Mac WebKit、1 stroke 150 点 / 30 chunk）**: CPU appendCommitted 74ms（maskField 22 / maskRaster 28 / maskUpload 9）→ GPU 110ms（maskField 23 / gpuBristleInk 57 / gpuCommit 36）。ランナーの p95 は 14-18 vs 15-20ms で横ばい。Chromium attribution では 3 pass 合計 ≈8ms/31 chunk なので WebKit の「ink 57ms」は GPU 同期待ちの付け替え（疑い: chunk ごとに寸法が変わる maskField texture の `texImage2D` 再確保）。ただし commit 床 1.2ms × chunk と CPU 側 maskField 23ms が残るため、**mixing OFF の Mac では最良でも CPU と同等**の見込み
 - **mixing ON（同条件）**: CPU 377ms（maskUpload 149 + checkpointReadback 149 = WebKit 同期）→ GPU 242ms（−36%）。GPU 側の残りは `gpuFieldUpdate` 164ms/182 回（run ごとの field 更新、0.9ms/回）
+
+### 5.2 GL オーバーヘッド削減後（コミット `d298dc5`）
+
+probe6（1 stroke 150 点、WebKit）:
+
+| 条件 | CPU | GPU | 備考 |
+|---|---|---|---|
+| mixing OFF（31 chunk） | appendCommitted 77ms（maskField 26 / maskRaster 33 / maskUpload 7） | appendCommitted 45 + gpuCommit 67 = 112ms（3 pass 合計 4ms、maskField 25） | commit 2.2ms/flush = 3 pass の GPU 実行待ち + ImageBitmap |
+| mixing ON（210 run / 31 flush） | 423ms（maskUpload 170 + checkpointReadback 177） | 73 + gpuCommit 193 = 266ms（**−37%**、gpuFieldUpdate 164→6ms） | commit 6.2ms/flush = 1 flush に ≈27 render pass（7 run × 3 + field 6）の実行待ち |
+
+ランナー（`benchmark-rough-capture.mjs`、mixing OFF、REPEATS=4）: Call p95 CPU 16-22 → GPU 13-22ms、batch wall p95 14-21 → 12-17ms、undo1 115 → 128ms。**mixing OFF は Mac では誤差域**。
+
+所見: CPU 側の仕事は消えたが、WebKit(Metal) では render pass 1 本あたり ≈0.2-0.3ms の GPU 側固定費があり、chunk × 3 pass の設計だと pass 本数が支配的。次の一手は mask / ink を同一 FBO に置いて pass を 3→2 にする（mixing ON で効く）。mixing OFF は 1 flush = 1 chunk なので pass 統合の余地が小さく、Mac では CPU 同等が上限。iPad（CPU raster が遅い）で逆転する可能性は未計測。
