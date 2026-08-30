@@ -159,3 +159,7 @@ interface BrushAccelerator {
 - 残る25〜40msはUndo操作の中（checkpoint復元→accum再upload→replay）で設計どおり。layer内容が変わる以上、再uploadは不可避
 - 経緯: react側イベントが無いように見えたのは、記録がUndo処理の途中（reactコードの前）に取られていたため。`recentEvents` を Copy JSON に含めて確認
 - 対応: `strokeStart` 記録に owner label（live / replay / rebuild）を付与して誤読を防ぐ。`#hook-r2` マーカー削除。Undo直後の `warmUp` は保険として残す
+
+## 15. 2本指ジェスチャ開始時の引っ掛かり（2026-08-30）
+- 原因: 1本目の指でGPU strokeが始まり、ジェスチャ成立でcancel。GPU strokeはCPU snapshotを持たないため、cancelの `restoreSnapshot` が `restoreLayerBeforeStroke`（history rebuild＝checkpoint復元＋replay）を実行し、`runtimeRestore` でresidencyも無効化 → ジェスチャのたびにUndo相当のコスト＋次strokeの16MB再upload
+- 対策（委譲中）: stroke開始時にaccumをGPU内で **base texture** へblit（CPU関与なし）。cancelはcommit済みdirty rectを base→accum に戻して通常commit経路でlayerへ書き戻す。history rebuild・CPU snapshot・residency無効化を不要にする
