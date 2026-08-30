@@ -152,3 +152,20 @@ probe6（1 stroke 150 点、WebKit）:
 - **mixing OFF の Rough**: Mac では CPU 同等（CPU raster が速く、GPU 側は pass 固定費 + commit 床で相殺）。Go 条件未達。ただし iPad は CPU raster が相対的に遅いため逆転しうる（未計測。次の実機確認で判断）
 - undo が GPU で +15ms（rebuild replay の GPU 再 upload）。Acrylic と同じ性質で許容範囲だが要観察
 - 見た目の parity: §5.5 に記録
+
+### 5.5 見た目の parity（CPU vs GPU、WebKit）
+
+- mask 単体（`bristle-pass.test.ts`、同一 chunk を CPU raster と GPU mask pass で描画）: 被覆率差 0.0065pt、alpha MAE 0.00018、|Δ|>0.1 0.013%。残差は三角形の edge rule
+- アプリ経路（ランナー fixture、layer の最終画素をスクショ比較、`tools/bench/results/imgdiff.mjs`）: |Δ|>25/255 の画素 0.67%（ink 画素の 2.1%）。定圧ストローク 0.4%、自己交差ループ 3.4%（点描分布の差）。拡大目視でかすれ・紙目の位置は一致
+- 一度「GPU がベタ塗り」に見えたのは描画途中（プレビュー状態）のスクショだった。誤報
+
+### 5.6 spike の結論（Mac、2026-08-31）
+
+| 条件 | 結果 | Go 条件（−20%） |
+|---|---|---|
+| Rough mixing ON | stroke 411 → 242ms（−41%）、readback ゼロ | **達成** |
+| Rough mixing OFF | CPU 同等（p95 −15% 前後、誤差域） | 未達（Mac）。iPad は未計測 |
+
+- 見た目は Tier B 相当で一致
+- 残る改善余地: flush 内で field 更新を挟まない run の mask/ink をまとめて 1 pass にする surface 側 queue 化（mixing ON でさらに削減の見込み）。iPad での mixing OFF 逆転の確認
+- ペンディング: mixing ON の composite における field UV の契約（現状は chunk bbox 全体への bilinear 近似。CPU は segment ごとの atlas 変換）。正式化時に定義が必要
