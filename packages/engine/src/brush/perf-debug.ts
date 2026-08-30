@@ -156,6 +156,7 @@ export interface BrushPerfSnapshot {
   readonly samples: Readonly<Record<BrushPerfSampleName, readonly number[]>>;
   readonly stageSeries: Readonly<Record<BrushPerfStageName, readonly number[]>>;
   readonly stalls: readonly BrushPerfStallSnapshot[];
+  readonly recentEvents: readonly BrushPerfEventSnapshot[];
 }
 
 export interface BrushPerfDebug {
@@ -393,6 +394,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
     snapshot() {
       return {
         enabled: this.enabled,
+        recentEvents: recentEvents.map((event) => ({ ...event })),
         nullStages: { ...this.nullStages },
         stages: Object.fromEntries(
           BRUSH_PERF_STAGE_NAMES.map((name) => [name, { ...stages[name] }]),

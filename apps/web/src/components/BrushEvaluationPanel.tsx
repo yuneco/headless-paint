@@ -37,8 +37,17 @@ function BrushEvaluationPanelComponent({
   const stalls = perfDebug?.enabled ? perfDebug.snapshot().stalls : [];
 
   function copyStalls(): void {
-    const currentStalls = globalThis.__hpBrushPerf?.snapshot().stalls ?? [];
-    void navigator.clipboard.writeText(JSON.stringify(currentStalls, null, 2));
+    const snapshot = globalThis.__hpBrushPerf?.snapshot();
+    void navigator.clipboard.writeText(
+      JSON.stringify(
+        {
+          stalls: snapshot?.stalls ?? [],
+          recentEvents: snapshot?.recentEvents ?? [],
+        },
+        null,
+        2,
+      ),
+    );
   }
 
   return (
