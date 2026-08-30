@@ -1,5 +1,5 @@
 import type { Layer } from "../../types";
-import { brushPerfDebug } from "../perf-debug";
+import { brushPerfDebug, perfMark, perfSample } from "../perf-debug";
 import {
   registerGpuLayerResidency,
   unregisterGpuLayerResidency,
@@ -179,11 +179,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   }
 
   warmUp(layer: Layer): void {
-    const record = (outcome: string) => {
-      if (brushPerfDebug.enabled) {
-        brushPerfDebug.recordEvent("warmUp", { reason: outcome });
-      }
-    };
+    const record = (outcome: string) => perfMark("warmUp", { reason: outcome });
     if (this.disposed) {
       record("skipped:disposed");
       return;
@@ -216,9 +212,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     layer: Layer,
     reason: GpuResidencyInvalidationReason = "external",
   ): void {
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordEvent("residencyInvalidated", { reason });
-    }
+    perfMark("residencyInvalidated", { reason });
     const residency = this.residencies.get(layer);
     if (residency) residency.valid = false;
     if (this.residentLayer === layer) this.residentLayer = null;
@@ -263,7 +257,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       if (brushPerfDebug.enabled) {
         const staleOwner = getGpuOwnerDebugMetadata(this.activeOwner);
         const recoveryOwner = getGpuOwnerDebugMetadata(owner);
-        brushPerfDebug.recordEvent("gpuStaleOwnerRecovered", {
+        perfMark("gpuStaleOwnerRecovered", {
           ownerLabel: staleOwner.label,
           ownerStartedAtMs: staleOwner.startedAtMs,
           ownerAgeMs: Math.max(0, performance.now() - staleOwner.startedAtMs),
@@ -285,11 +279,9 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     const surface = this.acquireSurface(layer.width, layer.height);
     if (!surface || surface.lost) return false;
     const residencyHit = this.resident && this.prepareResidency(layer, surface);
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample("gpuResidencyHit", residencyHit ? 1 : 0);
-      brushPerfDebug.recordSample("gpuBranches", branchCount);
-      brushPerfDebug.recordEvent("residency", { hit: residencyHit });
-    }
+    perfSample("gpuResidencyHit", residencyHit ? 1 : 0);
+    perfSample("gpuBranches", branchCount);
+    perfMark("residency", { hit: residencyHit });
     if (!residencyHit && !sourceCanvas) return false;
     try {
       surface.beginStroke(residencyHit ? undefined : sourceCanvas, branchCount);

@@ -84,7 +84,7 @@ function renderBrushStroke(
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
 | `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` / `bristle` の共通scheduler位相、混色状態、bristleの直前断面と短いlag stateをbranchごとに保持する。`round-pen` では無視される |
 | `sourceLayer` | `Layer` | 条件付き | stamp / bristleの混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
-| `accelerator` | `BrushAccelerator \| null` | - | GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。省略 / `null` はCPU経路。混色stampの適格条件を満たす場合のみGPU経路になり、結果はCPU経路とTier B parityの範囲で一致する |
+| `accelerator` | `BrushAccelerator \| null` | - | GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。省略 / `null` はCPU経路。混色stampの適格条件を満たす場合のみGPU経路になり、GPU経路の結果はCPU経路と原則一致する。同一backend内では決定的で、CPU/GPU間の許容差は [gpu-acceleration.md](./gpu-acceleration.md) を参照 |
 
 **戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 

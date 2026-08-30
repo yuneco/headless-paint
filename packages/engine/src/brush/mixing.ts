@@ -14,7 +14,7 @@ import {
   createMaterialField,
   writeMaterialFieldPixels,
 } from "./material-field";
-import { brushPerfDebug } from "./perf-debug";
+import { brushPerfDebug, perfSample, perfStage } from "./perf-debug";
 
 const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
@@ -116,23 +116,14 @@ export function prepareMixingState(
     mixing.fieldRows,
     baseColor,
   );
-  const fieldCanvasAllocStartedAt = brushPerfDebug.enabled
-    ? performance.now()
-    : 0;
-  const fieldCanvas = new OffscreenCanvas(
-    mixing.fieldColumns,
-    mixing.fieldRows,
+  const fieldCanvas = perfStage(
+    "canvasAlloc",
+    () => new OffscreenCanvas(mixing.fieldColumns, mixing.fieldRows),
   );
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("canvasAlloc", fieldCanvasAllocStartedAt);
-  }
-  const renderCanvasAllocStartedAt = brushPerfDebug.enabled
-    ? performance.now()
-    : 0;
-  const renderCanvas = new OffscreenCanvas(tipCanvas.width, tipCanvas.height);
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("canvasAlloc", renderCanvasAllocStartedAt);
-  }
+  const renderCanvas = perfStage(
+    "canvasAlloc",
+    () => new OffscreenCanvas(tipCanvas.width, tipCanvas.height),
+  );
   const fieldCtx = getCached2dContext(fieldCanvas, "material field");
   const fieldPixels = fieldCtx.createImageData(
     mixing.fieldColumns,
@@ -296,14 +287,12 @@ function captureCheckpoint(
   ctx.clearRect(0, 0, tileSize, tileSize);
   ctx.drawImage(sourceCanvas, -originX, -originY);
   ctx.restore();
-  const readbackStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  const checkpointPixels = brushPerfDebug.nullStages.nullCheckpoint
-    ? getNullCheckpointImageData(ctx, tileSize, tileSize)
-    : ctx.getImageData(0, 0, tileSize, tileSize);
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("checkpointReadback", readbackStartedAt);
-    brushPerfDebug.recordSample("checkpoints", 1);
-  }
+  const checkpointPixels = perfStage("checkpointReadback", () =>
+    brushPerfDebug.nullStages.nullCheckpoint
+      ? getNullCheckpointImageData(ctx, tileSize, tileSize)
+      : ctx.getImageData(0, 0, tileSize, tileSize),
+  );
+  perfSample("checkpoints", 1);
   return {
     ...state,
     checkpointCanvas,
@@ -348,11 +337,9 @@ export function advanceMixingFieldFromCheckpoint(
   state: BrushMixingState,
   distancePx: number,
 ): Float32Array {
-  const sampleStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  const sample = sampleCheckpointFootprint(input, state);
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("materialSample", sampleStartedAt);
-  }
+  const sample = perfStage("materialSample", () =>
+    sampleCheckpointFootprint(input, state),
+  );
   return advanceMaterialField(
     state.field,
     sample,
@@ -444,47 +431,37 @@ function uploadMaterialCanvas(
   tipCanvas: OffscreenCanvas,
   accelerator?: BrushAccelerator | null,
 ): void {
-  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  if (brushPerfDebug.nullStages.nullMaterialUpload) {
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("materialUpload", startedAt);
+  perfStage("materialUpload", () => {
+    if (brushPerfDebug.nullStages.nullMaterialUpload) return;
+    writeMaterialFieldPixels(state.field, state.fieldPixels.data);
+    const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+    if (gpuSurface) {
+      gpuSurface.updateField(
+        state.fieldPixels.data,
+        state.fieldPixels.width,
+        state.fieldPixels.height,
+      );
+      return;
     }
-    return;
-  }
-  writeMaterialFieldPixels(state.field, state.fieldPixels.data);
-  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
-  if (gpuSurface) {
-    gpuSurface.updateField(
-      state.fieldPixels.data,
-      state.fieldPixels.width,
-      state.fieldPixels.height,
-    );
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("materialUpload", startedAt);
-    }
-    return;
-  }
-  const fieldCtx = getCached2dContext(state.fieldCanvas, "material field");
-  fieldCtx.putImageData(state.fieldPixels, 0, 0);
+    const fieldCtx = getCached2dContext(state.fieldCanvas, "material field");
+    fieldCtx.putImageData(state.fieldPixels, 0, 0);
 
-  const renderCtx = getCached2dContext(state.renderCanvas, "material tip");
-  renderCtx.save();
-  renderCtx.globalAlpha = 1;
-  renderCtx.globalCompositeOperation = "copy";
-  renderCtx.imageSmoothingEnabled = true;
-  renderCtx.drawImage(
-    state.fieldCanvas,
-    0,
-    0,
-    state.renderCanvas.width,
-    state.renderCanvas.height,
-  );
-  renderCtx.globalCompositeOperation = "destination-in";
-  renderCtx.drawImage(tipCanvas, 0, 0);
-  renderCtx.restore();
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("materialUpload", startedAt);
-  }
+    const renderCtx = getCached2dContext(state.renderCanvas, "material tip");
+    renderCtx.save();
+    renderCtx.globalAlpha = 1;
+    renderCtx.globalCompositeOperation = "copy";
+    renderCtx.imageSmoothingEnabled = true;
+    renderCtx.drawImage(
+      state.fieldCanvas,
+      0,
+      0,
+      state.renderCanvas.width,
+      state.renderCanvas.height,
+    );
+    renderCtx.globalCompositeOperation = "destination-in";
+    renderCtx.drawImage(tipCanvas, 0, 0);
+    renderCtx.restore();
+  });
 }
 
 function ensureCanvasSize(
@@ -494,12 +471,7 @@ function ensureCanvasSize(
 ): OffscreenCanvas {
   if (canvas && canvas.width === width && canvas.height === height)
     return canvas;
-  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  const next = new OffscreenCanvas(width, height);
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("canvasAlloc", startedAt);
-  }
-  return next;
+  return perfStage("canvasAlloc", () => new OffscreenCanvas(width, height));
 }
 
 function getNullCheckpointImageData(

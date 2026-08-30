@@ -26,6 +26,7 @@ import type {
   FilterPipelineState,
   InputPoint,
 } from "@headless-paint/input";
+import { getBrushPerfDebug, perfSample, perfStage } from "./perf-debug";
 import { addPointToSession, startStrokeSession } from "./session";
 import type { RenderUpdate, StrokeSessionState } from "./types";
 
@@ -149,87 +150,69 @@ export function createIncrementalStrokeRenderer(
         : [],
       committedOverlapCount: hasNewCommitted ? overlapCount : 0,
     };
-    const perfDebug = (
-      globalThis as typeof globalThis & {
-        __hpBrushPerf?: {
-          readonly enabled: boolean;
-          recordStage(name: string, startedAt: number): void;
-        };
-      }
-    ).__hpBrushPerf;
-    const appendStartedAt = perfDebug?.enabled ? performance.now() : 0;
-    if (hasNewCommitted) {
-      if (!detectGpuStrokeLoss()) {
-        if (gpuStrokeActive) gpuRuntime?.enter(gpuOwner);
-        try {
-          brushState = appendToCommittedLayer(
-            config.layer,
-            batchUpdate.newlyCommitted,
-            config.style,
-            compiledExpand,
-            batchUpdate.committedOverlapCount,
-            brushState,
-            samplingLayer,
-            config.alphaLocked,
-            config.accelerator,
-          );
-          if (!gpuStrokeActive) {
-            config.accelerator?.invalidate(config.layer, "cpuBrush");
+    perfStage("appendCommitted", () => {
+      if (hasNewCommitted) {
+        if (!detectGpuStrokeLoss()) {
+          if (gpuStrokeActive) gpuRuntime?.enter(gpuOwner);
+          try {
+            brushState = appendToCommittedLayer(
+              config.layer,
+              batchUpdate.newlyCommitted,
+              config.style,
+              compiledExpand,
+              batchUpdate.committedOverlapCount,
+              brushState,
+              samplingLayer,
+              config.alphaLocked,
+              config.accelerator,
+            );
+            if (!gpuStrokeActive) {
+              config.accelerator?.invalidate(config.layer, "cpuBrush");
+            }
+          } catch (error) {
+            if (!detectGpuStrokeLoss()) throw error;
+          } finally {
+            if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
           }
-        } catch (error) {
-          if (!detectGpuStrokeLoss()) throw error;
-        } finally {
-          if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
         }
+        renderedCommittedCount = nextCommittedCount;
       }
-      renderedCommittedCount = nextCommittedCount;
-    }
-    if (perfDebug?.enabled) {
-      perfDebug.recordStage("appendCommitted", appendStartedAt);
-    }
-    const callbackStartedAt = perfDebug?.enabled ? performance.now() : 0;
-    if (!gpuStrokeLost) {
-      config.onRenderUpdate?.({
-        session: nextSession,
-        renderUpdate: batchUpdate,
-        brushState,
-      });
-    }
-    if (perfDebug?.enabled) {
-      perfDebug.recordStage("renderUpdateCallback", callbackStartedAt);
-    }
+    });
+    perfStage("renderUpdateCallback", () => {
+      if (!gpuStrokeLost) {
+        config.onRenderUpdate?.({
+          session: nextSession,
+          renderUpdate: batchUpdate,
+          brushState,
+        });
+      }
+    });
   }
 
   function processBatch(points: readonly InputPoint[]): void {
-    const perfDebugBatch = (
-      globalThis as typeof globalThis & {
-        __hpBrushPerf?: {
-          readonly enabled: boolean;
-          recordStage(name: string, startedAt: number): void;
-        };
+    perfStage("processBatch", () => {
+      let lastUpdate: RenderUpdate | null = null;
+      for (const point of points) {
+        const filterResult = processPoint(
+          filterState,
+          point,
+          compiledFilterPipeline,
+        );
+        filterState = filterResult.state;
+        const strokeResult = strokeSession
+          ? addPointToSession(strokeSession, filterResult.output)
+          : startStrokeSession(
+              filterResult.output,
+              config.style,
+              config.expand,
+            );
+        strokeSession = strokeResult.state;
+        lastUpdate = strokeResult.renderUpdate;
       }
-    ).__hpBrushPerf;
-    const batchStartedAt = perfDebugBatch?.enabled ? performance.now() : 0;
-    let lastUpdate: RenderUpdate | null = null;
-    for (const point of points) {
-      const filterResult = processPoint(
-        filterState,
-        point,
-        compiledFilterPipeline,
-      );
-      filterState = filterResult.state;
-      const strokeResult = strokeSession
-        ? addPointToSession(strokeSession, filterResult.output)
-        : startStrokeSession(filterResult.output, config.style, config.expand);
-      strokeSession = strokeResult.state;
-      lastUpdate = strokeResult.renderUpdate;
-    }
-    if (strokeSession && lastUpdate) {
-      appendProcessedBatch(strokeSession, lastUpdate);
-    }
-    if (perfDebugBatch?.enabled) {
-      perfDebugBatch.recordStage("processBatch", batchStartedAt);
-    }
+      if (strokeSession && lastUpdate) {
+        appendProcessedBatch(strokeSession, lastUpdate);
+      }
+    });
   }
 
   function feedMany(points: readonly InputPoint[]): void {
@@ -334,25 +317,6 @@ interface GpuStrokeRuntimeBridge {
   endStroke(owner: object): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
-}
-
-interface BrushPerfDebugBridge {
-  readonly enabled: boolean;
-  beginBatch(
-    pointCount: number,
-    branchCount: number,
-    kind?: "moveMany" | "strokeStart",
-    ownerLabel?: string,
-  ): void;
-  endBatch(): void;
-}
-
-function getBrushPerfDebug(): BrushPerfDebugBridge | undefined {
-  return (
-    globalThis as typeof globalThis & {
-      __hpBrushPerf?: BrushPerfDebugBridge;
-    }
-  ).__hpBrushPerf;
 }
 
 function getGpuStrokeRuntime(
@@ -460,43 +424,21 @@ function createSamplingLayer(
   ) {
     return undefined;
   }
-  const perf = (
-    globalThis as typeof globalThis & {
-      __hpBrushPerf?: {
-        readonly enabled: boolean;
-        readonly nullStages: { readonly nullFullCopy: boolean };
-        recordStage(name: string, startedAt: number): void;
-        recordSample(name: "samplingCopyPixels", value: number): void;
-      };
-    }
-  ).__hpBrushPerf;
-  const startedAt = perf?.enabled ? performance.now() : 0;
+  const perf = getBrushPerfDebug();
   if (perf?.nullStages.nullFullCopy) {
-    if (perf.enabled) {
-      perf.recordStage("samplingLayerCopy", startedAt);
-      perf.recordSample("samplingCopyPixels", 0);
-    }
+    perfStage("samplingLayerCopy", () => undefined);
+    perfSample("samplingCopyPixels", 0);
     return layer;
   }
   return copySamplingLayer(layer);
 }
 
 function copySamplingLayer(layer: Layer): Layer {
-  const perf = (
-    globalThis as typeof globalThis & {
-      __hpBrushPerf?: {
-        readonly enabled: boolean;
-        recordStage(name: string, startedAt: number): void;
-        recordSample(name: "samplingCopyPixels", value: number): void;
-      };
-    }
-  ).__hpBrushPerf;
-  const startedAt = perf?.enabled ? performance.now() : 0;
-  const samplingLayer = createLayer(layer.width, layer.height);
-  copyLayerPixels(layer, samplingLayer);
-  if (perf?.enabled) {
-    perf.recordStage("samplingLayerCopy", startedAt);
-    perf.recordSample("samplingCopyPixels", layer.width * layer.height);
-  }
+  const samplingLayer = perfStage("samplingLayerCopy", () => {
+    const next = createLayer(layer.width, layer.height);
+    copyLayerPixels(layer, next);
+    return next;
+  });
+  perfSample("samplingCopyPixels", layer.width * layer.height);
   return samplingLayer;
 }

@@ -1,6 +1,6 @@
 import type { BrushConfig } from "@headless-paint/engine";
 import { memo } from "react";
-import type { StrokeCallMetrics } from "../hooks/useStrokeCallMetrics";
+import type { StrokeCallMetrics } from "../debug/useStrokeCallMetrics";
 import { BristleGrainEvaluation } from "./BristleGrainEvaluation";
 
 type BrushPerfSnapshot = ReturnType<

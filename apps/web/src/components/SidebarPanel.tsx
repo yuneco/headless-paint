@@ -8,7 +8,7 @@ import type { ViewTransform } from "@headless-paint/input";
 import type { LayerEntry } from "@headless-paint/react";
 import type { HistoryState } from "@headless-paint/stroke";
 import { memo } from "react";
-import type { StrokeCallMetrics } from "../hooks/useStrokeCallMetrics";
+import type { StrokeCallMetrics } from "../debug/useStrokeCallMetrics";
 import { AccordionPanel } from "./AccordionPanel";
 import { BrushEvaluationPanel } from "./BrushEvaluationPanel";
 import { BrushPanel } from "./BrushPanel";

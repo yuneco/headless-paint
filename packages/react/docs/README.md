@@ -39,7 +39,7 @@ useSmoothing ─────── 入力スムージング
 useExpand ─────────── 対称展開（使う場合のみ）
 ```
 
-`usePaintEngine` は内部で `useStrokeSession` と `useLayers` を使用している。利用する機能のうち不要なものがあれば（例: Wrap shift を使わない）、対応するコールバックを接続しなければよい。
+`usePaintEngine` は内部で `useStrokeSession` と `useLayers` を使用している。レイヤー操作と履歴操作のオーケストレーションは `src/paint-engine/` の内部モジュールに分離されているが、公開 API と利用方法は変わらない。利用する機能のうち不要なものがあれば（例: Wrap shift を使わない）、対応するコールバックを接続しなければよい。
 
 ### 中間: 自前の履歴管理をしたい場合
 

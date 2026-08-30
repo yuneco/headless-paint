@@ -1,55 +1,33 @@
 import type { Layer } from "../../types";
-import { brushPerfDebug } from "../perf-debug";
+import { brushPerfDebug, perfMark, perfStage } from "../perf-debug";
+import {
+  type DirtyRect,
+  commitRectsToLayer,
+  unionDirtyRects,
+} from "./commit-packing";
+import {
+  allocateFieldStrip,
+  clampUnit,
+  executeMaterialFieldDiffusionPass,
+  executeMaterialFieldMixPass,
+  oppositeFieldIndex,
+} from "./field-strip";
+import {
+  type GpuStrokeGlResources,
+  createGpuStrokeGlResources,
+  disposeGpuStrokeGlResources,
+} from "./gl-resources";
+import {
+  type MaterialCheckpoint,
+  type PendingBranchSegment,
+  type PendingMaterialCheckpointCapture,
+  captureMaterialCheckpoints,
+  ensureMaterialCheckpoints,
+  queueMaterialCheckpoint,
+} from "./snapshot-manager";
 
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 6;
-const COMMIT_TILE_SIZE = 512;
-const COMMIT_CANVAS_SIZE = 1024;
-const GPU_ALLOCATION_QUANTUM_PX = 32;
-const MAX_GPU_STROKE_BRANCHES = 64;
-// uPreviousField and uFieldDimensions consume one default-block vector each.
-const FIELD_DIFFUSION_FIXED_FRAGMENT_UNIFORM_VECTORS = 2;
-const BRANCH_DATA_BINDING = 0;
-const BRANCH_DATA_VEC4S_PER_BRANCH = 4;
-const BRANCH_DATA_FLOATS =
-  MAX_GPU_STROKE_BRANCHES * BRANCH_DATA_VEC4S_PER_BRANCH * 4;
-
-interface DirtyRect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-interface CommitTile extends DirtyRect {
-  readonly width: number;
-  readonly height: number;
-}
-
-interface PackedCommitTile extends CommitTile {
-  readonly packedX: number;
-  readonly packedY: number;
-}
-
-interface MaterialCheckpoint {
-  textureSize: number;
-  originX: number;
-  originY: number;
-  initialized: boolean;
-}
-
-interface PendingMaterialCheckpointCapture {
-  readonly originX: number;
-  readonly originY: number;
-  readonly size: number;
-  readonly fromStrokeStart: boolean;
-}
-
-interface PendingBranchSegment {
-  readonly dabs: GpuDab[];
-  update?: GpuMaterialFieldUpdate;
-  checkpoint?: PendingMaterialCheckpointCapture;
-}
 
 export interface GpuDab {
   readonly x: number;
@@ -116,220 +94,12 @@ export interface GpuStrokeSurface {
   dispose(): void;
 }
 
-const VERTEX_SHADER_SOURCE = `#version 300 es
-precision highp float;
-
-layout(location = 0) in vec2 aUnitPosition;
-layout(location = 1) in vec2 aCenter;
-layout(location = 2) in float aSize;
-layout(location = 3) in float aRotation;
-layout(location = 4) in float aAlpha;
-layout(location = 5) in float aBranchIndex;
-
-uniform vec2 uSurfaceSize;
-
-out vec2 vUv;
-out float vAlpha;
-flat out int vBranchIndex;
-
-void main() {
-  vec2 local = (aUnitPosition - vec2(0.5)) * aSize;
-  float cosine = cos(aRotation);
-  float sine = sin(aRotation);
-  vec2 rotated = vec2(
-    local.x * cosine - local.y * sine,
-    local.x * sine + local.y * cosine
-  );
-  vec2 position = aCenter + rotated;
-  vec2 clip = vec2(
-    position.x / uSurfaceSize.x * 2.0 - 1.0,
-    1.0 - position.y / uSurfaceSize.y * 2.0
-  );
-  gl_Position = vec4(clip, 0.0, 1.0);
-  vUv = aUnitPosition;
-  vAlpha = aAlpha;
-  vBranchIndex = int(aBranchIndex + 0.5);
-}
-`;
-
-const FRAGMENT_SHADER_SOURCE = `#version 300 es
-precision highp float;
-
-uniform sampler2D uTip;
-uniform sampler2D uField;
-uniform vec2 uFieldSize;
-uniform vec2 uFieldTextureSize;
-uniform float uFieldRowStride;
-
-in vec2 vUv;
-in float vAlpha;
-flat in int vBranchIndex;
-out vec4 outColor;
-
-void main() {
-  float mask = texture(uTip, vUv).a;
-  // Preserve the Canvas2D / array-texture sampling footprint while clamping
-  // LINEAR filtering to this branch's rows inside the packed strip.
-  vec2 fieldTexel = vec2(
-    clamp(vUv.x * uFieldSize.x - 0.5, 0.0, uFieldSize.x - 1.0),
-    float(vBranchIndex) * uFieldRowStride +
-      clamp(vUv.y * uFieldSize.y - 0.5, 0.0, uFieldSize.y - 1.0)
-  );
-  vec2 fieldUv = (fieldTexel + vec2(0.5)) / uFieldTextureSize;
-  vec4 material = texture(uField, fieldUv);
-  float alpha = material.a * mask * vAlpha;
-  outColor = vec4(material.rgb * alpha, alpha);
-}
-`;
-
-const FIELD_VERTEX_SHADER_SOURCE = `#version 300 es
-precision highp float;
-
-void main() {
-  vec2 position = vec2(
-    gl_VertexID == 1 ? 3.0 : -1.0,
-    gl_VertexID == 2 ? 3.0 : -1.0
-  );
-  gl_Position = vec4(position, 0.0, 1.0);
-}
-`;
-
-const FIELD_MIX_FRAGMENT_SHADER_SOURCE = `#version 300 es
-precision highp float;
-
-uniform highp sampler2DArray uCheckpoints;
-uniform sampler2D uPreviousField;
-uniform ivec2 uFieldDimensions;
-
-layout(std140) uniform BranchData {
-  vec4 uCheckpointRects[${MAX_GPU_STROKE_BRANCHES}];
-  vec4 uGeometry[${MAX_GPU_STROKE_BRANCHES}];
-  vec4 uBaseColors[${MAX_GPU_STROKE_BRANCHES}];
-  vec4 uRates[${MAX_GPU_STROKE_BRANCHES}];
-};
-
-out vec4 outColor;
-
-vec4 checkpointTexel(ivec2 tilePixel, int branchIndex) {
-  ivec2 checkpointSize = ivec2(uCheckpointRects[branchIndex].zw);
-  if (
-    tilePixel.x < 0 || tilePixel.y < 0 ||
-    tilePixel.x >= checkpointSize.x || tilePixel.y >= checkpointSize.y
-  ) {
-    return vec4(0.0);
-  }
-  vec4 premultiplied = texelFetch(
-    uCheckpoints,
-    ivec3(tilePixel.x, checkpointSize.y - 1 - tilePixel.y, branchIndex),
-    0
-  );
-  if (premultiplied.a <= 0.0) return vec4(0.0);
-  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
-}
-
-vec4 sampleCheckpointBilinear(vec2 documentPosition, int branchIndex) {
-  vec2 samplePosition =
-    documentPosition - uCheckpointRects[branchIndex].xy - vec2(0.5);
-  ivec2 p0 = ivec2(floor(samplePosition));
-  vec2 fraction = samplePosition - vec2(p0);
-  return mix(
-    mix(
-      checkpointTexel(p0, branchIndex),
-      checkpointTexel(p0 + ivec2(1, 0), branchIndex),
-      fraction.x
-    ),
-    mix(
-      checkpointTexel(p0 + ivec2(0, 1), branchIndex),
-      checkpointTexel(p0 + ivec2(1, 1), branchIndex),
-      fraction.x
-    ),
-    fraction.y
-  );
-}
-
-void main() {
-  ivec2 stripCoord = ivec2(gl_FragCoord.xy);
-  int branchIndex = stripCoord.y / uFieldDimensions.y;
-  ivec2 fieldCoord = ivec2(
-    stripCoord.x,
-    stripCoord.y - branchIndex * uFieldDimensions.y
-  );
-  vec4 geometry = uGeometry[branchIndex];
-  vec3 rates = uRates[branchIndex].xyz;
-  vec4 current = texelFetch(uPreviousField, stripCoord, 0);
-  if (rates.z < 0.5) {
-    outColor = current;
-    return;
-  }
-  vec2 local = (
-    (vec2(fieldCoord) + vec2(0.5)) / vec2(uFieldDimensions) - vec2(0.5)
-  ) * geometry.w;
-  float cosine = cos(geometry.z);
-  float sine = sin(geometry.z);
-  vec2 documentPosition = geometry.xy + vec2(
-    local.x * cosine - local.y * sine,
-    local.x * sine + local.y * cosine
-  );
-  vec4 sampled = sampleCheckpointBilinear(documentPosition, branchIndex);
-  float pickupAmount = rates.x * sampled.a;
-  vec3 picked = mix(current.rgb, sampled.rgb, pickupAmount);
-  vec4 baseColor = uBaseColors[branchIndex];
-  outColor = vec4(
-    mix(picked, baseColor.rgb, rates.y),
-    mix(current.a, baseColor.a, rates.y)
-  );
-}
-`;
-
-function createFieldDiffusionFragmentShaderSource(
-  maxBranchCount: number,
-): string {
-  return `#version 300 es
-precision highp float;
-
-uniform sampler2D uPreviousField;
-uniform ivec2 uFieldDimensions;
-uniform float uStrengths[${maxBranchCount}];
-
-out vec4 outColor;
-
-void main() {
-  ivec2 stripCoord = ivec2(gl_FragCoord.xy);
-  int branchIndex = stripCoord.y / uFieldDimensions.y;
-  ivec2 coord = ivec2(
-    stripCoord.x,
-    stripCoord.y - branchIndex * uFieldDimensions.y
-  );
-  float strength = uStrengths[branchIndex];
-  vec4 current = texelFetch(uPreviousField, stripCoord, 0);
-  vec4 sum = current;
-  float count = 1.0;
-  if (coord.x > 0) {
-    sum += texelFetch(uPreviousField, stripCoord + ivec2(-1, 0), 0);
-    count += 1.0;
-  }
-  if (coord.x + 1 < uFieldDimensions.x) {
-    sum += texelFetch(uPreviousField, stripCoord + ivec2(1, 0), 0);
-    count += 1.0;
-  }
-  if (coord.y > 0) {
-    sum += texelFetch(uPreviousField, stripCoord + ivec2(0, -1), 0);
-    count += 1.0;
-  }
-  if (coord.y + 1 < uFieldDimensions.y) {
-    sum += texelFetch(uPreviousField, stripCoord + ivec2(0, 1), 0);
-    count += 1.0;
-  }
-  outColor = mix(current, sum / count, strength);
-}
-`;
-}
-
 class WebGl2StrokeSurface implements GpuStrokeSurface {
   readonly width: number;
   readonly height: number;
   readonly canvas: OffscreenCanvas;
   readonly gl: WebGL2RenderingContext;
+  private readonly glResources: GpuStrokeGlResources;
 
   private readonly program: WebGLProgram;
   private readonly fieldMixProgram: WebGLProgram;
@@ -379,177 +149,46 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private readonly commitMode: "bitmap" | "direct";
   readonly maxBranchCount: number;
   private strokeBegun = false;
-  private contextLost = false;
-  private quadBuffer: WebGLBuffer | null = null;
   private disposed = false;
 
   constructor(width: number, height: number, commitMode: "bitmap" | "direct") {
     this.width = width;
     this.height = height;
     this.commitMode = commitMode;
-    this.canvas = new OffscreenCanvas(COMMIT_CANVAS_SIZE, COMMIT_CANVAS_SIZE);
-    brushPerfDebug.recordEvent("realloc:commitCanvas", {
-      width: COMMIT_CANVAS_SIZE,
-      height: COMMIT_CANVAS_SIZE,
-      forceRecord: true,
-    });
-    const gl = this.canvas.getContext("webgl2", {
-      alpha: true,
-      antialias: false,
-      depth: false,
-      premultipliedAlpha: true,
-      preserveDrawingBuffer: true,
-      stencil: false,
-    });
-    if (!gl) throw new Error("WebGL2 is unavailable");
-    this.gl = gl;
-    const fragmentUniformVectors = Number(
-      gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
-    );
-    const availableBranchUniformVectors = Number.isFinite(
-      fragmentUniformVectors,
-    )
-      ? Math.floor(fragmentUniformVectors) -
-        FIELD_DIFFUSION_FIXED_FRAGMENT_UNIFORM_VECTORS
-      : 0;
-    this.maxBranchCount = Math.min(
-      MAX_GPU_STROKE_BRANCHES,
-      Math.max(0, availableBranchUniformVectors),
-    );
-    if (this.maxBranchCount < 1) {
-      throw new Error("GPU fragment uniform capacity is insufficient");
-    }
-    this.canvas.addEventListener("webglcontextlost", () => {
-      this.contextLost = true;
-    });
-
-    this.program = createProgram(
-      gl,
-      VERTEX_SHADER_SOURCE,
-      FRAGMENT_SHADER_SOURCE,
-      "GPU stroke",
-    );
-    this.fieldMixProgram = createProgram(
-      gl,
-      FIELD_VERTEX_SHADER_SOURCE,
-      FIELD_MIX_FRAGMENT_SHADER_SOURCE,
-      "GPU material field mix",
-    );
-    this.fieldDiffusionProgram = createProgram(
-      gl,
-      FIELD_VERTEX_SHADER_SOURCE,
-      createFieldDiffusionFragmentShaderSource(this.maxBranchCount),
-      "GPU material field diffusion",
-    );
-    this.vertexArray = requireResource(
-      gl.createVertexArray(),
-      "WebGL vertex array",
-    );
-    this.instanceBuffer = requireResource(
-      gl.createBuffer(),
-      "WebGL instance buffer",
-    );
-    this.branchDataBuffer = requireResource(
-      gl.createBuffer(),
-      "WebGL branch data uniform buffer",
-    );
-    this.accumTexture = requireResource(
-      gl.createTexture(),
-      "WebGL accumulation texture",
-    );
-    this.sourceTexture = requireResource(
-      gl.createTexture(),
-      "WebGL source texture",
-    );
-    this.baseTexture = requireResource(
-      gl.createTexture(),
-      "WebGL stroke base texture",
-    );
-    this.tipTexture = requireResource(gl.createTexture(), "WebGL tip texture");
-    this.fieldTextures = [
-      requireResource(gl.createTexture(), "WebGL field texture"),
-      requireResource(gl.createTexture(), "WebGL field texture"),
-    ];
-    this.fieldFramebuffers = [
-      requireResource(gl.createFramebuffer(), "WebGL field framebuffer"),
-      requireResource(gl.createFramebuffer(), "WebGL field framebuffer"),
-    ];
-    this.materialCheckpointTexture = requireResource(
-      gl.createTexture(),
-      "WebGL material checkpoint array texture",
-    );
-    this.materialCheckpointFramebuffer = requireResource(
-      gl.createFramebuffer(),
-      "WebGL material checkpoint framebuffer",
-    );
-    this.framebuffer = requireResource(
-      gl.createFramebuffer(),
-      "WebGL framebuffer",
-    );
-    this.sourceFramebuffer = requireResource(
-      gl.createFramebuffer(),
-      "WebGL source framebuffer",
-    );
-    this.baseFramebuffer = requireResource(
-      gl.createFramebuffer(),
-      "WebGL stroke base framebuffer",
-    );
-    this.surfaceSizeLocation = requireResource(
-      gl.getUniformLocation(this.program, "uSurfaceSize"),
-      "uSurfaceSize uniform",
-    );
-
-    this.configureGeometry();
-    this.configureBranchDataBuffer();
-    this.configureTexture(this.accumTexture, gl.NEAREST);
-    this.configureTexture(this.sourceTexture, gl.NEAREST);
-    this.configureTexture(this.baseTexture, gl.NEAREST);
-    gl.bindTexture(gl.TEXTURE_2D, this.baseTexture);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA8,
+    const resources = createGpuStrokeGlResources(
       width,
       height,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      null,
+      this.instances.byteLength,
+      INSTANCE_FLOATS,
     );
-    brushPerfDebug.recordEvent("realloc:strokeBase", {
-      width,
-      height,
-      bytes: width * height * 4,
-      forceRecord: true,
-    });
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.baseFramebuffer);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.COLOR_ATTACHMENT0,
-      gl.TEXTURE_2D,
-      this.baseTexture,
-      0,
-    );
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error("GPU stroke base framebuffer is incomplete");
-    }
-    this.configureTexture(this.tipTexture, gl.LINEAR);
-    for (const texture of this.fieldTextures) {
-      this.configureTexture(texture, gl.LINEAR);
-    }
-    this.configureArrayTexture(this.materialCheckpointTexture, gl.NEAREST);
-    this.useFloatField = Boolean(
-      gl.getExtension("EXT_color_buffer_float") ??
-        gl.getExtension("EXT_color_buffer_half_float"),
-    );
-    gl.useProgram(this.program);
-    gl.uniform1i(gl.getUniformLocation(this.program, "uTip"), 0);
-    gl.uniform1i(gl.getUniformLocation(this.program, "uField"), 1);
-    gl.uniform2f(this.surfaceSizeLocation, width, height);
+    this.glResources = resources;
+    this.canvas = resources.canvas;
+    this.gl = resources.gl;
+    this.program = resources.program;
+    this.fieldMixProgram = resources.fieldMixProgram;
+    this.fieldDiffusionProgram = resources.fieldDiffusionProgram;
+    this.vertexArray = resources.vertexArray;
+    this.instanceBuffer = resources.instanceBuffer;
+    this.branchDataBuffer = resources.branchDataBuffer;
+    this.accumTexture = resources.accumTexture;
+    this.sourceTexture = resources.sourceTexture;
+    this.baseTexture = resources.baseTexture;
+    this.tipTexture = resources.tipTexture;
+    this.fieldTextures = resources.fieldTextures;
+    this.fieldFramebuffers = resources.fieldFramebuffers;
+    this.materialCheckpointTexture = resources.materialCheckpointTexture;
+    this.materialCheckpointFramebuffer =
+      resources.materialCheckpointFramebuffer;
+    this.framebuffer = resources.framebuffer;
+    this.sourceFramebuffer = resources.sourceFramebuffer;
+    this.baseFramebuffer = resources.baseFramebuffer;
+    this.surfaceSizeLocation = resources.surfaceSizeLocation;
+    this.maxBranchCount = resources.maxBranchCount;
+    this.useFloatField = resources.useFloatField;
   }
 
   get lost(): boolean {
-    return this.contextLost || this.gl.isContextLost();
+    return this.glResources.contextState.lost || this.gl.isContextLost();
   }
 
   get branchIndex(): number {
@@ -581,26 +220,24 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
-      const uploadStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-      brushPerfDebug.recordEvent("realloc:accum", {
+      perfMark("realloc:accum", {
         width: this.width,
         height: this.height,
         forceRecord: true,
       });
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA8,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        sourceCanvas,
+      perfStage("gpuUpload", () =>
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA8,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          sourceCanvas,
+        ),
       );
-      if (brushPerfDebug.enabled) {
-        brushPerfDebug.recordStage("gpuUpload", uploadStartedAt);
-        brushPerfDebug.recordEvent("gpuUpload", {
-          bytes: sourceCanvas.width * sourceCanvas.height * 4,
-        });
-      }
+      perfMark("gpuUpload", {
+        bytes: sourceCanvas.width * sourceCanvas.height * 4,
+      });
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
       gl.framebufferTexture2D(
         gl.FRAMEBUFFER,
@@ -668,11 +305,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       ];
     }
     this.copyAccumToStrokeStartSource();
-    const baseCopyStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    this.copyAccumToBase();
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("gpuBaseCopy", baseCopyStartedAt);
-    }
+    perfStage("gpuBaseCopy", () => this.copyAccumToBase());
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
@@ -680,7 +313,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.dirtyRects = Array<DirtyRect | null>(branchCount).fill(null);
     this.committedDirtyRect = null;
     this.committedLayer = null;
-    this.ensureMaterialCheckpoints(branchCount);
+    ensureMaterialCheckpoints(this.materialCheckpoints, branchCount);
     for (const checkpoint of this.materialCheckpoints) {
       checkpoint.initialized = false;
     }
@@ -904,7 +537,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (!checkpoint) throw new Error("GPU material checkpoint is unavailable");
     if (checkpoint.initialized) return;
     checkpoint.initialized = true;
-    if (this.queueMaterialCheckpoint(originX, originY, size, true)) return;
+    if (
+      queueMaterialCheckpoint(
+        this.pendingBranchSegments,
+        this.currentBranchIndex,
+        { originX, originY, size, fromStrokeStart: true },
+      )
+    ) {
+      return;
+    }
     const captures = Array<PendingMaterialCheckpointCapture | undefined>(
       this.branchCount,
     ).fill(undefined);
@@ -925,7 +566,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     const checkpoint = this.materialCheckpoints[this.currentBranchIndex];
     if (!checkpoint) throw new Error("GPU material checkpoint is unavailable");
-    if (this.queueMaterialCheckpoint(originX, originY, size, false)) return;
+    if (
+      queueMaterialCheckpoint(
+        this.pendingBranchSegments,
+        this.currentBranchIndex,
+        { originX, originY, size, fromStrokeStart: false },
+      )
+    ) {
+      return;
+    }
     const captures = Array<PendingMaterialCheckpointCapture | undefined>(
       this.branchCount,
     ).fill(undefined);
@@ -1003,44 +652,42 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   flush(): void {
     if (this.instanceCount === 0 || this.lost) return;
-    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    const gl = this.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.viewport(0, 0, this.width, this.height);
-    gl.useProgram(this.program);
-    gl.bindVertexArray(this.vertexArray);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.tipTexture);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[this.activeFieldIndex]);
-    gl.uniform2f(
-      gl.getUniformLocation(this.program, "uFieldSize"),
-      this.fieldColumns,
-      this.fieldRows,
-    );
-    gl.uniform2f(
-      gl.getUniformLocation(this.program, "uFieldTextureSize"),
-      this.fieldTextureWidth,
-      this.fieldTextureHeight,
-    );
-    gl.uniform1f(
-      gl.getUniformLocation(this.program, "uFieldRowStride"),
-      this.fieldRows,
-    );
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
-    gl.bufferSubData(
-      gl.ARRAY_BUFFER,
-      0,
-      this.instances.subarray(0, this.instanceCount * INSTANCE_FLOATS),
-    );
-    gl.enable(gl.BLEND);
-    gl.blendEquation(gl.FUNC_ADD);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instanceCount);
-    this.instanceCount = 0;
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("gpuFlush", startedAt);
-    }
+    perfStage("gpuFlush", () => {
+      const gl = this.gl;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+      gl.viewport(0, 0, this.width, this.height);
+      gl.useProgram(this.program);
+      gl.bindVertexArray(this.vertexArray);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.tipTexture);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[this.activeFieldIndex]);
+      gl.uniform2f(
+        gl.getUniformLocation(this.program, "uFieldSize"),
+        this.fieldColumns,
+        this.fieldRows,
+      );
+      gl.uniform2f(
+        gl.getUniformLocation(this.program, "uFieldTextureSize"),
+        this.fieldTextureWidth,
+        this.fieldTextureHeight,
+      );
+      gl.uniform1f(
+        gl.getUniformLocation(this.program, "uFieldRowStride"),
+        this.fieldRows,
+      );
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
+      gl.bufferSubData(
+        gl.ARRAY_BUFFER,
+        0,
+        this.instances.subarray(0, this.instanceCount * INSTANCE_FLOATS),
+      );
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.FUNC_ADD);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instanceCount);
+      this.instanceCount = 0;
+    });
   }
 
   private drawDabs(dabs: readonly GpuDab[]): void {
@@ -1062,160 +709,40 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
   }
 
+  private fieldPassResources() {
+    return {
+      gl: this.gl,
+      branchCount: this.branchCount,
+      maxBranchCount: this.maxBranchCount,
+      fieldColumns: this.fieldColumns,
+      fieldRows: this.fieldRows,
+      activeFieldIndex: this.activeFieldIndex,
+      checkpoints: this.materialCheckpoints,
+      fieldTextures: this.fieldTextures,
+      materialCheckpointTexture: this.materialCheckpointTexture,
+      branchDataBuffer: this.branchDataBuffer,
+      vertexArray: this.vertexArray,
+      fieldMixProgram: this.fieldMixProgram,
+      fieldDiffusionProgram: this.fieldDiffusionProgram,
+      bindFieldFramebuffer: (index: 0 | 1) => this.bindFieldFramebuffer(index),
+    };
+  }
+
   private executeMaterialFieldUpdateBatch(
     updates: readonly (GpuMaterialFieldUpdate | undefined)[],
   ): number {
-    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    const gl = this.gl;
-    const nextIndex = oppositeFieldIndex(this.activeFieldIndex);
-    const branchData = new Float32Array(BRANCH_DATA_FLOATS);
-    const checkpointRectsOffset = 0;
-    const geometryOffset = MAX_GPU_STROKE_BRANCHES * 4;
-    const baseColorsOffset = MAX_GPU_STROKE_BRANCHES * 8;
-    const ratesOffset = MAX_GPU_STROKE_BRANCHES * 12;
-
-    for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
-      const update = updates[branchIndex];
-      const checkpoint = this.materialCheckpoints[branchIndex];
-      if (update && !checkpoint?.initialized) {
-        throw new Error("GPU material checkpoint has not been initialized");
-      }
-      if (checkpoint?.initialized) {
-        branchData.set(
-          [
-            checkpoint.originX,
-            checkpoint.originY,
-            checkpoint.textureSize,
-            checkpoint.textureSize,
-          ],
-          checkpointRectsOffset + branchIndex * 4,
-        );
-      }
-      if (!update) continue;
-      if (
-        update.columns !== this.fieldColumns ||
-        update.rows !== this.fieldRows
-      ) {
-        throw new Error("GPU material field batch dimensions do not match");
-      }
-      const distance = sanitizeNonNegative(update.distancePx);
-      branchData.set(
-        [
-          update.centerX,
-          update.centerY,
-          update.angle,
-          Math.max(1, update.sampleSize),
-        ],
-        geometryOffset + branchIndex * 4,
-      );
-      branchData.set(
-        [
-          clampUnit(update.baseColor.r / 255),
-          clampUnit(update.baseColor.g / 255),
-          clampUnit(update.baseColor.b / 255),
-          clampUnit(update.baseColor.a / 255),
-        ],
-        baseColorsOffset + branchIndex * 4,
-      );
-      branchData.set(
-        [
-          distanceCoefficient(update.pickupRatePerPx, distance),
-          distanceCoefficient(update.restoreRatePerPx, distance),
-          1,
-          0,
-        ],
-        ratesOffset + branchIndex * 4,
-      );
-    }
-
-    this.bindFieldFramebuffer(nextIndex);
-    gl.viewport(0, 0, this.fieldColumns, this.fieldRows * this.branchCount);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.useProgram(this.fieldMixProgram);
-    gl.bindVertexArray(this.vertexArray);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.materialCheckpointTexture);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[this.activeFieldIndex]);
-    gl.uniform1i(
-      gl.getUniformLocation(this.fieldMixProgram, "uCheckpoints"),
-      0,
-    );
-    gl.uniform1i(
-      gl.getUniformLocation(this.fieldMixProgram, "uPreviousField"),
-      1,
-    );
-    gl.uniform2i(
-      gl.getUniformLocation(this.fieldMixProgram, "uFieldDimensions"),
-      this.fieldColumns,
-      this.fieldRows,
-    );
-    gl.bindBuffer(gl.UNIFORM_BUFFER, this.branchDataBuffer);
-    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, branchData);
-    gl.bindBufferBase(
-      gl.UNIFORM_BUFFER,
-      BRANCH_DATA_BINDING,
-      this.branchDataBuffer,
-    );
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    return startedAt;
+    return executeMaterialFieldMixPass(this.fieldPassResources(), updates);
   }
 
   private executeMaterialFieldDiffusionBatch(
     updates: readonly (GpuMaterialFieldUpdate | undefined)[],
     startedAt: number,
   ): void {
-    const gl = this.gl;
-    const passAmounts = new Float32Array(this.maxBranchCount);
-    for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
-      const update = updates[branchIndex];
-      if (!update) continue;
-      passAmounts[branchIndex] =
-        sanitizeRate(update.diffusionRatePerPx) *
-        sanitizeNonNegative(update.distancePx);
-    }
-
-    let sourceIndex = oppositeFieldIndex(this.activeFieldIndex);
-    while (passAmounts.some((amount) => amount > 1e-6)) {
-      const strengths = new Float32Array(this.maxBranchCount);
-      for (let index = 0; index < this.branchCount; index++) {
-        strengths[index] = Math.min(1, passAmounts[index] ?? 0);
-      }
-      const targetIndex = oppositeFieldIndex(sourceIndex);
-      this.bindFieldFramebuffer(targetIndex);
-      gl.viewport(0, 0, this.fieldColumns, this.fieldRows * this.branchCount);
-      gl.disable(gl.BLEND);
-      gl.disable(gl.SCISSOR_TEST);
-      gl.useProgram(this.fieldDiffusionProgram);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, this.fieldTextures[sourceIndex]);
-      gl.uniform1i(
-        gl.getUniformLocation(this.fieldDiffusionProgram, "uPreviousField"),
-        1,
-      );
-      gl.uniform2i(
-        gl.getUniformLocation(this.fieldDiffusionProgram, "uFieldDimensions"),
-        this.fieldColumns,
-        this.fieldRows,
-      );
-      gl.uniform1fv(
-        gl.getUniformLocation(this.fieldDiffusionProgram, "uStrengths[0]"),
-        strengths,
-      );
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      sourceIndex = targetIndex;
-      for (let index = 0; index < this.branchCount; index++) {
-        passAmounts[index] = Math.max(
-          0,
-          (passAmounts[index] ?? 0) - (strengths[index] ?? 0),
-        );
-      }
-    }
-    this.activeFieldIndex = sourceIndex;
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("gpuFieldUpdate", startedAt);
-    }
+    this.activeFieldIndex = executeMaterialFieldDiffusionPass(
+      this.fieldPassResources(),
+      updates,
+      startedAt,
+    );
   }
 
   commitToLayer(layer: Layer): void {
@@ -1236,109 +763,38 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   cancelStroke(): void {
     this.assertStrokeBegun();
-    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    const pendingDirtyRect = unionDirtyRects(this.normalizedDirtyRects());
-    const restoreRect = unionDirtyRects([
-      this.committedDirtyRect,
-      pendingDirtyRect,
-    ]);
+    perfStage("gpuCancelRestore", () => {
+      const pendingDirtyRect = unionDirtyRects(this.normalizedDirtyRects());
+      const restoreRect = unionDirtyRects([
+        this.committedDirtyRect,
+        pendingDirtyRect,
+      ]);
 
-    // Discard queued dabs before restoring accum. Some dabs may already have
-    // reached accum through a field/checkpoint flush, so the dirty union still
-    // has to be restored even when it was never committed to the Layer.
-    this.instanceCount = 0;
-    this.pendingBranchSegments = null;
-    if (restoreRect) this.restoreBaseRectToAccum(restoreRect);
-    if (this.committedDirtyRect && this.committedLayer) {
-      this.commitRectsToLayer(this.committedLayer, [this.committedDirtyRect]);
-    }
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("gpuCancelRestore", startedAt);
-    }
+      // Discard queued dabs before restoring accum. Some dabs may already have
+      // reached accum through a field/checkpoint flush, so the dirty union still
+      // has to be restored even when it was never committed to the Layer.
+      this.instanceCount = 0;
+      this.pendingBranchSegments = null;
+      if (restoreRect) this.restoreBaseRectToAccum(restoreRect);
+      if (this.committedDirtyRect && this.committedLayer) {
+        this.commitRectsToLayer(this.committedLayer, [this.committedDirtyRect]);
+      }
+    });
   }
 
   private commitRectsToLayer(
     layer: Layer,
     commitRects: readonly DirtyRect[],
   ): void {
-    const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    const gl = this.gl;
-    const commitTiles = commitRects.flatMap(createCommitTiles);
-    const committedPixels = commitTiles.reduce(
-      (total, tile) => total + tile.width * tile.height,
-      0,
-    );
-    let tileIndex = 0;
-    let commitPasses = 0;
-    let bitmapMs = 0;
-    let drawMs = 0;
-    while (tileIndex < commitTiles.length) {
-      const packed = packCommitRound(commitTiles, tileIndex);
-      commitPasses++;
-      blitCommitPass(gl, this.framebuffer, this.height, packed);
-      let bitmap: ImageBitmap | null = null;
-      if (
-        this.commitMode === "bitmap" &&
-        typeof this.canvas.transferToImageBitmap === "function"
-      ) {
-        const bitmapStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-        try {
-          bitmap = this.canvas.transferToImageBitmap();
-        } catch {
-          // Some iOS WebKit versions fail the transfer sporadically. Re-blit
-          // before using the WebGL canvas because a failed transfer may still
-          // have discarded its default framebuffer.
-          blitCommitPass(gl, this.framebuffer, this.height, packed);
-        }
-        if (brushPerfDebug.enabled) {
-          bitmapMs += performance.now() - bitmapStartedAt;
-        }
-      }
-      if (
-        bitmap &&
-        (bitmap.width !== COMMIT_CANVAS_SIZE ||
-          bitmap.height !== COMMIT_CANVAS_SIZE)
-      ) {
-        bitmap.close();
-        bitmap = null;
-        blitCommitPass(gl, this.framebuffer, this.height, packed);
-      }
-      const drawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-      try {
-        if (bitmap) {
-          try {
-            drawCommitTiles(layer, bitmap, packed);
-          } catch {
-            // The bitmap can be accepted by transferToImageBitmap but rejected
-            // by Canvas2D on iOS. Recreate the pass and draw the WebGL canvas.
-            bitmap.close();
-            bitmap = null;
-            blitCommitPass(gl, this.framebuffer, this.height, packed);
-            drawCommitTiles(layer, this.canvas, packed);
-          }
-        } else {
-          drawCommitTiles(layer, this.canvas, packed);
-        }
-      } finally {
-        if (brushPerfDebug.enabled) {
-          drawMs += performance.now() - drawStartedAt;
-        }
-        bitmap?.close();
-      }
-      tileIndex += packed.length;
-    }
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample("gpuCommitPixels", committedPixels);
-      brushPerfDebug.recordSample("gpuCommitDraws", commitTiles.length);
-      brushPerfDebug.recordEvent("gpuCommit", {
-        mode: this.commitMode,
-        passes: commitPasses,
-        pixels: committedPixels,
-        bitmapMs: Number(bitmapMs.toFixed(3)),
-        drawMs: Number(drawMs.toFixed(3)),
-      });
-      brushPerfDebug.recordStage("gpuCommit", startedAt);
-    }
+    commitRectsToLayer({
+      layer,
+      rects: commitRects,
+      gl: this.gl,
+      framebuffer: this.framebuffer,
+      sourceHeight: this.height,
+      canvas: this.canvas,
+      mode: this.commitMode,
+    });
   }
 
   endStroke(): void {
@@ -1361,27 +817,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (this.disposed) return;
     this.disposed = true;
     this.endStroke();
-    const gl = this.gl;
-    gl.deleteProgram(this.program);
-    gl.deleteProgram(this.fieldMixProgram);
-    gl.deleteProgram(this.fieldDiffusionProgram);
-    gl.deleteVertexArray(this.vertexArray);
-    gl.deleteBuffer(this.quadBuffer);
-    gl.deleteBuffer(this.instanceBuffer);
-    gl.deleteBuffer(this.branchDataBuffer);
-    gl.deleteTexture(this.accumTexture);
-    gl.deleteTexture(this.sourceTexture);
-    gl.deleteTexture(this.baseTexture);
-    gl.deleteTexture(this.tipTexture);
-    for (const texture of this.fieldTextures) gl.deleteTexture(texture);
-    for (const framebuffer of this.fieldFramebuffers) {
-      gl.deleteFramebuffer(framebuffer);
-    }
-    gl.deleteTexture(this.materialCheckpointTexture);
-    gl.deleteFramebuffer(this.materialCheckpointFramebuffer);
-    gl.deleteFramebuffer(this.framebuffer);
-    gl.deleteFramebuffer(this.sourceFramebuffer);
-    gl.deleteFramebuffer(this.baseFramebuffer);
+    disposeGpuStrokeGlResources(this.glResources);
   }
 
   private copyAccumToStrokeStartSource(): void {
@@ -1455,251 +891,28 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     });
   }
 
-  private ensureMaterialCheckpoints(count: number): void {
-    while (this.materialCheckpoints.length < count) {
-      this.materialCheckpoints.push({
-        textureSize: 0,
-        originX: 0,
-        originY: 0,
-        initialized: false,
-      });
-    }
-  }
-
-  private queueMaterialCheckpoint(
-    originX: number,
-    originY: number,
-    size: number,
-    fromStrokeStart: boolean,
-  ): boolean {
-    const branchSegments =
-      this.pendingBranchSegments?.[this.currentBranchIndex];
-    if (!branchSegments) return false;
-    const segment = branchSegments[branchSegments.length - 1];
-    if (!segment) throw new Error("GPU branch segment is unavailable");
-    const previous = branchSegments[branchSegments.length - 2];
-    if (
-      !fromStrokeStart &&
-      segment.dabs.length === 0 &&
-      segment.update === undefined &&
-      previous?.update !== undefined &&
-      previous.checkpoint === undefined
-    ) {
-      previous.checkpoint = { originX, originY, size, fromStrokeStart };
-      return true;
-    }
-    if (segment.checkpoint) {
-      throw new Error("GPU branch segment already has a checkpoint");
-    }
-    segment.checkpoint = { originX, originY, size, fromStrokeStart };
-    branchSegments.push({ dabs: [] });
-    return true;
-  }
-
   private captureMaterialCheckpointBatch(
     captures: readonly (PendingMaterialCheckpointCapture | undefined)[],
   ): void {
-    this.flush();
-    const gl = this.gl;
-    const requestedTileSize = captures.reduce(
-      (maximum, capture) =>
-        capture
-          ? Math.max(maximum, Math.max(1, Math.floor(capture.size)))
-          : maximum,
-      0,
-    );
-    if (requestedTileSize === 0) return;
-    if (
-      requestedTileSize > this.materialCheckpointTextureSize ||
-      this.branchCount > this.materialCheckpointLayerCount
-    ) {
-      const allocatedTileSize = roundUpGpuAllocation(
-        Math.max(requestedTileSize, this.materialCheckpointTextureSize),
-      );
-      const allocatedLayerCount = Math.max(
-        this.branchCount,
-        this.materialCheckpointLayerCount,
-      );
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.materialCheckpointTexture);
-      gl.texImage3D(
-        gl.TEXTURE_2D_ARRAY,
-        0,
-        gl.RGBA8,
-        allocatedTileSize,
-        allocatedTileSize,
-        allocatedLayerCount,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null,
-      );
-      brushPerfDebug.recordEvent("realloc:snapshotArray", {
-        width: allocatedTileSize,
-        height: allocatedTileSize,
-        depth: allocatedLayerCount,
-        forceRecord: captures.some((capture) => capture?.fromStrokeStart),
-      });
-      this.materialCheckpointTextureSize = allocatedTileSize;
-      this.materialCheckpointLayerCount = allocatedLayerCount;
-      gl.bindFramebuffer(
-        gl.DRAW_FRAMEBUFFER,
-        this.materialCheckpointFramebuffer,
-      );
-      gl.framebufferTextureLayer(
-        gl.DRAW_FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        this.materialCheckpointTexture,
-        0,
-        0,
-      );
-      if (
-        gl.checkFramebufferStatus(gl.DRAW_FRAMEBUFFER) !==
-        gl.FRAMEBUFFER_COMPLETE
-      ) {
-        throw new Error("GPU material checkpoint framebuffer is incomplete");
-      }
-      for (const checkpoint of this.materialCheckpoints) {
-        checkpoint.initialized = false;
-      }
-    }
-
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.clearColor(0, 0, 0, 0);
-    for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
-      const capture = captures[branchIndex];
-      if (!capture) continue;
-      const checkpoint = this.materialCheckpoints[branchIndex];
-      if (!checkpoint) {
-        throw new Error("GPU material checkpoint is unavailable");
-      }
-      const branchTileSize = Math.max(1, Math.floor(capture.size));
-      checkpoint.textureSize = branchTileSize;
-      checkpoint.originX = capture.originX;
-      checkpoint.originY = capture.originY;
-      checkpoint.initialized = true;
-      gl.bindFramebuffer(
-        gl.DRAW_FRAMEBUFFER,
-        this.materialCheckpointFramebuffer,
-      );
-      gl.framebufferTextureLayer(
-        gl.DRAW_FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        this.materialCheckpointTexture,
-        0,
-        branchIndex,
-      );
-      gl.clear(gl.COLOR_BUFFER_BIT);
-
-      const readOriginX = Math.floor(capture.originX);
-      const readOriginY = Math.floor(capture.originY);
-      const left = Math.max(0, readOriginX);
-      const top = Math.max(0, readOriginY);
-      const right = Math.min(this.width, readOriginX + branchTileSize);
-      const bottom = Math.min(this.height, readOriginY + branchTileSize);
-      if (right <= left || bottom <= top) continue;
-      gl.bindFramebuffer(
-        gl.READ_FRAMEBUFFER,
-        capture.fromStrokeStart ? this.sourceFramebuffer : this.framebuffer,
-      );
-      gl.blitFramebuffer(
-        left,
-        this.height - bottom,
-        right,
-        this.height - top,
-        left - readOriginX,
-        branchTileSize - (bottom - readOriginY),
-        right - readOriginX,
-        branchTileSize - (top - readOriginY),
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      );
-    }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.viewport(0, 0, this.width, this.height);
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordSample(
-        "checkpoints",
-        captures.filter((capture) => capture !== undefined).length,
-      );
-    }
-  }
-
-  private configureGeometry(): void {
-    const gl = this.gl;
-    const unitQuad = new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]);
-    const quadBuffer = requireResource(gl.createBuffer(), "WebGL quad buffer");
-    this.quadBuffer = quadBuffer;
-    gl.bindVertexArray(this.vertexArray);
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, unitQuad, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.instances.byteLength, gl.DYNAMIC_DRAW);
-    const stride = INSTANCE_FLOATS * Float32Array.BYTES_PER_ELEMENT;
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 0);
-    gl.vertexAttribDivisor(1, 1);
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, stride, 2 * 4);
-    gl.vertexAttribDivisor(2, 1);
-    gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 3 * 4);
-    gl.vertexAttribDivisor(3, 1);
-    gl.enableVertexAttribArray(4);
-    gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 4 * 4);
-    gl.vertexAttribDivisor(4, 1);
-    gl.enableVertexAttribArray(5);
-    gl.vertexAttribPointer(5, 1, gl.FLOAT, false, stride, 5 * 4);
-    gl.vertexAttribDivisor(5, 1);
-    gl.bindVertexArray(null);
-  }
-
-  private configureBranchDataBuffer(): void {
-    const gl = this.gl;
-    const blockIndex = gl.getUniformBlockIndex(
-      this.fieldMixProgram,
-      "BranchData",
-    );
-    if (blockIndex === gl.INVALID_INDEX) {
-      throw new Error("GPU branch data uniform block is unavailable");
-    }
-    gl.uniformBlockBinding(
-      this.fieldMixProgram,
-      blockIndex,
-      BRANCH_DATA_BINDING,
-    );
-    gl.bindBuffer(gl.UNIFORM_BUFFER, this.branchDataBuffer);
-    gl.bufferData(
-      gl.UNIFORM_BUFFER,
-      BRANCH_DATA_FLOATS * Float32Array.BYTES_PER_ELEMENT,
-      gl.DYNAMIC_DRAW,
-    );
-    gl.bindBufferBase(
-      gl.UNIFORM_BUFFER,
-      BRANCH_DATA_BINDING,
-      this.branchDataBuffer,
-    );
-  }
-
-  private configureTexture(texture: WebGLTexture, filter: number): void {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  }
-
-  private configureArrayTexture(texture: WebGLTexture, filter: number): void {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, filter);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, filter);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    captureMaterialCheckpoints({
+      captures,
+      gl: this.gl,
+      width: this.width,
+      height: this.height,
+      branchCount: this.branchCount,
+      checkpoints: this.materialCheckpoints,
+      checkpointTexture: this.materialCheckpointTexture,
+      checkpointFramebuffer: this.materialCheckpointFramebuffer,
+      accumFramebuffer: this.framebuffer,
+      strokeStartFramebuffer: this.sourceFramebuffer,
+      allocatedTextureSize: this.materialCheckpointTextureSize,
+      allocatedLayerCount: this.materialCheckpointLayerCount,
+      flush: () => this.flush(),
+      updateAllocation: (textureSize, layerCount) => {
+        this.materialCheckpointTextureSize = textureSize;
+        this.materialCheckpointLayerCount = layerCount;
+      },
+    });
   }
 
   private ensureMaterialFieldSize(columns: number, rows: number): void {
@@ -1710,44 +923,21 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.materialFieldInitializedThisStroke = true;
     this.fieldColumns = columns;
     this.fieldRows = rows;
-    const requiredTextureHeight = rows * this.branchCount;
-    if (
-      columns <= this.fieldTextureWidth &&
-      requiredTextureHeight <= this.fieldTextureHeight
-    ) {
-      return;
-    }
-    const textureWidth = Math.max(columns, this.fieldTextureWidth);
-    const textureHeight = Math.max(
-      requiredTextureHeight,
-      this.fieldTextureHeight,
-    );
-    const gl = this.gl;
-    const internalFormat = this.useFloatField ? gl.RGBA16F : gl.RGBA8;
-    const type = this.useFloatField ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
-    for (let index = 0; index < this.fieldTextures.length; index++) {
-      const texture = this.fieldTextures[index];
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        internalFormat,
-        textureWidth,
-        textureHeight,
-        0,
-        gl.RGBA,
-        type,
-        null,
-      );
-      this.bindFieldFramebuffer(index as 0 | 1);
-    }
-    brushPerfDebug.recordEvent("realloc:fieldStrip", {
-      width: textureWidth,
-      height: textureHeight,
+    const allocation = allocateFieldStrip({
+      gl: this.gl,
+      columns,
+      rows,
+      branchCount: this.branchCount,
+      currentWidth: this.fieldTextureWidth,
+      currentHeight: this.fieldTextureHeight,
+      useFloatField: this.useFloatField,
+      textures: this.fieldTextures,
+      bindFramebuffer: (index) => this.bindFieldFramebuffer(index),
       forceRecord,
     });
-    this.fieldTextureWidth = textureWidth;
-    this.fieldTextureHeight = textureHeight;
+    if (!allocation) return;
+    this.fieldTextureWidth = allocation.width;
+    this.fieldTextureHeight = allocation.height;
     this.activeFieldIndex = 0;
   }
 
@@ -1817,197 +1007,4 @@ export function createGpuStrokeSurface(
   } catch {
     return null;
   }
-}
-
-function createProgram(
-  gl: WebGL2RenderingContext,
-  vertexSource: string,
-  fragmentSource: string,
-  label: string,
-): WebGLProgram {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
-  const program = requireResource(gl.createProgram(), "WebGL program");
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
-  gl.deleteShader(vertexShader);
-  gl.deleteShader(fragmentShader);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const info = gl.getProgramInfoLog(program) ?? "unknown link error";
-    gl.deleteProgram(program);
-    throw new Error(`Failed to link ${label} program: ${info}`);
-  }
-  return program;
-}
-
-function compileShader(
-  gl: WebGL2RenderingContext,
-  type: number,
-  source: string,
-): WebGLShader {
-  const shader = requireResource(gl.createShader(type), "WebGL shader");
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const info = gl.getShaderInfoLog(shader) ?? "unknown compile error";
-    gl.deleteShader(shader);
-    throw new Error(`Failed to compile GPU stroke shader: ${info}`);
-  }
-  return shader;
-}
-
-function requireResource<T>(value: T | null, label: string): T {
-  if (!value) throw new Error(`Failed to create ${label}`);
-  return value;
-}
-
-function oppositeFieldIndex(index: 0 | 1): 0 | 1 {
-  return index === 0 ? 1 : 0;
-}
-
-function unionDirtyRects(
-  rects: readonly (DirtyRect | null)[],
-): DirtyRect | null {
-  let union: DirtyRect | null = null;
-  for (const rect of rects) {
-    if (!rect) continue;
-    if (!union) {
-      union = { ...rect };
-      continue;
-    }
-    union.left = Math.min(union.left, rect.left);
-    union.top = Math.min(union.top, rect.top);
-    union.right = Math.max(union.right, rect.right);
-    union.bottom = Math.max(union.bottom, rect.bottom);
-  }
-  return union;
-}
-
-function createCommitTiles(rect: DirtyRect): CommitTile[] {
-  const tiles: CommitTile[] = [];
-  for (let top = rect.top; top < rect.bottom; top += COMMIT_TILE_SIZE) {
-    const bottom = Math.min(rect.bottom, top + COMMIT_TILE_SIZE);
-    for (let left = rect.left; left < rect.right; left += COMMIT_TILE_SIZE) {
-      const right = Math.min(rect.right, left + COMMIT_TILE_SIZE);
-      tiles.push({
-        left,
-        top,
-        right,
-        bottom,
-        width: right - left,
-        height: bottom - top,
-      });
-    }
-  }
-  return tiles;
-}
-
-function packCommitRound(
-  tiles: readonly CommitTile[],
-  startIndex: number,
-): PackedCommitTile[] {
-  const packed: PackedCommitTile[] = [];
-  let shelfX = 0;
-  let shelfY = 0;
-  let shelfHeight = 0;
-  for (let index = startIndex; index < tiles.length; index++) {
-    const tile = tiles[index];
-    if (!tile) break;
-    if (shelfX + tile.width > COMMIT_CANVAS_SIZE) {
-      shelfY += shelfHeight;
-      shelfX = 0;
-      shelfHeight = 0;
-    }
-    if (shelfY + tile.height > COMMIT_CANVAS_SIZE) break;
-    packed.push({ ...tile, packedX: shelfX, packedY: shelfY });
-    shelfX += tile.width;
-    shelfHeight = Math.max(shelfHeight, tile.height);
-  }
-  if (packed.length === 0 && startIndex < tiles.length) {
-    throw new Error("GPU commit tile does not fit the commit canvas");
-  }
-  return packed;
-}
-
-function blitCommitPass(
-  gl: WebGL2RenderingContext,
-  sourceFramebuffer: WebGLFramebuffer,
-  sourceHeight: number,
-  tiles: readonly PackedCommitTile[],
-): void {
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sourceFramebuffer);
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-  gl.disable(gl.BLEND);
-  gl.disable(gl.SCISSOR_TEST);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  for (const tile of tiles) {
-    gl.blitFramebuffer(
-      tile.left,
-      sourceHeight - tile.bottom,
-      tile.right,
-      sourceHeight - tile.top,
-      tile.packedX,
-      COMMIT_CANVAS_SIZE - tile.packedY - tile.height,
-      tile.packedX + tile.width,
-      COMMIT_CANVAS_SIZE - tile.packedY,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-  }
-  gl.flush();
-}
-
-function drawCommitTiles(
-  layer: Layer,
-  source: ImageBitmap | OffscreenCanvas,
-  tiles: readonly PackedCommitTile[],
-): void {
-  for (const tile of tiles) {
-    layer.ctx.save();
-    try {
-      layer.ctx.globalAlpha = 1;
-      layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
-      layer.ctx.beginPath();
-      layer.ctx.rect(tile.left, tile.top, tile.width, tile.height);
-      layer.ctx.clip();
-      layer.ctx.globalCompositeOperation = "copy";
-      layer.ctx.drawImage(
-        source,
-        tile.packedX,
-        tile.packedY,
-        tile.width,
-        tile.height,
-        tile.left,
-        tile.top,
-        tile.width,
-        tile.height,
-      );
-    } finally {
-      layer.ctx.restore();
-    }
-  }
-}
-
-function roundUpGpuAllocation(value: number): number {
-  return (
-    Math.ceil(value / GPU_ALLOCATION_QUANTUM_PX) * GPU_ALLOCATION_QUANTUM_PX
-  );
-}
-
-function sanitizeNonNegative(value: number): number {
-  return Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function sanitizeRate(value: number): number {
-  return Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function distanceCoefficient(ratePerPx: number, distancePx: number): number {
-  return 1 - Math.exp(-sanitizeRate(ratePerPx) * distancePx);
-}
-
-function clampUnit(value: number): number {
-  return Math.max(0, Math.min(1, value));
 }

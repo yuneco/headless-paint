@@ -66,7 +66,7 @@ type BrushPerfBatchStageName = (typeof BRUSH_PERF_BATCH_STAGE_NAMES)[number];
 
 type BrushPerfBatchKind = "moveMany" | "strokeStart";
 
-type BrushPerfEventName =
+export type BrushPerfEventName =
   | "residency"
   | "residencyInvalidated"
   | "gpuUpload"
@@ -77,14 +77,9 @@ type BrushPerfEventName =
   | "realloc:accum"
   | "realloc:strokeBase"
   | "gpuStaleOwnerRecovered"
-  | "warmUp"
-  | "warmUpScheduled"
-  | "warmUpCheck"
-  | "historyOpError"
-  | "historyOpResult"
-  | "warmUpFired";
+  | "warmUp";
 
-interface BrushPerfEventDetails {
+export interface BrushPerfEventDetails {
   readonly mode?: "bitmap" | "direct";
   readonly width?: number;
   readonly height?: number;
@@ -448,3 +443,29 @@ const installedBrushPerfDebug =
   globalThis.__hpBrushPerf ?? createBrushPerfDebug();
 globalThis.__hpBrushPerf = installedBrushPerfDebug;
 export const brushPerfDebug = installedBrushPerfDebug;
+
+export function perfStage<T>(name: BrushPerfStageName, operation: () => T): T {
+  if (!brushPerfDebug.enabled) return operation();
+  const startedAt = performance.now();
+  const result = operation();
+  brushPerfDebug.recordStage(name, startedAt);
+  return result;
+}
+
+export function perfElapsed(name: BrushPerfStageName, elapsedMs: number): void {
+  if (!brushPerfDebug.enabled) return;
+  brushPerfDebug.recordElapsed(name, elapsedMs);
+}
+
+export function perfSample(name: BrushPerfSampleName, value: number): void {
+  if (!brushPerfDebug.enabled) return;
+  brushPerfDebug.recordSample(name, value);
+}
+
+export function perfMark(
+  name: BrushPerfEventName,
+  details?: BrushPerfEventDetails,
+): void {
+  if (!brushPerfDebug.enabled) return;
+  brushPerfDebug.recordEvent(name, details);
+}

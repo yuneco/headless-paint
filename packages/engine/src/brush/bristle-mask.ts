@@ -1,5 +1,10 @@
 import type { BristleDynamics } from "../types";
-import { brushPerfDebug } from "./perf-debug";
+import {
+  brushPerfDebug,
+  perfElapsed,
+  perfSample,
+  perfStage,
+} from "./perf-debug";
 import { hashSeed } from "./prng";
 
 export interface BristleMaskSample {
@@ -72,11 +77,10 @@ export function rasterizeBristleMask(
   width: number,
   height: number,
 ): OffscreenCanvas {
-  const canvasAllocStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  const canvas = new OffscreenCanvas(width, height);
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("canvasAlloc", canvasAllocStartedAt);
-  }
+  const canvas = perfStage(
+    "canvasAlloc",
+    () => new OffscreenCanvas(width, height),
+  );
   const ctx = getContext(canvas, "bristle swept mask");
   if (samples.length < 2) return canvas;
 
@@ -96,9 +100,14 @@ export function rasterizeBristleMask(
     : 0;
   const halfWidth = brushSize / 2;
   const maxV = field.height - 1;
-  const rasterStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-  const surface = createSurfaceContactRaster(dynamics, seed, originX, originY);
-  if (!brushPerfDebug.nullStages.nullRaster) {
+  perfStage("maskRaster", () => {
+    const surface = createSurfaceContactRaster(
+      dynamics,
+      seed,
+      originX,
+      originY,
+    );
+    if (brushPerfDebug.nullStages.nullRaster) return;
     for (let index = 1; index < samples.length; index++) {
       const from = samples[index - 1];
       const to = samples[index];
@@ -156,15 +165,12 @@ export function rasterizeBristleMask(
         trialId,
       );
     }
-  }
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("maskRaster", rasterStartedAt);
-  }
+  });
   const uploadPutStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   ctx.putImageData(target, 0, 0);
   if (brushPerfDebug.enabled) {
     uploadElapsed += performance.now() - uploadPutStartedAt;
-    brushPerfDebug.recordElapsed("maskUpload", uploadElapsed);
+    perfElapsed("maskUpload", uploadElapsed);
   }
   return canvas;
 }
@@ -176,7 +182,24 @@ function createBristleMaskField(
   pressureCoverageResponse: number,
   seed: number,
 ): BristleMaskField {
-  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  return perfStage("maskField", () =>
+    createBristleMaskFieldUnmeasured(
+      samples,
+      brushSize,
+      dynamics,
+      pressureCoverageResponse,
+      seed,
+    ),
+  );
+}
+
+function createBristleMaskFieldUnmeasured(
+  samples: readonly BristleMaskSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  pressureCoverageResponse: number,
+  seed: number,
+): BristleMaskField {
   const width = Math.max(1, samples.length);
   const bands = Math.max(
     30,
@@ -187,10 +210,7 @@ function createBristleMaskField(
 
   if (brushPerfDebug.nullStages.nullField) {
     values.fill(1);
-    if (brushPerfDebug.enabled) {
-      brushPerfDebug.recordStage("maskField", startedAt);
-      brushPerfDebug.recordSample("fieldCells", values.length);
-    }
+    perfSample("fieldCells", values.length);
     return { width, height: bands, values };
   }
 
@@ -229,10 +249,7 @@ function createBristleMaskField(
       values[band * width + index] = signal - threshold;
     }
   }
-  if (brushPerfDebug.enabled) {
-    brushPerfDebug.recordStage("maskField", startedAt);
-    brushPerfDebug.recordSample("fieldCells", values.length);
-  }
+  perfSample("fieldCells", values.length);
   return { width, height: bands, values };
 }
 
