@@ -153,3 +153,9 @@ interface BrushAccelerator {
 - 実機ログで stale owner は解消（`fe05360`: Undo/Redo入口で進行中strokeを同期cancel）。残った `residencyInvalidated: executorUndo` は、Undo 1段では復元先にcheckpointがあり replay すべき command が無いため「最後の書き込み＝checkpoint復元」になる設計上の帰結
 - 対策: `usePaintEngine` が Undo/Redo 完了の次 frame に `warmUp(activeLayer)` を実行し、upload（2K 16MB、iPad ≈25〜30ms）を stroke 開始前の空き時間へ移す（`32bbe89`）
 - 実機確認待ち: Undo → 次の stroke の strokeStart に `gpuUpload` が出ないこと（warmUp 側で行われるため、閾値未満で記録されない）
+
+## 14. Undo直後stallの真相（2026-08-30）
+- 実機の `strokeStart` stall記録（`residencyInvalidated: executorUndo` → miss → upload）は、**Undo操作内部のhistory rebuildがreplayしたstrokeの開始**だった（`gapMs`が数秒なのはUndoを押す前の待ち時間）。Undo後のlive strokeは `warmUp: hit` で常駐有効・追加uploadなし
+- 残る25〜40msはUndo操作の中（checkpoint復元→accum再upload→replay）で設計どおり。layer内容が変わる以上、再uploadは不可避
+- 経緯: react側イベントが無いように見えたのは、記録がUndo処理の途中（reactコードの前）に取られていたため。`recentEvents` を Copy JSON に含めて確認
+- 対応: `strokeStart` 記録に owner label（live / replay / rebuild）を付与して誤読を防ぐ。`#hook-r2` マーカー削除。Undo直後の `warmUp` は保険として残す

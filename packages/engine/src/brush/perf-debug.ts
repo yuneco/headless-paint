@@ -138,6 +138,7 @@ export interface BrushPerfStageSnapshot {
 
 interface BrushPerfStallSnapshot {
   readonly kind: BrushPerfBatchKind;
+  readonly ownerLabel?: string;
   readonly timestampMs: number;
   readonly gapMs: number | null;
   readonly totalMs: number;
@@ -169,6 +170,7 @@ export interface BrushPerfDebug {
     pointCount: number,
     branchCount: number,
     kind?: BrushPerfBatchKind,
+    ownerLabel?: string,
   ): void;
   endBatch(): void;
   recordStage(name: BrushPerfStageName, startedAt: number): void;
@@ -181,6 +183,7 @@ export interface BrushPerfDebug {
 
 interface ActiveBatch {
   readonly kind: BrushPerfBatchKind;
+  readonly ownerLabel?: string;
   readonly startedAt: number;
   readonly timestampMs: number;
   readonly gapMs: number | null;
@@ -288,7 +291,8 @@ function createBrushPerfDebug(): BrushPerfDebug {
       stallThresholdMs: DEFAULT_STALL_THRESHOLD_MS,
     },
     nullStages: createNullStages(),
-    beginBatch(pointCount, branchCount, kind = "moveMany") {
+    beginBatch(pointCount, branchCount, kindArg, ownerLabel) {
+      const kind: BrushPerfBatchKind = kindArg ?? "moveMany";
       if (!this.enabled) return;
       if (activeBatch) {
         throw new Error("Brush perf batch is already active");
@@ -296,6 +300,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
       const startedAt = performance.now();
       activeBatch = {
         kind,
+        ownerLabel,
         startedAt,
         timestampMs: startedAt,
         gapMs:

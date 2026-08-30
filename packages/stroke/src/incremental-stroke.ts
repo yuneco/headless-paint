@@ -80,7 +80,12 @@ export function createIncrementalStrokeRenderer(
     (gpuRuntime?.supportsBranchCount(compiledExpand.outputCount) ?? false);
   const perfDebug = getBrushPerfDebug();
   if (gpuStrokeEligible) {
-    perfDebug?.beginBatch(0, compiledExpand.outputCount, "strokeStart");
+    perfDebug?.beginBatch(
+      0,
+      compiledExpand.outputCount,
+      "strokeStart",
+      config.gpuOwnerLabel ?? "live",
+    );
   }
   let gpuResidencyHit = false;
   let samplingLayer: Layer | undefined;
@@ -332,6 +337,7 @@ interface BrushPerfDebugBridge {
     pointCount: number,
     branchCount: number,
     kind?: "moveMany" | "strokeStart",
+    ownerLabel?: string,
   ): void;
   endBatch(): void;
 }
