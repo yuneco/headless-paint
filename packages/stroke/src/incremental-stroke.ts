@@ -105,7 +105,9 @@ export function createIncrementalStrokeRenderer(
       gpuStrokeActive = !!gpuRuntime?.beginStroke(
         gpuOwner,
         config.layer,
-        gpuResidencyHit ? undefined : samplingLayer?.canvas,
+        gpuResidencyHit
+          ? undefined
+          : (samplingLayer?.canvas ?? config.layer.canvas),
         compiledExpand.outputCount,
       );
     }

@@ -325,8 +325,8 @@ export function usePaintEngine<TCustom = never>(
   useEffect(() => {
     const brush = strokeStyle.brush;
     if (
-      brush.type === "stamp" &&
-      isBrushMixingActive(brush.mixing) &&
+      ((brush.type === "stamp" && isBrushMixingActive(brush.mixing)) ||
+        brush.type === "bristle") &&
       activeEntry?.committedLayer
     ) {
       accelerator?.warmUp(activeEntry.committedLayer);
