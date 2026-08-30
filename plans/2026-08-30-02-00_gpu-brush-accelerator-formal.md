@@ -163,3 +163,5 @@ interface BrushAccelerator {
 ## 15. 2本指ジェスチャ開始時の引っ掛かり（2026-08-30）
 - 原因: 1本目の指でGPU strokeが始まり、ジェスチャ成立でcancel。GPU strokeはCPU snapshotを持たないため、cancelの `restoreSnapshot` が `restoreLayerBeforeStroke`（history rebuild＝checkpoint復元＋replay）を実行し、`runtimeRestore` でresidencyも無効化 → ジェスチャのたびにUndo相当のコスト＋次strokeの16MB再upload
 - 対策（委譲中）: stroke開始時にaccumをGPU内で **base texture** へblit（CPU関与なし）。cancelはcommit済みdirty rectを base→accum に戻して通常commit経路でlayerへ書き戻す。history rebuild・CPU snapshot・residency無効化を不要にする
+- 実装（`f509b7f`）: base texture方式のGPU内cancel。iPad実機で2本指ジェスチャ開始の引っ掛かりが解消、`stalls: []`、無効化・再uploadなし。Mac回帰なし（r1 2/2・884、r8 4/6・2322、`gpuBaseCopy` はstroke開始1回で≈0ms）
+- **iPad関連の残課題ゼロ。正式化完了（543件green）。次はマージ方針の決定**
