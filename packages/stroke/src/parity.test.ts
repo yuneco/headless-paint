@@ -38,6 +38,7 @@ import {
   simulateLiveStroke,
 } from "./parity-helpers";
 import { rebuildLayerFromHistory } from "./replay";
+import { createStrokeRuntime } from "./stroke-runtime";
 import type { HistoryConfig, HistoryState } from "./types";
 
 const WIDTH = 180;
@@ -402,7 +403,7 @@ describe("GPU mixing feedMany parity", () => {
 });
 
 describe("GPU mixing lifecycle fallback", () => {
-  it("residency hit stroke途中のWEBGL_lose_context後はdirty rollbackしてCPUで全入力を再実行する", async () => {
+  it("runtimeはWEBGL_lose_context後にhistory復元してCPUで全入力を再実行する", async () => {
     const expected = createTestLayer();
     paintOpaqueBands(expected);
     const expectedRenderer = createIncrementalStrokeRenderer({
@@ -426,17 +427,9 @@ describe("GPU mixing lifecycle fallback", () => {
     paintOpaqueBands(actual);
     accelerator.warmUp(actual);
     perf.reset();
-    const renderer = createIncrementalStrokeRenderer({
-      layer: actual,
-      style: STAMP_MIXING_STYLE,
-      filterPipeline: FILTER_PIPELINE,
-      expand: EXPAND,
-      brushSeed: BRUSH_SEED,
-      alphaLocked: false,
-      accelerator,
-    });
-    renderer.feedMany(INPUT_POINTS.slice(0, 2));
-    renderer.feedMany(INPUT_POINTS.slice(2, 3));
+    const runtime = createHistoryBackedGpuRuntime(actual, accelerator);
+    startRuntimeStroke(runtime, actual);
+    runtime.moveMany(INPUT_POINTS.slice(1, 3));
 
     const surface = getActiveSurfaceForTest(accelerator);
     const gl = surface.canvas.getContext("webgl2");
@@ -455,8 +448,8 @@ describe("GPU mixing lifecycle fallback", () => {
     extension.loseContext();
     await contextLost;
 
-    renderer.feedMany(INPUT_POINTS.slice(3));
-    renderer.finalize();
+    runtime.moveMany(INPUT_POINTS.slice(3));
+    runtime.end();
     expectPixelEqual(actual, expected, "context loss CPU recovery");
     expect(perf.snapshot().samples.gpuResidencyHit).toEqual([1]);
 
@@ -472,7 +465,7 @@ describe("GPU mixing lifecycle fallback", () => {
     accelerator.dispose();
   });
 
-  it("residency hit stroke途中のdispose後もdirty rollbackしてCPUで全入力を再実行する", () => {
+  it("runtimeはstroke途中のaccelerator dispose後にhistory復元してCPUで全入力を再実行する", () => {
     const expected = createTestLayer();
     paintOpaqueBands(expected);
     const expectedRenderer = createIncrementalStrokeRenderer({
@@ -491,6 +484,21 @@ describe("GPU mixing lifecycle fallback", () => {
     const actual = createTestLayer();
     paintOpaqueBands(actual);
     accelerator.warmUp(actual);
+    const runtime = createHistoryBackedGpuRuntime(actual, accelerator);
+    startRuntimeStroke(runtime, actual);
+    runtime.moveMany(INPUT_POINTS.slice(1, 3));
+    accelerator.dispose();
+    runtime.moveMany(INPUT_POINTS.slice(3));
+    runtime.end();
+
+    expectPixelEqual(actual, expected, "active dispose CPU recovery");
+  });
+
+  it("incremental renderer直接利用は復元せず現在layer上でCPU全入力を再描画する", () => {
+    const accelerator = createTestAccelerator();
+    const actual = createTestLayer();
+    paintOpaqueBands(actual);
+    accelerator.warmUp(actual);
     const renderer = createIncrementalStrokeRenderer({
       layer: actual,
       style: STAMP_MIXING_STYLE,
@@ -500,13 +508,27 @@ describe("GPU mixing lifecycle fallback", () => {
       alphaLocked: false,
       accelerator,
     });
-    renderer.feedMany(INPUT_POINTS.slice(0, 2));
-    renderer.feedMany(INPUT_POINTS.slice(2, 3));
+    renderer.feedMany(INPUT_POINTS.slice(0, 3));
+
+    const expected = createTestLayer();
+    copyLayerPixels(actual, expected);
+    const cpuRenderer = createIncrementalStrokeRenderer({
+      layer: expected,
+      style: STAMP_MIXING_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+      accelerator: null,
+    });
+    cpuRenderer.feedMany(INPUT_POINTS);
+    cpuRenderer.finalize();
+
     accelerator.dispose();
     renderer.feedMany(INPUT_POINTS.slice(3));
     renderer.finalize();
 
-    expectPixelEqual(actual, expected, "active dispose CPU recovery");
+    expectPixelEqual(actual, expected, "low-level CPU redraw without restore");
   });
 
   it("dispose済みacceleratorはstroke全体をCPU経路で描く", () => {
@@ -932,6 +954,50 @@ function renderStrokeForLifecycle(
   });
   renderer.feedMany(CENTER_CROSSING_INPUT_POINTS);
   renderer.finalize();
+}
+
+function createHistoryBackedGpuRuntime(
+  layer: Layer,
+  accelerator: BrushAccelerator,
+): ReturnType<typeof createStrokeRuntime> {
+  const history = beginHistoryMutation(
+    createHistoryState(WIDTH, HEIGHT, { layerCount: 1 }),
+    { affectedLayers: [layer], layerCount: 1 },
+    HISTORY_CONFIG,
+  );
+  return createStrokeRuntime({
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    now: () => INPUT_POINTS[0]?.timestamp ?? 0,
+    requestRender: () => {},
+    onCommit: () => {},
+    onDrawingChanged: () => {},
+    randomSeed: () => BRUSH_SEED,
+    accelerator,
+    restoreLayerBeforeStroke: (target) => {
+      const result = rebuildLayerFromHistory(target, history);
+      if (!result.ok) {
+        throw new Error(`History recovery failed: ${result.reason}`);
+      }
+    },
+  });
+}
+
+function startRuntimeStroke(
+  runtime: ReturnType<typeof createStrokeRuntime>,
+  layer: Layer,
+): void {
+  const firstPoint = INPUT_POINTS[0];
+  if (!firstPoint) throw new Error("Lifecycle test requires input points");
+  runtime.start(firstPoint, {
+    layer,
+    pendingLayer: createLayer(WIDTH, HEIGHT),
+    style: STAMP_MIXING_STYLE,
+    filterPipeline: FILTER_PIPELINE,
+    expand: EXPAND,
+    alphaLocked: false,
+    brushSeed: BRUSH_SEED,
+  });
 }
 
 interface ParityRun {

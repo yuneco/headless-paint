@@ -47,6 +47,7 @@ export interface UseStrokeSessionConfig {
 
 interface InternalUseStrokeSessionConfig extends UseStrokeSessionConfig {
   readonly accelerator?: BrushAccelerator | null;
+  readonly restoreLayerBeforeStroke?: (layer: Layer) => void;
 }
 
 export interface UseStrokeSessionResult {
@@ -134,6 +135,7 @@ export function useStrokeSessionWithAccelerator(
           }
         },
         accelerator: configRef.current.accelerator,
+        restoreLayerBeforeStroke: configRef.current.restoreLayerBeforeStroke,
       });
     }
     return runtimeRef.current;

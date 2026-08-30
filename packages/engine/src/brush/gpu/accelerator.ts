@@ -38,13 +38,6 @@ interface LayerResidency {
   valid: boolean;
 }
 
-interface RollbackRect {
-  readonly left: number;
-  readonly top: number;
-  readonly right: number;
-  readonly bottom: number;
-}
-
 /** Internal runtime contract. It is intentionally absent from the public type. */
 interface BrushAcceleratorRuntime extends BrushAccelerator {
   supportsBranchCount(branchCount: number): boolean;
@@ -57,7 +50,6 @@ interface BrushAcceleratorRuntime extends BrushAccelerator {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
-  restoreStrokeLayer(owner: object, layer: Layer): boolean;
   endStroke(owner: object): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
@@ -147,10 +139,6 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   private currentOwner: object | null = null;
   private activeSurface: GpuStrokeSurface | null = null;
   private activeLayer: Layer | null = null;
-  private rollbackCanvas: OffscreenCanvas | null = null;
-  private rollbackContext: OffscreenCanvasRenderingContext2D | null = null;
-  private activeRollbackRects: RollbackRect[] | null = null;
-  private recoverableOwner: object | null = null;
   private disposed = false;
   private permanentlyUnavailable = false;
 
@@ -185,22 +173,15 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     this.disposed = true;
     if (this.activeOwner) {
       this.activeSurface?.endStroke();
-      if (this.activeLayer && this.activeRollbackRects) {
-        this.restoreActiveRollback(this.activeLayer);
-        this.recoverableOwner = this.activeOwner;
-      }
     }
     if (this.activeLayer) this.invalidate(this.activeLayer);
     this.activeOwner = null;
     this.currentOwner = null;
     this.activeSurface = null;
     this.activeLayer = null;
-    this.activeRollbackRects = null;
     if (this.residentLayer) this.invalidate(this.residentLayer);
     this.surface?.dispose();
     this.surface = null;
-    this.rollbackCanvas = null;
-    this.rollbackContext = null;
   }
 
   supportsBranchCount(branchCount: number): boolean {
@@ -231,8 +212,6 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       this.currentOwner = null;
       this.activeSurface = null;
       this.activeLayer = null;
-      this.activeRollbackRects = null;
-      this.recoverableOwner = null;
     }
     if (this.activeOwner) return false;
 
@@ -256,8 +235,6 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     this.activeOwner = owner;
     this.activeSurface = surface;
     this.activeLayer = layer;
-    this.activeRollbackRects = residencyHit ? [] : null;
-    this.recoverableOwner = null;
     return true;
   }
 
@@ -272,19 +249,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   commitToLayer(owner: object, layer: Layer): void {
     if (this.activeOwner !== owner) return;
     try {
-      this.activeSurface?.commitToLayer(
-        layer,
-        this.activeRollbackRects
-          ? (left, top, width, height) => {
-              this.captureRollbackTile(layer, {
-                left,
-                top,
-                right: left + width,
-                bottom: top + height,
-              });
-            }
-          : undefined,
-      );
+      this.activeSurface?.commitToLayer(layer);
     } catch {
       this.invalidate(layer);
       return;
@@ -297,18 +262,8 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     }
   }
 
-  restoreStrokeLayer(owner: object, layer: Layer): boolean {
-    if (this.recoverableOwner === owner) return true;
-    if (this.activeOwner !== owner || !this.activeRollbackRects) return false;
-    this.restoreActiveRollback(layer);
-    return true;
-  }
-
   endStroke(owner: object): void {
-    if (this.activeOwner !== owner) {
-      if (this.recoverableOwner === owner) this.recoverableOwner = null;
-      return;
-    }
+    if (this.activeOwner !== owner) return;
     const lost = this.activeSurface?.lost ?? false;
     this.activeSurface?.endStroke();
     if (lost && this.activeLayer) this.invalidate(this.activeLayer);
@@ -316,8 +271,6 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     this.currentOwner = null;
     this.activeSurface = null;
     this.activeLayer = null;
-    this.activeRollbackRects = null;
-    this.recoverableOwner = null;
   }
 
   isStrokeLost(owner: object): boolean {
@@ -344,53 +297,6 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
 
   readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null {
     return this.activeSurface?.readMaterialFieldForTest(branchIndex) ?? null;
-  }
-
-  private captureRollbackTile(layer: Layer, tile: RollbackRect): void {
-    const savedRects = this.activeRollbackRects;
-    if (!savedRects) return;
-    const uncoveredRects = savedRects.reduce<RollbackRect[]>(
-      (rects, saved) => rects.flatMap((rect) => subtractRect(rect, saved)),
-      [tile],
-    );
-    if (uncoveredRects.length === 0) return;
-    const context = this.acquireRollbackContext(layer.width, layer.height);
-    for (const rect of uncoveredRects) {
-      copyCanvasRect(layer.canvas, context, rect);
-      savedRects.push(rect);
-    }
-  }
-
-  private restoreActiveRollback(layer: Layer): void {
-    const rects = this.activeRollbackRects;
-    const canvas = this.rollbackCanvas;
-    if (!rects || rects.length === 0 || !canvas) return;
-    for (const rect of rects) copyCanvasRect(canvas, layer.ctx, rect);
-    this.invalidate(layer);
-    rects.length = 0;
-  }
-
-  private acquireRollbackContext(
-    width: number,
-    height: number,
-  ): OffscreenCanvasRenderingContext2D {
-    if (
-      this.rollbackCanvas &&
-      this.rollbackCanvas.width >= width &&
-      this.rollbackCanvas.height >= height &&
-      this.rollbackContext
-    ) {
-      return this.rollbackContext;
-    }
-    const canvas = new OffscreenCanvas(
-      Math.max(width, this.rollbackCanvas?.width ?? 0),
-      Math.max(height, this.rollbackCanvas?.height ?? 0),
-    );
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Failed to create GPU rollback context");
-    this.rollbackCanvas = canvas;
-    this.rollbackContext = context;
-    return context;
   }
 
   private acquireSurface(
@@ -448,68 +354,4 @@ function sanitizeMaxBranches(value: number | undefined): number {
     return DEFAULT_MAX_BRANCHES;
   }
   return Math.max(1, Math.min(DEFAULT_MAX_BRANCHES, Math.floor(value)));
-}
-
-function subtractRect(
-  rect: RollbackRect,
-  covered: RollbackRect,
-): RollbackRect[] {
-  const left = Math.max(rect.left, covered.left);
-  const top = Math.max(rect.top, covered.top);
-  const right = Math.min(rect.right, covered.right);
-  const bottom = Math.min(rect.bottom, covered.bottom);
-  if (right <= left || bottom <= top) return [rect];
-
-  const remainder: RollbackRect[] = [];
-  if (rect.top < top) {
-    remainder.push({
-      left: rect.left,
-      top: rect.top,
-      right: rect.right,
-      bottom: top,
-    });
-  }
-  if (bottom < rect.bottom) {
-    remainder.push({
-      left: rect.left,
-      top: bottom,
-      right: rect.right,
-      bottom: rect.bottom,
-    });
-  }
-  if (rect.left < left) {
-    remainder.push({ left: rect.left, top, right: left, bottom });
-  }
-  if (right < rect.right) {
-    remainder.push({ left: right, top, right: rect.right, bottom });
-  }
-  return remainder;
-}
-
-function copyCanvasRect(
-  source: OffscreenCanvas,
-  target: OffscreenCanvasRenderingContext2D,
-  rect: RollbackRect,
-): void {
-  const width = rect.right - rect.left;
-  const height = rect.bottom - rect.top;
-  target.save();
-  target.globalAlpha = 1;
-  target.setTransform(1, 0, 0, 1, 0, 0);
-  target.beginPath();
-  target.rect(rect.left, rect.top, width, height);
-  target.clip();
-  target.globalCompositeOperation = "copy";
-  target.drawImage(
-    source,
-    rect.left,
-    rect.top,
-    width,
-    height,
-    rect.left,
-    rect.top,
-    width,
-    height,
-  );
-  target.restore();
 }

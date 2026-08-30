@@ -38,6 +38,7 @@ export interface IncrementalStrokeRendererConfig {
   readonly sourceLayer?: Layer;
   readonly registry?: BrushTipRegistry;
   readonly accelerator?: BrushAccelerator | null;
+  readonly restoreLayerOnGpuLoss?: () => void;
   readonly onRenderUpdate?: (update: IncrementalStrokeRenderUpdate) => void;
 }
 
@@ -48,6 +49,7 @@ export interface IncrementalStrokeRenderUpdate {
 }
 
 export interface IncrementalStrokeRenderer {
+  readonly usesGpu: boolean;
   feed(point: InputPoint): void;
   feedMany(points: readonly InputPoint[]): void;
   finalize(): void;
@@ -77,7 +79,6 @@ export function createIncrementalStrokeRenderer(
   }
   let gpuResidencyHit = false;
   let samplingLayer: Layer | undefined;
-  let strokeStartSnapshot: Layer | undefined;
   let gpuStrokeActive = false;
   try {
     gpuResidencyHit =
@@ -95,12 +96,7 @@ export function createIncrementalStrokeRenderer(
         gpuResidencyHit ? undefined : samplingLayer?.canvas,
         compiledExpand.outputCount,
       );
-    strokeStartSnapshot =
-      gpuStrokeActive && !gpuResidencyHit
-        ? samplingLayer && samplingLayer.canvas !== config.layer.canvas
-          ? samplingLayer
-          : copySamplingLayer(config.layer)
-        : undefined;
+    if (gpuStrokeActive) samplingLayer = undefined;
   } finally {
     if (gpuStrokeEligible) perfDebug?.endBatch();
   }
@@ -249,6 +245,7 @@ export function createIncrementalStrokeRenderer(
   }
 
   return {
+    usesGpu: gpuStrokeActive,
     feed(point) {
       feedMany([point]);
     },
@@ -283,27 +280,20 @@ export function createIncrementalStrokeRenderer(
           gpuRuntime?.commitToLayer(gpuOwner, config.layer);
           detectGpuStrokeLoss();
         }
-        const dirtyRollbackRestored = gpuStrokeLost
-          ? (gpuRuntime?.restoreStrokeLayer(gpuOwner, config.layer) ?? false)
-          : false;
         gpuRuntime?.endStroke(gpuOwner);
-        if (gpuStrokeLost) recoverLostGpuStroke(dirtyRollbackRestored);
+        if (gpuStrokeLost) recoverLostGpuStroke();
       }
     },
   };
 
-  function recoverLostGpuStroke(dirtyRollbackRestored: boolean): void {
-    if (!dirtyRollbackRestored) {
-      if (!strokeStartSnapshot) {
-        throw new Error("GPU stroke recovery requires rollback pixels");
-      }
-      copyLayerPixels(strokeStartSnapshot, config.layer);
-    }
+  function recoverLostGpuStroke(): void {
+    config.restoreLayerOnGpuLoss?.();
     let recoveredUpdate: IncrementalStrokeRenderUpdate | undefined;
     const cpuRenderer = createIncrementalStrokeRenderer({
       ...config,
-      sourceLayer: dirtyRollbackRestored ? undefined : strokeStartSnapshot,
+      sourceLayer: undefined,
       accelerator: null,
+      restoreLayerOnGpuLoss: undefined,
       onRenderUpdate: (update) => {
         recoveredUpdate = update;
       },
@@ -325,7 +315,6 @@ interface GpuStrokeRuntimeBridge {
   enter(owner: object): void;
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
-  restoreStrokeLayer(owner: object, layer: Layer): boolean;
   endStroke(owner: object): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;

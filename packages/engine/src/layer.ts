@@ -1,4 +1,5 @@
 import { invalidateGpuLayerResidency } from "./brush/gpu/gpu-layer-residency";
+import { brushPerfDebug } from "./brush/perf-debug";
 import type { Color, Layer, LayerMeta } from "./types";
 
 const DEFAULT_META: LayerMeta = {
@@ -61,6 +62,7 @@ export function cloneLayer(source: Layer, options?: CloneLayerOptions): Layer {
 }
 
 export function copyLayerPixels(source: Layer, target: Layer): void {
+  recordLayerRead(source.width * source.height);
   invalidateGpuLayerResidency(target);
   clearLayer(target);
   target.ctx.save();
@@ -71,6 +73,7 @@ export function copyLayerPixels(source: Layer, target: Layer): void {
 }
 
 export function getImageData(layer: Layer): ImageData {
+  recordLayerRead(layer.width * layer.height);
   return layer.ctx.getImageData(0, 0, layer.width, layer.height);
 }
 
@@ -80,6 +83,7 @@ export function getPixel(layer: Layer, x: number, y: number): Color {
   if (ix < 0 || ix >= layer.width || iy < 0 || iy >= layer.height) {
     return { r: 0, g: 0, b: 0, a: 0 };
   }
+  recordLayerRead(1);
   const data = layer.ctx.getImageData(ix, iy, 1, 1).data;
   return { r: data[0], g: data[1], b: data[2], a: data[3] };
 }
@@ -102,4 +106,10 @@ export function setPixel(
 
 export function colorToStyle(color: Color): string {
   return `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a / 255})`;
+}
+
+function recordLayerRead(pixels: number): void {
+  if (brushPerfDebug.enabled) {
+    brushPerfDebug.recordSample("layerReadPixels", pixels);
+  }
 }

@@ -34,6 +34,7 @@ import {
   executeHistoryOp,
   mergeLayerDownAtomic,
   pushCommand,
+  rebuildLayerFromHistory,
 } from "@headless-paint/core";
 import type {
   Command,
@@ -386,6 +387,23 @@ export function usePaintEngine<TCustom = never>(
     [findEntry, activeLayerId, entriesRef, commitHistoryState],
   );
 
+  const restoreLayerBeforeStroke = useCallback(
+    (layer: Layer) => {
+      const result = rebuildLayerFromHistory(
+        layer,
+        historyStateRef.current,
+        registryRef.current,
+        { accelerator },
+      );
+      if (!result.ok) {
+        throw new Error(
+          `[headless-paint] GPU stroke recovery failed: ${result.reason} layerId=${result.layerId}`,
+        );
+      }
+    },
+    [accelerator],
+  );
+
   const session = useStrokeSessionWithAccelerator({
     layer: activeEntry?.committedLayer ?? null,
     pendingLayer,
@@ -396,6 +414,7 @@ export function usePaintEngine<TCustom = never>(
     onStrokeComplete,
     registry,
     accelerator,
+    restoreLayerBeforeStroke,
   });
 
   useEffect(() => {

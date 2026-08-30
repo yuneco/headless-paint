@@ -1,6 +1,7 @@
 import {
   clearLayer,
   compileExpand,
+  copyLayerPixels,
   createLayer,
   isBrushMixingActive,
   renderPendingLayer,
@@ -55,6 +56,7 @@ export interface StrokeRuntimeDeps {
   readonly onDrawingChanged: (isDrawing: boolean) => void;
   readonly randomSeed?: () => number;
   readonly accelerator?: BrushAccelerator | null;
+  readonly restoreLayerBeforeStroke?: (layer: Layer) => void;
 }
 
 export interface StrokeRuntime {
@@ -270,6 +272,11 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       installPendingStart(pendingStart);
     }
     if (!frozenConfig) return;
+    if (renderer?.usesGpu) {
+      committedSnapshot = undefined;
+      samplingLayer = undefined;
+      return;
+    }
     committedSnapshot = cloneLayerContent(frozenConfig.layer);
     samplingLayer = needsSamplingLayer(frozenConfig.style)
       ? committedSnapshot
@@ -321,6 +328,9 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       alphaLocked: start.config.alphaLocked,
       registry: start.config.tipRegistry,
       accelerator: deps.accelerator,
+      restoreLayerOnGpuLoss: deps.restoreLayerBeforeStroke
+        ? () => deps.restoreLayerBeforeStroke?.(start.config.layer)
+        : undefined,
       onRenderUpdate: (update) => {
         brushState = update.brushState;
       },
@@ -436,6 +446,8 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   function restoreSnapshot(preservePendingStart: boolean): void {
     if (frozenConfig && committedSnapshot) {
       restoreLayerContent(frozenConfig.layer, committedSnapshot);
+    } else if (frozenConfig && renderer?.usesGpu) {
+      deps.restoreLayerBeforeStroke?.(frozenConfig.layer);
     }
     clearPendingLayer();
     releaseSession(preservePendingStart);
@@ -485,7 +497,7 @@ function needsSamplingLayer(style: StrokeStyle): boolean {
 
 function cloneLayerContent(layer: Layer): Layer {
   const snapshot = createLayer(layer.width, layer.height);
-  snapshot.ctx.drawImage(layer.canvas, 0, 0);
+  copyLayerPixels(layer, snapshot);
   return snapshot;
 }
 

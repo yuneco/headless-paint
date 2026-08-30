@@ -185,18 +185,28 @@ describe("GPU layer residency", () => {
     );
   });
 
-  it("residency hit の通常 stroke は全面 sampling copy を行わない", () => {
+  it("residency hit の通常 stroke は layer pixel を読み出さない", () => {
     const accelerator = requireAccelerator({ resident: true });
     const layer = createTestLayer();
     accelerator.warmUp(layer);
     const perf = configurePerf();
 
-    drawStroke(layer, GPU_STYLE, FIRST_GPU_POINTS, 101, EXPAND, accelerator);
+    simulateLiveStroke({
+      layer,
+      inputPoints: FIRST_GPU_POINTS,
+      style: GPU_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: 101,
+      alphaLocked: false,
+      accelerator,
+    });
 
     const snapshot = perf.snapshot();
     expect(snapshot.samples.gpuResidencyHit).toEqual([1]);
     expect(snapshot.stages.samplingLayerCopy.count).toBe(0);
     expect(snapshot.samples.samplingCopyPixels).toEqual([]);
+    expect(snapshot.samples.layerReadPixels).toEqual([]);
     accelerator.dispose();
   });
 
@@ -363,6 +373,7 @@ interface BrushPerfTestBridge {
     };
     readonly samples: {
       readonly gpuResidencyHit: readonly number[];
+      readonly layerReadPixels: readonly number[];
       readonly samplingCopyPixels: readonly number[];
       readonly gpuBranches: readonly number[];
     };
