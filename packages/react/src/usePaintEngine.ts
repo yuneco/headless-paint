@@ -270,10 +270,12 @@ export function usePaintEngine<TCustom = never>(
       ? acceleratorState.accelerator
       : null;
   const gpuBackend = accelerator?.backend ?? "cpu";
-  const gpuBackendReason = resolveBrushAcceleratorBackend(
-    { backend: requestedGpuBackend },
-    { webgl2Available: () => accelerator !== null },
-  ).reason;
+  const gpuBackendReason = `${
+    resolveBrushAcceleratorBackend(
+      { backend: requestedGpuBackend },
+      { webgl2Available: () => accelerator !== null },
+    ).reason
+  } #hook-r2`;
 
   const registryRef = useRef(registry);
   registryRef.current = registry;
