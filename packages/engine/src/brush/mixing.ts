@@ -35,6 +35,7 @@ export interface MixingUpdateInput {
   readonly directionY: number;
   readonly stampSize: number;
   readonly checkpointFootprintSize: number;
+  readonly gpuCheckpointFootprintSize?: number;
   readonly stampDistance: number;
   readonly sourceLayer: Layer;
   readonly targetLayer: Layer;
@@ -215,7 +216,7 @@ export function updateMixingAfterDeposit(
     input.mixing.checkpointDistancePx
   ) {
     if (gpuFieldActive) {
-      const { originX, originY, tileSize } = getCheckpointTile(input);
+      const { originX, originY, tileSize } = getGpuCheckpointTile(input);
       gpuSurface.snapshotMaterialCheckpoint(originX, originY, tileSize);
       state = {
         ...state,
@@ -236,7 +237,7 @@ export function prepareInitialMixingCheckpoint(
 ): BrushMixingState {
   const gpuSurface = getActiveGpuStrokeSurface(accelerator);
   if (gpuSurface) {
-    const { originX, originY, tileSize } = getCheckpointTile(input);
+    const { originX, originY, tileSize } = getGpuCheckpointTile(input);
     gpuSurface.initializeMaterialCheckpoint(originX, originY, tileSize);
     return state;
   }
@@ -328,6 +329,18 @@ function getCheckpointTile(input: MixingUpdateInput): {
   const originX = input.x - tileSize / 2;
   const originY = input.y - tileSize / 2;
   return { originX, originY, tileSize };
+}
+
+function getGpuCheckpointTile(input: MixingUpdateInput): {
+  readonly originX: number;
+  readonly originY: number;
+  readonly tileSize: number;
+} {
+  return getCheckpointTile({
+    ...input,
+    checkpointFootprintSize:
+      input.gpuCheckpointFootprintSize ?? input.checkpointFootprintSize,
+  });
 }
 
 export function advanceMixingFieldFromCheckpoint(

@@ -5,6 +5,7 @@ const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 6;
 const COMMIT_TILE_SIZE = 512;
 const COMMIT_CANVAS_SIZE = 1024;
+const GPU_ALLOCATION_QUANTUM_PX = 32;
 const MAX_GPU_STROKE_BRANCHES = 64;
 // uPreviousField and uFieldDimensions consume one default-block vector each.
 const FIELD_DIFFUSION_FIXED_FRAGMENT_UNIFORM_VECTORS = 2;
@@ -164,7 +165,8 @@ precision highp float;
 uniform sampler2D uTip;
 uniform sampler2D uField;
 uniform vec2 uFieldSize;
-uniform int uFieldBranchCount;
+uniform vec2 uFieldTextureSize;
+uniform float uFieldRowStride;
 
 in vec2 vUv;
 in float vAlpha;
@@ -177,13 +179,10 @@ void main() {
   // LINEAR filtering to this branch's rows inside the packed strip.
   vec2 fieldTexel = vec2(
     clamp(vUv.x * uFieldSize.x - 0.5, 0.0, uFieldSize.x - 1.0),
-    float(vBranchIndex) * uFieldSize.y +
+    float(vBranchIndex) * uFieldRowStride +
       clamp(vUv.y * uFieldSize.y - 0.5, 0.0, uFieldSize.y - 1.0)
   );
-  vec2 fieldUv = (fieldTexel + vec2(0.5)) / vec2(
-    uFieldSize.x,
-    uFieldSize.y * float(uFieldBranchCount)
-  );
+  vec2 fieldUv = (fieldTexel + vec2(0.5)) / uFieldTextureSize;
   vec4 material = texture(uField, fieldUv);
   float alpha = material.a * mask * vAlpha;
   outColor = vec4(material.rgb * alpha, alpha);
@@ -372,7 +371,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private tipHeight = 0;
   private fieldColumns = 0;
   private fieldRows = 0;
-  private fieldBranchCount = 0;
+  private fieldTextureWidth = 0;
+  private fieldTextureHeight = 0;
   private materialFieldInitializedThisStroke = false;
   private activeFieldIndex: 0 | 1 = 0;
   private branchCount = 1;
@@ -974,9 +974,14 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       this.fieldColumns,
       this.fieldRows,
     );
-    gl.uniform1i(
-      gl.getUniformLocation(this.program, "uFieldBranchCount"),
-      this.branchCount,
+    gl.uniform2f(
+      gl.getUniformLocation(this.program, "uFieldTextureSize"),
+      this.fieldTextureWidth,
+      this.fieldTextureHeight,
+    );
+    gl.uniform1f(
+      gl.getUniformLocation(this.program, "uFieldRowStride"),
+      this.fieldRows,
     );
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
     gl.bufferSubData(
@@ -1205,9 +1210,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.disable(gl.SCISSOR_TEST);
     let tileIndex = 0;
     let commitPasses = 0;
+    let bitmapMs = 0;
+    let drawMs = 0;
     while (tileIndex < commitTiles.length) {
       const packed = packCommitRound(commitTiles, tileIndex);
       commitPasses++;
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
       for (const tile of packed) {
         gl.blitFramebuffer(
           tile.left,
@@ -1222,30 +1230,44 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
           gl.NEAREST,
         );
       }
-      // WebKit snapshots the WebGL canvas at drawImage. Keep every blit in
-      // the round ahead of every snapshot so one packed canvas incurs one GPU
-      // completion boundary instead of one boundary per branch/tile.
-      for (const tile of packed) {
-        beforeCommitTile?.(tile.left, tile.top, tile.width, tile.height);
-        layer.ctx.save();
-        layer.ctx.globalAlpha = 1;
-        layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        layer.ctx.beginPath();
-        layer.ctx.rect(tile.left, tile.top, tile.width, tile.height);
-        layer.ctx.clip();
-        layer.ctx.globalCompositeOperation = "copy";
-        layer.ctx.drawImage(
-          this.canvas,
-          tile.packedX,
-          tile.packedY,
-          tile.width,
-          tile.height,
-          tile.left,
-          tile.top,
-          tile.width,
-          tile.height,
-        );
-        layer.ctx.restore();
+      let bitmap: ImageBitmap | null = null;
+      if (typeof this.canvas.transferToImageBitmap === "function") {
+        const bitmapStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+        bitmap = this.canvas.transferToImageBitmap();
+        if (brushPerfDebug.enabled) {
+          bitmapMs += performance.now() - bitmapStartedAt;
+        }
+      }
+      const drawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+      try {
+        const source = bitmap ?? this.canvas;
+        for (const tile of packed) {
+          beforeCommitTile?.(tile.left, tile.top, tile.width, tile.height);
+          layer.ctx.save();
+          layer.ctx.globalAlpha = 1;
+          layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+          layer.ctx.beginPath();
+          layer.ctx.rect(tile.left, tile.top, tile.width, tile.height);
+          layer.ctx.clip();
+          layer.ctx.globalCompositeOperation = "copy";
+          layer.ctx.drawImage(
+            source,
+            tile.packedX,
+            tile.packedY,
+            tile.width,
+            tile.height,
+            tile.left,
+            tile.top,
+            tile.width,
+            tile.height,
+          );
+          layer.ctx.restore();
+        }
+      } finally {
+        if (brushPerfDebug.enabled) {
+          drawMs += performance.now() - drawStartedAt;
+        }
+        bitmap?.close();
       }
       tileIndex += packed.length;
     }
@@ -1255,6 +1277,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       brushPerfDebug.recordEvent("gpuCommit", {
         passes: commitPasses,
         pixels: committedPixels,
+        bitmapMs: Number(bitmapMs.toFixed(3)),
+        drawMs: Number(drawMs.toFixed(3)),
       });
       brushPerfDebug.recordStage("gpuCommit", startedAt);
     }
@@ -1365,39 +1389,46 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   ): void {
     this.flush();
     const gl = this.gl;
-    const tileSize = captures.reduce(
+    const requestedTileSize = captures.reduce(
       (maximum, capture) =>
         capture
           ? Math.max(maximum, Math.max(1, Math.floor(capture.size)))
           : maximum,
       0,
     );
-    if (tileSize === 0) return;
+    if (requestedTileSize === 0) return;
     if (
-      this.materialCheckpointTextureSize !== tileSize ||
-      this.materialCheckpointLayerCount !== this.branchCount
+      requestedTileSize > this.materialCheckpointTextureSize ||
+      this.branchCount > this.materialCheckpointLayerCount
     ) {
+      const allocatedTileSize = roundUpGpuAllocation(
+        Math.max(requestedTileSize, this.materialCheckpointTextureSize),
+      );
+      const allocatedLayerCount = Math.max(
+        this.branchCount,
+        this.materialCheckpointLayerCount,
+      );
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.materialCheckpointTexture);
       gl.texImage3D(
         gl.TEXTURE_2D_ARRAY,
         0,
         gl.RGBA8,
-        tileSize,
-        tileSize,
-        this.branchCount,
+        allocatedTileSize,
+        allocatedTileSize,
+        allocatedLayerCount,
         0,
         gl.RGBA,
         gl.UNSIGNED_BYTE,
         null,
       );
       brushPerfDebug.recordEvent("realloc:snapshotArray", {
-        width: tileSize,
-        height: tileSize,
-        depth: this.branchCount,
+        width: allocatedTileSize,
+        height: allocatedTileSize,
+        depth: allocatedLayerCount,
         forceRecord: captures.some((capture) => capture?.fromStrokeStart),
       });
-      this.materialCheckpointTextureSize = tileSize;
-      this.materialCheckpointLayerCount = this.branchCount;
+      this.materialCheckpointTextureSize = allocatedTileSize;
+      this.materialCheckpointLayerCount = allocatedLayerCount;
       gl.bindFramebuffer(
         gl.DRAW_FRAMEBUFFER,
         this.materialCheckpointFramebuffer,
@@ -1431,9 +1462,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         throw new Error("GPU material checkpoint is unavailable");
       }
       const branchTileSize = Math.max(1, Math.floor(capture.size));
-      if (branchTileSize !== tileSize) {
-        throw new Error("GPU material checkpoint batch sizes do not match");
-      }
       checkpoint.textureSize = branchTileSize;
       checkpoint.originX = capture.originX;
       checkpoint.originY = capture.originY;
@@ -1568,13 +1596,20 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
     const forceRecord = !this.materialFieldInitializedThisStroke;
     this.materialFieldInitializedThisStroke = true;
+    this.fieldColumns = columns;
+    this.fieldRows = rows;
+    const requiredTextureHeight = rows * this.branchCount;
     if (
-      this.fieldColumns === columns &&
-      this.fieldRows === rows &&
-      this.fieldBranchCount === this.branchCount
+      columns <= this.fieldTextureWidth &&
+      requiredTextureHeight <= this.fieldTextureHeight
     ) {
       return;
     }
+    const textureWidth = Math.max(columns, this.fieldTextureWidth);
+    const textureHeight = Math.max(
+      requiredTextureHeight,
+      this.fieldTextureHeight,
+    );
     const gl = this.gl;
     const internalFormat = this.useFloatField ? gl.RGBA16F : gl.RGBA8;
     const type = this.useFloatField ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
@@ -1585,8 +1620,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         gl.TEXTURE_2D,
         0,
         internalFormat,
-        columns,
-        rows * this.branchCount,
+        textureWidth,
+        textureHeight,
         0,
         gl.RGBA,
         type,
@@ -1595,13 +1630,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       this.bindFieldFramebuffer(index as 0 | 1);
     }
     brushPerfDebug.recordEvent("realloc:fieldStrip", {
-      width: columns,
-      height: rows * this.branchCount,
+      width: textureWidth,
+      height: textureHeight,
       forceRecord,
     });
-    this.fieldColumns = columns;
-    this.fieldRows = rows;
-    this.fieldBranchCount = this.branchCount;
+    this.fieldTextureWidth = textureWidth;
+    this.fieldTextureHeight = textureHeight;
     this.activeFieldIndex = 0;
   }
 
@@ -1763,6 +1797,12 @@ function packCommitRound(
     throw new Error("GPU commit tile does not fit the commit canvas");
   }
   return packed;
+}
+
+function roundUpGpuAllocation(value: number): number {
+  return (
+    Math.ceil(value / GPU_ALLOCATION_QUANTUM_PX) * GPU_ALLOCATION_QUANTUM_PX
+  );
 }
 
 function sanitizeNonNegative(value: number): number {

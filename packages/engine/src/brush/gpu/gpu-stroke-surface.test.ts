@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileExpand, expandPoint } from "../../expand";
 import { createLayer } from "../../layer";
 import {
@@ -20,6 +20,7 @@ afterEach(() => {
   surfaceUnderTest = null;
   brushPerfDebug.enabled = false;
   brushPerfDebug.reset();
+  vi.restoreAllMocks();
 });
 
 describe("GpuStrokeSurface", () => {
@@ -160,6 +161,34 @@ describe("GpuStrokeSurface", () => {
     expectChannelNear(branch1[1], 50);
     expectChannelNear(branch1[2], 230);
     expect(brushPerfDebug.snapshot().stages.gpuFieldUpdate.count).toBe(1);
+  });
+
+  it("field strip は小さい stroke に切り替えても縮小再確保しない", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(64, 32);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    const baseColor = { r: 20, g: 40, b: 60, a: 255 } as const;
+
+    brushPerfDebug.beginBatch(0, 4, "strokeStart");
+    surface.beginStroke(layer.canvas, 4);
+    surface.initializeMaterialField(18, 8, baseColor);
+    surface.endStroke();
+    surface.beginStroke(undefined, 1);
+    surface.initializeMaterialField(8, 4, baseColor);
+    surface.endStroke();
+    brushPerfDebug.endBatch();
+
+    const reallocations = brushPerfDebug
+      .snapshot()
+      .stalls.flatMap((stall) => stall.events)
+      .filter((event) => event.name === "realloc:fieldStrip");
+    expect(reallocations).toEqual([
+      { name: "realloc:fieldStrip", width: 18, height: 32 },
+    ]);
   });
 
   it("field update は live accum ではなく直近の checkpoint snapshot を読む", () => {
@@ -454,6 +483,10 @@ describe("GpuStrokeSurface", () => {
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
+    const transferSpy = vi.spyOn(
+      OffscreenCanvas.prototype,
+      "transferToImageBitmap",
+    );
     surface.beginStroke(layer.canvas);
     configureSolidDab(surface, [210, 70, 40, 255], 16);
 
@@ -465,6 +498,7 @@ describe("GpuStrokeSurface", () => {
     expectPixelNear(layer, 1300, 1050, [210, 70, 40, 255]);
     expectPixelNear(layer, 700, 550, [12, 34, 56, 255]);
     expect(brushPerfDebug.snapshot().samples.gpuCommitDraws).toEqual([6]);
+    expect(transferSpy).toHaveBeenCalledTimes(2);
   });
 
   it("radial 4 Expand の branch 別 commit が従来の union commit と byte-identical", () => {

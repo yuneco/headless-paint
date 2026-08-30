@@ -99,10 +99,72 @@ const CPU_POINTS: readonly InputPoint[] = [
 afterEach(() => {
   const perf = getPerf();
   perf.enabled = false;
+  perf.experiments.stallThresholdMs = 60;
   perf.reset();
 });
 
 describe("GPU layer residency", () => {
+  it("筆圧で stampSize が変化しても snapshot array を stroke 中に再確保しない", () => {
+    const perf = configurePerf();
+    perf.experiments.stallThresholdMs = 0;
+    const accelerator = requireAccelerator({ resident: false });
+    const layer = createTestLayer();
+    const gpuBrush = GPU_STYLE.brush;
+    if (gpuBrush.type !== "stamp") throw new Error("Expected stamp brush");
+    const style: StrokeStyle = {
+      ...GPU_STYLE,
+      brush: {
+        ...gpuBrush,
+        dynamics: { ...gpuBrush.dynamics, spacing: 0.1 },
+        pressureDynamics: { size: 1, flow: 0 },
+        mixing: {
+          ...(gpuBrush.mixing ?? DEFAULT_BRUSH_MIXING),
+          checkpointDistancePx: 4,
+        },
+      },
+    };
+    const points = Array.from({ length: 12 }, (_, index) => ({
+      x: 12 + index * 9,
+      y: 40,
+      pressure: index % 2 === 0 ? 0.1 : 1,
+      timestamp: index * 16,
+    }));
+    const renderer = createIncrementalStrokeRenderer({
+      layer,
+      style,
+      filterPipeline: { filters: [] },
+      expand: EXPAND,
+      brushSeed: 404,
+      alphaLocked: false,
+      accelerator,
+    });
+
+    perf.beginBatch(points.length, 1);
+    try {
+      renderer.feedMany(points);
+      renderer.finalize();
+    } finally {
+      perf.endBatch();
+      accelerator.dispose();
+    }
+
+    const events = perf.snapshot().stalls.flatMap((stall) => stall.events);
+    const snapshotReallocations = events.filter(
+      (event) => event.name === "realloc:snapshotArray",
+    );
+    expect(snapshotReallocations.length).toBeLessThanOrEqual(1);
+    for (const event of snapshotReallocations) {
+      expect((event.width ?? 0) % 32).toBe(0);
+      expect(event.width).toBe(event.height);
+    }
+    const commitEvents = events.filter((event) => event.name === "gpuCommit");
+    expect(commitEvents.length).toBeGreaterThan(0);
+    for (const event of commitEvents) {
+      expect(event.bitmapMs).toBeTypeOf("number");
+      expect(event.drawMs).toBeTypeOf("number");
+    }
+  });
+
   it("連続する2本目のGPU strokeでuploadを省略し、毎回uploadとpixel一致する", () => {
     const resident = renderSequence(true, false);
     const uploadEveryStroke = renderSequence(false, false);
@@ -288,6 +350,11 @@ function configurePerf(): BrushPerfTestBridge {
 
 interface BrushPerfTestBridge {
   enabled: boolean;
+  readonly experiments: {
+    stallThresholdMs: number;
+  };
+  beginBatch(pointCount: number, branchCount: number): void;
+  endBatch(): void;
   reset(): void;
   snapshot(): {
     readonly stages: {
@@ -299,6 +366,15 @@ interface BrushPerfTestBridge {
       readonly samplingCopyPixels: readonly number[];
       readonly gpuBranches: readonly number[];
     };
+    readonly stalls: readonly {
+      readonly events: readonly {
+        readonly name: string;
+        readonly width?: number;
+        readonly height?: number;
+        readonly bitmapMs?: number;
+        readonly drawMs?: number;
+      }[];
+    }[];
   };
 }
 

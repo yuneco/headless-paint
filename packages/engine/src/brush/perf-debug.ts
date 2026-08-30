@@ -79,6 +79,8 @@ interface BrushPerfEventDetails {
   readonly hit?: boolean;
   readonly passes?: number;
   readonly pixels?: number;
+  readonly bitmapMs?: number;
+  readonly drawMs?: number;
   readonly forceRecord?: boolean;
 }
 
@@ -91,6 +93,8 @@ interface BrushPerfEventSnapshot {
   readonly hit?: boolean;
   readonly passes?: number;
   readonly pixels?: number;
+  readonly bitmapMs?: number;
+  readonly drawMs?: number;
 }
 
 export interface BrushPerfNullStages {

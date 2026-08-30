@@ -244,6 +244,10 @@ function stampAt(
           directionY: point.directionY,
           stampSize,
           checkpointFootprintSize: Math.max(style.lineWidth, stampSize),
+          gpuCheckpointFootprintSize: Math.max(
+            style.lineWidth,
+            style.lineWidth * (1 + pressureSize),
+          ),
           stampDistance: point.distance,
           sourceLayer,
           targetLayer: layer,

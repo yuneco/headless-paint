@@ -375,13 +375,17 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     height: number,
   ): OffscreenCanvasRenderingContext2D {
     if (
-      this.rollbackCanvas?.width === width &&
-      this.rollbackCanvas.height === height &&
+      this.rollbackCanvas &&
+      this.rollbackCanvas.width >= width &&
+      this.rollbackCanvas.height >= height &&
       this.rollbackContext
     ) {
       return this.rollbackContext;
     }
-    const canvas = new OffscreenCanvas(width, height);
+    const canvas = new OffscreenCanvas(
+      Math.max(width, this.rollbackCanvas?.width ?? 0),
+      Math.max(height, this.rollbackCanvas?.height ?? 0),
+    );
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Failed to create GPU rollback context");
     this.rollbackCanvas = canvas;
