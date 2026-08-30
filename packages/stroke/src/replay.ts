@@ -1,6 +1,8 @@
 import type {
   BrushAccelerator,
   BrushTipRegistry,
+  GpuResidencyInvalidationReason,
+  GpuStrokeOwnerLabel,
   Layer,
 } from "@headless-paint/engine";
 import {
@@ -35,6 +37,7 @@ function replayStrokeCommand(
   command: StrokeCommand,
   registry?: BrushTipRegistry,
   accelerator?: BrushAccelerator | null,
+  gpuOwnerLabel: GpuStrokeOwnerLabel = "replay",
 ): void {
   const renderer = createIncrementalStrokeRenderer({
     layer,
@@ -45,6 +48,7 @@ function replayStrokeCommand(
     alphaLocked: command.alphaLocked,
     registry,
     accelerator,
+    gpuOwnerLabel,
   });
   renderer.feedMany(command.inputPoints);
   renderer.finalize();
@@ -103,7 +107,13 @@ export function replayCommand<TCustom = never>(
   }
   switch (command.type) {
     case "stroke":
-      replayStrokeCommand(layer, command, registry, options.accelerator);
+      replayStrokeCommand(
+        layer,
+        command,
+        registry,
+        options.accelerator,
+        options.gpuOwnerLabel,
+      );
       break;
     case "clear":
       clearLayer(layer);
@@ -144,14 +154,28 @@ export function rebuildLayerFromHistory<TCustom = never>(
   const checkpoint = findBestCheckpointForLayer(state, layer.id);
 
   if (checkpoint) {
-    restoreFromCheckpoint(layer, checkpoint, options.accelerator);
+    restoreFromCheckpoint(
+      layer,
+      checkpoint,
+      options.accelerator,
+      options.invalidationReason,
+    );
   } else if (
     state.currentIndex < state.historyStartIndex ||
     hasLayerCreationCommand(state, layer.id)
   ) {
-    clearLayer(layer);
+    if (options.invalidationReason) {
+      invalidateGpuLayerResidency(
+        layer,
+        options.accelerator,
+        options.invalidationReason,
+      );
+      layer.ctx.clearRect(0, 0, layer.width, layer.height);
+    } else {
+      clearLayer(layer);
+    }
   } else {
-    invalidateGpuLayerResidency(layer, options.accelerator);
+    invalidateGpuLayerResidency(layer, options.accelerator, "replayFailure");
     return {
       ok: false,
       reason: "missing-checkpoint",
@@ -166,7 +190,10 @@ export function rebuildLayerFromHistory<TCustom = never>(
     const command = getCommandAt(state, i);
     if (!command) continue;
     if (isDrawCommand(command)) {
-      replayCommand(layer, command, registry, options);
+      replayCommand(layer, command, registry, {
+        ...options,
+        gpuOwnerLabel: "rebuild",
+      });
       continue;
     }
     if (!isStructuralCommand(command)) continue;
@@ -181,7 +208,11 @@ export function rebuildLayerFromHistory<TCustom = never>(
         options,
       );
       if (!result.ok) {
-        invalidateGpuLayerResidency(layer, options.accelerator);
+        invalidateGpuLayerResidency(
+          layer,
+          options.accelerator,
+          "replayFailure",
+        );
         return result;
       }
       copyLayerPixels(sourceLayer, layer);
@@ -207,7 +238,11 @@ export function rebuildLayerFromHistory<TCustom = never>(
         options,
       );
       if (!result.ok) {
-        invalidateGpuLayerResidency(layer, options.accelerator);
+        invalidateGpuLayerResidency(
+          layer,
+          options.accelerator,
+          "replayFailure",
+        );
         return result;
       }
       mergeLayerDown(layer, sourceLayer, {
@@ -220,6 +255,8 @@ export function rebuildLayerFromHistory<TCustom = never>(
 
 export interface ReplayOptions {
   readonly accelerator?: BrushAccelerator | null;
+  readonly gpuOwnerLabel?: GpuStrokeOwnerLabel;
+  readonly invalidationReason?: GpuResidencyInvalidationReason;
 }
 
 /**

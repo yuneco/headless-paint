@@ -257,7 +257,7 @@ describe("command executor", () => {
     });
     expect(result.dirty).toEqual({ type: "none" });
     expect(result.persistence).toEqual({ type: "append-command", command });
-    expect(invalidate).toHaveBeenCalledWith(layer);
+    expect(invalidate).toHaveBeenCalledWith(layer, "replayFailure");
   });
 
   it("undoes add-layer with a remove list op and nearest active hint", () => {

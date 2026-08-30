@@ -37,7 +37,7 @@ export function createLayer(
 }
 
 export function clearLayer(layer: Layer): void {
-  invalidateGpuLayerResidency(layer);
+  invalidateGpuLayerResidency(layer, "clearLayer");
   layer.ctx.clearRect(0, 0, layer.width, layer.height);
 }
 
@@ -63,8 +63,8 @@ export function cloneLayer(source: Layer, options?: CloneLayerOptions): Layer {
 
 export function copyLayerPixels(source: Layer, target: Layer): void {
   recordLayerRead(source.width * source.height);
-  invalidateGpuLayerResidency(target);
-  clearLayer(target);
+  invalidateGpuLayerResidency(target, "copyLayerPixels");
+  target.ctx.clearRect(0, 0, target.width, target.height);
   target.ctx.save();
   target.ctx.globalAlpha = 1;
   target.ctx.globalCompositeOperation = "source-over";
@@ -99,7 +99,7 @@ export function setPixel(
   if (ix < 0 || ix >= layer.width || iy < 0 || iy >= layer.height) {
     return;
   }
-  invalidateGpuLayerResidency(layer);
+  invalidateGpuLayerResidency(layer, "setPixel");
   layer.ctx.fillStyle = colorToStyle(color);
   layer.ctx.fillRect(ix, iy, 1, 1);
 }

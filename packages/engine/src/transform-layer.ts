@@ -16,7 +16,7 @@ export function transformLayer(
   matrix: mat3,
   temp?: OffscreenCanvas,
 ): void {
-  invalidateGpuLayerResidency(layer);
+  invalidateGpuLayerResidency(layer, "transformLayer");
   const w = layer.width;
   const h = layer.height;
 

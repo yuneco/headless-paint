@@ -55,7 +55,7 @@ export function renderBrushStroke(
 ): BrushRenderState {
   const gpuSurface = getActiveGpuStrokeSurface(accelerator);
   if (points.length > 0 && style.brush.type !== "round-pen" && !gpuSurface) {
-    invalidateGpuLayerResidency(layer);
+    invalidateGpuLayerResidency(layer, "cpuBrush");
   }
   switch (style.brush.type) {
     case "round-pen":

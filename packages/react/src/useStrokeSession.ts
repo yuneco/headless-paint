@@ -227,7 +227,11 @@ export function useStrokeSessionWithAccelerator(
   }, [bumpRenderVersion]);
 
   const onDrawCancel = useCallback(() => {
-    runtimeRef.current?.cancel();
+    if (!runtimeRef.current?.isDrawing) {
+      pendingOnlyRef.current = false;
+      return;
+    }
+    runtimeRef.current.cancel();
     pendingOnlyRef.current = false;
     bumpRenderVersion();
   }, [bumpRenderVersion]);

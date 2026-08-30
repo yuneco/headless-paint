@@ -64,6 +64,7 @@ type BrushPerfBatchKind = "moveMany" | "strokeStart";
 
 type BrushPerfEventName =
   | "residency"
+  | "residencyInvalidated"
   | "gpuUpload"
   | "gpuCommit"
   | "realloc:fieldStrip"
@@ -79,6 +80,11 @@ interface BrushPerfEventDetails {
   readonly depth?: number;
   readonly bytes?: number;
   readonly hit?: boolean;
+  readonly reason?: string;
+  readonly ownerLabel?: string;
+  readonly ownerStartedAtMs?: number;
+  readonly ownerAgeMs?: number;
+  readonly recoveryOwnerLabel?: string;
   readonly passes?: number;
   readonly pixels?: number;
   readonly bitmapMs?: number;
@@ -94,6 +100,11 @@ interface BrushPerfEventSnapshot {
   readonly depth?: number;
   readonly bytes?: number;
   readonly hit?: boolean;
+  readonly reason?: string;
+  readonly ownerLabel?: string;
+  readonly ownerStartedAtMs?: number;
+  readonly ownerAgeMs?: number;
+  readonly recoveryOwnerLabel?: string;
   readonly passes?: number;
   readonly pixels?: number;
   readonly bitmapMs?: number;
@@ -177,6 +188,7 @@ interface ActiveBatch {
 }
 
 const STALL_BUFFER_CAPACITY = 32;
+const RECENT_EVENT_BUFFER_CAPACITY = 32;
 const DEFAULT_STALL_THRESHOLD_MS = 60;
 
 function createNullStages(): BrushPerfNullStages {
@@ -261,6 +273,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
   ) as Record<BrushPerfStageName, number[]>;
   let activeBatch: ActiveBatch | null = null;
   let stalls: BrushPerfStallSnapshot[] = [];
+  let recentEvents: BrushPerfEventSnapshot[] = [];
   let lastBatchEndedAt: number | null = null;
   return {
     enabled: false,
@@ -285,7 +298,10 @@ function createBrushPerfDebug(): BrushPerfDebug {
         pointCount,
         branchCount,
         stages: createBatchStageCounters(),
-        events: [],
+        events:
+          kind === "strokeStart"
+            ? recentEvents.map((event) => ({ ...event }))
+            : [],
         forceRecord: false,
       };
     },
@@ -346,9 +362,16 @@ function createBrushPerfDebug(): BrushPerfDebug {
       samples[name].push(value);
     },
     recordEvent(name, details = {}) {
-      if (!this.enabled || !activeBatch) return;
-      activeBatch.events.push(toEventSnapshot(name, details));
-      if (details.forceRecord) activeBatch.forceRecord = true;
+      if (!this.enabled) return;
+      const event = toEventSnapshot(name, details);
+      recentEvents.push(event);
+      if (recentEvents.length > RECENT_EVENT_BUFFER_CAPACITY) {
+        recentEvents = recentEvents.slice(-RECENT_EVENT_BUFFER_CAPACITY);
+      }
+      if (activeBatch) {
+        activeBatch.events.push(event);
+        if (details.forceRecord) activeBatch.forceRecord = true;
+      }
     },
     reset() {
       stages = createStageCounters();
@@ -358,6 +381,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
       ) as Record<BrushPerfStageName, number[]>;
       activeBatch = null;
       stalls = [];
+      recentEvents = [];
       lastBatchEndedAt = null;
     },
     snapshot() {

@@ -29,6 +29,7 @@ import type {
   FilterPipelineState,
   InputPoint,
 } from "@headless-paint/input";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import {
   createIncrementalStrokeRenderer,
   createInitialBrushState,
@@ -444,9 +445,17 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function restoreSnapshot(preservePendingStart: boolean): void {
+    // A history rebuild may start a new GPU renderer on the same accelerator.
+    // Release the live owner first so recovery never needs the stale-owner path.
+    const rendererUsesGpu = renderer?.usesGpu ?? false;
+    renderer?.cancel();
     if (frozenConfig && committedSnapshot) {
-      restoreLayerContent(frozenConfig.layer, committedSnapshot);
-    } else if (frozenConfig && renderer?.usesGpu) {
+      restoreLayerContent(
+        frozenConfig.layer,
+        committedSnapshot,
+        deps.accelerator,
+      );
+    } else if (frozenConfig && rendererUsesGpu) {
       deps.restoreLayerBeforeStroke?.(frozenConfig.layer);
     }
     clearPendingLayer();
@@ -501,8 +510,13 @@ function cloneLayerContent(layer: Layer): Layer {
   return snapshot;
 }
 
-function restoreLayerContent(layer: Layer, snapshot: Layer): void {
-  clearLayer(layer);
+function restoreLayerContent(
+  layer: Layer,
+  snapshot: Layer,
+  accelerator?: BrushAccelerator | null,
+): void {
+  invalidateGpuLayerResidency(layer, accelerator, "runtimeRestore");
+  layer.ctx.clearRect(0, 0, layer.width, layer.height);
   layer.ctx.drawImage(snapshot.canvas, 0, 0);
 }
 

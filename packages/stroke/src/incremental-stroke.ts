@@ -3,6 +3,7 @@ import type {
   BrushRenderState,
   BrushTipRegistry,
   ExpandConfig,
+  GpuStrokeOwnerLabel,
   Layer,
   StrokeStyle,
 } from "@headless-paint/engine";
@@ -38,6 +39,7 @@ export interface IncrementalStrokeRendererConfig {
   readonly sourceLayer?: Layer;
   readonly registry?: BrushTipRegistry;
   readonly accelerator?: BrushAccelerator | null;
+  readonly gpuOwnerLabel?: GpuStrokeOwnerLabel;
   readonly restoreLayerOnGpuLoss?: () => void;
   readonly onRenderUpdate?: (update: IncrementalStrokeRenderUpdate) => void;
 }
@@ -65,7 +67,10 @@ export function createIncrementalStrokeRenderer(
   const compiledFilterPipeline = compileFilterPipeline(config.filterPipeline);
   const compiledExpand = compileExpand(config.expand);
   const gpuRuntime = getGpuStrokeRuntime(config.accelerator);
-  const gpuOwner = {};
+  const gpuOwner = {
+    label: config.gpuOwnerLabel ?? "live",
+    startedAtMs: 0,
+  };
   const gpuStrokeEligible =
     gpuRuntime !== null &&
     config.style.brush.type === "stamp" &&
@@ -88,14 +93,15 @@ export function createIncrementalStrokeRenderer(
       (gpuResidencyHit
         ? undefined
         : createSamplingLayer(config.layer, config.style));
-    gpuStrokeActive =
-      gpuStrokeEligible &&
-      !!gpuRuntime?.beginStroke(
+    if (gpuStrokeEligible) {
+      gpuOwner.startedAtMs = performance.now();
+      gpuStrokeActive = !!gpuRuntime?.beginStroke(
         gpuOwner,
         config.layer,
         gpuResidencyHit ? undefined : samplingLayer?.canvas,
         compiledExpand.outputCount,
       );
+    }
     if (gpuStrokeActive) samplingLayer = undefined;
   } finally {
     if (gpuStrokeEligible) perfDebug?.endBatch();
@@ -163,7 +169,7 @@ export function createIncrementalStrokeRenderer(
             config.accelerator,
           );
           if (!gpuStrokeActive) {
-            config.accelerator?.invalidate(config.layer);
+            config.accelerator?.invalidate(config.layer, "cpuBrush");
           }
         } catch (error) {
           if (!detectGpuStrokeLoss()) throw error;

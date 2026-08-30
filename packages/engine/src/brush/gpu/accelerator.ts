@@ -13,6 +13,31 @@ const DEFAULT_MAX_BRANCHES = 64;
 
 export type BrushAcceleratorBackend = "auto" | "webgl2" | "cpu";
 
+export type GpuResidencyInvalidationReason =
+  | "acceleratorReplaced"
+  | "checkpointRestore"
+  | "clearLayer"
+  | "contextLost"
+  | "copyLayerPixels"
+  | "cpuBrush"
+  | "dispose"
+  | "drawPath"
+  | "executorRedo"
+  | "executorUndo"
+  | "external"
+  | "mergeLayerDown"
+  | "replayFailure"
+  | "residentLayerSwitch"
+  | "runtimeRestore"
+  | "setPixel"
+  | "staleOwnerRecovery"
+  | "surfaceResize"
+  | "transformLayer"
+  | "warmUpFailure"
+  | "wrapShift";
+
+export type GpuStrokeOwnerLabel = "live" | "replay" | "rebuild";
+
 export interface BrushAcceleratorOptions {
   readonly backend?: BrushAcceleratorBackend;
   readonly maxBranches?: number;
@@ -28,7 +53,7 @@ export interface BrushAcceleratorResolution {
 export interface BrushAccelerator {
   readonly backend: "webgl2";
   warmUp(layer: Layer): void;
-  invalidate(layer: Layer): void;
+  invalidate(layer: Layer, reason?: GpuResidencyInvalidationReason): void;
   dispose(): void;
 }
 
@@ -161,11 +186,17 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       surface.endStroke();
       this.validateResidency(layer, surface);
     } catch {
-      this.invalidate(layer);
+      this.invalidate(layer, "warmUpFailure");
     }
   }
 
-  invalidate(layer: Layer): void {
+  invalidate(
+    layer: Layer,
+    reason: GpuResidencyInvalidationReason = "external",
+  ): void {
+    if (brushPerfDebug.enabled) {
+      brushPerfDebug.recordEvent("residencyInvalidated", { reason });
+    }
     const residency = this.residencies.get(layer);
     if (residency) residency.valid = false;
     if (this.residentLayer === layer) this.residentLayer = null;
@@ -178,12 +209,12 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     if (this.activeOwner) {
       this.activeSurface?.endStroke();
     }
-    if (this.activeLayer) this.invalidate(this.activeLayer);
+    if (this.activeLayer) this.invalidate(this.activeLayer, "dispose");
     this.activeOwner = null;
     this.currentOwner = null;
     this.activeSurface = null;
     this.activeLayer = null;
-    if (this.residentLayer) this.invalidate(this.residentLayer);
+    if (this.residentLayer) this.invalidate(this.residentLayer, "dispose");
     this.surface?.dispose();
     this.surface = null;
   }
@@ -208,10 +239,20 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     if (!this.supportsBranchCount(branchCount)) return false;
     if (this.activeOwner && this.activeOwner !== owner) {
       if (brushPerfDebug.enabled) {
-        brushPerfDebug.recordEvent("gpuStaleOwnerRecovered", {});
+        const staleOwner = getGpuOwnerDebugMetadata(this.activeOwner);
+        const recoveryOwner = getGpuOwnerDebugMetadata(owner);
+        brushPerfDebug.recordEvent("gpuStaleOwnerRecovered", {
+          ownerLabel: staleOwner.label,
+          ownerStartedAtMs: staleOwner.startedAtMs,
+          ownerAgeMs: Math.max(0, performance.now() - staleOwner.startedAtMs),
+          recoveryOwnerLabel: recoveryOwner.label,
+          forceRecord: true,
+        });
       }
       this.activeSurface?.endStroke();
-      if (this.activeLayer) this.invalidate(this.activeLayer);
+      if (this.activeLayer) {
+        this.invalidate(this.activeLayer, "staleOwnerRecovery");
+      }
       this.activeOwner = null;
       this.currentOwner = null;
       this.activeSurface = null;
@@ -231,7 +272,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     try {
       surface.beginStroke(residencyHit ? undefined : sourceCanvas, branchCount);
     } catch {
-      this.invalidate(layer);
+      this.invalidate(layer, "contextLost");
       if (surface.lost) this.permanentlyUnavailable = true;
       return false;
     }
@@ -255,13 +296,13 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     try {
       this.activeSurface?.commitToLayer(layer);
     } catch {
-      this.invalidate(layer);
+      this.invalidate(layer, "contextLost");
       return;
     }
     if (this.activeSurface && !this.activeSurface.lost) {
       this.validateResidency(layer, this.activeSurface);
     } else {
-      this.invalidate(layer);
+      this.invalidate(layer, "contextLost");
       this.permanentlyUnavailable = true;
     }
   }
@@ -270,7 +311,9 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     if (this.activeOwner !== owner) return;
     const lost = this.activeSurface?.lost ?? false;
     this.activeSurface?.endStroke();
-    if (lost && this.activeLayer) this.invalidate(this.activeLayer);
+    if (lost && this.activeLayer) {
+      this.invalidate(this.activeLayer, "contextLost");
+    }
     this.activeOwner = null;
     this.currentOwner = null;
     this.activeSurface = null;
@@ -282,7 +325,9 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     const lost = this.activeSurface?.lost ?? true;
     if (lost) {
       this.permanentlyUnavailable = true;
-      if (this.activeLayer) this.invalidate(this.activeLayer);
+      if (this.activeLayer) {
+        this.invalidate(this.activeLayer, "contextLost");
+      }
     }
     return lost;
   }
@@ -321,7 +366,9 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       this.permanentlyUnavailable = true;
       return null;
     }
-    if (this.residentLayer) this.invalidate(this.residentLayer);
+    if (this.residentLayer) {
+      this.invalidate(this.residentLayer, "surfaceResize");
+    }
     return this.surface;
   }
 
@@ -340,7 +387,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
 
   private validateResidency(layer: Layer, surface: GpuStrokeSurface): void {
     if (this.residentLayer && this.residentLayer !== layer) {
-      this.invalidate(this.residentLayer);
+      this.invalidate(this.residentLayer, "residentLayerSwitch");
     }
     this.residentLayer = layer;
     this.residencies.set(layer, {
@@ -351,6 +398,27 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     });
     registerGpuLayerResidency(layer, this);
   }
+}
+
+function getGpuOwnerDebugMetadata(owner: object): {
+  readonly label: GpuStrokeOwnerLabel;
+  readonly startedAtMs: number;
+} {
+  const metadata = owner as {
+    readonly label?: unknown;
+    readonly startedAtMs?: unknown;
+  };
+  const label =
+    metadata.label === "replay" || metadata.label === "rebuild"
+      ? metadata.label
+      : "live";
+  return {
+    label,
+    startedAtMs:
+      typeof metadata.startedAtMs === "number"
+        ? metadata.startedAtMs
+        : performance.now(),
+  };
 }
 
 function sanitizeMaxBranches(value: number | undefined): number {

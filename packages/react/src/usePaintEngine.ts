@@ -402,7 +402,7 @@ export function usePaintEngine<TCustom = never>(
         layer,
         historyStateRef.current,
         registryRef.current,
-        { accelerator },
+        { accelerator, invalidationReason: "runtimeRestore" },
       );
       if (!result.ok) {
         throw new Error(
@@ -827,6 +827,9 @@ export function usePaintEngine<TCustom = never>(
 
   const executeAndApplyHistoryOp = useCallback(
     (op: "undo" | "redo") => {
+      // Toolbar / gesture history actions can race the final pointer event.
+      // End the live GPU owner before history rebuild starts.
+      handleDrawCancel();
       const prev = historyStateRef.current;
       if (op === "undo" ? !checkCanUndo(prev) : !checkCanRedo(prev)) return;
 
@@ -865,6 +868,7 @@ export function usePaintEngine<TCustom = never>(
       setLayerVisible,
       commitHistoryState,
       bumpRenderVersion,
+      handleDrawCancel,
     ],
   );
 

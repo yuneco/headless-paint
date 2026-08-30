@@ -71,6 +71,8 @@ export {
   type BrushAcceleratorBackend,
   type BrushAcceleratorOptions,
   type BrushAcceleratorResolution,
+  type GpuResidencyInvalidationReason,
+  type GpuStrokeOwnerLabel,
 } from "./brush/gpu/accelerator";
 export {
   createBrushTipRegistry,

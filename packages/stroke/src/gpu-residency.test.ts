@@ -9,6 +9,7 @@ import {
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
   ROUND_PEN,
+  clearLayer,
   createBrushAccelerator,
   createLayer,
 } from "@headless-paint/engine";
@@ -22,6 +23,8 @@ import {
 } from "./history";
 import { createIncrementalStrokeRenderer } from "./incremental-stroke";
 import { expectPixelEqual, simulateLiveStroke } from "./parity-helpers";
+import { rebuildLayerFromHistory } from "./replay";
+import { createStrokeRuntime } from "./stroke-runtime";
 import type { HistoryState } from "./types";
 
 const WIDTH = 128;
@@ -311,6 +314,160 @@ describe("GPU layer residency", () => {
       uploadAfterRebuild.layer,
       "Undo rebuild residency vs upload-after-rebuild",
     );
+  });
+
+  it("React Undoボタン順序のcancel→restore→undo→遅延end後もownerを残さず次がhitする", () => {
+    const perf = configurePerf();
+    perf.experiments.stallThresholdMs = 0;
+    const accelerator = requireAccelerator({ resident: true });
+    const layer = createTestLayer();
+    const pendingLayer = createLayer(WIDTH, HEIGHT);
+    let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+    history = recordStroke(
+      history,
+      layer,
+      GPU_STYLE,
+      FIRST_GPU_POINTS,
+      101,
+      accelerator,
+    );
+    history = recordStroke(
+      history,
+      layer,
+      GPU_STYLE,
+      SECOND_GPU_POINTS,
+      202,
+      accelerator,
+    );
+
+    perf.reset();
+    const runtime = createStrokeRuntime({
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+      now: () => performance.now(),
+      requestRender: () => {},
+      onCommit: () => {},
+      onDrawingChanged: () => {},
+      randomSeed: () => 303,
+      accelerator,
+      restoreLayerBeforeStroke: (target) => {
+        const result = rebuildLayerFromHistory(target, history, undefined, {
+          accelerator,
+          invalidationReason: "runtimeRestore",
+        });
+        expect(result.ok).toBe(true);
+      },
+    });
+    runtime.start(THIRD_GPU_POINTS[0], {
+      layer,
+      pendingLayer,
+      style: GPU_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      alphaLocked: false,
+      pendingOnly: false,
+    });
+    runtime.move(THIRD_GPU_POINTS[1]);
+
+    // usePaintEngine の履歴操作と、遅れて届く pointer end の順序:
+    // active cancel → history undo → delayed end → next live stroke。
+    runtime.cancel();
+    const undoResult = executeHistoryOp("undo", history, {
+      layers: [layer],
+      accelerator,
+    });
+    expect(undoResult.ok).toBe(true);
+    history = undoResult.next;
+    runtime.end();
+    drawStroke(layer, GPU_STYLE, THIRD_GPU_POINTS, 404, EXPAND, accelerator);
+
+    const snapshot = perf.snapshot();
+    const events = snapshot.stalls.flatMap((stall) => stall.events);
+    expect(snapshot.samples.gpuResidencyHit.at(-1)).toBe(1);
+    expect(
+      events.some(
+        (event) =>
+          event.name === "residencyInvalidated" &&
+          event.reason === "runtimeRestore",
+      ),
+    ).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.name === "residencyInvalidated" &&
+          event.reason === "executorUndo",
+      ),
+    ).toBe(true);
+    expect(
+      events.filter((event) => event.name === "gpuStaleOwnerRecovered"),
+    ).toEqual([]);
+    runtime.dispose();
+    accelerator.dispose();
+  });
+
+  it("strokeStart stallに直前のresidency invalidation reasonを含める", () => {
+    const perf = configurePerf();
+    perf.experiments.stallThresholdMs = 0;
+    const accelerator = requireAccelerator({ resident: true });
+    const layer = createTestLayer();
+    accelerator.warmUp(layer);
+    perf.reset();
+
+    clearLayer(layer);
+    drawStroke(layer, GPU_STYLE, FIRST_GPU_POINTS, 101, EXPAND, accelerator);
+
+    const strokeStart = [...perf.snapshot().stalls]
+      .reverse()
+      .find((stall) => stall.kind === "strokeStart");
+    expect(
+      strokeStart?.events.some(
+        (event) =>
+          event.name === "residencyInvalidated" &&
+          event.reason === "clearLayer",
+      ),
+    ).toBe(true);
+    accelerator.dispose();
+  });
+
+  it("stale owner回復eventに開始経路・開始時刻・回復経路を含める", () => {
+    const perf = configurePerf();
+    perf.experiments.stallThresholdMs = 0;
+    const accelerator = requireAccelerator({ resident: true });
+    const layer = createTestLayer();
+    const live = createIncrementalStrokeRenderer({
+      layer,
+      style: GPU_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: 101,
+      alphaLocked: false,
+      accelerator,
+      gpuOwnerLabel: "live",
+    });
+    const rebuild = createIncrementalStrokeRenderer({
+      layer,
+      style: GPU_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: 202,
+      alphaLocked: false,
+      accelerator,
+      gpuOwnerLabel: "rebuild",
+    });
+
+    const staleEvent = perf
+      .snapshot()
+      .stalls.flatMap((stall) => stall.events)
+      .find((event) => event.name === "gpuStaleOwnerRecovered");
+    expect(staleEvent).toMatchObject({
+      ownerLabel: "live",
+      recoveryOwnerLabel: "rebuild",
+    });
+    expect(staleEvent?.ownerStartedAtMs).toBeTypeOf("number");
+    expect(staleEvent?.ownerAgeMs).toBeGreaterThanOrEqual(0);
+    live.cancel();
+    rebuild.cancel();
+    accelerator.dispose();
   });
 
   it("GPU→CPU strokeのUndoでcheckpoint復元後のGPU replayを常駐維持する", () => {
@@ -679,6 +836,7 @@ interface BrushPerfTestBridge {
       readonly gpuBranches: readonly number[];
     };
     readonly stalls: readonly {
+      readonly kind: "moveMany" | "strokeStart";
       readonly events: readonly {
         readonly name: string;
         readonly mode?: "bitmap" | "direct";
@@ -686,6 +844,11 @@ interface BrushPerfTestBridge {
         readonly height?: number;
         readonly bitmapMs?: number;
         readonly drawMs?: number;
+        readonly reason?: string;
+        readonly ownerLabel?: string;
+        readonly ownerStartedAtMs?: number;
+        readonly ownerAgeMs?: number;
+        readonly recoveryOwnerLabel?: string;
       }[];
     }[];
   };

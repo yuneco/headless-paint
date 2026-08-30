@@ -1,5 +1,8 @@
 import type { Layer } from "../../types";
-import type { BrushAccelerator } from "./accelerator";
+import type {
+  BrushAccelerator,
+  GpuResidencyInvalidationReason,
+} from "./accelerator";
 
 const layerAccelerators = new WeakMap<Layer, BrushAccelerator>();
 
@@ -8,7 +11,9 @@ export function registerGpuLayerResidency(
   accelerator: BrushAccelerator,
 ): void {
   const previous = layerAccelerators.get(layer);
-  if (previous && previous !== accelerator) previous.invalidate(layer);
+  if (previous && previous !== accelerator) {
+    previous.invalidate(layer, "acceleratorReplaced");
+  }
   layerAccelerators.set(layer, accelerator);
 }
 
@@ -21,6 +26,9 @@ export function unregisterGpuLayerResidency(
   }
 }
 
-export function invalidateGpuLayerResidency(layer: Layer): void {
-  layerAccelerators.get(layer)?.invalidate(layer);
+export function invalidateGpuLayerResidency(
+  layer: Layer,
+  reason: GpuResidencyInvalidationReason,
+): void {
+  layerAccelerators.get(layer)?.invalidate(layer, reason);
 }

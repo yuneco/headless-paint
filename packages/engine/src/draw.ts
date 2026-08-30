@@ -19,7 +19,7 @@ export function drawLine(
   color: Color,
   lineWidth = 1,
 ): void {
-  invalidateGpuLayerResidency(layer);
+  invalidateGpuLayerResidency(layer, "drawPath");
   const { ctx } = layer;
   ctx.strokeStyle = colorToStyle(color);
   ctx.lineWidth = lineWidth;
@@ -37,7 +37,7 @@ export function drawCircle(
   radius: number,
   color: Color,
 ): void {
-  invalidateGpuLayerResidency(layer);
+  invalidateGpuLayerResidency(layer, "drawPath");
   const { ctx } = layer;
   ctx.fillStyle = colorToStyle(color);
 
@@ -54,7 +54,7 @@ export function drawPath(
 ): void {
   if (points.length === 0) return;
 
-  invalidateGpuLayerResidency(layer);
+  invalidateGpuLayerResidency(layer, "drawPath");
   const { ctx } = layer;
   ctx.strokeStyle = colorToStyle(color);
   ctx.lineWidth = lineWidth;
@@ -125,7 +125,7 @@ export function drawVariableWidthPath(
 ): void {
   if (points.length === 0) return;
 
-  invalidateGpuLayerResidency(layer);
+  invalidateGpuLayerResidency(layer, "drawPath");
   const { ctx } = layer;
   const style = colorToStyle(color);
   ctx.fillStyle = style;

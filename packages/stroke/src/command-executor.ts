@@ -246,6 +246,7 @@ function executeLayerDraw<TCustom>(
 
     const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
       accelerator: deps.accelerator,
+      invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
     });
     if (!result.ok) {
       return createFailureResult(
@@ -314,12 +315,22 @@ function executeCustom<TCustom>(
   const dirty = outcome.dirty ?? DIRTY_NONE;
   if (dirty.type === "all") {
     for (const layer of deps.layers) {
-      invalidateGpuLayerResidency(layer, deps.accelerator);
+      invalidateGpuLayerResidency(
+        layer,
+        deps.accelerator,
+        op === "undo" ? "executorUndo" : "executorRedo",
+      );
     }
   } else if (dirty.type === "layers") {
     for (const layerId of dirty.layerIds) {
       const layer = deps.layers.find((candidate) => candidate.id === layerId);
-      if (layer) invalidateGpuLayerResidency(layer, deps.accelerator);
+      if (layer) {
+        invalidateGpuLayerResidency(
+          layer,
+          deps.accelerator,
+          op === "undo" ? "executorUndo" : "executorRedo",
+        );
+      }
     }
   }
 
@@ -416,6 +427,7 @@ function executeStructural<TCustom>(
       );
       const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
         accelerator: deps.accelerator,
+        invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
       });
       if (!result.ok) {
         return createFailureResult(
@@ -546,7 +558,10 @@ function executeStructural<TCustom>(
         sourceLayer,
         next,
         deps.tipRegistry,
-        { accelerator: deps.accelerator },
+        {
+          accelerator: deps.accelerator,
+          invalidationReason: "executorUndo",
+        },
       );
       if (!sourceResult.ok) {
         return createFailureResult(
@@ -582,7 +597,10 @@ function executeStructural<TCustom>(
         targetLayer,
         next,
         deps.tipRegistry,
-        { accelerator: deps.accelerator },
+        {
+          accelerator: deps.accelerator,
+          invalidationReason: "executorUndo",
+        },
       );
       if (!targetResult.ok) {
         return createFailureResult(

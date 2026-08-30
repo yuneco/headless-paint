@@ -1,5 +1,9 @@
-import type { BrushAccelerator, Layer } from "@headless-paint/engine";
-import { clearLayer, getImageData } from "@headless-paint/engine";
+import type {
+  BrushAccelerator,
+  GpuResidencyInvalidationReason,
+  Layer,
+} from "@headless-paint/engine";
+import { getImageData } from "@headless-paint/engine";
 import { decompressSync, deflateSync } from "fflate";
 import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import type { Checkpoint } from "./types";
@@ -76,11 +80,12 @@ export function restoreFromCheckpoint(
   layer: Layer,
   checkpoint: Checkpoint,
   accelerator?: BrushAccelerator | null,
+  invalidationReason: GpuResidencyInvalidationReason = "checkpointRestore",
 ): void {
+  invalidateGpuLayerResidency(layer, accelerator, invalidationReason);
   if (checkpoint.payload.type === "empty") {
-    clearLayer(layer);
+    layer.ctx.clearRect(0, 0, layer.width, layer.height);
     return;
   }
-  invalidateGpuLayerResidency(layer, accelerator);
   layer.ctx.putImageData(getCheckpointImageData(checkpoint), 0, 0);
 }
