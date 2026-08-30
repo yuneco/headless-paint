@@ -767,7 +767,7 @@ function DebugPanelComponent({
         >
           <div>
             Engine: <strong>{gpuBackend}</strong> ({gpuBackendReason}) · commit:{" "}
-            {gpuCommitMode}
+            {gpuCommitMode} · build: {__HP_BUILD_ID__}
           </div>
           <label style={{ display: "grid", gridTemplateColumns: "1fr 110px" }}>
             Backend
