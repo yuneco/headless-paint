@@ -109,7 +109,10 @@ describe("GPU layer residency", () => {
 
     expect(resident.residencyHits).toEqual([0, 1]);
     expect(resident.gpuUploadCount).toBe(1);
-    expect(resident.samplingCopyPixels).toEqual([WIDTH * HEIGHT]);
+    expect(resident.samplingCopyPixels).toEqual([
+      WIDTH * HEIGHT,
+      WIDTH * HEIGHT,
+    ]);
     expect(uploadEveryStroke.residencyHits).toEqual([0, 0]);
     expect(uploadEveryStroke.gpuUploadCount).toBe(2);
     expect(uploadEveryStroke.samplingCopyPixels).toEqual([

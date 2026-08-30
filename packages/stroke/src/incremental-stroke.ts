@@ -77,6 +77,7 @@ export function createIncrementalStrokeRenderer(
   }
   let gpuResidencyHit = false;
   let samplingLayer: Layer | undefined;
+  let strokeStartSnapshot: Layer | undefined;
   let gpuStrokeActive = false;
   try {
     gpuResidencyHit =
@@ -94,6 +95,11 @@ export function createIncrementalStrokeRenderer(
         gpuResidencyHit ? undefined : samplingLayer?.canvas,
         compiledExpand.outputCount,
       );
+    strokeStartSnapshot = gpuStrokeActive
+      ? samplingLayer && samplingLayer.canvas !== config.layer.canvas
+        ? samplingLayer
+        : copySamplingLayer(config.layer)
+      : undefined;
   } finally {
     if (gpuStrokeEligible) perfDebug?.endBatch();
   }
@@ -111,6 +117,14 @@ export function createIncrementalStrokeRenderer(
   let finalized = false;
   let renderedCommittedCount = 0;
   let pendingBristlePoints: InputPoint[] = [];
+  const gpuInputPoints: InputPoint[] = [];
+  let gpuStrokeLost = false;
+
+  function detectGpuStrokeLoss(): boolean {
+    if (!gpuStrokeActive) return false;
+    gpuStrokeLost ||= gpuRuntime?.isStrokeLost(gpuOwner) ?? true;
+    return gpuStrokeLost;
+  }
 
   function appendProcessedBatch(
     nextSession: StrokeSessionState,
@@ -137,24 +151,28 @@ export function createIncrementalStrokeRenderer(
     ).__hpBrushPerf;
     const appendStartedAt = perfDebug?.enabled ? performance.now() : 0;
     if (hasNewCommitted) {
-      if (gpuStrokeActive) gpuRuntime?.enter(gpuOwner);
-      try {
-        brushState = appendToCommittedLayer(
-          config.layer,
-          batchUpdate.newlyCommitted,
-          config.style,
-          compiledExpand,
-          batchUpdate.committedOverlapCount,
-          brushState,
-          samplingLayer,
-          config.alphaLocked,
-          config.accelerator,
-        );
-        if (!gpuStrokeActive) {
-          config.accelerator?.invalidate(config.layer);
+      if (!detectGpuStrokeLoss()) {
+        if (gpuStrokeActive) gpuRuntime?.enter(gpuOwner);
+        try {
+          brushState = appendToCommittedLayer(
+            config.layer,
+            batchUpdate.newlyCommitted,
+            config.style,
+            compiledExpand,
+            batchUpdate.committedOverlapCount,
+            brushState,
+            samplingLayer,
+            config.alphaLocked,
+            config.accelerator,
+          );
+          if (!gpuStrokeActive) {
+            config.accelerator?.invalidate(config.layer);
+          }
+        } catch (error) {
+          if (!detectGpuStrokeLoss()) throw error;
+        } finally {
+          if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
         }
-      } finally {
-        if (gpuStrokeActive) gpuRuntime?.leave(gpuOwner);
       }
       renderedCommittedCount = nextCommittedCount;
     }
@@ -162,11 +180,13 @@ export function createIncrementalStrokeRenderer(
       perfDebug.recordStage("appendCommitted", appendStartedAt);
     }
     const callbackStartedAt = perfDebug?.enabled ? performance.now() : 0;
-    config.onRenderUpdate?.({
-      session: nextSession,
-      renderUpdate: batchUpdate,
-      brushState,
-    });
+    if (!gpuStrokeLost) {
+      config.onRenderUpdate?.({
+        session: nextSession,
+        renderUpdate: batchUpdate,
+        brushState,
+      });
+    }
     if (perfDebug?.enabled) {
       perfDebug.recordStage("renderUpdateCallback", callbackStartedAt);
     }
@@ -207,10 +227,12 @@ export function createIncrementalStrokeRenderer(
   function feedMany(points: readonly InputPoint[]): void {
     if (finalized || points.length === 0) return;
     hasFed = true;
+    if (gpuStrokeActive) gpuInputPoints.push(...points);
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
-      if (gpuStrokeActive) {
+      if (gpuStrokeActive && !detectGpuStrokeLoss()) {
         gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+        detectGpuStrokeLoss();
       }
       return;
     }
@@ -256,11 +278,34 @@ export function createIncrementalStrokeRenderer(
       strokeSession = strokeResult.state;
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
       if (gpuStrokeActive) {
-        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+        if (!detectGpuStrokeLoss()) {
+          gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+          detectGpuStrokeLoss();
+        }
         gpuRuntime?.endStroke(gpuOwner);
+        if (gpuStrokeLost) recoverLostGpuStroke();
       }
     },
   };
+
+  function recoverLostGpuStroke(): void {
+    if (!strokeStartSnapshot) {
+      throw new Error("GPU stroke recovery requires a stroke-start snapshot");
+    }
+    copyLayerPixels(strokeStartSnapshot, config.layer);
+    let recoveredUpdate: IncrementalStrokeRenderUpdate | undefined;
+    const cpuRenderer = createIncrementalStrokeRenderer({
+      ...config,
+      sourceLayer: strokeStartSnapshot,
+      accelerator: null,
+      onRenderUpdate: (update) => {
+        recoveredUpdate = update;
+      },
+    });
+    cpuRenderer.feedMany(gpuInputPoints);
+    cpuRenderer.finalize();
+    if (recoveredUpdate) config.onRenderUpdate?.(recoveredUpdate);
+  }
 }
 
 interface GpuStrokeRuntimeBridge {
@@ -275,6 +320,7 @@ interface GpuStrokeRuntimeBridge {
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
   endStroke(owner: object): void;
+  isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
 }
 
@@ -419,6 +465,20 @@ function createSamplingLayer(
     }
     return layer;
   }
+  return copySamplingLayer(layer);
+}
+
+function copySamplingLayer(layer: Layer): Layer {
+  const perf = (
+    globalThis as typeof globalThis & {
+      __hpBrushPerf?: {
+        readonly enabled: boolean;
+        recordStage(name: string, startedAt: number): void;
+        recordSample(name: "samplingCopyPixels", value: number): void;
+      };
+    }
+  ).__hpBrushPerf;
+  const startedAt = perf?.enabled ? performance.now() : 0;
   const samplingLayer = createLayer(layer.width, layer.height);
   copyLayerPixels(layer, samplingLayer);
   if (perf?.enabled) {

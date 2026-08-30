@@ -46,6 +46,7 @@ interface BrushAcceleratorRuntime extends BrushAccelerator {
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
   endStroke(owner: object): void;
+  isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
   getActiveSurface(): GpuStrokeSurface | null;
   readMaterialFieldForTest(branchIndex: number): Uint8ClampedArray | null;
@@ -230,6 +231,16 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     this.currentOwner = null;
     this.activeSurface = null;
     this.activeLayer = null;
+  }
+
+  isStrokeLost(owner: object): boolean {
+    if (this.activeOwner !== owner) return true;
+    const lost = this.activeSurface?.lost ?? true;
+    if (lost) {
+      this.permanentlyUnavailable = true;
+      if (this.activeLayer) this.invalidate(this.activeLayer);
+    }
+    return lost;
   }
 
   isLayerResident(layer: Layer): boolean {

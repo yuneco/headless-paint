@@ -401,6 +401,88 @@ describe("GPU mixing feedMany parity", () => {
   });
 });
 
+describe("GPU mixing lifecycle fallback", () => {
+  it("stroke途中のWEBGL_lose_context後はsnapshotからCPUで全入力を再実行する", async () => {
+    const expected = createTestLayer();
+    paintOpaqueBands(expected);
+    const expectedRenderer = createIncrementalStrokeRenderer({
+      layer: expected,
+      style: STAMP_MIXING_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+      accelerator: null,
+    });
+    expectedRenderer.feedMany(INPUT_POINTS);
+    expectedRenderer.finalize();
+
+    const perf = getBrushPerfTestBridge();
+    if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+    perf.enabled = true;
+    perf.reset();
+    const accelerator = createTestAccelerator();
+    const actual = createTestLayer();
+    paintOpaqueBands(actual);
+    const renderer = createIncrementalStrokeRenderer({
+      layer: actual,
+      style: STAMP_MIXING_STYLE,
+      filterPipeline: FILTER_PIPELINE,
+      expand: EXPAND,
+      brushSeed: BRUSH_SEED,
+      alphaLocked: false,
+      accelerator,
+    });
+    renderer.feedMany(INPUT_POINTS.slice(0, 3));
+
+    const surface = getActiveSurfaceForTest(accelerator);
+    const gl = surface.canvas.getContext("webgl2");
+    const extension = gl?.getExtension("WEBGL_lose_context");
+    if (!extension) throw new Error("WEBGL_lose_context is unavailable");
+    const contextLost = new Promise<void>((resolve) => {
+      surface.canvas.addEventListener(
+        "webglcontextlost",
+        (event) => {
+          event.preventDefault();
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    extension.loseContext();
+    await contextLost;
+
+    renderer.feedMany(INPUT_POINTS.slice(3));
+    renderer.finalize();
+    expectPixelEqual(actual, expected, "context loss CPU recovery");
+
+    const nextExpected = createTestLayer();
+    copyLayerPixels(actual, nextExpected);
+    const nextActual = createTestLayer();
+    copyLayerPixels(actual, nextActual);
+    perf.reset();
+    renderStrokeForLifecycle(nextExpected, null);
+    renderStrokeForLifecycle(nextActual, accelerator);
+    expectPixelEqual(nextActual, nextExpected, "post-loss CPU fallback");
+    expect(perf.snapshot().samples.gpuBranches).toEqual([]);
+    accelerator.dispose();
+  });
+
+  it("dispose済みacceleratorはstroke全体をCPU経路で描く", () => {
+    const expected = createTestLayer();
+    paintOpaqueBands(expected);
+    const actual = createTestLayer();
+    paintOpaqueBands(actual);
+    const accelerator = createTestAccelerator();
+    accelerator.dispose();
+
+    renderStrokeForLifecycle(expected, null);
+    renderStrokeForLifecycle(actual, accelerator);
+
+    expectPixelEqual(actual, expected, "disposed accelerator CPU fallback");
+  });
+});
+
 describe("GPU mixing Expand parity", () => {
   it("radial 2 の branch field が 5 update ごとに CPU と一致する", () => {
     const cpuSnapshots = traceRadialFieldUpdates("cpu");
@@ -778,6 +860,35 @@ function getGpuTestRuntime(
     typeof runtime.readMaterialFieldForTest === "function"
     ? (runtime as GpuTestRuntime)
     : null;
+}
+
+function getActiveSurfaceForTest(accelerator: BrushAccelerator): {
+  readonly canvas: OffscreenCanvas;
+} {
+  const surface = (
+    accelerator as unknown as {
+      readonly activeSurface: { readonly canvas: OffscreenCanvas } | null;
+    }
+  ).activeSurface;
+  if (!surface) throw new Error("GPU stroke surface is unavailable");
+  return surface;
+}
+
+function renderStrokeForLifecycle(
+  layer: Layer,
+  accelerator: BrushAccelerator | null,
+): void {
+  const renderer = createIncrementalStrokeRenderer({
+    layer,
+    style: STAMP_MIXING_STYLE,
+    filterPipeline: FILTER_PIPELINE,
+    expand: EXPAND,
+    brushSeed: BRUSH_SEED + 1,
+    alphaLocked: false,
+    accelerator,
+  });
+  renderer.feedMany(CENTER_CROSSING_INPUT_POINTS);
+  renderer.finalize();
 }
 
 interface ParityRun {
