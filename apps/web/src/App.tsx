@@ -50,6 +50,7 @@ const LAYER_HEIGHT = LAYER_WIDTH;
 const SETTINGS_STORAGE_KEY = "headless-paint:settings";
 
 type EngineBackendSetting = "auto" | "webgl2" | "cpu";
+type GpuCommitMode = "bitmap" | "direct";
 
 interface PersistedAppSettings {
   readonly paint: PaintSettingsSnapshot;
@@ -169,6 +170,11 @@ function getGpuBackendUrlOverride(): EngineBackendSetting | null {
   return isEngineBackendSetting(value) ? value : null;
 }
 
+function getGpuCommitModeUrlOverride(): GpuCommitMode | null {
+  const value = new URLSearchParams(window.location.search).get("gpuCommit");
+  return value === "direct" || value === "bitmap" ? value : null;
+}
+
 function saveSettingsSnapshot(
   snapshot: PaintSettingsSnapshot,
   engineBackend: EngineBackendSetting,
@@ -237,6 +243,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
   const persistedGpuBackend = initialSettings?.engineBackend ?? "auto";
   const gpuBackendUrlOverride = getGpuBackendUrlOverride();
   const gpuBackend = gpuBackendUrlOverride ?? persistedGpuBackend;
+  const gpuCommitMode = getGpuCommitModeUrlOverride() ?? "bitmap";
   const [tool, setTool] = useState<ToolType>("pen");
   const { width: viewWidth, height: viewHeight } = useWindowSize();
   const {
@@ -362,6 +369,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     compiledExpand: expand.compiled,
     registry: registryRef.current,
     gpuBackend,
+    gpuCommitMode,
   });
   const inputCaptureArmedRef = useRef(false);
   const inputCaptureActiveRef = useRef(false);
@@ -895,6 +903,7 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
         gpuBackendSetting={gpuBackend}
         gpuBackend={engine.gpuBackend}
         gpuBackendReason={engine.gpuBackendReason}
+        gpuCommitMode={gpuCommitMode}
         onGpuBackendChange={handleGpuBackendChange}
       />
     </div>

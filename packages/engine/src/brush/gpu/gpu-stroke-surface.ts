@@ -371,15 +371,17 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private currentBranchIndex = 0;
   private pendingBranchSegments: PendingBranchSegment[][] | null = null;
   private readonly useFloatField: boolean;
+  private readonly commitMode: "bitmap" | "direct";
   readonly maxBranchCount: number;
   private strokeBegun = false;
   private contextLost = false;
   private quadBuffer: WebGLBuffer | null = null;
   private disposed = false;
 
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, commitMode: "bitmap" | "direct") {
     this.width = width;
     this.height = height;
+    this.commitMode = commitMode;
     this.canvas = new OffscreenCanvas(COMMIT_CANVAS_SIZE, COMMIT_CANVAS_SIZE);
     brushPerfDebug.recordEvent("realloc:commitCanvas", {
       width: COMMIT_CANVAS_SIZE,
@@ -1197,7 +1199,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       commitPasses++;
       blitCommitPass(gl, this.framebuffer, this.height, packed);
       let bitmap: ImageBitmap | null = null;
-      if (typeof this.canvas.transferToImageBitmap === "function") {
+      if (
+        this.commitMode === "bitmap" &&
+        typeof this.canvas.transferToImageBitmap === "function"
+      ) {
         const bitmapStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
         try {
           bitmap = this.canvas.transferToImageBitmap();
@@ -1248,6 +1253,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       brushPerfDebug.recordSample("gpuCommitPixels", committedPixels);
       brushPerfDebug.recordSample("gpuCommitDraws", commitTiles.length);
       brushPerfDebug.recordEvent("gpuCommit", {
+        mode: this.commitMode,
         passes: commitPasses,
         pixels: committedPixels,
         bitmapMs: Number(bitmapMs.toFixed(3)),
@@ -1671,9 +1677,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 export function createGpuStrokeSurface(
   width: number,
   height: number,
+  commitMode: "bitmap" | "direct" = "bitmap",
 ): GpuStrokeSurface | null {
   try {
-    return new WebGl2StrokeSurface(width, height);
+    return new WebGl2StrokeSurface(width, height, commitMode);
   } catch {
     return null;
   }

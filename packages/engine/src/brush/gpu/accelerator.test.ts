@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createBrushAccelerator,
   isWebKitUserAgent,
   resolveBrushAcceleratorBackend,
 } from "./accelerator";
+import {
+  type GpuStrokeSurface,
+  createGpuStrokeSurface,
+} from "./gpu-stroke-surface";
+
+vi.mock("./gpu-stroke-surface", () => ({
+  createGpuStrokeSurface: vi.fn(),
+}));
 
 const SAFARI_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
@@ -11,9 +19,40 @@ const SAFARI_USER_AGENT =
 const CHROME_USER_AGENT =
   "Mozilla/5.0 AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36";
 
+beforeEach(() => {
+  vi.mocked(createGpuStrokeSurface)
+    .mockReset()
+    .mockReturnValue({
+      width: 1,
+      height: 1,
+      lost: false,
+      maxBranchCount: 64,
+      dispose: vi.fn(),
+    } as unknown as GpuStrokeSurface);
+});
+
 describe("createBrushAccelerator", () => {
   it('backend: "cpu" は常に null を返す', () => {
     expect(createBrushAccelerator({ backend: "cpu" })).toBeNull();
+  });
+
+  it("commitMode の既定 bitmap を surface に渡す", () => {
+    const accelerator = createBrushAccelerator({ backend: "webgl2" });
+
+    expect(accelerator).not.toBeNull();
+    expect(createGpuStrokeSurface).toHaveBeenCalledWith(1, 1, "bitmap");
+    accelerator?.dispose();
+  });
+
+  it("commitMode の direct を surface に渡す", () => {
+    const accelerator = createBrushAccelerator({
+      backend: "webgl2",
+      commitMode: "direct",
+    });
+
+    expect(accelerator).not.toBeNull();
+    expect(createGpuStrokeSurface).toHaveBeenCalledWith(1, 1, "direct");
+    accelerator?.dispose();
   });
 
   it("Safari UA を WebKit 系として判定する", () => {

@@ -214,6 +214,7 @@ describe("GPU layer residency", () => {
     const commitEvents = events.filter((event) => event.name === "gpuCommit");
     expect(commitEvents.length).toBeGreaterThan(0);
     for (const event of commitEvents) {
+      expect(event.mode).toBe("bitmap");
       expect(event.bitmapMs).toBeTypeOf("number");
       expect(event.drawMs).toBeTypeOf("number");
     }
@@ -559,6 +560,7 @@ interface BrushPerfTestBridge {
     readonly stalls: readonly {
       readonly events: readonly {
         readonly name: string;
+        readonly mode?: "bitmap" | "direct";
         readonly width?: number;
         readonly height?: number;
         readonly bitmapMs?: number;

@@ -78,6 +78,7 @@ export interface PaintEngineConfig<TCustom = never> {
   readonly initialDocument?: PaintEngineInitialDocument;
   readonly customCommandHandler?: CustomCommandHandler<TCustom>;
   readonly gpuBackend?: BrushAcceleratorBackend;
+  readonly gpuCommitMode?: "bitmap" | "direct";
 }
 
 export interface PaintEngineInitialLayer {
@@ -160,6 +161,7 @@ export interface PaintEngineResult<TCustom = never> {
 
 interface BrushAcceleratorState {
   readonly requestedBackend: BrushAcceleratorBackend;
+  readonly requestedCommitMode: "bitmap" | "direct";
   readonly accelerator: BrushAccelerator | null;
 }
 
@@ -236,28 +238,35 @@ export function usePaintEngine<TCustom = never>(
     initialDocument,
     customCommandHandler,
     gpuBackend: requestedGpuBackend = "auto",
+    gpuCommitMode: requestedGpuCommitMode = "bitmap",
   } = config;
 
   const [acceleratorState, setAcceleratorState] =
     useState<BrushAcceleratorState>(() => ({
       requestedBackend: requestedGpuBackend,
+      requestedCommitMode: requestedGpuCommitMode,
       accelerator: null,
     }));
   useEffect(() => {
     const nextAccelerator =
       requestedGpuBackend === "cpu"
         ? null
-        : createBrushAccelerator({ backend: requestedGpuBackend });
+        : createBrushAccelerator({
+            backend: requestedGpuBackend,
+            commitMode: requestedGpuCommitMode,
+          });
     setAcceleratorState({
       requestedBackend: requestedGpuBackend,
+      requestedCommitMode: requestedGpuCommitMode,
       accelerator: nextAccelerator,
     });
     return () => {
       nextAccelerator?.dispose();
     };
-  }, [requestedGpuBackend]);
+  }, [requestedGpuBackend, requestedGpuCommitMode]);
   const accelerator =
-    acceleratorState.requestedBackend === requestedGpuBackend
+    acceleratorState.requestedBackend === requestedGpuBackend &&
+    acceleratorState.requestedCommitMode === requestedGpuCommitMode
       ? acceleratorState.accelerator
       : null;
   const gpuBackend = accelerator?.backend ?? "cpu";

@@ -17,6 +17,7 @@ export interface BrushAcceleratorOptions {
   readonly backend?: BrushAcceleratorBackend;
   readonly maxBranches?: number;
   readonly resident?: boolean;
+  readonly commitMode?: "bitmap" | "direct";
 }
 
 export interface BrushAcceleratorResolution {
@@ -98,9 +99,10 @@ export function createBrushAccelerator(
   options: BrushAcceleratorOptions = {},
 ): BrushAccelerator | null {
   let surface: GpuStrokeSurface | null = null;
+  const commitMode = options.commitMode ?? "bitmap";
   const resolution = resolveBrushAcceleratorBackend(options, {
     webgl2Available: () => {
-      surface = createGpuStrokeSurface(1, 1);
+      surface = createGpuStrokeSurface(1, 1, commitMode);
       return surface !== null;
     },
   });
@@ -133,6 +135,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   private surface: GpuStrokeSurface | null;
   private readonly maxBranches: number;
   private readonly resident: boolean;
+  private readonly commitMode: "bitmap" | "direct";
   private readonly residencies = new WeakMap<Layer, LayerResidency>();
   private residentLayer: Layer | null = null;
   private activeOwner: object | null = null;
@@ -146,6 +149,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     this.surface = surface;
     this.maxBranches = sanitizeMaxBranches(options.maxBranches);
     this.resident = options.resident ?? true;
+    this.commitMode = options.commitMode ?? "bitmap";
   }
 
   warmUp(layer: Layer): void {
@@ -312,7 +316,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       return this.surface;
     }
     this.surface?.dispose();
-    this.surface = createGpuStrokeSurface(width, height);
+    this.surface = createGpuStrokeSurface(width, height, this.commitMode);
     if (!this.surface) {
       this.permanentlyUnavailable = true;
       return null;

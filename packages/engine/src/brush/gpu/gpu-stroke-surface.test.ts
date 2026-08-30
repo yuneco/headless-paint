@@ -522,6 +522,36 @@ describe("GpuStrokeSurface", () => {
     expectPixelNear(layer, 32, 32, [210, 70, 40, 255]);
   });
 
+  it("direct commit は transferToImageBitmap を使わずWebGL canvasを描画する", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    brushPerfDebug.beginBatch(1, 1);
+    const transferSpy = vi.spyOn(
+      OffscreenCanvas.prototype,
+      "transferToImageBitmap",
+    );
+    const layer = createLayer(64, 64);
+    const surface = createGpuStrokeSurface(layer.width, layer.height, "direct");
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+    configureSolidDab(surface, [210, 70, 40, 255], 16);
+
+    surface.pushDab({ x: 32, y: 32, size: 16, rotation: 0, alpha: 1 });
+    surface.commitToLayer(layer);
+    brushPerfDebug.endBatch();
+
+    expect(transferSpy).not.toHaveBeenCalled();
+    expectPixelNear(layer, 32, 32, [210, 70, 40, 255]);
+    const commitEvents = brushPerfDebug
+      .snapshot()
+      .stalls.flatMap((stall) => stall.events)
+      .filter((event) => event.name === "gpuCommit");
+    expect(commitEvents).toHaveLength(1);
+    expect(commitEvents[0]?.mode).toBe("direct");
+  });
+
   it("ImageBitmapのdrawImageが例外ならWebGL canvas直接描画へfallbackする", () => {
     const close = vi.fn();
     vi.spyOn(

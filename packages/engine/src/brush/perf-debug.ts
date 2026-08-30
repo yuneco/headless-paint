@@ -73,6 +73,7 @@ type BrushPerfEventName =
   | "gpuStaleOwnerRecovered";
 
 interface BrushPerfEventDetails {
+  readonly mode?: "bitmap" | "direct";
   readonly width?: number;
   readonly height?: number;
   readonly depth?: number;
@@ -87,6 +88,7 @@ interface BrushPerfEventDetails {
 
 interface BrushPerfEventSnapshot {
   readonly name: BrushPerfEventName;
+  readonly mode?: "bitmap" | "direct";
   readonly width?: number;
   readonly height?: number;
   readonly depth?: number;

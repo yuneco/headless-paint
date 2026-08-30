@@ -36,6 +36,7 @@ interface DebugPanelProps {
   gpuBackendSetting: "auto" | "webgl2" | "cpu";
   gpuBackend: "webgl2" | "cpu";
   gpuBackendReason: string;
+  gpuCommitMode: "bitmap" | "direct";
   onGpuBackendChange: (backend: "auto" | "webgl2" | "cpu") => void;
 }
 
@@ -70,6 +71,7 @@ function DebugPanelComponent({
   gpuBackendSetting,
   gpuBackend,
   gpuBackendReason,
+  gpuCommitMode,
   onGpuBackendChange,
 }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -764,7 +766,8 @@ function DebugPanelComponent({
           }}
         >
           <div>
-            Engine: <strong>{gpuBackend}</strong> ({gpuBackendReason})
+            Engine: <strong>{gpuBackend}</strong> ({gpuBackendReason}) · commit:{" "}
+            {gpuCommitMode}
           </div>
           <label style={{ display: "grid", gridTemplateColumns: "1fr 110px" }}>
             Backend
