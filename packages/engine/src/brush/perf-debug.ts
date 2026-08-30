@@ -74,6 +74,7 @@ type BrushPerfEventName =
   | "gpuStaleOwnerRecovered"
   | "warmUp"
   | "warmUpScheduled"
+  | "warmUpCheck"
   | "warmUpFired";
 
 interface BrushPerfEventDetails {

@@ -861,11 +861,21 @@ export function usePaintEngine<TCustom = never>(
       // invalidates GPU residency. Re-upload during the idle gap right after
       // the history op instead of at the next stroke start.
       const brush = strokeStyle.brush;
+      (
+        globalThis as {
+          __hpBrushPerf?: {
+            recordEvent(name: string, details?: object): void;
+          };
+        }
+      ).__hpBrushPerf?.recordEvent?.("warmUpCheck", {
+        reason: `${op} accel=${accelerator ? 1 : 0} brush=${brush.type} mix=${
+          brush.type === "stamp" && isBrushMixingActive(brush.mixing) ? 1 : 0
+        } raf=${typeof requestAnimationFrame}`,
+      });
       if (
         accelerator &&
         brush.type === "stamp" &&
-        isBrushMixingActive(brush.mixing) &&
-        typeof requestAnimationFrame === "function"
+        isBrushMixingActive(brush.mixing)
       ) {
         (
           globalThis as {
@@ -882,7 +892,11 @@ export function usePaintEngine<TCustom = never>(
         )
           ? (result.activeLayerIdHint ?? activeLayerId)
           : activeLayerId;
-        requestAnimationFrame(() => {
+        const schedule =
+          typeof requestAnimationFrame === "function"
+            ? requestAnimationFrame
+            : (cb: () => void) => setTimeout(cb, 0);
+        schedule(() => {
           const entry = entriesRef.current.find(
             (candidate) => candidate.id === targetLayerId,
           );
