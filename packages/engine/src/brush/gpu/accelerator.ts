@@ -19,6 +19,11 @@ export interface BrushAcceleratorOptions {
   readonly resident?: boolean;
 }
 
+export interface BrushAcceleratorResolution {
+  readonly backend: "webgl2" | "cpu";
+  readonly reason: string;
+}
+
 export interface BrushAccelerator {
   readonly backend: "webgl2";
   warmUp(layer: Layer): void;
@@ -67,22 +72,55 @@ export function isWebKitUserAgent(userAgent: string): boolean {
   );
 }
 
+export function resolveBrushAcceleratorBackend(
+  options: BrushAcceleratorOptions = {},
+  env: {
+    readonly userAgent?: string;
+    readonly webgl2Available?: () => boolean;
+  } = {},
+): BrushAcceleratorResolution {
+  const backend = options.backend ?? "auto";
+  if (backend === "cpu") {
+    return { backend: "cpu", reason: "cpu: setting" };
+  }
+
+  const userAgent =
+    env.userAgent ??
+    (typeof navigator === "undefined" ? "" : navigator.userAgent);
+  if (backend === "auto" && !isWebKitUserAgent(userAgent)) {
+    return { backend: "cpu", reason: "auto: not webkit" };
+  }
+
+  const webgl2Available = env.webgl2Available ?? probeWebGl2Availability;
+  if (!webgl2Available()) {
+    return { backend: "cpu", reason: "webgl2: unavailable" };
+  }
+
+  return {
+    backend: "webgl2",
+    reason: backend === "auto" ? "auto: webkit" : "webgl2: setting",
+  };
+}
+
 export function createBrushAccelerator(
   options: BrushAcceleratorOptions = {},
 ): BrushAccelerator | null {
-  const backend = options.backend ?? "auto";
-  if (backend === "cpu") return null;
-  if (
-    backend === "auto" &&
-    (typeof navigator === "undefined" ||
-      !isWebKitUserAgent(navigator.userAgent))
-  ) {
-    return null;
-  }
-
-  const surface = createGpuStrokeSurface(1, 1);
-  if (!surface) return null;
+  let surface: GpuStrokeSurface | null = null;
+  const resolution = resolveBrushAcceleratorBackend(options, {
+    webgl2Available: () => {
+      surface = createGpuStrokeSurface(1, 1);
+      return surface !== null;
+    },
+  });
+  if (resolution.backend === "cpu" || !surface) return null;
   return new WebGl2BrushAccelerator(surface, options);
+}
+
+function probeWebGl2Availability(): boolean {
+  const surface = createGpuStrokeSurface(1, 1);
+  if (!surface) return false;
+  surface.dispose();
+  return true;
 }
 
 export function getBrushAcceleratorRuntime(

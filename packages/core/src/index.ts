@@ -65,9 +65,11 @@ export {
 
 export {
   createBrushAccelerator,
+  resolveBrushAcceleratorBackend,
   type BrushAccelerator,
   type BrushAcceleratorBackend,
   type BrushAcceleratorOptions,
+  type BrushAcceleratorResolution,
 } from "@headless-paint/engine";
 export {
   hashSeed,

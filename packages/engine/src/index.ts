@@ -66,9 +66,11 @@ export {
 } from "./types";
 export {
   createBrushAccelerator,
+  resolveBrushAcceleratorBackend,
   type BrushAccelerator,
   type BrushAcceleratorBackend,
   type BrushAcceleratorOptions,
+  type BrushAcceleratorResolution,
 } from "./brush/gpu/accelerator";
 export {
   createBrushTipRegistry,

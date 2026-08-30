@@ -2,6 +2,7 @@ import {
   createBrushAccelerator,
   createLayer,
   isBrushMixingActive,
+  resolveBrushAcceleratorBackend,
   transformLayer,
   wrapShiftLayer,
 } from "@headless-paint/core";
@@ -167,29 +168,6 @@ const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
   checkpointCompression: "fast",
 };
 
-function isWebKitBrowser(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return (
-    /AppleWebKit/i.test(navigator.userAgent) &&
-    !/(?:Chrome|Chromium|CriOS|Edg|EdgiOS|EdgA|Firefox|FxiOS)/i.test(
-      navigator.userAgent,
-    )
-  );
-}
-
-function describeBrushAcceleratorBackend(
-  requestedBackend: BrushAcceleratorBackend,
-  accelerator: BrushAccelerator | null,
-): string {
-  if (requestedBackend === "cpu") return "cpu (setting)";
-  if (!accelerator) {
-    return requestedBackend === "auto" && !isWebKitBrowser()
-      ? "auto: not webkit"
-      : "webgl2 unavailable";
-  }
-  return requestedBackend === "auto" ? "auto: webkit" : "webgl2 (setting)";
-}
-
 function createDuplicateLayerName(
   sourceName: string,
   entries: readonly LayerEntry[],
@@ -282,10 +260,10 @@ export function usePaintEngine<TCustom = never>(
       ? acceleratorState.accelerator
       : null;
   const gpuBackend = accelerator?.backend ?? "cpu";
-  const gpuBackendReason = describeBrushAcceleratorBackend(
-    requestedGpuBackend,
-    accelerator,
-  );
+  const gpuBackendReason = resolveBrushAcceleratorBackend(
+    { backend: requestedGpuBackend },
+    { webgl2Available: () => accelerator !== null },
+  ).reason;
 
   const registryRef = useRef(registry);
   registryRef.current = registry;
