@@ -138,3 +138,7 @@ interface BrushAccelerator {
 - 最終回帰（Mac WebKit）: CPU 8/11・undoLong 2581 / GPU r1 2/3・852 / GPU r8 4/6・2394 / parity none・radial 4 全 pass（F1 RGB MAE 0.003〜0.005、|Δ|>0.1 0%）
 - 「r8 undoLong が 1006→2394 に後退」と見えたのは誤認。1006 は parity が壊れていた `0a3fb89`（live accum 直読み）の値で、snapshot 方式（`8c9c3a4`）以降は ≈2.4s が基準（CPU 19137 比 −87%）。bisect で確認済み
 - iPad 再確認待ち（kaleido 6 の commit stall が解消しているか）
+
+## 11. iPad再確認（2026-08-30 18:00）
+- stall は解消
+- **不具合**: Acrylic（GPU）で複数stroke → Undo → Redo 後に矩形状（commit tile相当）の描画欠け。Expandの有無に関係なし。replay（1回の`feedMany`＝大きなdirty rect→複数tile・複数pass）でのImageBitmap commit（p4c）がiOSで壊れている疑い。再現テスト（複数stroke・2 pass以上）と修正を委譲中。CPU経路（`?gpuBackend=cpu`）での再現有無をユーザーに確認依頼
