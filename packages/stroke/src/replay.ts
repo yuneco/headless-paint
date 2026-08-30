@@ -13,6 +13,7 @@ import {
 } from "@headless-paint/engine";
 import type { mat3 } from "gl-matrix";
 import { restoreFromCheckpoint } from "./checkpoint";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import { findBestCheckpointForLayer, getCommandAt } from "./history";
 import { createIncrementalStrokeRenderer } from "./incremental-stroke";
 import type {
@@ -150,6 +151,7 @@ export function rebuildLayerFromHistory<TCustom = never>(
   ) {
     clearLayer(layer);
   } else {
+    invalidateGpuLayerResidency(layer, options.accelerator);
     return {
       ok: false,
       reason: "missing-checkpoint",
@@ -178,7 +180,10 @@ export function rebuildLayerFromHistory<TCustom = never>(
         registry,
         options,
       );
-      if (!result.ok) return result;
+      if (!result.ok) {
+        invalidateGpuLayerResidency(layer, options.accelerator);
+        return result;
+      }
       copyLayerPixels(sourceLayer, layer);
       setLayerMeta(layer, command.meta);
       continue;
@@ -201,7 +206,10 @@ export function rebuildLayerFromHistory<TCustom = never>(
         registry,
         options,
       );
-      if (!result.ok) return result;
+      if (!result.ok) {
+        invalidateGpuLayerResidency(layer, options.accelerator);
+        return result;
+      }
       mergeLayerDown(layer, sourceLayer, {
         resultMeta: command.targetMetaAfter,
       });

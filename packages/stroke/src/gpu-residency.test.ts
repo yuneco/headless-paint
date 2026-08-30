@@ -22,6 +22,7 @@ import {
 } from "./history";
 import { createIncrementalStrokeRenderer } from "./incremental-stroke";
 import { expectPixelEqual, simulateLiveStroke } from "./parity-helpers";
+import type { HistoryState } from "./types";
 
 const WIDTH = 128;
 const HEIGHT = 80;
@@ -90,6 +91,11 @@ const SECOND_GPU_POINTS: readonly InputPoint[] = [
   { x: 54, y: 58, pressure: 0.8, timestamp: 100 },
   { x: 84, y: 52, pressure: 0.8, timestamp: 116 },
   { x: 112, y: 58, pressure: 0.8, timestamp: 132 },
+];
+const THIRD_GPU_POINTS: readonly InputPoint[] = [
+  { x: 22, y: 66, pressure: 0.75, timestamp: 200 },
+  { x: 54, y: 62, pressure: 0.75, timestamp: 216 },
+  { x: 92, y: 68, pressure: 0.75, timestamp: 232 },
 ];
 const CPU_POINTS: readonly InputPoint[] = [
   { x: 20, y: 42, pressure: 0.6, timestamp: 50 },
@@ -292,41 +298,78 @@ describe("GPU layer residency", () => {
     );
   });
 
-  it("Undoのhistory rebuild後は無効化され、次のGPU strokeでuploadする", () => {
+  it("GPU stroke x3 のUndo rebuild後は次のGPU strokeがhitし、常駐無効時とbyte一致する", () => {
+    const resident = renderGpuUndoThenStroke(true);
+    const uploadAfterRebuild = renderGpuUndoThenStroke(false);
+
+    expect(resident.residencyHits).toEqual([1]);
+    expect(resident.gpuUploadCount).toBe(0);
+    expect(uploadAfterRebuild.residencyHits).toEqual([0]);
+    expect(uploadAfterRebuild.gpuUploadCount).toBe(1);
+    expectPixelEqual(
+      resident.layer,
+      uploadAfterRebuild.layer,
+      "Undo rebuild residency vs upload-after-rebuild",
+    );
+  });
+
+  it("GPU→CPU strokeのUndoでcheckpoint復元後のGPU replayを常駐維持する", () => {
     const perf = configurePerf();
     const accelerator = requireAccelerator({ resident: true });
     const layer = createTestLayer();
     let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
-    history = beginHistoryMutation(history, { affectedLayers: [layer] });
-    const first = simulateLiveStroke({
+    history = recordStroke(
+      history,
       layer,
-      inputPoints: FIRST_GPU_POINTS,
-      style: GPU_STYLE,
-      filterPipeline: FILTER_PIPELINE,
-      expand: EXPAND,
-      brushSeed: 101,
-      alphaLocked: false,
+      GPU_STYLE,
+      FIRST_GPU_POINTS,
+      101,
+      accelerator,
+    );
+    history = recordStroke(
+      history,
+      layer,
+      CPU_STYLE,
+      CPU_POINTS,
+      77,
+      accelerator,
+    );
+
+    const undoResult = executeHistoryOp("undo", history, {
+      layers: [layer],
       accelerator,
     });
-    history = pushCommand(history, first.command, {
-      afterLayer: layer,
-      layerCount: 1,
-    });
-    history = beginHistoryMutation(history, { affectedLayers: [layer] });
-    const second = simulateLiveStroke({
+    expect(undoResult.ok).toBe(true);
+    perf.reset();
+
+    drawStroke(layer, GPU_STYLE, SECOND_GPU_POINTS, 303, EXPAND, accelerator);
+    const snapshot = perf.snapshot();
+    expect(snapshot.samples.gpuResidencyHit).toEqual([1]);
+    expect(snapshot.stages.gpuUpload.count).toBe(0);
+    accelerator.dispose();
+  });
+
+  it("CPU→GPU strokeのUndoでCPU replayが最後なら次のGPU strokeはmissする", () => {
+    const perf = configurePerf();
+    const accelerator = requireAccelerator({ resident: true });
+    const layer = createTestLayer();
+    let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+    history = recordStroke(
+      history,
       layer,
-      inputPoints: SECOND_GPU_POINTS,
-      style: GPU_STYLE,
-      filterPipeline: FILTER_PIPELINE,
-      expand: EXPAND,
-      brushSeed: 202,
-      alphaLocked: false,
+      CPU_STYLE,
+      CPU_POINTS,
+      77,
       accelerator,
-    });
-    history = pushCommand(history, second.command, {
-      afterLayer: layer,
-      layerCount: 1,
-    });
+    );
+    history = recordStroke(
+      history,
+      layer,
+      GPU_STYLE,
+      FIRST_GPU_POINTS,
+      101,
+      accelerator,
+    );
 
     const undoResult = executeHistoryOp("undo", history, {
       layers: [layer],
@@ -465,6 +508,84 @@ interface SequenceResult {
   readonly gpuUploadCount: number;
   readonly samplingCopyPixels: readonly number[];
   readonly gpuBranches: readonly number[];
+}
+
+function renderGpuUndoThenStroke(gpuResident: boolean): SequenceResult {
+  const perf = configurePerf();
+  const accelerator = requireAccelerator({ resident: gpuResident });
+  const layer = createTestLayer();
+  let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+  history = recordStroke(
+    history,
+    layer,
+    GPU_STYLE,
+    FIRST_GPU_POINTS,
+    101,
+    accelerator,
+  );
+  history = recordStroke(
+    history,
+    layer,
+    GPU_STYLE,
+    SECOND_GPU_POINTS,
+    202,
+    accelerator,
+  );
+  history = recordStroke(
+    history,
+    layer,
+    GPU_STYLE,
+    THIRD_GPU_POINTS,
+    303,
+    accelerator,
+  );
+
+  const undoResult = executeHistoryOp("undo", history, {
+    layers: [layer],
+    accelerator,
+  });
+  expect(undoResult.ok).toBe(true);
+  perf.reset();
+
+  drawStroke(layer, GPU_STYLE, THIRD_GPU_POINTS, 404, EXPAND, accelerator);
+  const snapshot = perf.snapshot();
+  const result = {
+    layer,
+    residencyHits: snapshot.samples.gpuResidencyHit,
+    gpuUploadCount: snapshot.stages.gpuUpload.count,
+    samplingCopyPixels: snapshot.samples.samplingCopyPixels,
+    gpuBranches: snapshot.samples.gpuBranches,
+  };
+  accelerator.dispose();
+  return result;
+}
+
+function recordStroke(
+  history: HistoryState,
+  layer: Layer,
+  style: StrokeStyle,
+  points: readonly InputPoint[],
+  brushSeed: number,
+  accelerator: BrushAccelerator,
+): HistoryState {
+  const prepared = beginHistoryMutation(history, {
+    affectedLayers: [layer],
+    layerCount: 1,
+  });
+  const { command } = simulateLiveStroke({
+    layer,
+    inputPoints: points,
+    style,
+    filterPipeline: FILTER_PIPELINE,
+    expand: EXPAND,
+    brushSeed,
+    alphaLocked: false,
+    accelerator,
+  });
+  return pushCommand(prepared, command, {
+    afterLayer: layer,
+    layerCount: 1,
+  });
 }
 
 function renderSequence(

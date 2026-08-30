@@ -259,7 +259,6 @@ function executeLayerDraw<TCustom>(
         persistence,
       );
     }
-    invalidateGpuLayerResidency(layer, deps.accelerator);
     if (!layer.meta.visible) visibilityFixLayerIds.push(layer.id);
   }
 
@@ -597,8 +596,6 @@ function executeStructural<TCustom>(
           persistence,
         );
       }
-      invalidateGpuLayerResidency(targetLayer, deps.accelerator);
-
       return {
         ok: true,
         next,
