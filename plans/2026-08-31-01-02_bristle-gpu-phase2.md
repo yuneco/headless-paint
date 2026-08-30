@@ -1,0 +1,116 @@
+# Rough bristle の GPU 化（GPU accelerator 第2フェーズ）
+
+作成: 2026-08-31 / ブランチ: `feature/acrylic-v2-production`（main マージ前にまとめてリリース）
+
+前提: `plans/2026-08-30-02-00_gpu-brush-accelerator-formal.md`（Acrylic 正式化、マージ済み PR #1）、`packages/engine/docs/gpu-acceleration.md`。
+
+## 0. 目的と非目標
+
+- 目的: Rough bristle（`type: "bristle"`）を既存の WebGL2 accelerator に乗せ、WebKit（Safari / iPad）での batch wall を下げる。mixing ON の Rough も同時に GPU 経路にする（現状は CPU `getImageData` 依存で重い）
+- 非目標: CPU 経路の見た目変更（fused raster 実験は外観差で棄却済み `fa2d7dc`）、Chromium 向け GPU、spray / 非混色 stamp、WebGPU
+- 採否: [improvement-threshold-policy] に従う。複雑性が増すので **WebKit の Rough batch wall p95 −20% 未満なら不採用**（目標は −50%）
+
+## 1. アクリルとハケは「どこまで同じか」（レビュー用の現状分析）
+
+概念: 「アクリル = 毛束1・かすれなし・mask 恒等のハケ」。実態を層ごとに見ると:
+
+| 層 | Acrylic (stamp+mixing) | Rough (bristle) | 揃っている? |
+|---|---|---|---|
+| 入力 → 点列補間 | centripetal 補間 + distance/time scheduler | 同じ補間、distance emission のみ（1px） | ◯ 共通コード |
+| batch 境界 | pointer batch ごと | 32ms または 1.5×lineWidth ごとに決定的 flush | △ 方針が違う（ハケは入力境界非依存にした経緯あり） |
+| **mask 生成** | tip texture を dab 位置に点置き（point sprite） | 掃引 quad（sweep）に符号付き dropout field + 紙目 + 反復接触を評価し MAX 蓄積 | **× 別物**。ここが両ブラシの本質的差分 |
+| **材料（色）** | `mixing.ts` の連続 RGBA field（pickup/restore/diffusion、checkpoint） | **同じ `mixing.ts`** をそのまま使用 | ◯ コード共通（型 `BrushMixing` も同一） |
+| 合成 | premultiplied `mask × material` を accum へ source-over | ink（profile atlas を sweep）に mask を destination-in、色（または field）を source-in → layer へ source-over | ◯ 結果の形は同じ（mask × material → accum） |
+| layer への書き戻し | GPU: batch ごとに dirty rect pack + ImageBitmap 1 枚 | CPU: run ごとに OffscreenCanvas 確保 + `drawImage` 1 回 | GPU 化で ◯ に揃う |
+| 常駐 / snapshot / cancel / context loss / 決定性 | GPU surface 契約 | 未対応（CPU のみ） | GPU 化で ◯ に揃う（契約は brush 非依存） |
+
+結論:
+
+- 「材料 → accum → layer」より後ろは**概念どおり共通**で、GPU 実装もそのまま共有できる（accum・field strip・snapshot・commit packing・residency・routing・context loss。コード量で GPU 側の約 7 割）
+- **mask 生成だけは CPU でも GPU でも別実装のまま**になる。アクリルは「tip 画像を置く」、ハケは「掃引面を field で削る」で、同じ数式の特殊ケースにはなっていない。CPU 側をひとつにするには stamp を sweep 化するか bristle を dab 化する必要があり、どちらも外観が変わる（過去の fused 実験で 4% の被覆差 → 棄却）。**CPU 側の統合はやらない**
+- 性能面: 共有部分（commit / snapshot / 常駐）は同じ数値になる。差が出るのは mask pass の重さで、ハケは chunk あたり field 評価 + 掃引 quad 描画が乗る。現状 Rough は WebKit で Call p50/p95 4/16ms（mixing OFF）。Acrylic の実績（8/11 → 2/2ms）から、ハケも p95 一桁 ms が目標
+- mixing ON の Rough は現在 CPU checkpoint の `getImageData` を踏む。GPU 化後は Acrylic と同じく readback ゼロになり、**初めて実用的な速度になる**（ここは統合の実利が最も大きい）
+
+## 2. 設計（GPU 側の plug-in）
+
+### 2.1 経路振り分け
+
+`incremental-stroke.ts` の `gpuStrokeEligible` を「stamp+mixing」から「stamp+mixing または bristle」に拡張する。bristle は mixing OFF でも GPU 適格（field は恒等色で初期化）。他条件（source-over・alphaLocked なし・branch 数・surface 取得）は共通。bristle の 32ms / 1.5B flush は維持し、flush ごとに `commitToLayer` を呼ぶ。
+
+### 2.2 GpuStrokeSurface への追加（内部 IF、公開しない）
+
+```ts
+// chunk = bristle の 1 run（updateDistancePx で区切られた点列）
+interface GpuBristleChunk {
+  readonly segments: readonly GpuSweepSegment[]; // 掃引 quad（from/to, 幅, overlap, frame）
+  readonly maskField: Float32Array;              // createBristleMaskField の出力（samples × bands）
+  readonly maskFieldColumns: number;
+  readonly maskFieldRows: number;
+  readonly profileAtlas: OffscreenCanvas;         // getBristleProfileAtlas
+  readonly grain: GpuGrainParams;                 // tooth tile texture + seed + hardness/amount
+  readonly bboxRect: Rect;
+}
+surface.pushBristleChunk(chunk: GpuBristleChunk): void;
+```
+
+パス構成（chunk ごと）:
+
+1. **mask pass**: chunk-local の RGBA8 texture（bbox サイズ、再利用）へ掃引 quad を描画。fragment は `maskField` texture を bilinear サンプル → `activationFromDistance(depositHardness)` → 紙目（tooth tile texture, document 空間）と反復接触（`hashSeed` を uint 演算で移植）→ `gl.blendEquation(MAX)` で蓄積
+2. **ink pass**: profile atlas texture を segment ごとに source-over で同じサイズの ink texture へ（drawSweep 相当。overlap / frame fallback は CPU と同じ式）
+3. **composite pass**: `ink.a × mask.a × material(field bilinear または style.color)` を accum へ source-over。ここから先は Acrylic と同じ（dirty rect → commit packing）
+
+`maskField` の生成（`createBristleMaskField`）は **CPU に残す**。9k cell 程度で軽く（Chromium 内訳 23%）、CPU と同じ Float32 を GPU が bilinear するので parity が取りやすい。GPU に移すのは重い部分（raster 28% + layerDraw 43% + canvas 確保）。
+
+### 2.3 決定性と parity
+
+- 同一 backend 内: live / replay / undo / redo は byte 一致（既存契約）
+- CPU vs GPU: Tier B（既存定義）。mask は scanline vs GPU raster の被覆差が出るので byte 一致は狙わない。紙目・反復接触の hash は整数演算を移植し一致させる
+- parity fixture に `rough bristle`（mixing OFF / ON、Expand あり）を追加
+
+### 2.4 残す CPU 経路
+
+CPU 実装は変更しない（Chromium / Node / context loss の再実行に使う）。
+
+## 3. 作業 Phase
+
+### Phase 0: contract-check spike（1〜2 日、専用 branch `experiment/bristle-gpu`）
+
+mask pass + ink pass を最小実装し、WebKit で Rough batch wall を計測。**Go 条件: p95 −20% 以上、目標 −50%**。parity は Tier B 見込みが立つこと。未達なら Hold に戻し理由を記録して終了。
+
+### Phase 1: API 設計・ドキュメント
+
+- `gpu-acceleration.md`: 適格条件に bristle を追加、描画モデルに mask / ink / composite pass、bristle の maskField を CPU 生成する理由、parity の扱い
+- `brush-api.md`: bristle の `accelerator` 転送
+- 公開 API 追加なし（`BrushAccelerator` / options / react `gpuBackend` は不変）
+
+### Phase 2: 利用イメージレビュー
+
+アプリ側は変更不要（`usePaintEngine({ gpuBackend })` のまま Rough も GPU）。デバッグパネルの Engine 表示はそのまま。レビュー対象は本ファイル §1・§2。
+
+### Phase 3: 実装（codex 委譲）
+
+1. surface に `pushBristleChunk` + 3 pass、shader-sources に bristle 用 shader、gl-resources に mask/ink texture・tooth tile texture
+2. `bristle.ts` の `renderSweepRun` を GPU surface があれば chunk を push する分岐に（CPU 経路は現状維持）
+3. `incremental-stroke.ts` の eligibility と bristle flush → commit
+4. テスト: gpu-stroke-surface（bristle chunk / MAX 蓄積 / cancel）、parity（rough OFF / ON / Expand）、gpu-residency（bristle undo/redo）
+5. `tools/bench` に Rough runner（`work.local/benchmark-rough-production-capture.mjs` を移植）
+
+### Phase 4: アーキテクトレビュー + 実機
+
+Mac WebKit / STP / iPad で計測、stall・undo/redo・ジェスチャの再確認（Acrylic と同じ手順）。
+
+## 4. ペンディング / リスク
+
+- GLSL の hash 移植で CPU と bit 一致しない場合、反復接触の点分布が変わる → parity が Tier B を超えるなら hash 結果を CPU で事前計算し texture で渡す案に切替
+- chunk-local texture のサイズは lineWidth と chunk 長で変動 → 最大サイズで確保し realloc しない（Acrylic と同方針）
+- Rough の 32ms flush と GPU commit の相性（commit 回数が減るので有利な見込み。要計測）
+
+## 5. Phase 0 計測記録
+
+環境: Mac WebKit（Playwright）、`tools/bench/benchmark-rough-capture.mjs endpoints`、Rough 60px、mixing OFF、REPEATS=4、コミット `144d260`（GPU 化前）。
+
+| backend | Call p50 / p95 / max (ms) | batch wall p95 / max | undo1 / undo9 (ms) |
+|---|---|---|---|
+| cpu（ベースライン） | 4-5 / 17-23 / 73 | 14-20 / 73 | 118 / 195 |
+
+注: runner の undo 計測で `NotFoundError` が複数出るが timing は取れている（runner 側の locator 問題、要確認）。
