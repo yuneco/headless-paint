@@ -867,6 +867,14 @@ export function usePaintEngine<TCustom = never>(
         isBrushMixingActive(brush.mixing) &&
         typeof requestAnimationFrame === "function"
       ) {
+        (
+          globalThis as {
+            __hpBrushPerf?: {
+              enabled: boolean;
+              recordEvent(name: string, details?: object): void;
+            };
+          }
+        ).__hpBrushPerf?.recordEvent?.("warmUpScheduled", { reason: op });
         const targetLayerId = shouldApplyActiveLayerHint(
           op,
           result,
@@ -878,6 +886,16 @@ export function usePaintEngine<TCustom = never>(
           const entry = entriesRef.current.find(
             (candidate) => candidate.id === targetLayerId,
           );
+          (
+            globalThis as {
+              __hpBrushPerf?: {
+                enabled: boolean;
+                recordEvent(name: string, details?: object): void;
+              };
+            }
+          ).__hpBrushPerf?.recordEvent?.("warmUpFired", {
+            reason: entry ? "entry" : "no-entry",
+          });
           if (entry) accelerator.warmUp(entry.committedLayer);
         });
       }
