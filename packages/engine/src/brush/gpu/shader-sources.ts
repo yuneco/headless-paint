@@ -266,6 +266,7 @@ precision highp float;
 
 uniform sampler2D uAtlas;
 uniform sampler2D uField;
+uniform sampler2D uPreviousField;
 uniform ivec2 uSurfaceSize;
 uniform ivec2 uAtlasSize;
 uniform ivec2 uAtlasOrigin;
@@ -276,6 +277,7 @@ uniform ivec2 uFieldTextureSize;
 uniform int uFieldRowStride;
 uniform int uBranchIndex;
 uniform bool uUseField;
+uniform float uFieldMixWeight;
 uniform vec4 uColor;
 out vec4 outColor;
 
@@ -291,7 +293,12 @@ vec4 sampleMaterial(vec2 localPosition) {
     float(uBranchIndex * uFieldRowStride) +
       clamp(normalized.y * float(uFieldSize.y) - 0.5, 0.0, float(uFieldSize.y - 1))
   );
-  return texture(uField, (fieldTexel + vec2(0.5)) / vec2(uFieldTextureSize));
+  vec2 fieldUv = (fieldTexel + vec2(0.5)) / vec2(uFieldTextureSize);
+  return mix(
+    texture(uPreviousField, fieldUv),
+    texture(uField, fieldUv),
+    clamp(uFieldMixWeight, 0.0, 1.0)
+  );
 }
 
 void main() {
@@ -422,7 +429,9 @@ precision highp float;
 uniform sampler2D uCheckpoints;
 uniform sampler2D uPreviousField;
 uniform highp sampler2D uRunData;
+uniform sampler2D uFlushStartAccum;
 uniform ivec2 uFieldDimensions;
+uniform ivec2 uSurfaceDimensions;
 uniform int uRunCount;
 
 out vec4 outColor;
@@ -471,6 +480,53 @@ vec4 sampleCheckpointBilinear(
   );
 }
 
+vec4 flushStartTexel(ivec2 tilePixel, vec4 checkpointRect) {
+  ivec2 checkpointSize = ivec2(checkpointRect.zw);
+  if (
+    tilePixel.x < 0 || tilePixel.y < 0 ||
+    tilePixel.x >= checkpointSize.x || tilePixel.y >= checkpointSize.y
+  ) {
+    return vec4(0.0);
+  }
+  ivec2 documentPixel = ivec2(checkpointRect.xy) + tilePixel;
+  if (
+    documentPixel.x < 0 || documentPixel.y < 0 ||
+    documentPixel.x >= uSurfaceDimensions.x ||
+    documentPixel.y >= uSurfaceDimensions.y
+  ) {
+    return vec4(0.0);
+  }
+  vec4 premultiplied = texelFetch(
+    uFlushStartAccum,
+    ivec2(documentPixel.x, uSurfaceDimensions.y - 1 - documentPixel.y),
+    0
+  );
+  if (premultiplied.a <= 0.0) return vec4(0.0);
+  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
+}
+
+vec4 sampleFlushStartBilinear(
+  vec2 documentPosition,
+  vec4 checkpointRect
+) {
+  vec2 samplePosition = documentPosition - checkpointRect.xy - vec2(0.5);
+  ivec2 p0 = ivec2(floor(samplePosition));
+  vec2 fraction = samplePosition - vec2(p0);
+  return mix(
+    mix(
+      flushStartTexel(p0, checkpointRect),
+      flushStartTexel(p0 + ivec2(1, 0), checkpointRect),
+      fraction.x
+    ),
+    mix(
+      flushStartTexel(p0 + ivec2(0, 1), checkpointRect),
+      flushStartTexel(p0 + ivec2(1, 1), checkpointRect),
+      fraction.x
+    ),
+    fraction.y
+  );
+}
+
 void main() {
   ivec2 stripCoord = ivec2(gl_FragCoord.xy);
   int branchIndex = stripCoord.y / uFieldDimensions.y;
@@ -498,11 +554,13 @@ void main() {
       local.x * cosine - local.y * sine,
       local.x * sine + local.y * cosine
     );
-    vec4 sampled = sampleCheckpointBilinear(
-      documentPosition,
-      checkpointRect,
-      atlasOrigin
-    );
+    vec4 sampled = rates.w > 0.5
+      ? sampleFlushStartBilinear(documentPosition, checkpointRect)
+      : sampleCheckpointBilinear(
+          documentPosition,
+          checkpointRect,
+          atlasOrigin
+        );
     float pickupAmount = rates.x * sampled.a;
     vec3 picked = mix(current.rgb, sampled.rgb, pickupAmount);
     current = vec4(

@@ -157,6 +157,90 @@ describe("GpuStrokeSurface", () => {
     expect(snapshot.samples.gpuBristlePasses).toEqual([4]);
   });
 
+  it("perFlush composite は flush 前後の field を距離進行度で補間する", () => {
+    const layer = createLayer(128, 128);
+    layer.ctx.fillStyle = "rgb(20, 210, 40)";
+    layer.ctx.fillRect(0, 0, layer.width, layer.height);
+    const surface = createGpuStrokeSurface(
+      layer.width,
+      layer.height,
+      "bitmap",
+      "perFlush",
+    );
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const baseColor = { r: 220, g: 30, b: 20, a: 255 } as const;
+    const makeChunk = (offsetX: number): GpuBristleChunk => ({
+      segments: [
+        {
+          ...makeSweepSegment(0, 1),
+          fromX: 20 + offsetX,
+          toX: 40 + offsetX,
+        },
+      ],
+      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
+      maskFieldColumns: 2,
+      maskFieldRows: 2,
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: {
+        left: 12 + offsetX,
+        top: 22,
+        right: 48 + offsetX,
+        bottom: 42,
+      },
+      brushSize: 12,
+      depositHardness: 1,
+      color: baseColor,
+      useMaterialField: true,
+    });
+
+    surface.initializeMaterialField(2, 2, baseColor);
+    surface.initializeMaterialCheckpoint(0, 0, 128);
+    surface.beginBranchBatch();
+    for (const offsetX of [0, 36, 72]) {
+      surface.pushBristleChunk(makeChunk(offsetX));
+      surface.updateMaterialField({
+        baseColor,
+        centerX: 30 + offsetX,
+        centerY: 32,
+        angle: 0,
+        sampleSize: 12,
+        columns: 2,
+        rows: 2,
+        pickupRatePerPx: 1,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 4,
+      });
+    }
+    surface.endBranchBatch();
+    surface.commitToLayer(layer);
+
+    const first = layer.ctx.getImageData(30, 32, 1, 1).data;
+    const middle = layer.ctx.getImageData(66, 32, 1, 1).data;
+    const last = layer.ctx.getImageData(102, 32, 1, 1).data;
+    expect(first[0]).toBeGreaterThan(middle[0] ?? 0);
+    expect(middle[0]).toBeGreaterThan(last[0] ?? 0);
+    expect(first[1]).toBeLessThan(middle[1] ?? 0);
+    expect(middle[1]).toBeLessThan(last[1] ?? 0);
+  });
+
   it("perFlush field は各 bristle run の checkpoint geometry を積分する", () => {
     const source = new OffscreenCanvas(72, 48);
     const sourceCtx = source.getContext("2d");

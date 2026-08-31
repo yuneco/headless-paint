@@ -50,6 +50,7 @@ export interface GpuStrokeGlResources {
   };
   readonly fieldBatchMixUniforms: {
     readonly fieldDimensions: WebGLUniformLocation;
+    readonly surfaceDimensions: WebGLUniformLocation;
     readonly runCount: WebGLUniformLocation;
   };
   readonly fieldDiffusionUniforms: {
@@ -231,6 +232,10 @@ export function createGpuStrokeGlResources(
       gl.getUniformLocation(fieldBatchMixProgram, "uFieldDimensions"),
       "GPU material field batch mix dimensions uniform",
     ),
+    surfaceDimensions: requireResource(
+      gl.getUniformLocation(fieldBatchMixProgram, "uSurfaceDimensions"),
+      "GPU material field batch mix surface dimensions uniform",
+    ),
     runCount: requireResource(
       gl.getUniformLocation(fieldBatchMixProgram, "uRunCount"),
       "GPU material field batch mix run count uniform",
@@ -350,6 +355,13 @@ export function createGpuStrokeGlResources(
       "GPU material field batch run data sampler uniform",
     ),
     2,
+  );
+  gl.uniform1i(
+    requireResource(
+      gl.getUniformLocation(fieldBatchMixProgram, "uFlushStartAccum"),
+      "GPU material field batch accumulation sampler uniform",
+    ),
+    3,
   );
   gl.useProgram(fieldDiffusionProgram);
   gl.uniform1i(

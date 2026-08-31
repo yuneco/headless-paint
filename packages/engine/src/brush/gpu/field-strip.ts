@@ -53,10 +53,14 @@ export interface FieldPassResources {
   };
   readonly fieldBatchMixUniforms: {
     readonly fieldDimensions: WebGLUniformLocation;
+    readonly surfaceDimensions: WebGLUniformLocation;
     readonly runCount: WebGLUniformLocation;
   };
   readonly fieldBatchCheckpointTexture: WebGLTexture;
   readonly fieldBatchRunDataTexture: WebGLTexture;
+  readonly fieldBatchAccumTexture: WebGLTexture;
+  readonly surfaceWidth: number;
+  readonly surfaceHeight: number;
   readonly fieldDiffusionUniforms: {
     readonly fieldDimensions: WebGLUniformLocation;
     readonly strengths: WebGLUniformLocation;
@@ -82,6 +86,7 @@ export interface FieldBatchCheckpoint {
   readonly textureSize: number;
   readonly atlasX: number;
   readonly atlasY: number;
+  readonly sampleFlushStartAccum: boolean;
 }
 
 export interface FieldBatchMixRun {
@@ -232,7 +237,7 @@ export function executeMaterialFieldBatchMixPass(
       distance,
     );
     runData[offset + 14] = run.branchIndex;
-    runData[offset + 15] = 0;
+    runData[offset + 15] = checkpoint.sampleFlushStartAccum ? 1 : 0;
     runData[offset + 16] = checkpoint.atlasX;
     runData[offset + 17] = checkpoint.atlasY;
   }
@@ -297,6 +302,8 @@ export function executeMaterialFieldBatchMixPass(
   );
   gl.activeTexture(gl.TEXTURE2);
   gl.bindTexture(gl.TEXTURE_2D, resources.fieldBatchRunDataTexture);
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, resources.fieldBatchAccumTexture);
   if (
     scratch.batchMixColumns !== resources.fieldColumns ||
     scratch.batchMixRows !== resources.fieldRows
@@ -309,6 +316,11 @@ export function executeMaterialFieldBatchMixPass(
     scratch.batchMixColumns = resources.fieldColumns;
     scratch.batchMixRows = resources.fieldRows;
   }
+  gl.uniform2i(
+    resources.fieldBatchMixUniforms.surfaceDimensions,
+    resources.surfaceWidth,
+    resources.surfaceHeight,
+  );
   gl.uniform1i(resources.fieldBatchMixUniforms.runCount, runs.length);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   return startedAt;

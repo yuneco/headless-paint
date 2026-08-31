@@ -301,6 +301,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       fieldBatchMixUniforms: this.glResources.fieldBatchMixUniforms,
       fieldBatchCheckpointTexture: this.glResources.fieldBatchCheckpointTexture,
       fieldBatchRunDataTexture: this.glResources.fieldBatchRunDataTexture,
+      fieldBatchAccumTexture: this.accumTexture,
+      surfaceWidth: this.width,
+      surfaceHeight: this.height,
       fieldDiffusionUniforms: this.glResources.fieldDiffusionUniforms,
       fieldPassScratch: this.glResources.fieldPassScratch,
       bindFieldFramebuffer: (index) => this.bindFieldFramebuffer(index),
@@ -1021,7 +1024,51 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       }
     }
 
+    const aggregatedUpdates = latestUpdates.map((update, branchIndex) => {
+      if (!update) return undefined;
+      const distancePx = updateDistances[branchIndex] ?? 0;
+      return {
+        ...update,
+        distancePx,
+        // perFlush is deliberately capped at one coarse diffusion pass. The
+        // experiment measures pass fixed cost, so replaying N diffusion passes
+        // here would reintroduce the cost this cadence is meant to remove.
+        diffusionRatePerPx:
+          distancePx > 0
+            ? Math.min(update.diffusionRatePerPx, 1 / distancePx)
+            : update.diffusionRatePerPx,
+      };
+    });
+    let fieldUpdateStartedAt = 0;
+    const fieldStartIndex = this.activeFieldIndex;
+    let fieldEndIndex = fieldStartIndex;
+    const hasFieldUpdates = aggregatedUpdates.some(
+      (update) => update !== undefined,
+    );
+    if (hasFieldUpdates) {
+      // A checkpoint scheduled inside this flush is persisted only after its
+      // run composites. Until then the batch shader samples the same rectangle
+      // from F0, avoiding an extra checkpoint copy before the field pass.
+      const runs: FieldBatchMixRun[] = pendingRuns.map((run) => {
+        const checkpoint = checkpointLayouts.get(run.checkpoint);
+        if (!checkpoint) {
+          throw new Error("GPU material field batch checkpoint is unavailable");
+        }
+        return {
+          branchIndex: run.branchIndex,
+          update: run.update,
+          checkpoint,
+        };
+      });
+      fieldUpdateStartedAt = executeMaterialFieldBatchMixPass(
+        this.fieldPassResources(),
+        runs,
+      );
+      fieldEndIndex = oppositeFieldIndex(fieldStartIndex);
+    }
+
     const bristleDraws: GpuBristleDraw[] = [];
+    const compositedDistances = new Float64Array(this.branchCount);
 
     for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
       for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
@@ -1029,6 +1076,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         if (!segment) continue;
         this.drawDabs(segment.dabs);
         const checkpoint = checkpointBySegment.get(segment);
+        const runDistance = Math.max(0, segment.update?.distancePx ?? 0);
+        const runEndDistance =
+          (compositedDistances[branchIndex] ?? 0) + runDistance;
+        const totalDistance = updateDistances[branchIndex] ?? 0;
+        const fieldMixWeight =
+          totalDistance > 0 ? clampUnit(runEndDistance / totalDistance) : 1;
         for (
           let chunkIndex = 0;
           chunkIndex < segment.bristleChunks.length;
@@ -1038,7 +1091,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
           if (!chunk) continue;
           bristleDraws.push({
             chunk,
-            target: this.bristleTarget(branchIndex),
+            target: this.bristleTarget(branchIndex, {
+              previousFieldIndex: fieldStartIndex,
+              fieldIndex: fieldEndIndex,
+              fieldMixWeight,
+            }),
             afterComposite:
               checkpoint &&
               !checkpoint.capture?.fromStrokeStart &&
@@ -1054,6 +1111,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
                 : undefined,
           });
         }
+        compositedDistances[branchIndex] = runEndDistance;
         if (
           checkpoint &&
           !checkpoint.capture?.fromStrokeStart &&
@@ -1080,38 +1138,11 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
     this.persistPerFlushCheckpoints(currentCheckpoints, checkpointLayouts);
 
-    const aggregatedUpdates = latestUpdates.map((update, branchIndex) => {
-      if (!update) return undefined;
-      const distancePx = updateDistances[branchIndex] ?? 0;
-      return {
-        ...update,
-        distancePx,
-        // perFlush is deliberately capped at one coarse diffusion pass. The
-        // experiment measures pass fixed cost, so replaying N diffusion passes
-        // here would reintroduce the cost this cadence is meant to remove.
-        diffusionRatePerPx:
-          distancePx > 0
-            ? Math.min(update.diffusionRatePerPx, 1 / distancePx)
-            : update.diffusionRatePerPx,
-      };
-    });
-    if (aggregatedUpdates.some((update) => update !== undefined)) {
-      const runs: FieldBatchMixRun[] = pendingRuns.map((run) => {
-        const checkpoint = checkpointLayouts.get(run.checkpoint);
-        if (!checkpoint) {
-          throw new Error("GPU material field batch checkpoint is unavailable");
-        }
-        return {
-          branchIndex: run.branchIndex,
-          update: run.update,
-          checkpoint,
-        };
-      });
-      const startedAt = executeMaterialFieldBatchMixPass(
-        this.fieldPassResources(),
-        runs,
+    if (hasFieldUpdates) {
+      this.executeMaterialFieldDiffusionBatch(
+        aggregatedUpdates,
+        fieldUpdateStartedAt,
       );
-      this.executeMaterialFieldDiffusionBatch(aggregatedUpdates, startedAt);
       passCount += 1 + diffusionPassCount(aggregatedUpdates);
     }
     if (passCount > 0) perfSample("gpuBristlePasses", passCount);
@@ -1219,6 +1250,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         textureSize: checkpointSize(checkpoint),
         atlasX: (index % columns) * cellSize,
         atlasY: Math.floor(index / columns) * cellSize,
+        sampleFlushStartAccum:
+          !checkpoint.current && !checkpoint.capture?.fromStrokeStart,
       });
     }
     return layouts;
@@ -1380,10 +1413,22 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     );
   }
 
-  private bristleTarget(branchIndex: number) {
+  private bristleTarget(
+    branchIndex: number,
+    fieldInterpolation?: {
+      readonly previousFieldIndex: 0 | 1;
+      readonly fieldIndex: 0 | 1;
+      readonly fieldMixWeight: number;
+    },
+  ) {
+    const previousFieldIndex =
+      fieldInterpolation?.previousFieldIndex ?? this.activeFieldIndex;
+    const fieldIndex = fieldInterpolation?.fieldIndex ?? this.activeFieldIndex;
     return {
       accumFramebuffer: this.framebuffer,
-      fieldTexture: this.fieldTextures[this.activeFieldIndex],
+      fieldTexture: this.fieldTextures[fieldIndex],
+      previousFieldTexture: this.fieldTextures[previousFieldIndex],
+      fieldMixWeight: fieldInterpolation?.fieldMixWeight ?? 1,
       fieldColumns: this.fieldColumns,
       fieldRows: this.fieldRows,
       fieldTextureWidth: this.fieldTextureWidth,

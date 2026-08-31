@@ -44,12 +44,15 @@ interface CompositeUniforms {
   readonly fieldRowStride: WebGLUniformLocation;
   readonly branchIndex: WebGLUniformLocation;
   readonly useField: WebGLUniformLocation;
+  readonly fieldMixWeight: WebGLUniformLocation;
   readonly color: WebGLUniformLocation;
 }
 
 export interface BristlePassTarget {
   readonly accumFramebuffer: WebGLFramebuffer;
   readonly fieldTexture: WebGLTexture;
+  readonly previousFieldTexture: WebGLTexture;
+  readonly fieldMixWeight: number;
   readonly fieldColumns: number;
   readonly fieldRows: number;
   readonly fieldTextureWidth: number;
@@ -139,6 +142,7 @@ export function createGpuBristlePassResources(
     fieldRowStride: uniformLocation(gl, compositeProgram, "uFieldRowStride"),
     branchIndex: uniformLocation(gl, compositeProgram, "uBranchIndex"),
     useField: uniformLocation(gl, compositeProgram, "uUseField"),
+    fieldMixWeight: uniformLocation(gl, compositeProgram, "uFieldMixWeight"),
     color: uniformLocation(gl, compositeProgram, "uColor"),
   };
   const maskVertexArray = requireResource(
@@ -214,6 +218,7 @@ export function createGpuBristlePassResources(
   gl.useProgram(compositeProgram);
   gl.uniform1i(uniformLocation(gl, compositeProgram, "uAtlas"), 0);
   gl.uniform1i(uniformLocation(gl, compositeProgram, "uField"), 1);
+  gl.uniform1i(uniformLocation(gl, compositeProgram, "uPreviousField"), 2);
   gl.uniform2i(compositeUniforms.surfaceSize, surfaceWidth, surfaceHeight);
 
   let atlasWidth = 0;
@@ -580,6 +585,7 @@ export function createGpuBristlePassResources(
       compositeUniforms.useField,
       chunk.useMaterialField && target.fieldColumns > 0 ? 1 : 0,
     );
+    gl.uniform1f(compositeUniforms.fieldMixWeight, target.fieldMixWeight);
     gl.uniform4f(
       compositeUniforms.color,
       chunk.color.r / 255,
@@ -594,6 +600,13 @@ export function createGpuBristlePassResources(
       gl.TEXTURE_2D,
       chunk.useMaterialField && target.fieldColumns > 0
         ? target.fieldTexture
+        : fallbackMaterialTexture,
+    );
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(
+      gl.TEXTURE_2D,
+      chunk.useMaterialField && target.fieldColumns > 0
+        ? target.previousFieldTexture
         : fallbackMaterialTexture,
     );
   }
