@@ -175,3 +175,15 @@ probe6（1 stroke 150 点、WebKit）:
 表現優先で作ってきた Rough の要素のうち価値の薄い部分は CPU 側含め削る/調整して良い。毛束表現は最終パラメータで大部分潰れており候補。官能評価は S 字 + 実ストローク（comb-06 fixture）で行う。順番: A) replay の中間 commit 廃止 → B) field 反映粒度の flush 化 + run の pass 統合 → C) 毛束 dropout field の簡略化（A/B 画像で官能判定）。
 
 - **A 結果（`cd81832`）**: replay/rebuild を final commit 化。undo 5本（mixing ON, webgl2）2058 → 1872ms（−9%）。ImageBitmap は消えたが GPU pass 実行は replay でも同数走り最終同期で待つため、undo の支配項も pass 数。B が本丸と判明。参考: 同条件 CPU undo 2356ms（GPU は −21%）
+
+### 5.8 B: field 反映粒度 perFlush の結果（`68e9936`、実験フラグ `?gpuBristleField=perFlush`）
+
+性能（WebKit、mixing ON、1 stroke 150 点）:
+
+| 指標 | perRun | perFlush |
+|---|---|---|
+| stroke（appendCommitted + gpuCommit） | 266ms | **99ms（−63%）** |
+| undo 5 本合計 | 1959ms | **931ms（−52%）** |
+| pass 数 / flush | ≈20 | 3〜4 |
+
+見た目（下地の赤帯 3 本 + 混色ストローク、comb-06 fixture）: perFlush は **pickup が明らかに弱い**。粒度低下に加え、flush 集約が「最新 checkpoint × 最後の geometry × 合計距離」で拾うため、flush 途中に横切った下地色を取り込めていない疑い。表現として許容不可の見込み → 集約方法の改善（run ごとの geometry で checkpoint を積分しつつ pass はまとめる）が次の課題。ユーザー判定待ち。
