@@ -49,6 +49,7 @@ function replayStrokeCommand(
     registry,
     accelerator,
     gpuOwnerLabel,
+    gpuCommitCadence: "final",
   });
   renderer.feedMany(command.inputPoints);
   renderer.finalize();

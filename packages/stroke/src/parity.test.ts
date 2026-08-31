@@ -404,6 +404,10 @@ describe("GPU mixing feedMany parity", () => {
 
 describe("GPU rough bristle parity", () => {
   it("mixing OFF の live/replay/undo/redo が同一 backend 内で byte-identical", () => {
+    const perf = getBrushPerfTestBridge();
+    if (!perf) throw new Error("Brush perf debug bridge is unavailable");
+    perf.enabled = true;
+    perf.reset();
     const accelerator = createTestAccelerator();
     const style = makeStyle({
       color: { r: 205, g: 55, b: 25, a: 255 },
@@ -429,8 +433,11 @@ describe("GPU rough bristle parity", () => {
       alphaLocked: false,
       accelerator,
     });
+    expect(perf.snapshot().stages.gpuCommit.count).toBeGreaterThan(1);
+    perf.reset();
     const replayLayer = createTestLayer();
     replayOnLayer(command, replayLayer, baseLayer, accelerator);
+    expect(perf.snapshot().stages.gpuCommit.count).toBe(1);
     expectPixelEqual(liveLayer, replayLayer, "GPU rough live vs replay");
 
     history = pushCommand(
@@ -449,6 +456,7 @@ describe("GPU rough bristle parity", () => {
     expect(undoResult.ok).toBe(true);
     expectPixelEqual(undoLayer, baseLayer, "GPU rough undo");
 
+    perf.reset();
     const redoLayer = createTestLayer();
     const redoResult = rebuildLayerFromHistory(
       redoLayer,
@@ -457,6 +465,7 @@ describe("GPU rough bristle parity", () => {
       { accelerator },
     );
     expect(redoResult.ok).toBe(true);
+    expect(perf.snapshot().stages.gpuCommit.count).toBe(1);
     expectPixelEqual(redoLayer, replayLayer, "GPU rough redo");
     accelerator.dispose();
   });
@@ -730,8 +739,11 @@ describe("GPU mixing Expand parity", () => {
       alphaLocked: false,
       accelerator,
     });
+    expect(perf.snapshot().stages.gpuCommit.count).toBeGreaterThan(1);
+    perf.reset();
     const replayLayer = createTestLayer();
     replayOnLayer(command, replayLayer, baseLayer, accelerator);
+    expect(perf.snapshot().stages.gpuCommit.count).toBe(1);
 
     expectPixelEqual(
       liveLayer,
@@ -979,6 +991,7 @@ function getBrushPerfTestBridge():
         readonly stages: {
           readonly gpuFlush: { readonly count: number };
           readonly gpuFieldUpdate: { readonly count: number };
+          readonly gpuCommit: { readonly count: number };
           readonly checkpointReadback: { readonly count: number };
         };
         readonly samples: {
@@ -997,6 +1010,7 @@ function getBrushPerfTestBridge():
           readonly stages: {
             readonly gpuFlush: { readonly count: number };
             readonly gpuFieldUpdate: { readonly count: number };
+            readonly gpuCommit: { readonly count: number };
             readonly checkpointReadback: { readonly count: number };
           };
           readonly samples: {

@@ -60,11 +60,19 @@ export interface IncrementalStrokeRenderer {
   cancel(): boolean;
 }
 
+type GpuCommitCadence = "perFlush" | "final";
+
+type IncrementalStrokeRendererInternalConfig =
+  IncrementalStrokeRendererConfig & {
+    readonly gpuCommitCadence?: GpuCommitCadence;
+  };
+
 const BRISTLE_BATCH_INTERVAL_MS = 32;
 
 export function createIncrementalStrokeRenderer(
-  config: IncrementalStrokeRendererConfig,
+  config: IncrementalStrokeRendererInternalConfig,
 ): IncrementalStrokeRenderer {
+  const gpuCommitCadence = config.gpuCommitCadence ?? "perFlush";
   const compiledFilterPipeline = compileFilterPipeline(config.filterPipeline);
   const compiledExpand = compileExpand(config.expand);
   const gpuRuntime = getGpuStrokeRuntime(config.accelerator);
@@ -136,6 +144,12 @@ export function createIncrementalStrokeRenderer(
     if (!gpuStrokeActive) return false;
     gpuStrokeLost ||= gpuRuntime?.isStrokeLost(gpuOwner) ?? true;
     return gpuStrokeLost;
+  }
+
+  function commitGpuStrokeToLayer(): void {
+    if (!gpuStrokeActive || detectGpuStrokeLoss()) return;
+    gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+    detectGpuStrokeLoss();
   }
 
   function appendProcessedBatch(
@@ -224,10 +238,7 @@ export function createIncrementalStrokeRenderer(
     if (gpuStrokeActive) gpuInputPoints.push(...points);
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
-      if (gpuStrokeActive && !detectGpuStrokeLoss()) {
-        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
-        detectGpuStrokeLoss();
-      }
+      if (gpuCommitCadence === "perFlush") commitGpuStrokeToLayer();
       return;
     }
     for (const point of points) {
@@ -237,10 +248,7 @@ export function createIncrementalStrokeRenderer(
       ) {
         processBatch(pendingBristlePoints);
         pendingBristlePoints = [];
-        if (gpuStrokeActive && !detectGpuStrokeLoss()) {
-          gpuRuntime?.commitToLayer(gpuOwner, config.layer);
-          detectGpuStrokeLoss();
-        }
+        if (gpuCommitCadence === "perFlush") commitGpuStrokeToLayer();
       }
     }
   }
@@ -281,10 +289,7 @@ export function createIncrementalStrokeRenderer(
       strokeSession = strokeResult.state;
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
       if (gpuStrokeActive) {
-        if (!detectGpuStrokeLoss()) {
-          gpuRuntime?.commitToLayer(gpuOwner, config.layer);
-          detectGpuStrokeLoss();
-        }
+        commitGpuStrokeToLayer();
         gpuRuntime?.endStroke(gpuOwner);
         if (gpuStrokeLost) recoverLostGpuStroke();
       }
