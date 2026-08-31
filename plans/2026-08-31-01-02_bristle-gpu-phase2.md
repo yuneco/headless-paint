@@ -169,3 +169,9 @@ probe6（1 stroke 150 点、WebKit）:
 - 見た目は Tier B 相当で一致
 - 残る改善余地: flush 内で field 更新を挟まない run の mask/ink をまとめて 1 pass にする surface 側 queue 化（mixing ON でさらに削減の見込み）。iPad での mixing OFF 逆転の確認
 - ペンディング: mixing ON の composite における field UV の契約（現状は chunk bbox 全体への bilinear 近似。CPU は segment ごとの atlas 変換）。正式化時に定義が必要
+
+### 5.7 表現調整の探索（ユーザー方針 2026-08-31）
+
+表現優先で作ってきた Rough の要素のうち価値の薄い部分は CPU 側含め削る/調整して良い。毛束表現は最終パラメータで大部分潰れており候補。官能評価は S 字 + 実ストローク（comb-06 fixture）で行う。順番: A) replay の中間 commit 廃止 → B) field 反映粒度の flush 化 + run の pass 統合 → C) 毛束 dropout field の簡略化（A/B 画像で官能判定）。
+
+- **A 結果（`cd81832`）**: replay/rebuild を final commit 化。undo 5本（mixing ON, webgl2）2058 → 1872ms（−9%）。ImageBitmap は消えたが GPU pass 実行は replay でも同数走り最終同期で待つため、undo の支配項も pass 数。B が本丸と判明。参考: 同条件 CPU undo 2356ms（GPU は −21%）
