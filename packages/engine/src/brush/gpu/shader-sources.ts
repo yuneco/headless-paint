@@ -80,7 +80,8 @@ layout(location = 1) in vec2 aFieldCoord;
 layout(location = 2) in float aPressure;
 layout(location = 3) in float aTrialId;
 
-uniform vec2 uTargetSize;
+uniform vec2 uAtlasSize;
+uniform vec2 uAtlasOrigin;
 
 out vec2 vFieldCoord;
 out float vPressure;
@@ -88,8 +89,8 @@ flat out float vTrialId;
 
 void main() {
   gl_Position = vec4(
-    aPosition.x / uTargetSize.x * 2.0 - 1.0,
-    1.0 - aPosition.y / uTargetSize.y * 2.0,
+    (aPosition.x + uAtlasOrigin.x) / uAtlasSize.x * 2.0 - 1.0,
+    1.0 - (aPosition.y + uAtlasOrigin.y) / uAtlasSize.y * 2.0,
     0.0,
     1.0
   );
@@ -107,7 +108,9 @@ uniform sampler2D uMaskField;
 uniform sampler2D uTooth;
 uniform ivec2 uFieldSize;
 uniform ivec2 uMaskFieldTextureSize;
-uniform vec2 uTargetSize;
+uniform ivec2 uMaskFieldOrigin;
+uniform vec2 uAtlasSize;
+uniform vec2 uAtlasOrigin;
 uniform ivec2 uDocumentOrigin;
 uniform float uDepositHardness;
 uniform float uGrainAmount;
@@ -137,9 +140,12 @@ float sampleField(vec2 coord) {
   ivec2 p0 = ivec2(floor(clamped));
   ivec2 p1 = min(p0 + ivec2(1), uFieldSize - ivec2(1));
   vec2 fraction = clamped - vec2(p0);
-  vec2 fieldUvScale = vec2(uFieldSize) / vec2(uMaskFieldTextureSize);
-  vec2 p0Uv = (vec2(p0) + vec2(0.5)) / vec2(uFieldSize) * fieldUvScale;
-  vec2 p1Uv = (vec2(p1) + vec2(0.5)) / vec2(uFieldSize) * fieldUvScale;
+  vec2 p0Uv =
+    (vec2(uMaskFieldOrigin + p0) + vec2(0.5)) /
+    vec2(uMaskFieldTextureSize);
+  vec2 p1Uv =
+    (vec2(uMaskFieldOrigin + p1) + vec2(0.5)) /
+    vec2(uMaskFieldTextureSize);
   return mix(
     mix(
       texture(uMaskField, p0Uv).r,
@@ -194,8 +200,8 @@ void main() {
     uDepositHardness
   );
   ivec2 localPixel = ivec2(
-    int(floor(gl_FragCoord.x)),
-    int(uTargetSize.y) - 1 - int(floor(gl_FragCoord.y))
+    int(floor(gl_FragCoord.x)) - int(uAtlasOrigin.x),
+    int(uAtlasSize.y) - 1 - int(floor(gl_FragCoord.y)) - int(uAtlasOrigin.y)
   );
   if (
     !hasSurfaceContact(
@@ -215,13 +221,14 @@ precision highp float;
 
 layout(location = 0) in vec2 aPosition;
 layout(location = 1) in vec2 aUv;
-uniform vec2 uTargetSize;
+uniform vec2 uAtlasSize;
+uniform vec2 uAtlasOrigin;
 out vec2 vUv;
 
 void main() {
   gl_Position = vec4(
-    aPosition.x / uTargetSize.x * 2.0 - 1.0,
-    1.0 - aPosition.y / uTargetSize.y * 2.0,
+    (aPosition.x + uAtlasOrigin.x) / uAtlasSize.x * 2.0 - 1.0,
+    1.0 - (aPosition.y + uAtlasOrigin.y) / uAtlasSize.y * 2.0,
     0.0,
     1.0
   );
@@ -260,7 +267,8 @@ precision highp float;
 uniform sampler2D uAtlas;
 uniform sampler2D uField;
 uniform ivec2 uSurfaceSize;
-uniform ivec2 uTargetSize;
+uniform ivec2 uAtlasSize;
+uniform ivec2 uAtlasOrigin;
 uniform ivec2 uChunkSize;
 uniform ivec2 uDocumentOrigin;
 uniform ivec2 uFieldSize;
@@ -294,13 +302,13 @@ void main() {
   vec2 localPosition = documentPosition - vec2(uDocumentOrigin);
   ivec2 localPixel = ivec2(floor(localPosition));
   ivec2 texturePixel = ivec2(
-    localPixel.x,
-    uTargetSize.y - 1 - localPixel.y
+    uAtlasOrigin.x + localPixel.x,
+    uAtlasSize.y - 1 - uAtlasOrigin.y - localPixel.y
   );
   float mask = texelFetch(uAtlas, texturePixel, 0).a;
   float ink = texelFetch(
     uAtlas,
-    texturePixel + ivec2(uTargetSize.x, 0),
+    texturePixel + ivec2(uChunkSize.x, 0),
     0
   ).a;
   vec4 material = sampleMaterial(localPosition);

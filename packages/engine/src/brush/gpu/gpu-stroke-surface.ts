@@ -1,5 +1,5 @@
 import type { Color, Layer } from "../../types";
-import { brushPerfDebug, perfMark, perfStage } from "../perf-debug";
+import { brushPerfDebug, perfMark, perfSample, perfStage } from "../perf-debug";
 import {
   type GpuBristlePassResources,
   createGpuBristlePassResources,
@@ -33,6 +33,8 @@ import {
 
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 6;
+
+export type BristleFieldCadence = "perRun" | "perFlush";
 
 export interface GpuDab {
   readonly x: number;
@@ -204,16 +206,24 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private branchCount = 1;
   private currentBranchIndex = 0;
   private pendingBranchSegments: PendingBranchSegment[][] | null = null;
+  private branchBatchActive = false;
   private readonly useFloatField: boolean;
   private readonly commitMode: "bitmap" | "direct";
+  private readonly bristleFieldCadence: BristleFieldCadence;
   readonly maxBranchCount: number;
   private strokeBegun = false;
   private disposed = false;
 
-  constructor(width: number, height: number, commitMode: "bitmap" | "direct") {
+  constructor(
+    width: number,
+    height: number,
+    commitMode: "bitmap" | "direct",
+    bristleFieldCadence: BristleFieldCadence,
+  ) {
     this.width = width;
     this.height = height;
     this.commitMode = commitMode;
+    this.bristleFieldCadence = bristleFieldCadence;
     const resources = createGpuStrokeGlResources(
       width,
       height,
@@ -395,6 +405,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
     this.pendingBranchSegments = null;
+    this.branchBatchActive = false;
     this.dirtyRects = Array<DirtyRect | null>(branchCount).fill(null);
     this.committedDirtyRect = null;
     this.committedLayer = null;
@@ -409,8 +420,15 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     // A single branch already keeps dabs pending until its next field update.
     // Segment batching would flush the final segment at every append boundary.
-    if (this.branchCount === 1) {
+    if (this.bristleFieldCadence === "perRun" && this.branchCount === 1) {
       return;
+    }
+    if (
+      this.bristleFieldCadence === "perFlush" &&
+      this.pendingBranchSegments &&
+      !this.branchBatchActive
+    ) {
+      this.flushPendingBranchSegments();
     }
     if (this.pendingBranchSegments) {
       throw new Error("GPU branch batch is already active");
@@ -420,6 +438,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       { length: this.branchCount },
       () => [{ dabs: [], bristleChunks: [] }],
     );
+    this.branchBatchActive = true;
   }
 
   endBranchBatch(): void {
@@ -427,7 +446,18 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     const branches = this.pendingBranchSegments;
     if (!branches) return;
     this.pendingBranchSegments = null;
+    this.branchBatchActive = false;
 
+    if (this.bristleFieldCadence === "perFlush") {
+      this.drawPerFlushBranchSegments(branches);
+      return;
+    }
+    this.drawPerRunBranchSegments(branches);
+  }
+
+  private drawPerRunBranchSegments(
+    branches: readonly (readonly PendingBranchSegment[])[],
+  ): void {
     const segmentCount = branches.reduce(
       (maximum, segments) => Math.max(maximum, segments.length),
       0,
@@ -598,6 +628,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     this.ensureMaterialFieldSize(update.columns, update.rows);
     if (brushPerfDebug.nullStages.nullFieldAdvance) return;
+    if (this.bristleFieldCadence === "perFlush") {
+      this.ensurePerFlushSegments();
+    }
     const branchSegments =
       this.pendingBranchSegments?.[this.currentBranchIndex];
     if (branchSegments) {
@@ -630,6 +663,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     if (!checkpoint) throw new Error("GPU material checkpoint is unavailable");
     if (checkpoint.initialized) return;
     checkpoint.initialized = true;
+    if (this.bristleFieldCadence === "perFlush") {
+      this.ensurePerFlushSegments();
+    }
     if (
       queueMaterialCheckpoint(
         this.pendingBranchSegments,
@@ -659,6 +695,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.assertStrokeBegun();
     const checkpoint = this.materialCheckpoints[this.currentBranchIndex];
     if (!checkpoint) throw new Error("GPU material checkpoint is unavailable");
+    if (this.bristleFieldCadence === "perFlush") {
+      this.ensurePerFlushSegments();
+    }
     if (
       queueMaterialCheckpoint(
         this.pendingBranchSegments,
@@ -684,6 +723,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     branchIndex = this.currentBranchIndex,
   ): Uint8ClampedArray {
     this.assertStrokeBegun();
+    this.flush();
     this.selectBranch(branchIndex);
     const gl = this.gl;
     const length = this.fieldColumns * this.fieldRows * 4;
@@ -745,6 +785,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   pushBristleChunk(chunk: GpuBristleChunk): void {
     this.assertStrokeBegun();
+    if (this.bristleFieldCadence === "perFlush") {
+      this.ensurePerFlushSegments();
+    }
     const branchSegments =
       this.pendingBranchSegments?.[this.currentBranchIndex];
     if (branchSegments) {
@@ -765,6 +808,13 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   }
 
   flush(): void {
+    if (
+      this.bristleFieldCadence === "perFlush" &&
+      this.pendingBranchSegments &&
+      !this.branchBatchActive
+    ) {
+      this.flushPendingBranchSegments();
+    }
     if (this.instanceCount === 0 || this.lost) return;
     perfStage("gpuFlush", () => {
       const gl = this.gl;
@@ -846,20 +896,122 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.drawBristleChunks(segment.bristleChunks, branchIndex);
   }
 
+  private ensurePerFlushSegments(): void {
+    if (this.pendingBranchSegments) return;
+    this.pendingBranchSegments = Array.from(
+      { length: this.branchCount },
+      () => [{ dabs: [], bristleChunks: [] }],
+    );
+  }
+
+  private flushPendingBranchSegments(): void {
+    const branches = this.pendingBranchSegments;
+    if (!branches) return;
+    this.pendingBranchSegments = null;
+    this.drawPerFlushBranchSegments(branches);
+  }
+
+  private drawPerFlushBranchSegments(
+    branches: readonly (readonly PendingBranchSegment[])[],
+  ): void {
+    const hasBristleChunks = branches.some((segments) =>
+      segments.some((segment) => segment.bristleChunks.length > 0),
+    );
+    if (!hasBristleChunks) {
+      this.drawPerRunBranchSegments(branches);
+      return;
+    }
+    const segmentCount = branches.reduce(
+      (maximum, segments) => Math.max(maximum, segments.length),
+      0,
+    );
+    const bristleDraws: {
+      readonly chunk: GpuBristleChunk;
+      readonly target: {
+        readonly accumFramebuffer: WebGLFramebuffer;
+        readonly fieldTexture: WebGLTexture;
+        readonly fieldColumns: number;
+        readonly fieldRows: number;
+        readonly fieldTextureWidth: number;
+        readonly fieldTextureHeight: number;
+        readonly branchIndex: number;
+      };
+    }[] = [];
+    const updates = Array<GpuMaterialFieldUpdate | undefined>(
+      this.branchCount,
+    ).fill(undefined);
+    const updateDistances = new Float64Array(this.branchCount);
+    const captures = Array<PendingMaterialCheckpointCapture | undefined>(
+      this.branchCount,
+    ).fill(undefined);
+
+    for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
+      for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
+        const segment = branches[branchIndex]?.[segmentIndex];
+        if (!segment) continue;
+        this.drawDabs(segment.dabs);
+        for (const chunk of segment.bristleChunks) {
+          bristleDraws.push({
+            chunk,
+            target: this.bristleTarget(branchIndex),
+          });
+        }
+        if (segment.update) {
+          updates[branchIndex] = segment.update;
+          updateDistances[branchIndex] += Math.max(
+            0,
+            segment.update.distancePx,
+          );
+        }
+        if (segment.checkpoint) captures[branchIndex] = segment.checkpoint;
+      }
+    }
+
+    let passCount = this.bristleResources.drawBatch(bristleDraws);
+    if (captures.some((capture) => capture !== undefined)) {
+      this.captureMaterialCheckpointBatch(captures);
+    }
+    const aggregatedUpdates = updates.map((update, branchIndex) => {
+      if (!update) return undefined;
+      const distancePx = updateDistances[branchIndex] ?? 0;
+      return {
+        ...update,
+        distancePx,
+        // perFlush is deliberately capped at one coarse diffusion pass. The
+        // experiment measures pass fixed cost, so replaying N diffusion passes
+        // here would reintroduce the cost this cadence is meant to remove.
+        diffusionRatePerPx:
+          distancePx > 0
+            ? Math.min(update.diffusionRatePerPx, 1 / distancePx)
+            : update.diffusionRatePerPx,
+      };
+    });
+    if (aggregatedUpdates.some((update) => update !== undefined)) {
+      const startedAt = this.executeMaterialFieldUpdateBatch(aggregatedUpdates);
+      this.executeMaterialFieldDiffusionBatch(aggregatedUpdates, startedAt);
+      passCount += 1 + diffusionPassCount(aggregatedUpdates);
+    }
+    if (passCount > 0) perfSample("gpuBristlePasses", passCount);
+  }
+
+  private bristleTarget(branchIndex: number) {
+    return {
+      accumFramebuffer: this.framebuffer,
+      fieldTexture: this.fieldTextures[this.activeFieldIndex],
+      fieldColumns: this.fieldColumns,
+      fieldRows: this.fieldRows,
+      fieldTextureWidth: this.fieldTextureWidth,
+      fieldTextureHeight: this.fieldTextureHeight,
+      branchIndex,
+    };
+  }
+
   private drawBristleChunks(
     chunks: readonly GpuBristleChunk[],
     branchIndex: number,
   ): void {
     for (const chunk of chunks) {
-      this.bristleResources.draw(chunk, {
-        accumFramebuffer: this.framebuffer,
-        fieldTexture: this.fieldTextures[this.activeFieldIndex],
-        fieldColumns: this.fieldColumns,
-        fieldRows: this.fieldRows,
-        fieldTextureWidth: this.fieldTextureWidth,
-        fieldTextureHeight: this.fieldTextureHeight,
-        branchIndex,
-      });
+      this.bristleResources.draw(chunk, this.bristleTarget(branchIndex));
     }
   }
 
@@ -919,6 +1071,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       // has to be restored even when it was never committed to the Layer.
       this.instanceCount = 0;
       this.pendingBranchSegments = null;
+      this.branchBatchActive = false;
       if (restoreRect) this.restoreBaseRectToAccum(restoreRect);
       if (this.committedDirtyRect && this.committedLayer) {
         this.commitRectsToLayer(this.committedLayer, [this.committedDirtyRect]);
@@ -944,6 +1097,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   endStroke(): void {
     this.instanceCount = 0;
     this.pendingBranchSegments = null;
+    this.branchBatchActive = false;
     this.dirtyRects = [null];
     this.committedDirtyRect = null;
     this.committedLayer = null;
@@ -1148,10 +1302,32 @@ export function createGpuStrokeSurface(
   width: number,
   height: number,
   commitMode: "bitmap" | "direct" = "bitmap",
+  bristleFieldCadence: BristleFieldCadence = "perRun",
 ): GpuStrokeSurface | null {
   try {
-    return new WebGl2StrokeSurface(width, height, commitMode);
+    return new WebGl2StrokeSurface(
+      width,
+      height,
+      commitMode,
+      bristleFieldCadence,
+    );
   } catch {
     return null;
   }
+}
+
+function diffusionPassCount(
+  updates: readonly (GpuMaterialFieldUpdate | undefined)[],
+): number {
+  return updates.reduce((maximum, update) => {
+    if (!update) return maximum;
+    const rate = Number.isFinite(update.diffusionRatePerPx)
+      ? Math.max(0, update.diffusionRatePerPx)
+      : 0;
+    const distance = Number.isFinite(update.distancePx)
+      ? Math.max(0, update.distancePx)
+      : 0;
+    const amount = rate * distance;
+    return Math.max(maximum, amount > 1e-6 ? Math.ceil(amount) : 0);
+  }, 0);
 }

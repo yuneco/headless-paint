@@ -403,6 +403,81 @@ describe("GPU mixing feedMany parity", () => {
 });
 
 describe("GPU rough bristle parity", () => {
+  it("perFlush mixing の live/replay/undo/redo が byte-identical", () => {
+    const debugGlobal = globalThis as typeof globalThis & {
+      __headlessPaintGpuBristleField?: "perRun" | "perFlush";
+    };
+    debugGlobal.__headlessPaintGpuBristleField = "perFlush";
+    const accelerator = createTestAccelerator();
+    try {
+      const style = makeStyle({
+        color: WHITE,
+        lineWidth: 34,
+        brush: {
+          ...ROUGH_BRISTLE,
+          mixing: {
+            ...DEFAULT_BRUSH_MIXING,
+            enabled: true,
+            updateDistancePx: 4,
+            checkpointDistancePx: 8,
+          },
+        },
+      });
+      const baseLayer = createTestLayer();
+      paintOpaqueBands(baseLayer);
+      const liveLayer = createTestLayer();
+      copyLayerPixels(baseLayer, liveLayer);
+      let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+      history = beginHistoryMutation(
+        history,
+        { affectedLayers: [liveLayer], layerCount: 1 },
+        HISTORY_CONFIG,
+      );
+      const { command } = simulateLiveStroke({
+        layer: liveLayer,
+        inputPoints: INPUT_POINTS,
+        style,
+        filterPipeline: CAUSAL_FILTER_PIPELINE,
+        expand: EXPAND,
+        brushSeed: BRUSH_SEED,
+        alphaLocked: false,
+        accelerator,
+      });
+      const replayLayer = createTestLayer();
+      replayOnLayer(command, replayLayer, baseLayer, accelerator);
+      expectPixelEqual(liveLayer, replayLayer, "perFlush rough live vs replay");
+
+      history = pushCommand(
+        history,
+        command,
+        { afterLayer: liveLayer, layerCount: 1 },
+        HISTORY_CONFIG,
+      );
+      const undoLayer = createTestLayer();
+      const undoResult = rebuildLayerFromHistory(
+        undoLayer,
+        undo(history),
+        undefined,
+        { accelerator },
+      );
+      expect(undoResult.ok).toBe(true);
+      expectPixelEqual(undoLayer, baseLayer, "perFlush rough undo");
+
+      const redoLayer = createTestLayer();
+      const redoResult = rebuildLayerFromHistory(
+        redoLayer,
+        redo(undo(history)),
+        undefined,
+        { accelerator },
+      );
+      expect(redoResult.ok).toBe(true);
+      expectPixelEqual(redoLayer, replayLayer, "perFlush rough redo");
+    } finally {
+      accelerator.dispose();
+      debugGlobal.__headlessPaintGpuBristleField = "perRun";
+    }
+  });
+
   it("mixing OFF の live/replay/undo/redo が同一 backend 内で byte-identical", () => {
     const perf = getBrushPerfTestBridge();
     if (!perf) throw new Error("Brush perf debug bridge is unavailable");

@@ -85,6 +85,78 @@ describe("GpuStrokeSurface", () => {
     expect(stages.gpuBristleComposite.count).toBe(1);
   });
 
+  it("perFlush は複数 bristle run を一つの atlas/composite にまとめる", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(64, 48);
+    const surface = createGpuStrokeSurface(
+      layer.width,
+      layer.height,
+      "bitmap",
+      "perFlush",
+    );
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const chunk: GpuBristleChunk = {
+      segments: [makeSweepSegment(0, 1)],
+      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
+      maskFieldColumns: 2,
+      maskFieldRows: 2,
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: { r: 220, g: 40, b: 20, a: 255 },
+      useMaterialField: true,
+    };
+    const baseColor = { r: 220, g: 40, b: 20, a: 255 } as const;
+    const update = {
+      baseColor,
+      centerX: 30,
+      centerY: 32,
+      angle: 0,
+      sampleSize: 12,
+      columns: 2,
+      rows: 2,
+      pickupRatePerPx: 0.1,
+      restoreRatePerPx: 0,
+      diffusionRatePerPx: 0.05,
+      distancePx: 15,
+    } as const;
+    surface.initializeMaterialField(2, 2, baseColor);
+    surface.initializeMaterialCheckpoint(0, 0, 64);
+    surface.beginBranchBatch();
+    surface.pushBristleChunk(chunk);
+    surface.updateMaterialField(update);
+    surface.pushBristleChunk(chunk);
+    surface.updateMaterialField(update);
+    surface.endBranchBatch();
+    surface.commitToLayer(layer);
+
+    const snapshot = brushPerfDebug.snapshot();
+    expect(snapshot.stages.gpuBristleMask.count).toBe(1);
+    expect(snapshot.stages.gpuBristleInk.count).toBe(1);
+    expect(snapshot.stages.gpuBristleComposite.count).toBe(1);
+    expect(snapshot.stages.gpuFieldUpdate.count).toBe(1);
+    expect(snapshot.samples.gpuBristlePasses).toEqual([4]);
+  });
+
   it("単色 field と円 tip の dab を layer に commit する", () => {
     const layer = createLayer(64, 48);
     const surface = createGpuStrokeSurface(layer.width, layer.height);
