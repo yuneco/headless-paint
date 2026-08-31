@@ -301,7 +301,10 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       fieldBatchMixUniforms: this.glResources.fieldBatchMixUniforms,
       fieldBatchCheckpointTexture: this.glResources.fieldBatchCheckpointTexture,
       fieldBatchRunDataTexture: this.glResources.fieldBatchRunDataTexture,
-      fieldBatchAccumTexture: this.accumTexture,
+      // beginStroke may swap the accumulation/source texture pair after an
+      // upload. Resolve the active accumulation texture at pass submission so
+      // an in-flush checkpoint never samples the stale half of that pair.
+      getFieldBatchAccumTexture: () => this.accumTexture,
       surfaceWidth: this.width,
       surfaceHeight: this.height,
       fieldDiffusionUniforms: this.glResources.fieldDiffusionUniforms,

@@ -58,7 +58,7 @@ export interface FieldPassResources {
   };
   readonly fieldBatchCheckpointTexture: WebGLTexture;
   readonly fieldBatchRunDataTexture: WebGLTexture;
-  readonly fieldBatchAccumTexture: WebGLTexture;
+  readonly getFieldBatchAccumTexture: () => WebGLTexture;
   readonly surfaceWidth: number;
   readonly surfaceHeight: number;
   readonly fieldDiffusionUniforms: {
@@ -303,7 +303,7 @@ export function executeMaterialFieldBatchMixPass(
   gl.activeTexture(gl.TEXTURE2);
   gl.bindTexture(gl.TEXTURE_2D, resources.fieldBatchRunDataTexture);
   gl.activeTexture(gl.TEXTURE3);
-  gl.bindTexture(gl.TEXTURE_2D, resources.fieldBatchAccumTexture);
+  gl.bindTexture(gl.TEXTURE_2D, resources.getFieldBatchAccumTexture());
   if (
     scratch.batchMixColumns !== resources.fieldColumns ||
     scratch.batchMixRows !== resources.fieldRows

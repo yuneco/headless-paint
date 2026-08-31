@@ -241,6 +241,80 @@ describe("GpuStrokeSurface", () => {
     expect(middle[1]).toBeLessThan(last[1] ?? 0);
   });
 
+  it("perFlush の flush-start sample は texture swap 後も現在の accum を参照する", () => {
+    const firstLayer = createLayer(64, 64);
+    const secondLayer = createLayer(64, 64);
+    for (const layer of [firstLayer, secondLayer]) {
+      layer.ctx.fillStyle = "rgb(20, 210, 40)";
+      layer.ctx.fillRect(0, 0, layer.width, layer.height);
+    }
+    const surface = createGpuStrokeSurface(64, 64, "bitmap", "perFlush");
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const baseColor = { r: 220, g: 30, b: 20, a: 255 } as const;
+    const chunk: GpuBristleChunk = {
+      segments: [makeSweepSegment(0, 1)],
+      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
+      maskFieldColumns: 2,
+      maskFieldRows: 2,
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(64 * 64),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: baseColor,
+      useMaterialField: true,
+    };
+    const update = {
+      baseColor,
+      centerX: 30,
+      centerY: 32,
+      angle: 0,
+      sampleSize: 20,
+      columns: 2,
+      rows: 2,
+      pickupRatePerPx: 0.17,
+      restoreRatePerPx: 0,
+      diffusionRatePerPx: 0,
+      distancePx: 4,
+    } as const;
+    const render = (layer: typeof firstLayer) => {
+      surface.beginStroke(layer.canvas);
+      surface.initializeMaterialField(2, 2, baseColor);
+      surface.initializeMaterialCheckpoint(0, 0, 64);
+      for (let batch = 0; batch < 2; batch++) {
+        surface.beginBranchBatch();
+        surface.pushBristleChunk(chunk);
+        surface.updateMaterialField(update);
+        surface.snapshotMaterialCheckpoint(0, 0, 64);
+        surface.pushBristleChunk(chunk);
+        surface.updateMaterialField(update);
+        surface.endBranchBatch();
+      }
+      const field = surface.readMaterialFieldForTest();
+      surface.endStroke();
+      return field;
+    };
+
+    // sourceCanvas upload swaps accum/source on every beginStroke. Rendering
+    // must not depend on which physical texture is active after that swap.
+    expect(render(firstLayer)).toEqual(render(secondLayer));
+  });
+
   it("perFlush field は各 bristle run の checkpoint geometry を積分する", () => {
     const source = new OffscreenCanvas(72, 48);
     const sourceCtx = source.getContext("2d");
