@@ -193,3 +193,9 @@ probe6（1 stroke 150 点、WebKit）:
 - perFlush: stroke 185ms（perRun 289ms 比 −36%）、undo 5 本 1063ms（−46%）、pass 3〜4/flush + run ごとの checkpoint texture copy
 - 見た目: pickup 量は perRun 相当に回復。残差は **flush 単位の色の段差**（composite が flush 開始時点の field を一律参照するため、色が ~90px ごとに階段状に変わる。perRun は滑らか）
 - 次の一手: composite で field の flush 前後 2 状態を run 位置で補間（pass 数不変のまま段差を平滑化）
+
+### 5.10 B 最終形（`10eced7`+`b9342ac`: composite で mix(F0,F1,距離重み) 補間）
+
+- 決定性差し戻し 1 回: beginStroke の texture swap 偶奇で F0 参照が live/replay で異なった（`b9342ac` で修正、回帰テスト追加、552 tests green）
+- 性能（WebKit、mixing ON、1 stroke 150 点）: perRun 270ms → **perFlush 102ms（−62%）**。undo 5 本 1976 → **1079ms（−45%）**（undo 残差は再 upload とベース replay コスト）
+- 見た目: pickup 量 perRun 相当 + 段差解消（§5.11 の画像参照）。全画面画素差は ink の 15%（点描分布と補間の残差）→ ユーザー官能判定待ち
