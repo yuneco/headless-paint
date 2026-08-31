@@ -206,3 +206,17 @@ probe6（1 stroke 150 点、WebKit）:
 - CPU bristle mixing も perFlush 意味論へ移植（速くなる方向の統一。checkpoint getImageData / field 転写が flush 単位に減り CPU 411ms → 150ms 前後の見込み）。stamp（Acrylic）は変更しない
 - GPU default を perFlush 化（`?gpuBristleField=perRun` は比較用に残す）
 - cross-backend（CPU vs GPU）は Tier B を parity テストで保証。過去ドキュメントの replay 結果が微変する点はリリースノート事項
+
+### 5.12 CPU/GPU 統一の結果（`2fce9bd`〜`91f5441`、C の戻り点）
+
+mixing ON、1 stroke 150 点、WebKit / Chromium:
+
+| 経路 | 統一前 | 統一後 | 備考 |
+|---|---|---|---|
+| WebKit GPU（Safari 実経路） | 270ms | **109ms** | default perFlush |
+| Chromium CPU（Chromium 実経路） | 98ms | 104ms | 同等（誤差域） |
+| WebKit CPU（context loss 復旧のみ） | 411ms | 635ms | **残課題**: JS 仕事は同等（Chromium 比較で確認）だが WebKit の Canvas2D 同期回数が増加。実利用面は僅少のため保留 |
+
+- cross-backend Tier B: alpha MAE 0 / RGB MAE 0.0013 / |Δ|>0.1 0.08% で全閾値内。見た目も目視一致
+- checkpoint 二重カウント（61→90）は修正済み
+- **C 棄却時の戻り点 = `91f5441`**（557 tests green）。C は子ブランチ `experiment/bristle-mask-simplify` で実施
