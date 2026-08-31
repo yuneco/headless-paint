@@ -57,6 +57,10 @@ export interface BristleMixingFlushResult {
   readonly updates: readonly BristleMixingFlushUpdate[];
 }
 
+export interface BristleMixingInterpolationProfiles {
+  readonly canvases: readonly OffscreenCanvas[];
+}
+
 export function getActiveMixing(
   mixing: BrushMixing | undefined,
 ): BrushMixing | null {
@@ -289,6 +293,7 @@ export function prepareBristleMixingFlush(
             : firstInput.targetLayer.canvas,
         )
       : undefined;
+  if (needsInitialCheckpoint && union) perfSample("checkpoints", 1);
 
   let state = union
     ? {
@@ -379,31 +384,144 @@ export function prepareBristleMixingFlush(
   return { state, startField, endField, updates };
 }
 
-/** CPU bristle 描画用に flush 始点/終点の field を距離比で補間する。 */
-export function uploadBristleMixingInterpolation(
+interface BristleMixingInterpolationCache {
+  fieldCanvas: OffscreenCanvas;
+  fieldPixels: ImageData;
+  renderCanvases: OffscreenCanvas[];
+  capacity: number;
+}
+
+const BRISTLE_INTERPOLATION_CACHE = new WeakMap<
+  OffscreenCanvas,
+  BristleMixingInterpolationCache
+>();
+
+/**
+ * CPU bristle の run ごとの補間 field を低解像度 atlas へ一括 upload する。
+ * tip 解像度への転写も先にまとめ、描画中の ImageData upload を避ける。
+ */
+export function prepareBristleMixingInterpolationProfiles(
   state: BrushMixingState,
   tipCanvas: OffscreenCanvas,
   startField: Float32Array,
   endField: Float32Array,
-  weight: number,
-): void {
-  perfStage("materialUpload", () => {
-    if (brushPerfDebug.nullStages.nullMaterialUpload) return;
+  weights: readonly number[],
+): BristleMixingInterpolationProfiles | null {
+  return perfStage("materialUpload", () => {
+    if (brushPerfDebug.nullStages.nullMaterialUpload) return null;
     if (
       startField.length !== state.field.length ||
       endField.length !== state.field.length
     ) {
       throw new Error("Bristle mixing field dimensions do not match");
     }
-    const resolvedWeight = Math.max(0, Math.min(1, weight));
-    for (let index = 0; index < state.field.length; index++) {
-      const from = startField[index] ?? 0;
-      const to = endField[index] ?? 0;
-      state.fieldPixels.data[index] = Math.round(
-        from + (to - from) * resolvedWeight,
+    const columns = state.fieldPixels.width;
+    const rows = state.fieldPixels.height;
+    const profileWidth = tipCanvas.width;
+    const profileHeight = tipCanvas.height;
+    const requiredCapacity = weights.length + 1;
+    let cached = BRISTLE_INTERPOLATION_CACHE.get(state.renderCanvas);
+    if (
+      !cached ||
+      cached.capacity < requiredCapacity ||
+      cached.fieldCanvas.height !== rows
+    ) {
+      const capacity = Math.max(requiredCapacity, cached?.capacity ?? 0);
+      const fieldCanvas = new OffscreenCanvas(columns * capacity, rows);
+      const fieldCtx = getCached2dContext(
+        fieldCanvas,
+        "bristle material field atlas",
       );
+      cached = {
+        fieldCanvas,
+        fieldPixels: fieldCtx.createImageData(columns * capacity, rows),
+        renderCanvases: Array.from(
+          { length: capacity },
+          (_, index) =>
+            cached?.renderCanvases[index] ??
+            new OffscreenCanvas(profileWidth, profileHeight),
+        ),
+        capacity,
+      };
+      BRISTLE_INTERPOLATION_CACHE.set(state.renderCanvas, cached);
     }
-    uploadMaterialCanvasPixels(state, tipCanvas);
+
+    const writeField = (
+      slot: number,
+      field: Float32Array,
+      otherField: Float32Array,
+      weight: number,
+    ) => {
+      const resolvedWeight = Math.max(0, Math.min(1, weight));
+      for (let row = 0; row < rows; row++) {
+        for (let column = 0; column < columns; column++) {
+          const sourceOffset = (row * columns + column) * 4;
+          const targetOffset =
+            (row * cached.fieldPixels.width + slot * columns + column) * 4;
+          for (let channel = 0; channel < 4; channel++) {
+            const index = sourceOffset + channel;
+            const from = field[index] ?? 0;
+            const to = otherField[index] ?? 0;
+            cached.fieldPixels.data[targetOffset + channel] = Math.round(
+              from + (to - from) * resolvedWeight,
+            );
+          }
+        }
+      }
+    };
+
+    for (let slot = 0; slot < weights.length; slot++) {
+      writeField(slot, startField, endField, weights[slot] ?? 1);
+    }
+    writeField(weights.length, state.field, state.field, 1);
+
+    const fieldCtx = getCached2dContext(
+      cached.fieldCanvas,
+      "bristle material field atlas",
+    );
+    fieldCtx.putImageData(cached.fieldPixels, 0, 0);
+    writeMaterialFieldPixels(state.field, state.fieldPixels.data);
+
+    for (let slot = 0; slot < requiredCapacity; slot++) {
+      const renderCanvas = cached.renderCanvases[slot];
+      if (!renderCanvas) continue;
+      const renderCtx = getCached2dContext(
+        renderCanvas,
+        "bristle material tip interpolation",
+      );
+      renderCtx.save();
+      renderCtx.globalAlpha = 1;
+      renderCtx.globalCompositeOperation = "copy";
+      renderCtx.setTransform(1, 0, 0, 1, 0, 0);
+      renderCtx.drawImage(
+        cached.fieldCanvas,
+        slot * columns,
+        0,
+        columns,
+        rows,
+        0,
+        0,
+        profileWidth,
+        profileHeight,
+      );
+      renderCtx.globalCompositeOperation = "destination-in";
+      renderCtx.drawImage(tipCanvas, 0, 0);
+      renderCtx.restore();
+    }
+
+    const stateRenderCtx = getCached2dContext(
+      state.renderCanvas,
+      "material tip",
+    );
+    stateRenderCtx.save();
+    stateRenderCtx.globalAlpha = 1;
+    stateRenderCtx.globalCompositeOperation = "copy";
+    stateRenderCtx.setTransform(1, 0, 0, 1, 0, 0);
+    const finalCanvas = cached.renderCanvases[weights.length];
+    if (finalCanvas) stateRenderCtx.drawImage(finalCanvas, 0, 0);
+    stateRenderCtx.restore();
+
+    return { canvases: cached.renderCanvases.slice(0, weights.length) };
   });
 }
 
@@ -575,7 +693,6 @@ function captureCheckpointUnion(
       ? getNullCheckpointImageData(ctx, width, height)
       : ctx.getImageData(0, 0, width, height),
   );
-  perfSample("checkpoints", inputs.length);
   return { canvas, pixels, originX, originY };
 }
 

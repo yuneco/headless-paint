@@ -27,11 +27,11 @@ import {
   finalizeBristleMixingCheckpoint,
   getActiveMixing,
   prepareBristleMixingFlush,
+  prepareBristleMixingInterpolationProfiles,
   prepareInitialMixingCheckpoint,
   prepareMixingState,
   stageBristleMixingCheckpoint,
   updateMixingAfterDeposit,
-  uploadBristleMixingInterpolation,
 } from "./mixing";
 import { brushPerfDebug, perfSample, perfStage } from "./perf-debug";
 import { type EmissionPoint, walkEmissions } from "./scheduler";
@@ -443,23 +443,30 @@ function renderCpuMixingRuns(
   let mixingState = flush.state;
   let updateIndex = 0;
   let mixWeight = 1;
-  let stagedCheckpoint = false;
-  for (const run of runs) {
+  const runWeights = runs.map((run) => {
     const update = run.updateInput ? flush.updates[updateIndex++] : undefined;
     if (update) mixWeight = update.mixWeight;
-    uploadBristleMixingInterpolation(
-      mixingState,
-      profile,
-      flush.startField,
-      flush.endField,
-      mixWeight,
-    );
+    return mixWeight;
+  });
+  const paintProfiles = prepareBristleMixingInterpolationProfiles(
+    mixingState,
+    profile,
+    flush.startField,
+    flush.endField,
+    runWeights,
+  );
+  updateIndex = 0;
+  let stagedCheckpoint = false;
+  for (let runIndex = 0; runIndex < runs.length; runIndex++) {
+    const run = runs[runIndex];
+    if (!run) continue;
+    const update = run.updateInput ? flush.updates[updateIndex++] : undefined;
     renderSweepRun(
       layer,
       run.points,
       style,
       brush,
-      mixingState.renderCanvas,
+      paintProfiles?.canvases[runIndex] ?? mixingState.renderCanvas,
       profile,
       seed,
       true,
@@ -472,13 +479,6 @@ function renderCpuMixingRuns(
   if (stagedCheckpoint) {
     mixingState = finalizeBristleMixingCheckpoint(mixingState);
   }
-  uploadBristleMixingInterpolation(
-    mixingState,
-    profile,
-    mixingState.field,
-    mixingState.field,
-    1,
-  );
   return { mixing: mixingState };
 }
 
