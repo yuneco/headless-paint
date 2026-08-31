@@ -187,3 +187,9 @@ probe6（1 stroke 150 点、WebKit）:
 | pass 数 / flush | ≈20 | 3〜4 |
 
 見た目（下地の赤帯 3 本 + 混色ストローク、comb-06 fixture）: perFlush は **pickup が明らかに弱い**。粒度低下に加え、flush 集約が「最新 checkpoint × 最後の geometry × 合計距離」で拾うため、flush 途中に横切った下地色を取り込めていない疑い。表現として許容不可の見込み → 集約方法の改善（run ごとの geometry で checkpoint を積分しつつ pass はまとめる）が次の課題。ユーザー判定待ち。
+
+### 5.9 pickup 積分修正後（`80266d5`）
+
+- perFlush: stroke 185ms（perRun 289ms 比 −36%）、undo 5 本 1063ms（−46%）、pass 3〜4/flush + run ごとの checkpoint texture copy
+- 見た目: pickup 量は perRun 相当に回復。残差は **flush 単位の色の段差**（composite が flush 開始時点の field を一律参照するため、色が ~90px ごとに階段状に変わる。perRun は滑らか）
+- 次の一手: composite で field の flush 前後 2 状態を run 位置で補間（pass 数不変のまま段差を平滑化）
