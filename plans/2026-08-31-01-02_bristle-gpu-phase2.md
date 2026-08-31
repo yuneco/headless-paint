@@ -199,3 +199,10 @@ probe6（1 stroke 150 点、WebKit）:
 - 決定性差し戻し 1 回: beginStroke の texture swap 偶奇で F0 参照が live/replay で異なった（`b9342ac` で修正、回帰テスト追加、552 tests green）
 - 性能（WebKit、mixing ON、1 stroke 150 点）: perRun 270ms → **perFlush 102ms（−62%）**。undo 5 本 1976 → **1079ms（−45%）**（undo 残差は再 upload とベース replay コスト）
 - 見た目: pickup 量 perRun 相当 + 段差解消（§5.11 の画像参照）。全画面画素差は ink の 15%（点描分布と補間の残差）→ ユーザー官能判定待ち
+
+### 5.11 決定: mixing 意味論を perFlush で CPU/GPU 統一（ユーザー決定 2026-08-31）
+
+- perFlush の見た目はキャプチャ判定で許容（「悪くない」）。Bristle はアプリ未使用のため表現変更は問題なし
+- CPU bristle mixing も perFlush 意味論へ移植（速くなる方向の統一。checkpoint getImageData / field 転写が flush 単位に減り CPU 411ms → 150ms 前後の見込み）。stamp（Acrylic）は変更しない
+- GPU default を perFlush 化（`?gpuBristleField=perRun` は比較用に残す）
+- cross-backend（CPU vs GPU）は Tier B を parity テストで保証。過去ドキュメントの replay 結果が微変する点はリリースノート事項
