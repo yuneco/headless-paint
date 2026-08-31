@@ -1,6 +1,7 @@
 import type { Color, Layer } from "../../types";
 import { brushPerfDebug, perfMark, perfSample, perfStage } from "../perf-debug";
 import {
+  type GpuBristleDraw,
   type GpuBristlePassResources,
   createGpuBristlePassResources,
 } from "./bristle-pass";
@@ -10,12 +11,16 @@ import {
   unionDirtyRects,
 } from "./commit-packing";
 import {
+  type FieldBatchCheckpoint,
+  type FieldBatchMixRun,
   type FieldPassResources,
   allocateFieldStrip,
   clampUnit,
+  executeMaterialFieldBatchMixPass,
   executeMaterialFieldDiffusionPass,
   executeMaterialFieldMixPass,
   oppositeFieldIndex,
+  roundUpGpuAllocation,
 } from "./field-strip";
 import {
   type GpuStrokeGlResources,
@@ -33,6 +38,18 @@ import {
 
 const INSTANCE_CAPACITY = 4096;
 const INSTANCE_FLOATS = 6;
+
+interface PendingPerFlushCheckpoint {
+  readonly branchIndex: number;
+  readonly capture?: PendingMaterialCheckpointCapture;
+  readonly current?: MaterialCheckpoint;
+}
+
+interface PendingPerFlushFieldRun {
+  readonly branchIndex: number;
+  readonly update: GpuMaterialFieldUpdate;
+  readonly checkpoint: PendingPerFlushCheckpoint;
+}
 
 export type BristleFieldCadence = "perRun" | "perFlush";
 
@@ -152,6 +169,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   private readonly program: WebGLProgram;
   private readonly fieldMixProgram: WebGLProgram;
+  private readonly fieldBatchMixProgram: WebGLProgram;
   private readonly fieldDiffusionProgram: WebGLProgram;
   private readonly vertexArray: WebGLVertexArrayObject;
   private readonly instanceBuffer: WebGLBuffer;
@@ -174,6 +192,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private readonly materialCheckpoints: MaterialCheckpoint[] = [];
   private materialCheckpointTextureSize = 0;
   private materialCheckpointLayerCount = 0;
+  private fieldBatchCheckpointTextureWidth = 0;
+  private fieldBatchCheckpointTextureHeight = 0;
   private framebuffer: WebGLFramebuffer;
   private sourceFramebuffer: WebGLFramebuffer;
   private readonly baseFramebuffer: WebGLFramebuffer;
@@ -235,6 +255,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.gl = resources.gl;
     this.program = resources.program;
     this.fieldMixProgram = resources.fieldMixProgram;
+    this.fieldBatchMixProgram = resources.fieldBatchMixProgram;
     this.fieldDiffusionProgram = resources.fieldDiffusionProgram;
     this.vertexArray = resources.vertexArray;
     this.instanceBuffer = resources.instanceBuffer;
@@ -274,8 +295,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       branchDataBuffer: this.branchDataBuffer,
       vertexArray: this.vertexArray,
       fieldMixProgram: this.fieldMixProgram,
+      fieldBatchMixProgram: this.fieldBatchMixProgram,
       fieldDiffusionProgram: this.fieldDiffusionProgram,
       fieldMixUniforms: this.glResources.fieldMixUniforms,
+      fieldBatchMixUniforms: this.glResources.fieldBatchMixUniforms,
+      fieldBatchCheckpointTexture: this.glResources.fieldBatchCheckpointTexture,
+      fieldBatchRunDataTexture: this.glResources.fieldBatchRunDataTexture,
       fieldDiffusionUniforms: this.glResources.fieldDiffusionUniforms,
       fieldPassScratch: this.glResources.fieldPassScratch,
       bindFieldFramebuffer: (index) => this.bindFieldFramebuffer(index),
@@ -925,53 +950,137 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       (maximum, segments) => Math.max(maximum, segments.length),
       0,
     );
-    const bristleDraws: {
-      readonly chunk: GpuBristleChunk;
-      readonly target: {
-        readonly accumFramebuffer: WebGLFramebuffer;
-        readonly fieldTexture: WebGLTexture;
-        readonly fieldColumns: number;
-        readonly fieldRows: number;
-        readonly fieldTextureWidth: number;
-        readonly fieldTextureHeight: number;
-        readonly branchIndex: number;
-      };
-    }[] = [];
-    const updates = Array<GpuMaterialFieldUpdate | undefined>(
+    const checkpointRefs: PendingPerFlushCheckpoint[] = [];
+    const currentCheckpoints = this.materialCheckpoints.map(
+      (checkpoint, branchIndex): PendingPerFlushCheckpoint | undefined => {
+        if (!checkpoint.initialized) return undefined;
+        const reference = { branchIndex, current: checkpoint };
+        checkpointRefs.push(reference);
+        return reference;
+      },
+    );
+    const checkpointBySegment = new Map<
+      PendingBranchSegment,
+      PendingPerFlushCheckpoint
+    >();
+    const pendingRuns: PendingPerFlushFieldRun[] = [];
+    const latestUpdates = Array<GpuMaterialFieldUpdate | undefined>(
       this.branchCount,
     ).fill(undefined);
     const updateDistances = new Float64Array(this.branchCount);
-    const captures = Array<PendingMaterialCheckpointCapture | undefined>(
-      this.branchCount,
-    ).fill(undefined);
+
+    for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
+      for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
+        const segment = branches[branchIndex]?.[segmentIndex];
+        if (!segment) continue;
+        if (segment.update) {
+          const checkpoint = currentCheckpoints[branchIndex];
+          if (!checkpoint) {
+            throw new Error("GPU material checkpoint has not been initialized");
+          }
+          pendingRuns.push({
+            branchIndex,
+            update: segment.update,
+            checkpoint,
+          });
+          latestUpdates[branchIndex] = segment.update;
+          updateDistances[branchIndex] += Math.max(
+            0,
+            segment.update.distancePx,
+          );
+        }
+        if (segment.checkpoint) {
+          const checkpoint = {
+            branchIndex,
+            capture: segment.checkpoint,
+          };
+          checkpointRefs.push(checkpoint);
+          checkpointBySegment.set(segment, checkpoint);
+          currentCheckpoints[branchIndex] = checkpoint;
+        }
+      }
+    }
+
+    const checkpointLayouts =
+      this.preparePerFlushCheckpointAtlas(checkpointRefs);
+    const capturedCheckpoints = new Set<PendingPerFlushCheckpoint>();
+    for (const checkpoint of checkpointRefs) {
+      if (checkpoint.current) {
+        this.copyCurrentCheckpointToPerFlushAtlas(
+          checkpoint,
+          checkpointLayouts,
+        );
+        capturedCheckpoints.add(checkpoint);
+      } else if (checkpoint.capture?.fromStrokeStart) {
+        this.copySurfaceCheckpointToPerFlushAtlas(
+          checkpoint,
+          checkpointLayouts,
+          this.sourceFramebuffer,
+        );
+        capturedCheckpoints.add(checkpoint);
+      }
+    }
+
+    const bristleDraws: GpuBristleDraw[] = [];
 
     for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
       for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
         const segment = branches[branchIndex]?.[segmentIndex];
         if (!segment) continue;
         this.drawDabs(segment.dabs);
-        for (const chunk of segment.bristleChunks) {
+        const checkpoint = checkpointBySegment.get(segment);
+        for (
+          let chunkIndex = 0;
+          chunkIndex < segment.bristleChunks.length;
+          chunkIndex++
+        ) {
+          const chunk = segment.bristleChunks[chunkIndex];
+          if (!chunk) continue;
           bristleDraws.push({
             chunk,
             target: this.bristleTarget(branchIndex),
+            afterComposite:
+              checkpoint &&
+              !checkpoint.capture?.fromStrokeStart &&
+              chunkIndex === segment.bristleChunks.length - 1
+                ? () => {
+                    this.copySurfaceCheckpointToPerFlushAtlas(
+                      checkpoint,
+                      checkpointLayouts,
+                      this.framebuffer,
+                    );
+                    capturedCheckpoints.add(checkpoint);
+                  }
+                : undefined,
           });
         }
-        if (segment.update) {
-          updates[branchIndex] = segment.update;
-          updateDistances[branchIndex] += Math.max(
-            0,
-            segment.update.distancePx,
+        if (
+          checkpoint &&
+          !checkpoint.capture?.fromStrokeStart &&
+          segment.bristleChunks.length === 0
+        ) {
+          this.copySurfaceCheckpointToPerFlushAtlas(
+            checkpoint,
+            checkpointLayouts,
+            this.framebuffer,
           );
+          capturedCheckpoints.add(checkpoint);
         }
-        if (segment.checkpoint) captures[branchIndex] = segment.checkpoint;
       }
     }
 
     let passCount = this.bristleResources.drawBatch(bristleDraws);
-    if (captures.some((capture) => capture !== undefined)) {
-      this.captureMaterialCheckpointBatch(captures);
+    for (const checkpoint of checkpointRefs) {
+      if (capturedCheckpoints.has(checkpoint)) continue;
+      this.copySurfaceCheckpointToPerFlushAtlas(
+        checkpoint,
+        checkpointLayouts,
+        this.framebuffer,
+      );
     }
-    const aggregatedUpdates = updates.map((update, branchIndex) => {
+    this.persistPerFlushCheckpoints(currentCheckpoints, checkpointLayouts);
+
+    const aggregatedUpdates = latestUpdates.map((update, branchIndex) => {
       if (!update) return undefined;
       const distancePx = updateDistances[branchIndex] ?? 0;
       return {
@@ -987,11 +1096,288 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       };
     });
     if (aggregatedUpdates.some((update) => update !== undefined)) {
-      const startedAt = this.executeMaterialFieldUpdateBatch(aggregatedUpdates);
+      const runs: FieldBatchMixRun[] = pendingRuns.map((run) => {
+        const checkpoint = checkpointLayouts.get(run.checkpoint);
+        if (!checkpoint) {
+          throw new Error("GPU material field batch checkpoint is unavailable");
+        }
+        return {
+          branchIndex: run.branchIndex,
+          update: run.update,
+          checkpoint,
+        };
+      });
+      const startedAt = executeMaterialFieldBatchMixPass(
+        this.fieldPassResources(),
+        runs,
+      );
       this.executeMaterialFieldDiffusionBatch(aggregatedUpdates, startedAt);
       passCount += 1 + diffusionPassCount(aggregatedUpdates);
     }
     if (passCount > 0) perfSample("gpuBristlePasses", passCount);
+  }
+
+  private preparePerFlushCheckpointAtlas(
+    checkpoints: readonly PendingPerFlushCheckpoint[],
+  ): Map<PendingPerFlushCheckpoint, FieldBatchCheckpoint> {
+    const layouts = new Map<PendingPerFlushCheckpoint, FieldBatchCheckpoint>();
+    if (checkpoints.length === 0) return layouts;
+    const checkpointSize = (checkpoint: PendingPerFlushCheckpoint) =>
+      checkpoint.current?.textureSize ??
+      Math.max(1, Math.floor(checkpoint.capture?.size ?? 1));
+    const largestSize = checkpoints.reduce(
+      (maximum, checkpoint) => Math.max(maximum, checkpointSize(checkpoint)),
+      1,
+    );
+    const cellSize = roundUpGpuAllocation(largestSize);
+    const gl = this.gl;
+    const maxTextureSize = Number(gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    const maxColumns = Math.floor(maxTextureSize / cellSize);
+    if (maxColumns < 1) {
+      throw new Error("GPU material checkpoint exceeds the texture limit");
+    }
+    let columns = Math.min(
+      maxColumns,
+      Math.max(1, Math.ceil(Math.sqrt(checkpoints.length))),
+    );
+    let rows = Math.ceil(checkpoints.length / columns);
+    if (rows * cellSize > maxTextureSize) {
+      columns = maxColumns;
+      rows = Math.ceil(checkpoints.length / columns);
+    }
+    if (rows * cellSize > maxTextureSize) {
+      throw new Error(
+        "GPU material checkpoint batch exceeds the texture limit",
+      );
+    }
+    const requiredWidth = columns * cellSize;
+    const requiredHeight = rows * cellSize;
+    if (
+      requiredWidth > this.fieldBatchCheckpointTextureWidth ||
+      requiredHeight > this.fieldBatchCheckpointTextureHeight
+    ) {
+      this.fieldBatchCheckpointTextureWidth = Math.max(
+        this.fieldBatchCheckpointTextureWidth,
+        requiredWidth,
+      );
+      this.fieldBatchCheckpointTextureHeight = Math.max(
+        this.fieldBatchCheckpointTextureHeight,
+        requiredHeight,
+      );
+      gl.bindTexture(
+        gl.TEXTURE_2D,
+        this.glResources.fieldBatchCheckpointTexture,
+      );
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        this.fieldBatchCheckpointTextureWidth,
+        this.fieldBatchCheckpointTextureHeight,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+      perfMark("realloc:fieldBatchCheckpoints", {
+        width: this.fieldBatchCheckpointTextureWidth,
+        height: this.fieldBatchCheckpointTextureHeight,
+      });
+    }
+    gl.bindFramebuffer(
+      gl.FRAMEBUFFER,
+      this.glResources.fieldBatchCheckpointFramebuffer,
+    );
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      this.glResources.fieldBatchCheckpointTexture,
+      0,
+    );
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error(
+        "GPU material checkpoint batch framebuffer is incomplete",
+      );
+    }
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    // copyTexSubImage2D writes this texture later. Keep it detached from the
+    // currently bound draw framebuffer while checkpoint pixels are copied.
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.framebuffer);
+
+    for (let index = 0; index < checkpoints.length; index++) {
+      const checkpoint = checkpoints[index];
+      if (!checkpoint) continue;
+      const source = checkpoint.capture ?? checkpoint.current;
+      if (!source) continue;
+      layouts.set(checkpoint, {
+        originX: source.originX,
+        originY: source.originY,
+        textureSize: checkpointSize(checkpoint),
+        atlasX: (index % columns) * cellSize,
+        atlasY: Math.floor(index / columns) * cellSize,
+      });
+    }
+    return layouts;
+  }
+
+  private copyCurrentCheckpointToPerFlushAtlas(
+    checkpoint: PendingPerFlushCheckpoint,
+    layouts: ReadonlyMap<PendingPerFlushCheckpoint, FieldBatchCheckpoint>,
+  ): void {
+    const layout = layouts.get(checkpoint);
+    if (!layout || !checkpoint.current) return;
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.materialCheckpointFramebuffer);
+    gl.framebufferTextureLayer(
+      gl.READ_FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      this.materialCheckpointTexture,
+      0,
+      checkpoint.branchIndex,
+    );
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.glResources.fieldBatchCheckpointTexture);
+    gl.copyTexSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      layout.atlasX,
+      layout.atlasY,
+      0,
+      0,
+      layout.textureSize,
+      layout.textureSize,
+    );
+  }
+
+  private copySurfaceCheckpointToPerFlushAtlas(
+    checkpoint: PendingPerFlushCheckpoint,
+    layouts: ReadonlyMap<PendingPerFlushCheckpoint, FieldBatchCheckpoint>,
+    sourceFramebuffer: WebGLFramebuffer,
+  ): void {
+    const capture = checkpoint.capture;
+    const layout = layouts.get(checkpoint);
+    if (!capture || !layout) return;
+    const readOriginX = Math.floor(capture.originX);
+    const readOriginY = Math.floor(capture.originY);
+    const left = Math.max(0, readOriginX);
+    const top = Math.max(0, readOriginY);
+    const right = Math.min(this.width, readOriginX + layout.textureSize);
+    const bottom = Math.min(this.height, readOriginY + layout.textureSize);
+    if (right <= left || bottom <= top) return;
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sourceFramebuffer);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.glResources.fieldBatchCheckpointTexture);
+    gl.copyTexSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      layout.atlasX + left - readOriginX,
+      layout.atlasY + layout.textureSize - (bottom - readOriginY),
+      left,
+      this.height - bottom,
+      right - left,
+      bottom - top,
+    );
+  }
+
+  private persistPerFlushCheckpoints(
+    checkpoints: readonly (PendingPerFlushCheckpoint | undefined)[],
+    layouts: ReadonlyMap<PendingPerFlushCheckpoint, FieldBatchCheckpoint>,
+  ): void {
+    const requiredSize = checkpoints.reduce((maximum, checkpoint) => {
+      const layout = checkpoint ? layouts.get(checkpoint) : undefined;
+      return Math.max(maximum, layout?.textureSize ?? 0);
+    }, 0);
+    if (requiredSize === 0) return;
+    const gl = this.gl;
+    if (
+      requiredSize > this.materialCheckpointTextureSize ||
+      this.branchCount > this.materialCheckpointLayerCount
+    ) {
+      this.materialCheckpointTextureSize = roundUpGpuAllocation(
+        Math.max(requiredSize, this.materialCheckpointTextureSize),
+      );
+      this.materialCheckpointLayerCount = Math.max(
+        this.branchCount,
+        this.materialCheckpointLayerCount,
+      );
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.materialCheckpointTexture);
+      gl.texImage3D(
+        gl.TEXTURE_2D_ARRAY,
+        0,
+        gl.RGBA8,
+        this.materialCheckpointTextureSize,
+        this.materialCheckpointTextureSize,
+        this.materialCheckpointLayerCount,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+      perfMark("realloc:snapshotArray", {
+        width: this.materialCheckpointTextureSize,
+        height: this.materialCheckpointTextureSize,
+        depth: this.materialCheckpointLayerCount,
+      });
+    }
+    gl.bindFramebuffer(
+      gl.READ_FRAMEBUFFER,
+      this.glResources.fieldBatchCheckpointFramebuffer,
+    );
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.materialCheckpointFramebuffer);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
+      const checkpointRef = checkpoints[branchIndex];
+      const layout = checkpointRef ? layouts.get(checkpointRef) : undefined;
+      const checkpoint = this.materialCheckpoints[branchIndex];
+      if (!checkpoint) continue;
+      if (!layout) {
+        checkpoint.initialized = false;
+        continue;
+      }
+      gl.framebufferTextureLayer(
+        gl.DRAW_FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        this.materialCheckpointTexture,
+        0,
+        branchIndex,
+      );
+      if (
+        gl.checkFramebufferStatus(gl.DRAW_FRAMEBUFFER) !==
+        gl.FRAMEBUFFER_COMPLETE
+      ) {
+        throw new Error("GPU material checkpoint framebuffer is incomplete");
+      }
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.blitFramebuffer(
+        layout.atlasX,
+        layout.atlasY,
+        layout.atlasX + layout.textureSize,
+        layout.atlasY + layout.textureSize,
+        0,
+        0,
+        layout.textureSize,
+        layout.textureSize,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+      checkpoint.textureSize = layout.textureSize;
+      checkpoint.originX = layout.originX;
+      checkpoint.originY = layout.originY;
+      checkpoint.initialized = true;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+    gl.viewport(0, 0, this.width, this.height);
+    perfSample(
+      "checkpoints",
+      checkpoints.filter((checkpoint) => checkpoint?.capture).length,
+    );
   }
 
   private bristleTarget(branchIndex: number) {

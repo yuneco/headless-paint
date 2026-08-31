@@ -46,10 +46,17 @@ export interface FieldPassResources {
   readonly branchDataBuffer: WebGLBuffer;
   readonly vertexArray: WebGLVertexArrayObject;
   readonly fieldMixProgram: WebGLProgram;
+  readonly fieldBatchMixProgram: WebGLProgram;
   readonly fieldDiffusionProgram: WebGLProgram;
   readonly fieldMixUniforms: {
     readonly fieldDimensions: WebGLUniformLocation;
   };
+  readonly fieldBatchMixUniforms: {
+    readonly fieldDimensions: WebGLUniformLocation;
+    readonly runCount: WebGLUniformLocation;
+  };
+  readonly fieldBatchCheckpointTexture: WebGLTexture;
+  readonly fieldBatchRunDataTexture: WebGLTexture;
   readonly fieldDiffusionUniforms: {
     readonly fieldDimensions: WebGLUniformLocation;
     readonly strengths: WebGLUniformLocation;
@@ -60,10 +67,27 @@ export interface FieldPassResources {
     readonly strengths: Float32Array<ArrayBuffer>;
     mixColumns: number;
     mixRows: number;
+    batchMixColumns: number;
+    batchMixRows: number;
+    batchRunCapacity: number;
     diffusionColumns: number;
     diffusionRows: number;
   };
   readonly bindFieldFramebuffer: (index: 0 | 1) => void;
+}
+
+export interface FieldBatchCheckpoint {
+  readonly originX: number;
+  readonly originY: number;
+  readonly textureSize: number;
+  readonly atlasX: number;
+  readonly atlasY: number;
+}
+
+export interface FieldBatchMixRun {
+  readonly branchIndex: number;
+  readonly update: GpuMaterialFieldUpdate;
+  readonly checkpoint: FieldBatchCheckpoint;
 }
 
 export function executeMaterialFieldMixPass(
@@ -161,6 +185,131 @@ export function executeMaterialFieldMixPass(
   }
   gl.bindBuffer(gl.UNIFORM_BUFFER, resources.branchDataBuffer);
   gl.bufferSubData(gl.UNIFORM_BUFFER, 0, branchData);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  return startedAt;
+}
+
+export function executeMaterialFieldBatchMixPass(
+  resources: FieldPassResources,
+  runs: readonly FieldBatchMixRun[],
+): number {
+  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  if (runs.length === 0) return startedAt;
+  const runData = new Float32Array(runs.length * 5 * 4);
+  for (let runIndex = 0; runIndex < runs.length; runIndex++) {
+    const run = runs[runIndex];
+    if (!run) continue;
+    const { update, checkpoint } = run;
+    if (
+      update.columns !== resources.fieldColumns ||
+      update.rows !== resources.fieldRows
+    ) {
+      throw new Error("GPU material field batch dimensions do not match");
+    }
+    if (run.branchIndex < 0 || run.branchIndex >= resources.branchCount) {
+      throw new Error("GPU material field batch branch is out of range");
+    }
+    const offset = runIndex * 20;
+    runData[offset] = checkpoint.originX;
+    runData[offset + 1] = checkpoint.originY;
+    runData[offset + 2] = checkpoint.textureSize;
+    runData[offset + 3] = checkpoint.textureSize;
+    runData[offset + 4] = update.centerX;
+    runData[offset + 5] = update.centerY;
+    runData[offset + 6] = update.angle;
+    runData[offset + 7] = Math.max(1, update.sampleSize);
+    runData[offset + 8] = clampUnit(update.baseColor.r / 255);
+    runData[offset + 9] = clampUnit(update.baseColor.g / 255);
+    runData[offset + 10] = clampUnit(update.baseColor.b / 255);
+    runData[offset + 11] = clampUnit(update.baseColor.a / 255);
+    const distance = sanitizeNonNegative(update.distancePx);
+    runData[offset + 12] = distanceCoefficient(
+      update.pickupRatePerPx,
+      distance,
+    );
+    runData[offset + 13] = distanceCoefficient(
+      update.restoreRatePerPx,
+      distance,
+    );
+    runData[offset + 14] = run.branchIndex;
+    runData[offset + 15] = 0;
+    runData[offset + 16] = checkpoint.atlasX;
+    runData[offset + 17] = checkpoint.atlasY;
+  }
+
+  const { gl } = resources;
+  const scratch = resources.fieldPassScratch;
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, resources.fieldBatchRunDataTexture);
+  if (runs.length > scratch.batchRunCapacity) {
+    scratch.batchRunCapacity = Math.max(
+      runs.length,
+      scratch.batchRunCapacity * 2,
+    );
+    const maxTextureSize = Number(gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    if (scratch.batchRunCapacity > maxTextureSize) {
+      throw new Error("GPU material field batch exceeds the texture limit");
+    }
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA32F,
+      5,
+      scratch.batchRunCapacity,
+      0,
+      gl.RGBA,
+      gl.FLOAT,
+      null,
+    );
+  }
+  gl.texSubImage2D(
+    gl.TEXTURE_2D,
+    0,
+    0,
+    0,
+    5,
+    runs.length,
+    gl.RGBA,
+    gl.FLOAT,
+    runData,
+  );
+
+  const nextIndex = oppositeFieldIndex(resources.activeFieldIndex);
+  resources.bindFieldFramebuffer(nextIndex);
+  gl.viewport(
+    0,
+    0,
+    resources.fieldColumns,
+    resources.fieldRows * resources.branchCount,
+  );
+  gl.disable(gl.BLEND);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.useProgram(resources.fieldBatchMixProgram);
+  gl.bindVertexArray(resources.vertexArray);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, resources.fieldBatchCheckpointTexture);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(
+    gl.TEXTURE_2D,
+    resources.fieldTextures[resources.activeFieldIndex],
+  );
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, resources.fieldBatchRunDataTexture);
+  if (
+    scratch.batchMixColumns !== resources.fieldColumns ||
+    scratch.batchMixRows !== resources.fieldRows
+  ) {
+    gl.uniform2i(
+      resources.fieldBatchMixUniforms.fieldDimensions,
+      resources.fieldColumns,
+      resources.fieldRows,
+    );
+    scratch.batchMixColumns = resources.fieldColumns;
+    scratch.batchMixRows = resources.fieldRows;
+  }
+  gl.uniform1i(resources.fieldBatchMixUniforms.runCount, runs.length);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   return startedAt;
 }

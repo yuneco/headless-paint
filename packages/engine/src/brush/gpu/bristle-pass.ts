@@ -60,6 +60,7 @@ export interface BristlePassTarget {
 export interface GpuBristleDraw {
   readonly chunk: GpuBristleChunk;
   readonly target: BristlePassTarget;
+  readonly afterComposite?: () => void;
 }
 
 interface AtlasSlot extends GpuBristleDraw {
@@ -542,6 +543,7 @@ export function createGpuBristlePassResources(
         gl.scissor(left, surfaceHeight - bottom, right - left, bottom - top);
         setCompositeUniforms(slot);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
+        slot.afterComposite?.();
       }
       gl.disable(gl.SCISSOR_TEST);
     });

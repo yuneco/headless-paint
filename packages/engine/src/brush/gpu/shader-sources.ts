@@ -416,6 +416,104 @@ void main() {
 }
 `;
 
+export const FIELD_BATCH_MIX_FRAGMENT_SHADER_SOURCE = `#version 300 es
+precision highp float;
+
+uniform sampler2D uCheckpoints;
+uniform sampler2D uPreviousField;
+uniform highp sampler2D uRunData;
+uniform ivec2 uFieldDimensions;
+uniform int uRunCount;
+
+out vec4 outColor;
+
+vec4 checkpointTexel(
+  ivec2 tilePixel,
+  vec4 checkpointRect,
+  ivec2 atlasOrigin
+) {
+  ivec2 checkpointSize = ivec2(checkpointRect.zw);
+  if (
+    tilePixel.x < 0 || tilePixel.y < 0 ||
+    tilePixel.x >= checkpointSize.x || tilePixel.y >= checkpointSize.y
+  ) {
+    return vec4(0.0);
+  }
+  ivec2 atlasPixel = atlasOrigin + ivec2(
+    tilePixel.x,
+    checkpointSize.y - 1 - tilePixel.y
+  );
+  vec4 premultiplied = texelFetch(uCheckpoints, atlasPixel, 0);
+  if (premultiplied.a <= 0.0) return vec4(0.0);
+  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
+}
+
+vec4 sampleCheckpointBilinear(
+  vec2 documentPosition,
+  vec4 checkpointRect,
+  ivec2 atlasOrigin
+) {
+  vec2 samplePosition = documentPosition - checkpointRect.xy - vec2(0.5);
+  ivec2 p0 = ivec2(floor(samplePosition));
+  vec2 fraction = samplePosition - vec2(p0);
+  return mix(
+    mix(
+      checkpointTexel(p0, checkpointRect, atlasOrigin),
+      checkpointTexel(p0 + ivec2(1, 0), checkpointRect, atlasOrigin),
+      fraction.x
+    ),
+    mix(
+      checkpointTexel(p0 + ivec2(0, 1), checkpointRect, atlasOrigin),
+      checkpointTexel(p0 + ivec2(1, 1), checkpointRect, atlasOrigin),
+      fraction.x
+    ),
+    fraction.y
+  );
+}
+
+void main() {
+  ivec2 stripCoord = ivec2(gl_FragCoord.xy);
+  int branchIndex = stripCoord.y / uFieldDimensions.y;
+  ivec2 fieldCoord = ivec2(
+    stripCoord.x,
+    stripCoord.y - branchIndex * uFieldDimensions.y
+  );
+  vec4 current = texelFetch(uPreviousField, stripCoord, 0);
+
+  for (int runIndex = 0; runIndex < uRunCount; runIndex++) {
+    vec4 checkpointRect = texelFetch(uRunData, ivec2(0, runIndex), 0);
+    vec4 geometry = texelFetch(uRunData, ivec2(1, runIndex), 0);
+    vec4 baseColor = texelFetch(uRunData, ivec2(2, runIndex), 0);
+    vec4 rates = texelFetch(uRunData, ivec2(3, runIndex), 0);
+    if (int(round(rates.z)) != branchIndex) continue;
+    ivec2 atlasOrigin = ivec2(
+      texelFetch(uRunData, ivec2(4, runIndex), 0).xy
+    );
+    vec2 local = (
+      (vec2(fieldCoord) + vec2(0.5)) / vec2(uFieldDimensions) - vec2(0.5)
+    ) * geometry.w;
+    float cosine = cos(geometry.z);
+    float sine = sin(geometry.z);
+    vec2 documentPosition = geometry.xy + vec2(
+      local.x * cosine - local.y * sine,
+      local.x * sine + local.y * cosine
+    );
+    vec4 sampled = sampleCheckpointBilinear(
+      documentPosition,
+      checkpointRect,
+      atlasOrigin
+    );
+    float pickupAmount = rates.x * sampled.a;
+    vec3 picked = mix(current.rgb, sampled.rgb, pickupAmount);
+    current = vec4(
+      mix(picked, baseColor.rgb, rates.y),
+      mix(current.a, baseColor.a, rates.y)
+    );
+  }
+  outColor = current;
+}
+`;
+
 export function createFieldDiffusionFragmentShaderSource(
   maxBranchCount: number,
 ): string {

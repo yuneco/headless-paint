@@ -79,6 +79,7 @@ export type BrushPerfEventName =
   | "gpuUpload"
   | "gpuCommit"
   | "realloc:fieldStrip"
+  | "realloc:fieldBatchCheckpoints"
   | "realloc:snapshotArray"
   | "realloc:commitCanvas"
   | "realloc:accum"

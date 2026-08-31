@@ -3,6 +3,7 @@ import { COMMIT_CANVAS_SIZE } from "./commit-packing";
 import {
   BRANCH_DATA_BINDING,
   BRANCH_DATA_FLOATS,
+  FIELD_BATCH_MIX_FRAGMENT_SHADER_SOURCE,
   FIELD_DIFFUSION_FIXED_FRAGMENT_UNIFORM_VECTORS,
   FIELD_MIX_FRAGMENT_SHADER_SOURCE,
   FIELD_VERTEX_SHADER_SOURCE,
@@ -18,6 +19,7 @@ export interface GpuStrokeGlResources {
   readonly contextState: { lost: boolean };
   readonly program: WebGLProgram;
   readonly fieldMixProgram: WebGLProgram;
+  readonly fieldBatchMixProgram: WebGLProgram;
   readonly fieldDiffusionProgram: WebGLProgram;
   readonly vertexArray: WebGLVertexArrayObject;
   readonly quadBuffer: WebGLBuffer;
@@ -31,6 +33,9 @@ export interface GpuStrokeGlResources {
   readonly fieldFramebuffers: readonly [WebGLFramebuffer, WebGLFramebuffer];
   readonly materialCheckpointTexture: WebGLTexture;
   readonly materialCheckpointFramebuffer: WebGLFramebuffer;
+  readonly fieldBatchCheckpointTexture: WebGLTexture;
+  readonly fieldBatchCheckpointFramebuffer: WebGLFramebuffer;
+  readonly fieldBatchRunDataTexture: WebGLTexture;
   readonly framebuffer: WebGLFramebuffer;
   readonly sourceFramebuffer: WebGLFramebuffer;
   readonly baseFramebuffer: WebGLFramebuffer;
@@ -43,6 +48,10 @@ export interface GpuStrokeGlResources {
   readonly fieldMixUniforms: {
     readonly fieldDimensions: WebGLUniformLocation;
   };
+  readonly fieldBatchMixUniforms: {
+    readonly fieldDimensions: WebGLUniformLocation;
+    readonly runCount: WebGLUniformLocation;
+  };
   readonly fieldDiffusionUniforms: {
     readonly fieldDimensions: WebGLUniformLocation;
     readonly strengths: WebGLUniformLocation;
@@ -53,6 +62,9 @@ export interface GpuStrokeGlResources {
     readonly strengths: Float32Array<ArrayBuffer>;
     mixColumns: number;
     mixRows: number;
+    batchMixColumns: number;
+    batchMixRows: number;
+    batchRunCapacity: number;
     diffusionColumns: number;
     diffusionRows: number;
   };
@@ -113,6 +125,12 @@ export function createGpuStrokeGlResources(
     FIELD_MIX_FRAGMENT_SHADER_SOURCE,
     "GPU material field mix",
   );
+  const fieldBatchMixProgram = createProgram(
+    gl,
+    FIELD_VERTEX_SHADER_SOURCE,
+    FIELD_BATCH_MIX_FRAGMENT_SHADER_SOURCE,
+    "GPU material field batch mix",
+  );
   const fieldDiffusionProgram = createProgram(
     gl,
     FIELD_VERTEX_SHADER_SOURCE,
@@ -160,6 +178,18 @@ export function createGpuStrokeGlResources(
     gl.createFramebuffer(),
     "WebGL material checkpoint framebuffer",
   );
+  const fieldBatchCheckpointTexture = requireResource(
+    gl.createTexture(),
+    "GPU material field batch checkpoint texture",
+  );
+  const fieldBatchCheckpointFramebuffer = requireResource(
+    gl.createFramebuffer(),
+    "GPU material field batch checkpoint framebuffer",
+  );
+  const fieldBatchRunDataTexture = requireResource(
+    gl.createTexture(),
+    "GPU material field batch run data texture",
+  );
   const framebuffer = requireResource(
     gl.createFramebuffer(),
     "WebGL framebuffer",
@@ -196,6 +226,16 @@ export function createGpuStrokeGlResources(
       "GPU material field mix dimensions uniform",
     ),
   };
+  const fieldBatchMixUniforms = {
+    fieldDimensions: requireResource(
+      gl.getUniformLocation(fieldBatchMixProgram, "uFieldDimensions"),
+      "GPU material field batch mix dimensions uniform",
+    ),
+    runCount: requireResource(
+      gl.getUniformLocation(fieldBatchMixProgram, "uRunCount"),
+      "GPU material field batch mix run count uniform",
+    ),
+  };
   const fieldDiffusionUniforms = {
     fieldDimensions: requireResource(
       gl.getUniformLocation(fieldDiffusionProgram, "uFieldDimensions"),
@@ -212,6 +252,9 @@ export function createGpuStrokeGlResources(
     strengths: new Float32Array(maxBranchCount),
     mixColumns: 0,
     mixRows: 0,
+    batchMixColumns: 0,
+    batchMixRows: 0,
+    batchRunCapacity: 0,
     diffusionColumns: 0,
     diffusionRows: 0,
   };
@@ -261,6 +304,8 @@ export function createGpuStrokeGlResources(
     configureTexture2d(gl, texture, gl.LINEAR);
   }
   configureTextureArray(gl, materialCheckpointTexture, gl.NEAREST);
+  configureTexture2d(gl, fieldBatchCheckpointTexture, gl.NEAREST);
+  configureTexture2d(gl, fieldBatchRunDataTexture, gl.NEAREST);
   const useFloatField = Boolean(
     gl.getExtension("EXT_color_buffer_float") ??
       gl.getExtension("EXT_color_buffer_half_float"),
@@ -284,6 +329,28 @@ export function createGpuStrokeGlResources(
     ),
     1,
   );
+  gl.useProgram(fieldBatchMixProgram);
+  gl.uniform1i(
+    requireResource(
+      gl.getUniformLocation(fieldBatchMixProgram, "uCheckpoints"),
+      "GPU material field batch checkpoint sampler uniform",
+    ),
+    0,
+  );
+  gl.uniform1i(
+    requireResource(
+      gl.getUniformLocation(fieldBatchMixProgram, "uPreviousField"),
+      "GPU material field batch previous sampler uniform",
+    ),
+    1,
+  );
+  gl.uniform1i(
+    requireResource(
+      gl.getUniformLocation(fieldBatchMixProgram, "uRunData"),
+      "GPU material field batch run data sampler uniform",
+    ),
+    2,
+  );
   gl.useProgram(fieldDiffusionProgram);
   gl.uniform1i(
     requireResource(
@@ -299,6 +366,7 @@ export function createGpuStrokeGlResources(
     contextState,
     program,
     fieldMixProgram,
+    fieldBatchMixProgram,
     fieldDiffusionProgram,
     vertexArray,
     quadBuffer,
@@ -312,12 +380,16 @@ export function createGpuStrokeGlResources(
     fieldFramebuffers,
     materialCheckpointTexture,
     materialCheckpointFramebuffer,
+    fieldBatchCheckpointTexture,
+    fieldBatchCheckpointFramebuffer,
+    fieldBatchRunDataTexture,
     framebuffer,
     sourceFramebuffer,
     baseFramebuffer,
     surfaceSizeLocation,
     strokeFieldUniforms,
     fieldMixUniforms,
+    fieldBatchMixUniforms,
     fieldDiffusionUniforms,
     fieldPassScratch,
     maxBranchCount,
@@ -331,6 +403,7 @@ export function disposeGpuStrokeGlResources(
   const gl = resources.gl;
   gl.deleteProgram(resources.program);
   gl.deleteProgram(resources.fieldMixProgram);
+  gl.deleteProgram(resources.fieldBatchMixProgram);
   gl.deleteProgram(resources.fieldDiffusionProgram);
   gl.deleteVertexArray(resources.vertexArray);
   gl.deleteBuffer(resources.quadBuffer);
@@ -346,6 +419,9 @@ export function disposeGpuStrokeGlResources(
   }
   gl.deleteTexture(resources.materialCheckpointTexture);
   gl.deleteFramebuffer(resources.materialCheckpointFramebuffer);
+  gl.deleteTexture(resources.fieldBatchCheckpointTexture);
+  gl.deleteFramebuffer(resources.fieldBatchCheckpointFramebuffer);
+  gl.deleteTexture(resources.fieldBatchRunDataTexture);
   gl.deleteFramebuffer(resources.framebuffer);
   gl.deleteFramebuffer(resources.sourceFramebuffer);
   gl.deleteFramebuffer(resources.baseFramebuffer);

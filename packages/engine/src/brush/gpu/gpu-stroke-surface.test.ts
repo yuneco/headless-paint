@@ -157,6 +157,33 @@ describe("GpuStrokeSurface", () => {
     expect(snapshot.samples.gpuBristlePasses).toEqual([4]);
   });
 
+  it("perFlush field は各 bristle run の checkpoint geometry を積分する", () => {
+    const source = new OffscreenCanvas(72, 48);
+    const sourceCtx = source.getContext("2d");
+    expect(sourceCtx).not.toBeNull();
+    if (!sourceCtx) return;
+    sourceCtx.fillStyle = "rgb(235, 35, 25)";
+    sourceCtx.fillRect(0, 0, 24, source.height);
+    sourceCtx.fillStyle = "rgb(25, 210, 65)";
+    sourceCtx.fillRect(24, 0, 24, source.height);
+    sourceCtx.fillStyle = "rgb(30, 65, 235)";
+    sourceCtx.fillRect(48, 0, 24, source.height);
+
+    const perRun = renderBristleFieldCadenceForTest(source, "perRun");
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const perFlush = renderBristleFieldCadenceForTest(source, "perFlush");
+
+    expect(
+      materialFieldMae(perRun, perFlush),
+      JSON.stringify({
+        perRun: Array.from(perRun.slice(0, 4)),
+        perFlush: Array.from(perFlush.slice(0, 4)),
+      }),
+    ).toBeLessThanOrEqual(0.02);
+    expect(brushPerfDebug.snapshot().samples.gpuBristlePasses).toEqual([3]);
+  });
+
   it("単色 field と円 tip の dab を layer に commit する", () => {
     const layer = createLayer(64, 48);
     const surface = createGpuStrokeSurface(layer.width, layer.height);
@@ -841,6 +868,87 @@ function makeSweepSegment(fromFieldColumn: number, toFieldColumn: number) {
     overlap: 1,
     trialId: fromFieldColumn,
   } as const;
+}
+
+function renderBristleFieldCadenceForTest(
+  source: OffscreenCanvas,
+  cadence: "perRun" | "perFlush",
+): Uint8ClampedArray {
+  const surface = createGpuStrokeSurface(
+    source.width,
+    source.height,
+    "bitmap",
+    cadence,
+  );
+  expect(surface).not.toBeNull();
+  if (!surface) return new Uint8ClampedArray();
+  try {
+    surface.beginStroke(source);
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return new Uint8ClampedArray();
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const chunk: GpuBristleChunk = {
+      segments: [makeSweepSegment(0, 1)],
+      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
+      maskFieldColumns: 2,
+      maskFieldRows: 2,
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: { r: 180, g: 180, b: 180, a: 0 },
+      useMaterialField: false,
+    };
+    const baseColor = { r: 180, g: 180, b: 180, a: 255 } as const;
+    surface.initializeMaterialField(4, 4, baseColor);
+    surface.initializeMaterialCheckpoint(0, 0, 24);
+    surface.beginBranchBatch();
+    for (const [index, centerX] of [12, 36, 60].entries()) {
+      surface.pushBristleChunk(chunk);
+      surface.updateMaterialField({
+        baseColor,
+        centerX,
+        centerY: 24,
+        angle: 0,
+        sampleSize: 8,
+        columns: 4,
+        rows: 4,
+        pickupRatePerPx: 0.12,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 4,
+      });
+      if (index < 2) {
+        surface.snapshotMaterialCheckpoint((index + 1) * 24, 0, 24);
+      }
+    }
+    surface.endBranchBatch();
+    return surface.readMaterialFieldForTest();
+  } finally {
+    surface.dispose();
+  }
+}
+
+function materialFieldMae(
+  expected: Uint8ClampedArray,
+  actual: Uint8ClampedArray,
+): number {
+  expect(actual).toHaveLength(expected.length);
+  let absoluteDelta = 0;
+  for (let index = 0; index < expected.length; index++) {
+    absoluteDelta += Math.abs((expected[index] ?? 0) - (actual[index] ?? 0));
+  }
+  return absoluteDelta / expected.length / 255;
 }
 
 function expectChannelNear(actual: number | undefined, expected: number): void {
