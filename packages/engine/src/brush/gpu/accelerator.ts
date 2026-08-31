@@ -144,7 +144,7 @@ function readBristleFieldCadenceDebugFlag(): BristleFieldCadence {
       __headlessPaintGpuBristleField?: unknown;
     }
   ).__headlessPaintGpuBristleField;
-  return value === "perFlush" ? "perFlush" : "perRun";
+  return value === "perRun" ? "perRun" : "perFlush";
 }
 
 function createSurface(
@@ -153,9 +153,7 @@ function createSurface(
   commitMode: "bitmap" | "direct",
   bristleFieldCadence: BristleFieldCadence,
 ): GpuStrokeSurface | null {
-  return bristleFieldCadence === "perFlush"
-    ? createGpuStrokeSurface(width, height, commitMode, bristleFieldCadence)
-    : createGpuStrokeSurface(width, height, commitMode);
+  return createGpuStrokeSurface(width, height, commitMode, bristleFieldCadence);
 }
 
 function probeWebGl2Availability(): boolean {

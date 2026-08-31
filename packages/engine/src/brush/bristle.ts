@@ -24,10 +24,14 @@ import {
 import type { GpuSweepSegment } from "./gpu/gpu-stroke-surface";
 import {
   type MixingUpdateInput,
+  finalizeBristleMixingCheckpoint,
   getActiveMixing,
+  prepareBristleMixingFlush,
   prepareInitialMixingCheckpoint,
   prepareMixingState,
+  stageBristleMixingCheckpoint,
   updateMixingAfterDeposit,
+  uploadBristleMixingInterpolation,
 } from "./mixing";
 import { brushPerfDebug, perfSample, perfStage } from "./perf-debug";
 import { type EmissionPoint, walkEmissions } from "./scheduler";
@@ -291,6 +295,20 @@ function renderRuns(
     return { mixing: initialMixingState };
   }
 
+  if (mixing && initialMixingState && !getActiveGpuStrokeSurface(accelerator)) {
+    return renderCpuMixingRuns(
+      layer,
+      points,
+      style,
+      brush,
+      profile,
+      seed,
+      sourceLayer,
+      mixing,
+      initialMixingState,
+    );
+  }
+
   let mixingState = initialMixingState;
   let runStart = 0;
   let nextUpdateDistance = mixing
@@ -359,6 +377,108 @@ function renderRuns(
       accelerator,
     );
   }
+  return { mixing: mixingState };
+}
+
+interface CpuMixingSweepRun {
+  readonly points: readonly ResolvedSweepPoint[];
+  readonly updateInput?: MixingUpdateInput;
+}
+
+function renderCpuMixingRuns(
+  layer: Layer,
+  points: readonly ResolvedSweepPoint[],
+  style: StrokeStyle,
+  brush: BristleBrushConfig,
+  profile: OffscreenCanvas,
+  seed: number,
+  sourceLayer: Layer,
+  mixing: BrushMixing,
+  initialMixingState: BrushMixingState,
+): BristleRenderResult {
+  const runs: CpuMixingSweepRun[] = [];
+  const updateInputs: MixingUpdateInput[] = [];
+  let runStart = 0;
+  let nextUpdateDistance =
+    (initialMixingState.lastUpdateDistance ?? 0) + mixing.updateDistancePx;
+
+  for (let index = 1; index < points.length; index++) {
+    const point = points[index];
+    if (!point || point.distance + 0.0001 < nextUpdateDistance) continue;
+    const updateInput = createMixingUpdateInput(
+      point,
+      profile,
+      style,
+      sourceLayer,
+      layer,
+      mixing,
+      initialMixingState,
+    );
+    runs.push({ points: points.slice(runStart, index + 1), updateInput });
+    updateInputs.push(updateInput);
+    nextUpdateDistance = point.distance + mixing.updateDistancePx;
+    runStart = index;
+  }
+  if (runStart < points.length - 1) {
+    runs.push({ points: points.slice(runStart) });
+  }
+
+  if (updateInputs.length === 0) {
+    for (const run of runs) {
+      renderSweepRun(
+        layer,
+        run.points,
+        style,
+        brush,
+        initialMixingState.renderCanvas,
+        profile,
+        seed,
+        true,
+      );
+    }
+    return { mixing: initialMixingState };
+  }
+
+  const flush = prepareBristleMixingFlush(updateInputs, initialMixingState);
+  let mixingState = flush.state;
+  let updateIndex = 0;
+  let mixWeight = 1;
+  let stagedCheckpoint = false;
+  for (const run of runs) {
+    const update = run.updateInput ? flush.updates[updateIndex++] : undefined;
+    if (update) mixWeight = update.mixWeight;
+    uploadBristleMixingInterpolation(
+      mixingState,
+      profile,
+      flush.startField,
+      flush.endField,
+      mixWeight,
+    );
+    renderSweepRun(
+      layer,
+      run.points,
+      style,
+      brush,
+      mixingState.renderCanvas,
+      profile,
+      seed,
+      true,
+    );
+    if (update?.capturesCheckpoint) {
+      mixingState = stageBristleMixingCheckpoint(update.input, mixingState);
+      stagedCheckpoint = true;
+    }
+  }
+  if (stagedCheckpoint) {
+    mixingState = finalizeBristleMixingCheckpoint(mixingState);
+  }
+  uploadBristleMixingInterpolation(
+    mixingState,
+    profile,
+    mixingState.field,
+    mixingState.field,
+    1,
+  );
   return { mixing: mixingState };
 }
 

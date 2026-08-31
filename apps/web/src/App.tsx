@@ -46,7 +46,7 @@ const gpuBristleField = new URLSearchParams(window.location.search).get(
     __headlessPaintGpuBristleField?: "perRun" | "perFlush";
   }
 ).__headlessPaintGpuBristleField =
-  gpuBristleField === "perFlush" ? "perFlush" : "perRun";
+  gpuBristleField === "perRun" ? "perRun" : "perFlush";
 const LAYER_WIDTH =
   EXPERIMENT_LAYER_SIZE > 0 ? EXPERIMENT_LAYER_SIZE : 1024 * 2;
 const LAYER_HEIGHT = LAYER_WIDTH;

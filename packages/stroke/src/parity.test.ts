@@ -194,6 +194,19 @@ const FIELD_TRACE_STYLE = makeStyle({
     },
   },
 });
+const ROUGH_MIXING_STYLE = makeStyle({
+  color: WHITE,
+  lineWidth: 34,
+  brush: {
+    ...ROUGH_BRISTLE,
+    mixing: {
+      ...DEFAULT_BRUSH_MIXING,
+      enabled: true,
+      updateDistancePx: 4,
+      checkpointDistancePx: 8,
+    },
+  },
+});
 
 const FIELD_TRACE_INPUT_POINTS: readonly InputPoint[] = Array.from(
   { length: 101 },
@@ -403,78 +416,32 @@ describe("GPU mixing feedMany parity", () => {
 });
 
 describe("GPU rough bristle parity", () => {
-  it("perFlush mixing の live/replay/undo/redo が byte-identical", () => {
+  it("Rough mixing ON の CPU/GPU が Tier B parity を満たす", () => {
+    const cpuLayer = renderRoughMixing("cpu");
+    const gpuLayer = renderRoughMixing("webgl2");
+    const metrics = measureTierB(cpuLayer, gpuLayer);
+
+    console.info("Rough mixing CPU/GPU Tier B", metrics);
+    expect(metrics.alphaMae).toBeLessThanOrEqual(0.015);
+    expect(metrics.rgbMae).toBeLessThanOrEqual(0.02);
+    expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
+  });
+
+  it("CPU perFlush mixing の live/replay/undo/redo が byte-identical", () => {
+    expectRoughMixingHistoryParity(null, "CPU perFlush rough");
+  });
+
+  it("GPU perFlush mixing の live/replay/undo/redo が byte-identical", () => {
     const debugGlobal = globalThis as typeof globalThis & {
       __headlessPaintGpuBristleField?: "perRun" | "perFlush";
     };
     debugGlobal.__headlessPaintGpuBristleField = "perFlush";
     const accelerator = createTestAccelerator();
     try {
-      const style = makeStyle({
-        color: WHITE,
-        lineWidth: 34,
-        brush: {
-          ...ROUGH_BRISTLE,
-          mixing: {
-            ...DEFAULT_BRUSH_MIXING,
-            enabled: true,
-            updateDistancePx: 4,
-            checkpointDistancePx: 8,
-          },
-        },
-      });
-      const baseLayer = createTestLayer();
-      paintOpaqueBands(baseLayer);
-      const liveLayer = createTestLayer();
-      copyLayerPixels(baseLayer, liveLayer);
-      let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
-      history = beginHistoryMutation(
-        history,
-        { affectedLayers: [liveLayer], layerCount: 1 },
-        HISTORY_CONFIG,
-      );
-      const { command } = simulateLiveStroke({
-        layer: liveLayer,
-        inputPoints: INPUT_POINTS,
-        style,
-        filterPipeline: CAUSAL_FILTER_PIPELINE,
-        expand: EXPAND,
-        brushSeed: BRUSH_SEED,
-        alphaLocked: false,
-        accelerator,
-      });
-      const replayLayer = createTestLayer();
-      replayOnLayer(command, replayLayer, baseLayer, accelerator);
-      expectPixelEqual(liveLayer, replayLayer, "perFlush rough live vs replay");
-
-      history = pushCommand(
-        history,
-        command,
-        { afterLayer: liveLayer, layerCount: 1 },
-        HISTORY_CONFIG,
-      );
-      const undoLayer = createTestLayer();
-      const undoResult = rebuildLayerFromHistory(
-        undoLayer,
-        undo(history),
-        undefined,
-        { accelerator },
-      );
-      expect(undoResult.ok).toBe(true);
-      expectPixelEqual(undoLayer, baseLayer, "perFlush rough undo");
-
-      const redoLayer = createTestLayer();
-      const redoResult = rebuildLayerFromHistory(
-        redoLayer,
-        redo(undo(history)),
-        undefined,
-        { accelerator },
-      );
-      expect(redoResult.ok).toBe(true);
-      expectPixelEqual(redoLayer, replayLayer, "perFlush rough redo");
+      expectRoughMixingHistoryParity(accelerator, "GPU perFlush rough");
     } finally {
       accelerator.dispose();
-      debugGlobal.__headlessPaintGpuBristleField = "perRun";
+      debugGlobal.__headlessPaintGpuBristleField = undefined;
     }
   });
 
@@ -1005,6 +972,80 @@ function renderGpuMixingBatches(
   return layer;
 }
 
+function renderRoughMixing(backend: "cpu" | "webgl2"): Layer {
+  const accelerator = backend === "webgl2" ? createTestAccelerator() : null;
+  const layer = createTestLayer();
+  paintOpaqueBands(layer);
+  const renderer = createIncrementalStrokeRenderer({
+    layer,
+    style: ROUGH_MIXING_STYLE,
+    filterPipeline: CAUSAL_FILTER_PIPELINE,
+    expand: EXPAND,
+    brushSeed: BRUSH_SEED,
+    alphaLocked: false,
+    accelerator,
+  });
+  renderer.feedMany(INPUT_POINTS);
+  renderer.finalize();
+  accelerator?.dispose();
+  return layer;
+}
+
+function expectRoughMixingHistoryParity(
+  accelerator: BrushAccelerator | null,
+  label: string,
+): void {
+  const baseLayer = createTestLayer();
+  paintOpaqueBands(baseLayer);
+  const liveLayer = createTestLayer();
+  copyLayerPixels(baseLayer, liveLayer);
+  let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+  history = beginHistoryMutation(
+    history,
+    { affectedLayers: [liveLayer], layerCount: 1 },
+    HISTORY_CONFIG,
+  );
+  const { command } = simulateLiveStroke({
+    layer: liveLayer,
+    inputPoints: INPUT_POINTS,
+    style: ROUGH_MIXING_STYLE,
+    filterPipeline: CAUSAL_FILTER_PIPELINE,
+    expand: EXPAND,
+    brushSeed: BRUSH_SEED,
+    alphaLocked: false,
+    accelerator,
+  });
+  const replayLayer = createTestLayer();
+  replayOnLayer(command, replayLayer, baseLayer, accelerator);
+  expectPixelEqual(liveLayer, replayLayer, `${label} live vs replay`);
+
+  history = pushCommand(
+    history,
+    command,
+    { afterLayer: liveLayer, layerCount: 1 },
+    HISTORY_CONFIG,
+  );
+  const undoLayer = createTestLayer();
+  const undoResult = rebuildLayerFromHistory(
+    undoLayer,
+    undo(history),
+    undefined,
+    { accelerator },
+  );
+  expect(undoResult.ok).toBe(true);
+  expectPixelEqual(undoLayer, baseLayer, `${label} undo`);
+
+  const redoLayer = createTestLayer();
+  const redoResult = rebuildLayerFromHistory(
+    redoLayer,
+    redo(undo(history)),
+    undefined,
+    { accelerator },
+  );
+  expect(redoResult.ok).toBe(true);
+  expectPixelEqual(redoLayer, replayLayer, `${label} redo`);
+}
+
 function renderGpuExpandBatches(
   backend: "cpu" | "webgl2",
   batches: readonly (readonly InputPoint[])[],
@@ -1056,6 +1097,49 @@ function expectAlphaTierB(cpuLayer: Layer, gpuLayer: Layer): void {
   }
   expect(absoluteDelta / pixelCount).toBeLessThanOrEqual(0.015);
   expect(largeDeltaPixels / pixelCount).toBeLessThanOrEqual(0.01);
+}
+
+function measureTierB(
+  cpuLayer: Layer,
+  gpuLayer: Layer,
+): {
+  readonly alphaMae: number;
+  readonly rgbMae: number;
+  readonly largeDeltaRate: number;
+  readonly comparedPixels: number;
+} {
+  const cpu = cpuLayer.ctx.getImageData(0, 0, WIDTH, HEIGHT).data;
+  const gpu = gpuLayer.ctx.getImageData(0, 0, WIDTH, HEIGHT).data;
+  let alphaAbsoluteDelta = 0;
+  let rgbAbsoluteDelta = 0;
+  let largeDeltaPixels = 0;
+  let comparedPixels = 0;
+  for (let offset = 0; offset < cpu.length; offset += 4) {
+    const cpuAlpha = (cpu[offset + 3] ?? 0) / 255;
+    const gpuAlpha = (gpu[offset + 3] ?? 0) / 255;
+    if (cpuAlpha <= 0 && gpuAlpha <= 0) continue;
+    comparedPixels++;
+    const redDelta = Math.abs((cpu[offset] ?? 0) - (gpu[offset] ?? 0)) / 255;
+    const greenDelta =
+      Math.abs((cpu[offset + 1] ?? 0) - (gpu[offset + 1] ?? 0)) / 255;
+    const blueDelta =
+      Math.abs((cpu[offset + 2] ?? 0) - (gpu[offset + 2] ?? 0)) / 255;
+    const alphaDelta = Math.abs(cpuAlpha - gpuAlpha);
+    rgbAbsoluteDelta += redDelta + greenDelta + blueDelta;
+    alphaAbsoluteDelta += alphaDelta;
+    if (Math.max(redDelta, greenDelta, blueDelta, alphaDelta) > 0.1) {
+      largeDeltaPixels++;
+    }
+  }
+  if (comparedPixels === 0) {
+    throw new Error("Tier B comparison requires union coverage");
+  }
+  return {
+    alphaMae: alphaAbsoluteDelta / comparedPixels,
+    rgbMae: rgbAbsoluteDelta / comparedPixels / 3,
+    largeDeltaRate: largeDeltaPixels / comparedPixels,
+    comparedPixels,
+  };
 }
 
 function getBrushPerfTestBridge():
