@@ -227,3 +227,5 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - 性能（WebKit、mixing OFF、1 stroke）: GPU 122 → **49ms（−60%）**。CPU は 67ms のまま（mask 生成減はあるが総計は横ばい）
 - 画素差: fixture 2.2% / mix 3.1% / S字 0.3%（|Δ|>25）。拡大目視では simple の方が縦筋（毛束の線状テクスチャ）がやや強く、field は斑状。キャラクターは近い
 - 560 tests green（field default で既存テスト不変）。採否はユーザー官能判定待ち
+
+- 追記: S 字（両端で筆圧が抜ける）で simple の低筆圧応答が現行より強すぎ、末尾が消えかける。`threshold = 0.5 + (0.5 - effectivePressure) * 0.98` の係数（0.98）と octave 削減の複合。採用するなら低筆圧域の係数チューニング（要・目視イテレーション）が必要
