@@ -220,3 +220,10 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - cross-backend Tier B: alpha MAE 0 / RGB MAE 0.0013 / |Δ|>0.1 0.08% で全閾値内。見た目も目視一致
 - checkpoint 二重カウント（61→90）は修正済み
 - **C 棄却時の戻り点 = `91f5441`**（557 tests green）。C は子ブランチ `experiment/bristle-mask-simplify` で実施
+
+## 6. C: 毛束 dropout field の簡略化（branch `experiment/bristle-mask-simplify`、`51fefaf`）
+
+- `?bristleMask=simple`: dropout を broad 1 オクターブの手続き評価に（detail・micro edge texture 削除）。GPU は shader 内評価で `createBristleMaskField` と texture upload ごと消滅。CPU は同式を field grid に評価（生成 67% 減）。紙目・反復接触・profile atlas・mixing は不変
+- 性能（WebKit、mixing OFF、1 stroke）: GPU 122 → **49ms（−60%）**。CPU は 67ms のまま（mask 生成減はあるが総計は横ばい）
+- 画素差: fixture 2.2% / mix 3.1% / S字 0.3%（|Δ|>25）。拡大目視では simple の方が縦筋（毛束の線状テクスチャ）がやや強く、field は斑状。キャラクターは近い
+- 560 tests green（field default で既存テスト不変）。採否はユーザー官能判定待ち
