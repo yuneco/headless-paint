@@ -1,8 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRISTLE_DYNAMICS } from "../types";
-import { rasterizeBristleMask } from "./bristle-mask";
+import {
+  createSimpleBristleMaskField,
+  rasterizeBristleMask,
+} from "./bristle-mask";
 
 describe("bristle surface grain", () => {
+  it("simple field is deterministic and omits edge micro texture", () => {
+    const samples = [
+      { pressure: 0.2, distance: 0 },
+      { pressure: 0.6, distance: 12 },
+      { pressure: 0.9, distance: 25 },
+    ];
+    const withEdgeTexture = createSimpleBristleMaskField(
+      samples,
+      40,
+      { ...DEFAULT_BRISTLE_DYNAMICS, edgeTextureAmount: 1 },
+      0.75,
+      17,
+    );
+    const withoutEdgeTexture = createSimpleBristleMaskField(
+      samples,
+      40,
+      { ...DEFAULT_BRISTLE_DYNAMICS, edgeTextureAmount: 0 },
+      0.75,
+      17,
+    );
+
+    expect(withEdgeTexture).toEqual(withoutEdgeTexture);
+  });
+
   it("初回の未着彩cellへalpha floorを加えない", () => {
     const mask = rasterizeBristleMask(
       [

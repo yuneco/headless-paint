@@ -1021,6 +1021,8 @@ function makeSweepSegment(fromFieldColumn: number, toFieldColumn: number) {
     toFrameY: 0,
     fromPressure: 1,
     toPressure: 1,
+    fromDistance: fromFieldColumn,
+    toDistance: toFieldColumn,
     fromFieldColumn,
     toFieldColumn,
     overlap: 1,

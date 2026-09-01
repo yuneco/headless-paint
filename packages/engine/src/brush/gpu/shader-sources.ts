@@ -117,6 +117,9 @@ uniform float uGrainAmount;
 uniform float uGrainSoftness;
 uniform uint uGrainSeed;
 uniform uint uStrokeSeed;
+uniform bool uSimpleMask;
+uniform vec2 uDropoutSize;
+uniform float uPressureCoverageResponse;
 
 in vec2 vFieldCoord;
 in float vPressure;
@@ -133,6 +136,25 @@ uint hashSeed(uint seed, int index) {
 
 float hashUnit(uint seed, int x, int y) {
   return float(hashSeed(hashSeed(seed, x), y)) / 4294967296.0;
+}
+
+float valueNoise2d(vec2 position, uint seed) {
+  ivec2 p0 = ivec2(floor(position));
+  ivec2 p1 = p0 + ivec2(1);
+  vec2 fraction = smoothstep(vec2(0.0), vec2(1.0), position - vec2(p0));
+  return mix(
+    mix(
+      hashUnit(seed, p0.x, p0.y),
+      hashUnit(seed, p1.x, p0.y),
+      fraction.x
+    ),
+    mix(
+      hashUnit(seed, p0.x, p1.y),
+      hashUnit(seed, p1.x, p1.y),
+      fraction.x
+    ),
+    fraction.y
+  );
 }
 
 float sampleField(vec2 coord) {
@@ -166,6 +188,18 @@ float activationFromDistance(float distance, float hardness) {
   return smoothstep(0.0, 1.0, (distance + transition * 0.5) / transition);
 }
 
+float simpleMaskDistance() {
+  float broad = valueNoise2d(
+    vFieldCoord / uDropoutSize,
+    uStrokeSeed ^ 0x510e527fu
+  );
+  float pressure = clamp(vPressure, 0.0, 1.0);
+  float effectivePressure =
+    0.5 + (pressure - 0.5) * uPressureCoverageResponse;
+  float threshold = 0.5 + (0.5 - effectivePressure) * 0.98;
+  return broad - threshold;
+}
+
 bool hasSurfaceContact(ivec2 documentPixel, float pressure, int trialId) {
   if (uGrainAmount <= 0.0) return true;
   ivec2 tile = ivec2(
@@ -196,7 +230,7 @@ bool hasSurfaceContact(ivec2 documentPixel, float pressure, int trialId) {
 
 void main() {
   float alpha = activationFromDistance(
-    sampleField(vFieldCoord),
+    uSimpleMask ? simpleMaskDistance() : sampleField(vFieldCoord),
     uDepositHardness
   );
   ivec2 localPixel = ivec2(

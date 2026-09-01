@@ -11,9 +11,11 @@ import {
 import {
   type BristleMaskSweepSample,
   createBristleMaskField,
+  createSimpleBristleMaskField,
   getFineToothHeightTile,
   rasterizeBristleMaskFieldForTest,
 } from "../bristle-mask";
+import { brushPerfDebug } from "../perf-debug";
 import {
   createBrushAccelerator,
   getBrushAcceleratorRuntime,
@@ -93,6 +95,85 @@ describe("GPU bristle mask parity", () => {
 
       expect(metrics.alphaMae).toBeLessThanOrEqual(0.015);
       expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
+      expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
+    } finally {
+      pass.dispose();
+    }
+  });
+
+  it("reports procedural simple mask parity and stays deterministic", () => {
+    const width = 160;
+    const height = 96;
+    const brushSize = 60;
+    const seed = 0x1234abcd;
+    const originX = 37;
+    const originY = 19;
+    const samples = createCurvedSamples();
+    const dynamics = ROUGH_BRISTLE.dynamics;
+    const field = createSimpleBristleMaskField(
+      samples,
+      brushSize,
+      dynamics,
+      ROUGH_BRISTLE.pressureDynamics.coverage,
+      seed,
+    );
+    const cpuMask = rasterizeBristleMaskFieldForTest(
+      field,
+      samples,
+      brushSize,
+      dynamics,
+      seed,
+      originX,
+      originY,
+      width,
+      height,
+    );
+
+    const canvas = new OffscreenCanvas(width, height);
+    const gl = canvas.getContext("webgl2");
+    expect(gl).not.toBeNull();
+    if (!gl) return;
+    const pass = createGpuBristlePassResources(gl, width, height);
+    const chunk: GpuBristleChunk = {
+      segments: createSegments(samples, dynamics.geometryStepPx),
+      maskField: new Float32Array(0),
+      maskFieldColumns: 0,
+      maskFieldRows: 0,
+      simpleMask: {
+        dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
+        dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
+        pressureCoverageResponse: ROUGH_BRISTLE.pressureDynamics.coverage,
+      },
+      profileAtlas: new OffscreenCanvas(2, brushSize),
+      grain: {
+        amount: dynamics.surfaceGrain.amount,
+        softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
+        grainSeed: dynamics.surfaceGrain.seed,
+        strokeSeed: seed,
+        toothHeights: getFineToothHeightTile(
+          dynamics.surfaceGrain.seed,
+          dynamics.surfaceGrain.scalePx,
+        ),
+      },
+      bboxRect: {
+        left: originX,
+        top: originY,
+        right: originX + width,
+        bottom: originY + height,
+      },
+      brushSize,
+      depositHardness: dynamics.depositHardness,
+      color: { r: 0, g: 0, b: 0, a: 255 },
+      useMaterialField: false,
+    };
+
+    try {
+      const first = pass.readMaskForTest(chunk);
+      const second = pass.readMaskForTest(chunk);
+      const metrics = compareAlpha(readCanvasAlpha(cpuMask), first);
+      console.info("GPU bristle simple mask parity", metrics);
+
+      expect(second).toEqual(first);
       expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
     } finally {
       pass.dispose();
@@ -179,6 +260,69 @@ describe("GPU bristle mask parity", () => {
     expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
     expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
   });
+
+  it("does not generate or upload a CPU mask field in GPU simple mode", () => {
+    const debugGlobal = globalThis as typeof globalThis & {
+      __headlessPaintBristleMask?: "field" | "simple";
+    };
+    const previousMode = debugGlobal.__headlessPaintBristleMask;
+    const previousPerfEnabled = brushPerfDebug.enabled;
+    debugGlobal.__headlessPaintBristleMask = "simple";
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+
+    const layer = createLayer(220, 150);
+    const style: StrokeStyle = {
+      color: { r: 20, g: 40, b: 60, a: 255 },
+      lineWidth: 60,
+      pressureCurve: DEFAULT_PRESSURE_CURVE,
+      compositeOperation: "source-over",
+      brush: ROUGH_BRISTLE,
+    };
+    const accelerator = createBrushAccelerator({
+      backend: "webgl2",
+      resident: false,
+    });
+    expect(accelerator).not.toBeNull();
+    if (!accelerator) throw new Error("WebGL2 accelerator unavailable");
+    const runtime = getBrushAcceleratorRuntime(accelerator);
+    expect(runtime).not.toBeNull();
+    if (!runtime) throw new Error("WebGL2 accelerator runtime unavailable");
+    const owner = {};
+
+    try {
+      expect(runtime.beginStroke(owner, layer, layer.canvas)).toBe(true);
+      runtime.enter(owner);
+      try {
+        renderBrushStroke(
+          layer,
+          createStrokePoints(),
+          style,
+          0,
+          {
+            tipCanvas: null,
+            seed: 0x1234abcd,
+            branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
+          },
+          layer,
+          accelerator,
+        );
+      } finally {
+        runtime.leave(owner);
+      }
+      runtime.commitToLayer(owner, layer);
+      runtime.endStroke(owner);
+
+      const snapshot = brushPerfDebug.snapshot();
+      expect(snapshot.stages.maskField.count).toBe(0);
+      expect(snapshot.samples.fieldCells).toEqual([]);
+    } finally {
+      accelerator.dispose();
+      debugGlobal.__headlessPaintBristleMask = previousMode;
+      brushPerfDebug.enabled = previousPerfEnabled;
+      brushPerfDebug.reset();
+    }
+  });
 });
 
 function createStrokePoints(): StrokePoint[] {
@@ -212,6 +356,8 @@ function createLargerWarmupChunk(chunk: GpuBristleChunk): GpuBristleChunk {
           toFrameY: 0,
           fromPressure: 0.5,
           toPressure: 0.5,
+          fromDistance: 0,
+          toDistance: 1,
           overlap: 0,
           trialId: 0,
         }),
@@ -296,6 +442,8 @@ function createSegments(
       toFrameY: to.frameY,
       fromPressure: from.pressure,
       toPressure: to.pressure,
+      fromDistance: from.distance,
+      toDistance: to.distance,
       fromFieldColumn: index - 1,
       toFieldColumn: index,
       overlap: 0,

@@ -25,6 +25,9 @@ interface MaskUniforms {
   readonly grainSoftness: WebGLUniformLocation;
   readonly grainSeed: WebGLUniformLocation;
   readonly strokeSeed: WebGLUniformLocation;
+  readonly simpleMask: WebGLUniformLocation;
+  readonly dropoutSize: WebGLUniformLocation;
+  readonly pressureCoverageResponse: WebGLUniformLocation;
 }
 
 interface InkUniforms {
@@ -121,6 +124,13 @@ export function createGpuBristlePassResources(
     grainSoftness: uniformLocation(gl, maskProgram, "uGrainSoftness"),
     grainSeed: uniformLocation(gl, maskProgram, "uGrainSeed"),
     strokeSeed: uniformLocation(gl, maskProgram, "uStrokeSeed"),
+    simpleMask: uniformLocation(gl, maskProgram, "uSimpleMask"),
+    dropoutSize: uniformLocation(gl, maskProgram, "uDropoutSize"),
+    pressureCoverageResponse: uniformLocation(
+      gl,
+      maskProgram,
+      "uPressureCoverageResponse",
+    ),
   };
   const inkUniforms: InkUniforms = {
     atlasSize: uniformLocation(gl, inkProgram, "uAtlasSize"),
@@ -187,6 +197,18 @@ export function createGpuBristlePassResources(
   configureTexture(gl, profileTexture, gl.LINEAR);
   configureTexture(gl, fallbackMaterialTexture, gl.NEAREST);
   configureTexture(gl, atlasTexture, gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.R32F,
+    1,
+    1,
+    0,
+    gl.RED,
+    gl.FLOAT,
+    new Float32Array([0]),
+  );
   gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
   gl.framebufferTexture2D(
     gl.FRAMEBUFFER,
@@ -223,8 +245,8 @@ export function createGpuBristlePassResources(
 
   let atlasWidth = 0;
   let atlasHeight = 0;
-  let maskFieldTextureWidth = 0;
-  let maskFieldTextureHeight = 0;
+  let maskFieldTextureWidth = 1;
+  let maskFieldTextureHeight = 1;
   let profileTextureWidth = 0;
   let profileTextureHeight = 0;
   let vertexBufferCapacity = 0;
@@ -299,18 +321,23 @@ export function createGpuBristlePassResources(
 
   function uploadMaskFields(chunks: readonly GpuBristleChunk[]): number[] {
     const usedWidth = chunks.reduce(
-      (maximum, chunk) => Math.max(maximum, chunk.maskFieldColumns),
+      (maximum, chunk) =>
+        chunk.simpleMask ? maximum : Math.max(maximum, chunk.maskFieldColumns),
       0,
     );
     const usedHeight = chunks.reduce(
-      (sum, chunk) => sum + chunk.maskFieldRows,
+      (sum, chunk) => sum + (chunk.simpleMask ? 0 : chunk.maskFieldRows),
       0,
     );
     const origins: number[] = [];
+    if (usedWidth === 0 || usedHeight === 0) {
+      return chunks.map(() => 0);
+    }
     const packed = new Float32Array(usedWidth * usedHeight);
     let originY = 0;
     for (const chunk of chunks) {
       origins.push(originY);
+      if (chunk.simpleMask) continue;
       for (let row = 0; row < chunk.maskFieldRows; row++) {
         packed.set(
           chunk.maskField.subarray(
@@ -492,6 +519,16 @@ export function createGpuBristlePassResources(
     gl.uniform1f(maskUniforms.grainSoftness, chunk.grain.softness);
     gl.uniform1ui(maskUniforms.grainSeed, chunk.grain.grainSeed >>> 0);
     gl.uniform1ui(maskUniforms.strokeSeed, chunk.grain.strokeSeed >>> 0);
+    gl.uniform1i(maskUniforms.simpleMask, chunk.simpleMask ? 1 : 0);
+    gl.uniform2f(
+      maskUniforms.dropoutSize,
+      chunk.simpleMask?.dropoutLengthPx ?? 1,
+      chunk.simpleMask?.dropoutWidthPx ?? 1,
+    );
+    gl.uniform1f(
+      maskUniforms.pressureCoverageResponse,
+      chunk.simpleMask?.pressureCoverageResponse ?? 0,
+    );
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
     gl.activeTexture(gl.TEXTURE1);
@@ -717,36 +754,37 @@ function createMaskVertices(chunk: GpuBristleChunk): Float32Array {
   const halfWidth = chunk.brushSize / 2;
   const originX = chunk.bboxRect.left;
   const originY = chunk.bboxRect.top;
+  const simple = chunk.simpleMask !== undefined;
   for (const segment of chunk.segments) {
     const fromLeft = maskVertex(
       segment.fromX + segment.fromFrameY * halfWidth - originX,
       segment.fromY - segment.fromFrameX * halfWidth - originY,
-      segment.fromFieldColumn,
-      0,
+      simple ? segment.fromDistance : segment.fromFieldColumn,
+      simple ? -halfWidth : 0,
       segment.fromPressure,
       segment.trialId,
     );
     const fromRight = maskVertex(
       segment.fromX - segment.fromFrameY * halfWidth - originX,
       segment.fromY + segment.fromFrameX * halfWidth - originY,
-      segment.fromFieldColumn,
-      chunk.maskFieldRows - 1,
+      simple ? segment.fromDistance : segment.fromFieldColumn,
+      simple ? halfWidth : chunk.maskFieldRows - 1,
       segment.fromPressure,
       segment.trialId,
     );
     const toLeft = maskVertex(
       segment.toX + segment.toFrameY * halfWidth - originX,
       segment.toY - segment.toFrameX * halfWidth - originY,
-      segment.toFieldColumn,
-      0,
+      simple ? segment.toDistance : segment.toFieldColumn,
+      simple ? -halfWidth : 0,
       segment.toPressure,
       segment.trialId,
     );
     const toRight = maskVertex(
       segment.toX - segment.toFrameY * halfWidth - originX,
       segment.toY + segment.toFrameX * halfWidth - originY,
-      segment.toFieldColumn,
-      chunk.maskFieldRows - 1,
+      simple ? segment.toDistance : segment.toFieldColumn,
+      simple ? halfWidth : chunk.maskFieldRows - 1,
       segment.toPressure,
       segment.trialId,
     );

@@ -26,6 +26,8 @@ export interface BristleMaskField {
   readonly values: Float32Array<ArrayBuffer>;
 }
 
+export type BristleMaskMode = "field" | "simple";
+
 interface RasterVertex {
   readonly x: number;
   readonly y: number;
@@ -84,13 +86,22 @@ export function rasterizeBristleMask(
   const ctx = getContext(canvas, "bristle swept mask");
   if (samples.length < 2) return canvas;
 
-  const field = createBristleMaskField(
-    samples,
-    brushSize,
-    dynamics,
-    pressureCoverageResponse,
-    seed,
-  );
+  const field =
+    readBristleMaskModeDebugFlag() === "simple"
+      ? createSimpleBristleMaskField(
+          samples,
+          brushSize,
+          dynamics,
+          pressureCoverageResponse,
+          seed,
+        )
+      : createBristleMaskField(
+          samples,
+          brushSize,
+          dynamics,
+          pressureCoverageResponse,
+          seed,
+        );
   rasterizeBristleMaskFieldIntoCanvas(
     field,
     samples,
@@ -245,6 +256,58 @@ export function createBristleMaskField(
       seed,
     ),
   );
+}
+
+export function createSimpleBristleMaskField(
+  samples: readonly BristleMaskSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  pressureCoverageResponse: number,
+  seed: number,
+): BristleMaskField {
+  const width = Math.max(1, samples.length);
+  const bands = Math.max(
+    30,
+    Math.ceil(brushSize / Math.max(0.25, dynamics.transverseMaskCellPx)),
+  );
+  const values = new Float32Array(width * bands);
+  const coverageResponse = clamp(pressureCoverageResponse, 0, 1);
+
+  if (brushPerfDebug.nullStages.nullField) {
+    values.fill(1);
+    perfSample("fieldCells", values.length);
+    return { width, height: bands, values };
+  }
+
+  const dropoutLength = Math.max(4, dynamics.dropoutLengthPx);
+  const dropoutWidth = Math.max(0.5, dynamics.dropoutWidthPx);
+  for (let band = 0; band < bands; band++) {
+    const crossPx = (-0.5 + (band + 0.5) / bands) * brushSize;
+    for (let index = 0; index < samples.length; index++) {
+      const sample = samples[index];
+      if (!sample) continue;
+      const broad = valueNoise2d(
+        sample.distance / dropoutLength,
+        crossPx / dropoutWidth,
+        seed ^ 0x510e527f,
+      );
+      const pressure = clamp(sample.pressure, 0, 1);
+      const effectivePressure = 0.5 + (pressure - 0.5) * coverageResponse;
+      const threshold = 0.5 + (0.5 - effectivePressure) * 0.98;
+      values[band * width + index] = broad - threshold;
+    }
+  }
+  perfSample("fieldCells", values.length);
+  return { width, height: bands, values };
+}
+
+export function readBristleMaskModeDebugFlag(): BristleMaskMode {
+  const value = (
+    globalThis as typeof globalThis & {
+      __headlessPaintBristleMask?: unknown;
+    }
+  ).__headlessPaintBristleMask;
+  return value === "simple" ? "simple" : "field";
 }
 
 function createBristleMaskFieldUnmeasured(

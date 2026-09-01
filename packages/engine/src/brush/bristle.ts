@@ -15,6 +15,7 @@ import {
   createBristleMaskField,
   getFineToothHeightTile,
   rasterizeBristleMask,
+  readBristleMaskModeDebugFlag,
 } from "./bristle-mask";
 import { getBristleProfileAtlas } from "./bristle-profile";
 import {
@@ -505,18 +506,33 @@ function renderSweepRun(
   perfSample("bboxAreas", width * height);
   const gpuSurface = getActiveGpuStrokeSurface(accelerator);
   if (gpuSurface) {
-    const field = createBristleMaskField(
-      points,
-      style.lineWidth,
-      brush.dynamics,
-      brush.pressureDynamics.coverage,
-      seed,
-    );
+    const simpleMask =
+      readBristleMaskModeDebugFlag() === "simple"
+        ? {
+            dropoutLengthPx: Math.max(4, brush.dynamics.dropoutLengthPx),
+            dropoutWidthPx: Math.max(0.5, brush.dynamics.dropoutWidthPx),
+            pressureCoverageResponse: clamp(
+              brush.pressureDynamics.coverage,
+              0,
+              1,
+            ),
+          }
+        : undefined;
+    const field = simpleMask
+      ? undefined
+      : createBristleMaskField(
+          points,
+          style.lineWidth,
+          brush.dynamics,
+          brush.pressureDynamics.coverage,
+          seed,
+        );
     gpuSurface.pushBristleChunk({
       segments: createGpuSweepSegments(points, style.lineWidth, brush),
-      maskField: field.values,
-      maskFieldColumns: field.width,
-      maskFieldRows: field.height,
+      maskField: field?.values ?? new Float32Array(0),
+      maskFieldColumns: field?.width ?? 0,
+      maskFieldRows: field?.height ?? 0,
+      simpleMask,
       profileAtlas,
       grain: {
         amount: brushPerfDebug.nullStages.nullContact
@@ -634,6 +650,8 @@ function createGpuSweepSegments(
       toFrameY: to.frameY,
       fromPressure: from.pressure,
       toPressure: to.pressure,
+      fromDistance: from.distance,
+      toDistance: to.distance,
       fromFieldColumn: index - 1,
       toFieldColumn: index,
       overlap: segmentOverlap(from, to, brushSize),

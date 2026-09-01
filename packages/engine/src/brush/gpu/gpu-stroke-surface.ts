@@ -73,10 +73,18 @@ export interface GpuSweepSegment {
   readonly toFrameY: number;
   readonly fromPressure: number;
   readonly toPressure: number;
+  readonly fromDistance: number;
+  readonly toDistance: number;
   readonly fromFieldColumn: number;
   readonly toFieldColumn: number;
   readonly overlap: number;
   readonly trialId: number;
+}
+
+export interface GpuSimpleBristleMask {
+  readonly dropoutLengthPx: number;
+  readonly dropoutWidthPx: number;
+  readonly pressureCoverageResponse: number;
 }
 
 export interface GpuGrainParams {
@@ -92,6 +100,7 @@ export interface GpuBristleChunk {
   readonly maskField: Float32Array<ArrayBuffer>;
   readonly maskFieldColumns: number;
   readonly maskFieldRows: number;
+  readonly simpleMask?: GpuSimpleBristleMask;
   readonly profileAtlas: OffscreenCanvas;
   readonly grain: GpuGrainParams;
   readonly bboxRect: DirtyRect;
