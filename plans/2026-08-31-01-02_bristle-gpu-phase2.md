@@ -257,3 +257,10 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - probe-undo の 1079ms は再生 10 本分（4+3+2+1）。accum 常駐は実装済みで「毎 stroke re-upload」とは限らない → gpuUpload 回数/bytes の実測から
 - gpu-acceleration.md が bristle 対象外のまま・全画面 texture 3 枚（4K 192MiB）と記載乖離
 - commit 経路: ImageBitmap を明確に超える代替なし（WebKit の transferToImageBitmap は単純な所有権移譲ではない）。dirty 面積削減が確実路線。`preserveDrawingBuffer:false` と direct mode 再計測は検討余地
+
+## 9. astra ラウンドの実装結果（`75c6e13`〜`e6f1dd2`、612 tests green）
+
+- **⓪ CPU perFlush の checkpoint 時間基準バグ修正**: 検証テストで乖離を実証（最悪 channel 差 253/255）→ CPU を GPU に合わせ、テストを一致契約（≤1/255）に転換
+- **① undo-1 GPU キャッシュ**: stroke-start snapshot を保持し、直前 1 手の undo は再生ゼロで復元。**undo 1 回目 355→28ms（mixing ON）/ 226→28ms（OFF）**。2 手目以降は従来 rebuild にフォールバック（設計どおり）。差し戻し 1 回: react 層が command を `createStrokeCommand` で再生成して WeakMap の同一性が壊れていた → 元 command をそのまま push（`e6f1dd2`、react 側に実 GPU + StrictMode の hit/byte 一致テスト追加）
+- **② 中間 checkpoint コピー省略 / ③ 全画面 texture 3→2 枚（4K で 64MiB 減）**: 実装済み、byte 一致維持
+- 計測ノート: probe-undo の 5 回 undo は再生 10 本分（4+3+2+1）の合計。undo-1 は最頻の「直前 1 手」を狙い撃ちする設計（ユーザー決定 N=1）
