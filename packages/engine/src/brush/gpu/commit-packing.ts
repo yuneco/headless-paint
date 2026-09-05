@@ -182,6 +182,10 @@ export function commitRectsToLayer(options: CommitRectsOptions): void {
     ) {
       const bitmapStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
       try {
+        // WebKit's transferToImageBitmap does not wait for the queued blit
+        // (gl.flush alone is insufficient); without a full sync the bitmap can
+        // carry stale tiles, so commits become non-deterministic on Safari.
+        options.gl.finish();
         bitmap = options.canvas.transferToImageBitmap();
       } catch {
         blitCommitPass(

@@ -32,7 +32,7 @@ interface BrushAcceleratorOptions {
   readonly maxBranches?: number;
   /** accum を stroke 間で常駐させる。既定 true */
   readonly resident?: boolean;
-  /** デバッグ用。commit の書き戻し方式。既定 "bitmap"（pass ごとに ImageBitmap 1 枚を経由）。"direct" は WebGL canvas を rect ごとに直接 drawImage する */
+  /** デバッグ用。commit の書き戻し方式。既定 "bitmap"（pass ごとに ImageBitmap 1 枚を経由。WebKit の transferToImageBitmap は queue 済み blit を待たないため直前に gl.finish で同期する）。"direct" は WebGL canvas を rect ごとに直接 drawImage する */
   readonly commitMode?: "bitmap" | "direct";
 }
 
