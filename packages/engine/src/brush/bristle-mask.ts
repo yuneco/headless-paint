@@ -272,6 +272,7 @@ export function createSimpleBristleMaskField(
   );
   const values = new Float32Array(width * bands);
   const coverageResponse = clamp(pressureCoverageResponse, 0, 1);
+  const lowPressureGain = readBristleLowPressureGainDebugFlag();
 
   if (brushPerfDebug.nullStages.nullField) {
     values.fill(1);
@@ -293,7 +294,7 @@ export function createSimpleBristleMaskField(
       );
       const pressure = clamp(sample.pressure, 0, 1);
       const effectivePressure = 0.5 + (pressure - 0.5) * coverageResponse;
-      const threshold = 0.5 + (0.5 - effectivePressure) * 0.98;
+      const threshold = 0.5 + (0.5 - effectivePressure) * lowPressureGain;
       values[band * width + index] = broad - threshold;
     }
   }
@@ -308,6 +309,17 @@ export function readBristleMaskModeDebugFlag(): BristleMaskMode {
     }
   ).__headlessPaintBristleMask;
   return value === "simple" ? "simple" : "field";
+}
+
+export function readBristleLowPressureGainDebugFlag(): number {
+  const value = (
+    globalThis as typeof globalThis & {
+      __headlessPaintBristleLowPressureGain?: unknown;
+    }
+  ).__headlessPaintBristleLowPressureGain;
+  return typeof value === "number" && Number.isFinite(value)
+    ? clamp(value, 0, 1)
+    : 0.98;
 }
 
 function createBristleMaskFieldUnmeasured(

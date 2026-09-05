@@ -1,3 +1,4 @@
+import { readBristleLowPressureGainDebugFlag } from "../bristle-mask";
 import { perfStage } from "../perf-debug";
 import { createProgram, requireResource } from "./gl-resources";
 import type { GpuBristleChunk, GpuSweepSegment } from "./gpu-stroke-surface";
@@ -28,6 +29,7 @@ interface MaskUniforms {
   readonly simpleMask: WebGLUniformLocation;
   readonly dropoutSize: WebGLUniformLocation;
   readonly pressureCoverageResponse: WebGLUniformLocation;
+  readonly lowPressureGain: WebGLUniformLocation;
 }
 
 interface InkUniforms {
@@ -126,6 +128,7 @@ export function createGpuBristlePassResources(
     strokeSeed: uniformLocation(gl, maskProgram, "uStrokeSeed"),
     simpleMask: uniformLocation(gl, maskProgram, "uSimpleMask"),
     dropoutSize: uniformLocation(gl, maskProgram, "uDropoutSize"),
+    lowPressureGain: uniformLocation(gl, maskProgram, "uLowPressureGain"),
     pressureCoverageResponse: uniformLocation(
       gl,
       maskProgram,
@@ -528,6 +531,10 @@ export function createGpuBristlePassResources(
     gl.uniform1f(
       maskUniforms.pressureCoverageResponse,
       chunk.simpleMask?.pressureCoverageResponse ?? 0,
+    );
+    gl.uniform1f(
+      maskUniforms.lowPressureGain,
+      chunk.simpleMask ? readBristleLowPressureGainDebugFlag() : 0.98,
     );
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);

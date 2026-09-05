@@ -120,6 +120,7 @@ uniform uint uStrokeSeed;
 uniform bool uSimpleMask;
 uniform vec2 uDropoutSize;
 uniform float uPressureCoverageResponse;
+uniform float uLowPressureGain;
 
 in vec2 vFieldCoord;
 in float vPressure;
@@ -196,7 +197,7 @@ float simpleMaskDistance() {
   float pressure = clamp(vPressure, 0.0, 1.0);
   float effectivePressure =
     0.5 + (pressure - 0.5) * uPressureCoverageResponse;
-  float threshold = 0.5 + (0.5 - effectivePressure) * 0.98;
+  float threshold = 0.5 + (0.5 - effectivePressure) * uLowPressureGain;
   return broad - threshold;
 }
 

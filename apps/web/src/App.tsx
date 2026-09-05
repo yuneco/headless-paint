@@ -55,6 +55,16 @@ const bristleMask = new URLSearchParams(window.location.search).get(
     __headlessPaintBristleMask?: "field" | "simple";
   }
 ).__headlessPaintBristleMask = bristleMask === "simple" ? "simple" : "field";
+const bristleLowP = new URLSearchParams(window.location.search).get(
+  "bristleLowP",
+);
+if (bristleLowP !== null && Number.isFinite(Number(bristleLowP))) {
+  (
+    globalThis as typeof globalThis & {
+      __headlessPaintBristleLowPressureGain?: number;
+    }
+  ).__headlessPaintBristleLowPressureGain = Number(bristleLowP);
+}
 const LAYER_WIDTH =
   EXPERIMENT_LAYER_SIZE > 0 ? EXPERIMENT_LAYER_SIZE : 1024 * 2;
 const LAYER_HEIGHT = LAYER_WIDTH;
