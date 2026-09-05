@@ -241,3 +241,19 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - **mixing OFF の Go 判定クローズ**: iPad では p95 互角でも CPU は max が 100〜400ms に跳ね、GPU は max ≈10ms で安定。tail latency の差で GPU 適格を維持する
 - C（simple）は iPad でも p95 −57%。ユーザー官能は「感触悪くはない」（S 字の低筆圧チューニングは採用時に実施）
 - undo は 1 回目（9 本再生）がもたつく体感。既知の残課題（undo 時の常駐再利用・再 upload 削減）と一致
+
+## 8. gpt-6-astra 相談の要点（2026-09-06、read-only 分析）
+
+優先順位提案:
+1. **直近履歴状態の GPU キャッシュ**（stroke 境界の accum を RGBA8 で数件保持 → undo hit 時は再生ゼロ）。効果は桁。リスク中〜高（分岐識別・メモリ予算・hit/miss byte 一致。4K は 64MiB/枚なので bytes 上限必須。ImageData 経由 premultiplied 往復との同値性確認）
+2. **perFlush の中間 checkpoint 画像コピー省略**（次 flush で読まれるのは branch 最後だけ。afterComposite の中間コピーは情報だけ残して省略可）: mixing ON 5〜20ms/stroke。※ `gpuBristlePasses` は copy/blit を数えておらず「3〜4 pass」は encoder 数ではない
+3. stroke-start snapshot と cancel base の共用（全画面 texture 3 枚 → 2 枚。4K で 64MiB 節約）
+4. rebuild 中の per-stroke commit 省略（数〜数十ms。「resident=layer と同内容」と区別する内部状態が必要。finalize skip だけでは不十分）
+5. field shader の run 配列 branch 索引化（多 branch 時のみ）/ 6. dirty 重複除去
+
+指摘された負債・疑義:
+- **field UV の bbox 近似は正式化前に解消すべき**。有望案: ink pass で segment profile UV に沿って field を読み色付き premultiplied ink を蓄積、composite は mask 掛けのみに（pass 数不変）。UV atlas 案は自己交差で破綻するので不可
+- **CPU の perFlush に GPU と食い違う疑い**: `prepareBristleMixingFlush` が union 生成時に持ち越し checkpoint を上書きし最初の run から union を参照（GPU は持ち越しを先に読む）。mixing.ts L298 付近。要検証
+- probe-undo の 1079ms は再生 10 本分（4+3+2+1）。accum 常駐は実装済みで「毎 stroke re-upload」とは限らない → gpuUpload 回数/bytes の実測から
+- gpu-acceleration.md が bristle 対象外のまま・全画面 texture 3 枚（4K 192MiB）と記載乖離
+- commit 経路: ImageBitmap を明確に超える代替なし（WebKit の transferToImageBitmap は単純な所有権移譲ではない）。dirty 面積削減が確実路線。`preserveDrawingBuffer:false` と direct mode 再計測は検討余地
