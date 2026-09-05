@@ -534,7 +534,7 @@ export function createGpuBristlePassResources(
     );
     gl.uniform1f(
       maskUniforms.lowPressureGain,
-      chunk.simpleMask ? readBristleLowPressureGainDebugFlag() : 0.98,
+      chunk.simpleMask ? readBristleLowPressureGainDebugFlag() : 0.9,
     );
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);

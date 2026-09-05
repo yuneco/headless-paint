@@ -11,7 +11,7 @@ import {
 import {
   type BristleMaskSweepSample,
   createBristleMaskField,
-  createSimpleBristleMaskField,
+  createSimpleBristleMaskEvaluator,
   getFineToothHeightTile,
   rasterizeBristleMaskFieldForTest,
 } from "../bristle-mask";
@@ -110,7 +110,7 @@ describe("GPU bristle mask parity", () => {
     const originY = 19;
     const samples = createCurvedSamples();
     const dynamics = ROUGH_BRISTLE.dynamics;
-    const field = createSimpleBristleMaskField(
+    const field = createSimpleBristleMaskEvaluator(
       samples,
       brushSize,
       dynamics,

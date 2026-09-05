@@ -54,7 +54,7 @@ const bristleMask = new URLSearchParams(window.location.search).get(
   globalThis as typeof globalThis & {
     __headlessPaintBristleMask?: "field" | "simple";
   }
-).__headlessPaintBristleMask = bristleMask === "simple" ? "simple" : "field";
+).__headlessPaintBristleMask = bristleMask === "field" ? "field" : "simple";
 const bristleLowP = new URLSearchParams(window.location.search).get(
   "bristleLowP",
 );
