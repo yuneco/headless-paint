@@ -40,3 +40,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 - 非 mixing stamp + Expand の dab 配置・jitter は branch state 統一（2026-07-03）で意図的に変わった（branch ごと独立 seed・位相）。過去データの見た目互換はない（プロジェクト方針通り）。
 
 - **GPU undo-1 の React 境界（2026-09-06 spike）**: runtime で retain した command を useStrokeSession が DTO 化し、usePaintEngine が再生成していたため WeakMap の bind が常に miss した。内部 onStrokeCommit で元 command をそのまま push するよう修正。公開 DTO / persisted schema は維持。今後 runtime 単体 parity だけでなく React → history → executor を含む統合テストで hit を保証する。今回追加の bitmap/direct 2 ケースと既存 byte parity 12 ケースは sandbox の listen EPERM により未実行で、実ブラウザ検収が残る。
+
+- **stroke command の同一性は undo-1 キャッシュの契約（2026-09-06）**: GPU undo-1 キャッシュは command オブジェクトの同一性（WeakMap）で履歴と対応付ける。react 層等で command をクローン・再生成して push すると静かに無効化される（テストは通るのに実アプリで不発、という形で現れた）。中間層を書くときは「セッションが生成した command はそのまま push する」こと。packages/react/src/usePaintEngine.test.ts に実 GPU + StrictMode の hit 検証テストあり
+- **bristle の perFlush 意味論は描画仕様（2026-09-06）**: flush 境界（32ms / 1.5×lineWidth）が混色の見た目に影響する仕様になった。replay や最適化で flush を束ねたり拡大したりすると決定性が壊れる。表示 commit の束ね方（undo 時の final commit 化など）とは別物として扱うこと
+- **WebKit の性能計測の罠（再確認）**: stage 計時は GPU 同期待ちが後段 stage に付け替わる。原因特定は Chromium の attribution + 「CPU 仕事が増えたか」の新旧比較で行う。render pass 1 本 ≈0.2-0.3ms の固定費が WebKit(Metal) の支配項になりやすい
