@@ -229,3 +229,15 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - 560 tests green（field default で既存テスト不変）。採否はユーザー官能判定待ち
 
 - 追記: S 字（両端で筆圧が抜ける）で simple の低筆圧応答が現行より強すぎ、末尾が消えかける。`threshold = 0.5 + (0.5 - effectivePressure) * 0.98` の係数（0.98）と octave 削減の複合。採用するなら低筆圧域の係数チューニング（要・目視イテレーション）が必要
+
+## 7. iPad 実機計測（2026-09-06、Rough 154px、mixing OFF、10 strokes、perfDebug）
+
+| 条件 | Call p50 / p95 / max | stalls |
+|---|---|---|
+| webgl2 + field | 0.0 / 7.0 / 10.0ms | 0 |
+| webgl2 + simple | 0.0 / **3.0** / 11.0ms | 0 |
+| cpu | 0.0 / 8.0 / **109ms（複数回で 15〜400ms に跳ねる）** | 0 |
+
+- **mixing OFF の Go 判定クローズ**: iPad では p95 互角でも CPU は max が 100〜400ms に跳ね、GPU は max ≈10ms で安定。tail latency の差で GPU 適格を維持する
+- C（simple）は iPad でも p95 −57%。ユーザー官能は「感触悪くはない」（S 字の低筆圧チューニングは採用時に実施）
+- undo は 1 回目（9 本再生）がもたつく体感。既知の残課題（undo 時の常駐再利用・再 upload 削減）と一致
