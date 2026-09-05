@@ -267,12 +267,30 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 
 ## 10. セッション引き継ぎ（2026-09-06 時点の現在地）
 
-- **branch**: `experiment/bristle-mask-simplify` @ `75dd698`（612 tests green、tree clean）。戻り点（C 棄却時）= `experiment/bristle-gpu` @ `8a210bf`
+- **branch**: `experiment/bristle-mask-simplify` @ `257b78c`（612 tests green、tree clean）。戻り点（C 棄却時）= `experiment/bristle-gpu` @ `8a210bf`
 - **確定済み**: perFlush 意味論の CPU/GPU 統一（時間基準バグ修正込み）/ undo-1 キャッシュ（直前 1 手 28ms）/ checkpoint コピー省略 / texture 3→2 枚 / iPad で mixing OFF も GPU 勝ち（tail latency）
 - **次アクション（未着手順）**:
-  1. C の低筆圧チューニング: simple の `threshold` 係数 0.98 を 0.7/0.8/0.9 で振った S 字比較画像を作りユーザー官能判定 → C 採否確定
+  1. C の低筆圧チューニング: 比較画像は §11.2 で作成済み（`?bristleLowP=`）。ユーザー官能判定 → C 採否と係数確定
+  1'. WebKit bitmap commit の `gl.finish` 修正（§11.1、`e2e259b`）の iPad 実機再計測: 矩形欠けの消失と gpuCommit コストの確認（Mac WebKit では +1.2ms/commit）
   2. field UV bbox 近似の解消（astra 案: ink pass で segment profile UV に沿って field を読み色付き ink を蓄積、composite は mask 掛けのみ。出力変更を伴うので採否と同時に）
   3. 正式化: gpu-acceleration.md へ bristle 反映（適格条件・3 pass モデル・perFlush 意味論・undo-1・texture 構成）→ planning-flow Phase 1-4 → `experiment/bristle-gpu` へ統合 → `feature/acrylic-v2-production` へ PR
 - **計測環境**: dev server `pnpm dev`（http、port 5174）。ランナー: `tools/bench/benchmark-rough-capture.mjs`（ENGINE/GPU_BACKEND/BASE_URL）、内訳: `tools/bench/results/probe6.mjs`（EXTRA/MIX/PRESSURE/LOOP/SHOT）、undo: `probe-undo.mjs`（EXTRA/MIX/STROKES）、官能撮影: `eval-shot.mjs`（STROKE=fixture|scurve|probe, MIX, PRE, LW, GPU_BACKEND + 第2引数にクエリ）、画像比較: `imgdiff.mjs` / `crop.mjs`
 - **flags**: `?gpuBackend=auto|webgl2|cpu`、`?bristleMask=field|simple`（default field）、`?gpuBristleField=perFlush|perRun`（default perFlush）、`?perfDebug=1`
 - **注意**: probe 系は `perfDebug=1` がないと `__hpDebugUi` が出ない / ランナーの stageSnapshot は元から空（内訳は probe6 で）/ WebKit の stage 計時は GPU 同期が後段に付く（attribution は Chromium）/ react 層で stroke command をクローンすると undo-1 が無効化される（同一性契約）
+
+## 11. WebKit bitmap commit の非決定性修正と C の係数比較（2026-09-06）
+
+### 11.1 発見: WebKit の transferToImageBitmap は queue 済み blit を待たない（`e2e259b`）
+
+- 係数比較のために Lab S 字（決定的な入力・seed 固定・同期 replay）を Playwright WebKit で撮ると、**同じ入力で run ごとに ink 画素の 12〜27% が異なり**、commit tile 境界で縦にスパッと切れる矩形欠けが出た。撮影タイミングではない（同一 run の 1.5s 後と 5.5s 後は byte 一致）
+- 切り分け: CPU 経路 = run 間 byte 一致 / WebKit `gpuCommit=direct` = 一致 / Chromium bitmap = 一致 / WebKit bitmap = 不一致。親ブランチ `experiment/bristle-gpu`（`8a210bf`）でも同様（17%）→ C の回帰ではなく潜在バグ。2026-08-30 の iPad「Undo/Redo 後の矩形欠け」（formal 計画 §11-12）と同じ症状で、当時の `gl.flush` 追加は不十分だった
+- 修正: `commit-packing.ts` で `transferToImageBitmap` 直前に `gl.finish()`。WebKit bitmap が run 間 byte 一致 + CPU と一致（|Δ|>25 が ink の 0.01%）
+- コスト（Mac Playwright WebKit、probe6、1 stroke 31 commit）: gpuCommit 19〜27ms → 53〜67ms、moveMany 71〜112 → 113〜129ms。direct は 5〜9ms / 51〜90ms で最速だが、iOS では WebGL canvas の drawImage source 化が 50〜100ms/commit だった経緯（formal 計画 §10 p4c）があり default は bitmap のまま。**iPad 実機での再計測が必要**
+- テスト: vitest browser は chromium のみ（`vitest.config.ts`）で WebKit 固有挙動は自動テストで捕まえられない。検証はランナー（`eval-shot.mjs` を 3 run + `imgdiff.mjs`）で実施。webkit instance の追加は要検討
+- 後続の削減余地: finish は commit 回数に比例するので、commit 頻度（flush ごと → rAF ごと等）の削減が効く
+
+### 11.2 C の低筆圧係数比較（`257b78c`、`?bristleMask=simple&bristleLowP=<0..1>`）
+
+- S 字（筆圧 0.15→1.0→0.15、Rough 120px、mixing OFF、webgl2、finish 修正後で決定的）を field / simple 0.98 / 0.9 / 0.8 / 0.7 で撮影。画像はセッションの scratchpad（`s-compare.png`）で共有済み
+- 見え方: 0.98 は両端の低筆圧部が field より長く疎に伸びる（末尾は消えず点描で残る）。係数を下げると低筆圧端が密になる一方、高筆圧の胴体が多孔質になる（0.7 で顕著）。0.9 が両端・胴体とも field に最も近い印象 → ユーザー官能判定待ち
+- field vs simple 0.98 の画素差 |Δ|>25: ink の 8%
