@@ -267,10 +267,10 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 
 ## 10. セッション引き継ぎ（2026-09-06 時点の現在地）
 
-- **branch**: `experiment/bristle-mask-simplify` @ `257b78c`（612 tests green、tree clean）。戻り点（C 棄却時）= `experiment/bristle-gpu` @ `8a210bf`
+- **branch**: `experiment/bristle-mask-simplify`（615 tests green、tree clean。最新は §11.3 のコミット）。戻り点（C 棄却時）= `experiment/bristle-gpu` @ `8a210bf`
 - **確定済み**: perFlush 意味論の CPU/GPU 統一（時間基準バグ修正込み）/ undo-1 キャッシュ（直前 1 手 28ms）/ checkpoint コピー省略 / texture 3→2 枚 / iPad で mixing OFF も GPU 勝ち（tail latency）
 - **次アクション（未着手順）**:
-  1. C の低筆圧チューニング: 比較画像は §11.2 で作成済み（`?bristleLowP=`）。ユーザー官能判定 → C 採否と係数確定
+  1. ~~C の低筆圧チューニング~~ → **C 採用・係数 0.9 で確定（§11.3）**
   1'. WebKit bitmap commit の `gl.finish` 修正（§11.1、`e2e259b`）の iPad 実機再計測: 矩形欠けの消失と gpuCommit コストの確認（Mac WebKit では +1.2ms/commit）
   2. field UV bbox 近似の解消（astra 案: ink pass で segment profile UV に沿って field を読み色付き ink を蓄積、composite は mask 掛けのみ。出力変更を伴うので採否と同時に）
   3. 正式化: gpu-acceleration.md へ bristle 反映（適格条件・3 pass モデル・perFlush 意味論・undo-1・texture 構成）→ planning-flow Phase 1-4 → `experiment/bristle-gpu` へ統合 → `feature/acrylic-v2-production` へ PR
@@ -294,3 +294,10 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - S 字（筆圧 0.15→1.0→0.15、Rough 120px、mixing OFF、webgl2、finish 修正後で決定的）を field / simple 0.98 / 0.9 / 0.8 / 0.7 で撮影。画像はセッションの scratchpad（`s-compare.png`）で共有済み
 - 見え方: 0.98 は両端の低筆圧部が field より長く疎に伸びる（末尾は消えず点描で残る）。係数を下げると低筆圧端が密になる一方、高筆圧の胴体が多孔質になる（0.7 で顕著）。0.9 が両端・胴体とも field に最も近い印象 → ユーザー官能判定待ち
 - field vs simple 0.98 の画素差 |Δ|>25: ink の 8%
+
+### 11.3 決定: C 採用・simple 既定・係数 0.9・CPU を画素ごと評価に統一（ユーザー決定 2026-09-06）
+
+- ユーザー判定「0.9 でいい。性能は一旦 OK、正しさ優先」→ `bristleMask` 既定を simple、`bristleLowP` 既定を 0.9 に（`field` / `bristleLowP` は比較用に残置）
+- 既定反転で Tier B parity テストが fail（alphaMae 0.0171 > 0.015、largeDelta 0.0206 > 0.01）。根本原因は CPU simple が samples×bands 格子 + bilinear、GPU が画素ごとノイズ評価という離散化差。CPU を GPU と同じ画素ごと評価（u→distance/pressure 線形補間、v→crossPx = −半径〜+半径）に置換して解消（テスト無変更で通過）
+- 結果: 615 tests green。S 字 CPU vs GPU 差 0.01%。Chromium CPU は simple の方が field より約 10ms 速い（OFF 62 vs 73ms、ON 92 vs 103ms）
+- 残: iPad 実機で `gl.finish` 修正のコスト確認（§11.1）、field UV bbox 近似の解消（次アクション 2）、正式化（次アクション 3）
