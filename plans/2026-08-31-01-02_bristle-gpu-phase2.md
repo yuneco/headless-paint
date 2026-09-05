@@ -264,3 +264,15 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - **① undo-1 GPU キャッシュ**: stroke-start snapshot を保持し、直前 1 手の undo は再生ゼロで復元。**undo 1 回目 355→28ms（mixing ON）/ 226→28ms（OFF）**。2 手目以降は従来 rebuild にフォールバック（設計どおり）。差し戻し 1 回: react 層が command を `createStrokeCommand` で再生成して WeakMap の同一性が壊れていた → 元 command をそのまま push（`e6f1dd2`、react 側に実 GPU + StrictMode の hit/byte 一致テスト追加）
 - **② 中間 checkpoint コピー省略 / ③ 全画面 texture 3→2 枚（4K で 64MiB 減）**: 実装済み、byte 一致維持
 - 計測ノート: probe-undo の 5 回 undo は再生 10 本分（4+3+2+1）の合計。undo-1 は最頻の「直前 1 手」を狙い撃ちする設計（ユーザー決定 N=1）
+
+## 10. セッション引き継ぎ（2026-09-06 時点の現在地）
+
+- **branch**: `experiment/bristle-mask-simplify` @ `75dd698`（612 tests green、tree clean）。戻り点（C 棄却時）= `experiment/bristle-gpu` @ `8a210bf`
+- **確定済み**: perFlush 意味論の CPU/GPU 統一（時間基準バグ修正込み）/ undo-1 キャッシュ（直前 1 手 28ms）/ checkpoint コピー省略 / texture 3→2 枚 / iPad で mixing OFF も GPU 勝ち（tail latency）
+- **次アクション（未着手順）**:
+  1. C の低筆圧チューニング: simple の `threshold` 係数 0.98 を 0.7/0.8/0.9 で振った S 字比較画像を作りユーザー官能判定 → C 採否確定
+  2. field UV bbox 近似の解消（astra 案: ink pass で segment profile UV に沿って field を読み色付き ink を蓄積、composite は mask 掛けのみ。出力変更を伴うので採否と同時に）
+  3. 正式化: gpu-acceleration.md へ bristle 反映（適格条件・3 pass モデル・perFlush 意味論・undo-1・texture 構成）→ planning-flow Phase 1-4 → `experiment/bristle-gpu` へ統合 → `feature/acrylic-v2-production` へ PR
+- **計測環境**: dev server `pnpm dev`（http、port 5174）。ランナー: `tools/bench/benchmark-rough-capture.mjs`（ENGINE/GPU_BACKEND/BASE_URL）、内訳: `tools/bench/results/probe6.mjs`（EXTRA/MIX/PRESSURE/LOOP/SHOT）、undo: `probe-undo.mjs`（EXTRA/MIX/STROKES）、官能撮影: `eval-shot.mjs`（STROKE=fixture|scurve|probe, MIX, PRE, LW, GPU_BACKEND + 第2引数にクエリ）、画像比較: `imgdiff.mjs` / `crop.mjs`
+- **flags**: `?gpuBackend=auto|webgl2|cpu`、`?bristleMask=field|simple`（default field）、`?gpuBristleField=perFlush|perRun`（default perFlush）、`?perfDebug=1`
+- **注意**: probe 系は `perfDebug=1` がないと `__hpDebugUi` が出ない / ランナーの stageSnapshot は元から空（内訳は probe6 で）/ WebKit の stage 計時は GPU 同期が後段に付く（attribution は Chromium）/ react 層で stroke command をクローンすると undo-1 が無効化される（同一性契約）
