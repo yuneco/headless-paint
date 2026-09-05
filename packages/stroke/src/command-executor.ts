@@ -6,6 +6,7 @@ import type {
 } from "@headless-paint/engine";
 import { createLayer, wrapShiftLayer } from "@headless-paint/engine";
 import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
+import { getGpuUndoRuntime } from "./gpu-undo-cache";
 import {
   canRedo,
   canUndo,
@@ -244,10 +245,21 @@ function executeLayerDraw<TCustom>(
     const layer = deps.layers.find((candidate) => candidate.id === layerId);
     if (!layer) continue;
 
-    const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
-      accelerator: deps.accelerator,
-      invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
-    });
+    const undoHit =
+      op === "undo" &&
+      isDrawCommand(command) &&
+      command.type === "stroke" &&
+      getGpuUndoRuntime(deps.accelerator)?.restoreUndoSnapshot(
+        layer,
+        state.currentIndex,
+        state.commands,
+      );
+    const result = undoHit
+      ? { ok: true as const }
+      : rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
+          accelerator: deps.accelerator,
+          invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
+        });
     if (!result.ok) {
       return createFailureResult(
         state,
@@ -663,6 +675,9 @@ export function executeHistoryOp<TCustom>(
     };
   }
 
+  if (op !== "undo" || !isDrawCommand(command) || command.type !== "stroke") {
+    getGpuUndoRuntime(deps.accelerator)?.discardUndoSnapshot();
+  }
   const next = op === "undo" ? undo(state) : redo(state);
   const persistence = resolveHistoryPersistenceEvent(op, command);
 

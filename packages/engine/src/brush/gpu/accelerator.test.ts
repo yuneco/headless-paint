@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Layer } from "../../types";
 import {
   createBrushAccelerator,
+  getBrushAcceleratorRuntime,
   isWebKitUserAgent,
   resolveBrushAcceleratorBackend,
 } from "./accelerator";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
 import {
   type GpuStrokeSurface,
   createGpuStrokeSurface,
@@ -161,5 +164,161 @@ describe("resolveBrushAcceleratorBackend", () => {
         { userAgent: SAFARI_USER_AGENT, webgl2Available: () => true },
       ),
     ).toEqual({ backend: "cpu", reason: "cpu: setting" });
+  });
+});
+
+describe("undo-1 snapshot lifecycle (no browser)", () => {
+  function setupUndo(residentBeforeStroke = true) {
+    const canvas = new EventTarget();
+    const surface = {
+      canvas,
+      width: 1,
+      height: 1,
+      lost: false,
+      maxBranchCount: 64,
+      beginStroke: vi.fn(),
+      commitToLayer: vi.fn(),
+      cancelStroke: vi.fn(),
+      endStroke: vi.fn(),
+      restoreUndoToLayer: vi.fn(() => true),
+      dispose: vi.fn(),
+    };
+    vi.mocked(createGpuStrokeSurface).mockReturnValue(
+      surface as unknown as GpuStrokeSurface,
+    );
+    const accelerator = createBrushAccelerator({ backend: "webgl2" });
+    const runtime = getBrushAcceleratorRuntime(accelerator);
+    if (!accelerator || !runtime) throw new Error("Missing test accelerator");
+    const layer = {
+      width: 1,
+      height: 1,
+      canvas: {},
+    } as Layer;
+    if (residentBeforeStroke) {
+      accelerator.warmUp(layer);
+      surface.beginStroke.mockClear();
+      surface.endStroke.mockClear();
+    }
+    const owner = {};
+    const command = {};
+    const branch = [command];
+    expect(runtime.beginStroke(owner, layer, layer.canvas)).toBe(true);
+    runtime.commitToLayer(owner, layer);
+    runtime.endStroke(owner, true);
+    expect(runtime.retainUndoSnapshot(layer, command)).toBe(true);
+    runtime.bindUndoSnapshot(command, 7, branch);
+    return { accelerator, runtime, surface, layer, command, branch, canvas };
+  }
+
+  it("restores once without beginning or replaying a stroke, retaining residency", () => {
+    const { accelerator, runtime, surface, layer, branch } = setupUndo();
+    expect(surface.endStroke).toHaveBeenLastCalledWith(true);
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(true);
+    expect(surface.restoreUndoToLayer).toHaveBeenCalledExactlyOnceWith(layer);
+    expect(surface.beginStroke).toHaveBeenCalledTimes(1);
+    expect(runtime.isLayerResident(layer)).toBe(true);
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(false);
+    accelerator.dispose();
+  });
+
+  it("an uploaded CPU base can hit undo without changing its nonresident status", () => {
+    const { accelerator, runtime, surface, layer, branch } = setupUndo(false);
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(true);
+    expect(surface.restoreUndoToLayer).toHaveBeenCalledExactlyOnceWith(layer);
+    expect(runtime.isLayerResident(layer)).toBe(false);
+    accelerator.dispose();
+  });
+
+  it.each(["index", "branch", "layer", "size"] as const)(
+    "rejects a different %s and consumes the stale entry",
+    (mismatch) => {
+      const { accelerator, runtime, surface, layer, branch } = setupUndo();
+      const target = mismatch === "layer" ? { ...layer } : layer;
+      if (mismatch === "size") (layer as { width: number }).width = 2;
+      expect(
+        runtime.restoreUndoSnapshot(
+          target,
+          mismatch === "index" ? 6 : 7,
+          mismatch === "branch" ? [...branch] : branch,
+        ),
+      ).toBe(false);
+      expect(surface.restoreUndoToLayer).not.toHaveBeenCalled();
+      expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(false);
+      accelerator.dispose();
+    },
+  );
+
+  it.each([
+    "external",
+    "checkpointRestore",
+    "clearLayer",
+    "cpuBrush",
+    "copyLayerPixels",
+    "setPixel",
+    "transformLayer",
+    "wrapShift",
+    "mergeLayerDown",
+    "acceleratorReplaced",
+    "replayFailure",
+  ] as const)("residency invalidation %s also discards undo", (reason) => {
+    const { accelerator, runtime, surface, layer, branch } = setupUndo();
+    accelerator.invalidate(layer, reason);
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(false);
+    expect(surface.restoreUndoToLayer).not.toHaveBeenCalled();
+    accelerator.dispose();
+  });
+
+  it("uses the engine's external-write hook without an explicit accelerator", () => {
+    const { accelerator, runtime, layer, branch } = setupUndo();
+    invalidateGpuLayerResidency(layer, "setPixel");
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(false);
+    accelerator.dispose();
+  });
+
+  it.each([
+    "newStroke",
+    "cancel",
+    "layerSwitch",
+    "resize",
+    "contextLoss",
+    "dispose",
+  ])("%s cannot reuse the completed snapshot", (action) => {
+    const { accelerator, runtime, surface, layer, branch, canvas } =
+      setupUndo();
+    if (action === "newStroke" || action === "cancel") {
+      const owner = {};
+      runtime.beginStroke(owner, layer);
+      if (action === "cancel") runtime.cancelStroke(owner);
+      runtime.endStroke(owner, action === "newStroke");
+    } else if (action === "layerSwitch") {
+      accelerator.warmUp({ ...layer });
+    } else if (action === "resize") {
+      runtime.isLayerResident({ ...layer, width: 2 });
+    } else if (action === "contextLoss") {
+      surface.lost = true;
+      canvas.dispatchEvent(new Event("webglcontextlost"));
+    } else {
+      accelerator.dispose();
+    }
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(false);
+    expect(surface.restoreUndoToLayer).not.toHaveBeenCalled();
+    accelerator.dispose();
+  });
+
+  it("token-specific disposal of an old branch leaves the new entry intact", () => {
+    const { accelerator, runtime, layer, branch } = setupUndo();
+    runtime.discardUndoSnapshot({});
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(true);
+    accelerator.dispose();
+  });
+
+  it("a failed GPU restore invalidates residency and falls back", () => {
+    const { accelerator, runtime, surface, layer, branch } = setupUndo();
+    surface.restoreUndoToLayer.mockImplementation(() => {
+      throw new Error("lost");
+    });
+    expect(runtime.restoreUndoSnapshot(layer, 7, branch)).toBe(false);
+    expect(runtime.isLayerResident(layer)).toBe(false);
+    accelerator.dispose();
   });
 });

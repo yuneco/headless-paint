@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createLayer } from "../../layer";
 import { DEFAULT_BRUSH_MIXING } from "../../types";
 import { writeMaterialFieldPixels } from "../material-field";
@@ -14,9 +14,8 @@ import {
   createGpuStrokeSurface,
 } from "./gpu-stroke-surface";
 
-// Diagnostic characterization, not the desired parity contract. Production and
-// existing tests are intentionally untouched. Run this file in browser mode.
-describe("perFlush carried checkpoint verification (known CPU/GPU mismatch)", () => {
+// The first run reads the carried image; only subsequent runs switch to F0.
+describe("perFlush carried checkpoint parity contract", () => {
   it.each([
     {
       label: "unchanged substrate",
@@ -33,34 +32,113 @@ describe("perFlush carried checkpoint verification (known CPU/GPU mismatch)", ()
       paintAfterCheckpoint: true,
       capture: true,
     },
-  ])("$label", ({ label, paintAfterCheckpoint, capture }) => {
+  ])("$label", ({ paintAfterCheckpoint, capture }) => {
     const result = measureCheckpointMismatch({
       paintAfterCheckpoint,
       capture,
       pickupRatePerPx: 0.17,
       tailDistance: 4,
     });
-    console.info(label, result);
-    if (paintAfterCheckpoint && capture) {
-      expect(result.rgbMae).toBeGreaterThan(0.49);
-      expect(result.largeDeltaRate).toBe(1);
-    } else {
-      expect(result.rgbMae).toBeLessThanOrEqual(1 / 255);
-      expect(result.largeDeltaRate).toBe(0);
-    }
+    expect(result.rgbMae).toBeLessThanOrEqual(1 / 255);
+    expect(result.maxChannelDelta).toBeLessThanOrEqual(1);
+    expect(result.largeDeltaRate).toBe(0);
   });
 
-  it("approaches full-scale RGB divergence with saturated early pickup and a short tail", () => {
+  it("matches with saturated early pickup and a short tail", () => {
     const result = measureCheckpointMismatch({
       paintAfterCheckpoint: true,
       capture: true,
       pickupRatePerPx: 1,
       tailDistance: 0.01,
     });
-    console.info("maximized carried checkpoint mismatch", result);
-    expect(result.rgbMae).toBeGreaterThan(0.98);
-    expect(result.largeDeltaRate).toBe(1);
+    expect(result.rgbMae).toBeLessThanOrEqual(1 / 255);
+    expect(result.maxChannelDelta).toBeLessThanOrEqual(1);
+    expect(result.largeDeltaRate).toBe(0);
   });
+});
+
+describe("perFlush checkpoint copy elision", () => {
+  it.each([1, 2])(
+    "copies only the last checkpoint per branch (%i branches), at its composite",
+    (branchCount) => {
+      const layer = createLayer(256, 256);
+      layer.ctx.fillStyle = "white";
+      layer.ctx.fillRect(0, 0, 256, 256);
+      const tip = new OffscreenCanvas(2, 32);
+      const ctx = tip.getContext("2d");
+      if (!ctx) throw new Error("Missing tip context");
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, 2, 32);
+      const surface = createGpuStrokeSurface(256, 256, "bitmap", "perFlush");
+      if (!surface) throw new Error("WebGL2 is required");
+      // Observe actual image copies, not the metadata-only checkpoint requests.
+      const copies = vi.spyOn(
+        surface as unknown as {
+          copySurfaceCheckpointToPerFlushAtlas(...args: unknown[]): void;
+        },
+        "copySurfaceCheckpointToPerFlushAtlas",
+      );
+      const gray = { r: 128, g: 128, b: 128, a: 255 };
+      const update = {
+        baseColor: gray,
+        centerX: 128,
+        centerY: 128,
+        angle: 0,
+        sampleSize: 8,
+        columns: 4,
+        rows: 4,
+        pickupRatePerPx: 0,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 32,
+      };
+      const black = makeUniformChunk(tip, 255);
+      const white = { ...black, color: { r: 255, g: 255, b: 255, a: 255 } };
+      try {
+        surface.beginStroke(layer.canvas, branchCount);
+        for (let branch = 0; branch < branchCount; branch++) {
+          surface.selectBranch(branch);
+          surface.initializeMaterialField(4, 4, gray);
+          surface.initializeMaterialCheckpoint(88, 88, 80);
+        }
+        surface.beginBranchBatch();
+        for (let branch = 0; branch < branchCount; branch++) {
+          surface.selectBranch(branch);
+          for (const chunk of [black, white, black]) {
+            surface.pushBristleChunk(chunk);
+            surface.updateMaterialField(update);
+            surface.snapshotMaterialCheckpoint(88, 88, 80);
+          }
+          // The final checkpoint must remain black even though the flush ends white.
+          surface.pushBristleChunk(white);
+        }
+        surface.endBranchBatch();
+        expect(copies).toHaveBeenCalledTimes(branchCount);
+        surface.commitToLayer(layer);
+        expect(Array.from(layer.ctx.getImageData(128, 128, 1, 1).data)).toEqual(
+          [255, 255, 255, 255],
+        );
+        surface.beginBranchBatch();
+        for (let branch = 0; branch < branchCount; branch++) {
+          surface.selectBranch(branch);
+          surface.pushBristleChunk(makeUniformChunk(tip, 0));
+          surface.updateMaterialField({ ...update, pickupRatePerPx: 1 });
+        }
+        surface.endBranchBatch();
+        for (let branch = 0; branch < branchCount; branch++) {
+          const pixels = surface.readMaterialFieldForTest(branch);
+          for (let offset = 0; offset < pixels.length; offset += 4) {
+            expect(Array.from(pixels.slice(offset, offset + 4))).toEqual([
+              0, 0, 0, 255,
+            ]);
+          }
+        }
+      } finally {
+        copies.mockRestore();
+        surface.dispose();
+      }
+    },
+  );
 });
 
 function measureCheckpointMismatch(options: {

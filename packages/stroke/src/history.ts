@@ -1,5 +1,6 @@
 import type { Layer } from "@headless-paint/engine";
 import { compressCheckpoint, createCheckpoint } from "./checkpoint";
+import { bindGpuUndoHistory } from "./gpu-undo-cache";
 import type {
   AffectedLayers,
   Checkpoint,
@@ -371,7 +372,11 @@ export function pushCommand<TCustom = never>(
   );
   if (missingLayerIds.length > 0) {
     warnMissingCheckpoint(state, command, missingLayerIds);
-    return absorbUntrackedMutation(state, command, options);
+    return bindGpuUndoHistory(
+      state,
+      absorbUntrackedMutation(state, command, options),
+      command,
+    );
   }
 
   const redoTrimOffset = Math.max(
@@ -391,7 +396,7 @@ export function pushCommand<TCustom = never>(
     layerCount: options.layerCount ?? state.layerCount,
   };
   const compressed = compressCheckpoints(next, normalizedConfig);
-  return evictCheckpoints(
+  const result = evictCheckpoints(
     compressed,
     getEffectiveMaxCheckpoints(
       compressed,
@@ -399,6 +404,7 @@ export function pushCommand<TCustom = never>(
       normalizedConfig,
     ),
   );
+  return bindGpuUndoHistory(state, result, command);
 }
 
 export function canUndo<TCustom = never>(

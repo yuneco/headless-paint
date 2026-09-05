@@ -130,6 +130,7 @@ export interface GpuMaterialFieldUpdate {
 }
 
 export interface GpuStrokeSurface {
+  readonly canvas: OffscreenCanvas;
   readonly width: number;
   readonly height: number;
   readonly lost: boolean;
@@ -163,7 +164,8 @@ export interface GpuStrokeSurface {
   flush(): void;
   commitToLayer(layer: Layer): void;
   cancelStroke(): void;
-  endStroke(): void;
+  endStroke(retainUndo?: boolean): void;
+  restoreUndoToLayer(layer: Layer): boolean;
   dispose(): void;
 }
 
@@ -184,8 +186,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private readonly instanceBuffer: WebGLBuffer;
   private readonly branchDataBuffer: WebGLBuffer;
   private accumTexture: WebGLTexture;
+  private undoDirtyRect: DirtyRect | null = null;
   private sourceTexture: WebGLTexture;
-  private readonly baseTexture: WebGLTexture;
   private readonly tipTexture: WebGLTexture;
   private readonly fieldTextures: readonly [WebGLTexture, WebGLTexture];
   private readonly fieldFramebuffers: readonly [
@@ -205,7 +207,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private fieldBatchCheckpointTextureHeight = 0;
   private framebuffer: WebGLFramebuffer;
   private sourceFramebuffer: WebGLFramebuffer;
-  private readonly baseFramebuffer: WebGLFramebuffer;
   private readonly surfaceSizeLocation: WebGLUniformLocation;
   private readonly instances = new Float32Array(
     INSTANCE_CAPACITY * INSTANCE_FLOATS,
@@ -271,7 +272,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.branchDataBuffer = resources.branchDataBuffer;
     this.accumTexture = resources.accumTexture;
     this.sourceTexture = resources.sourceTexture;
-    this.baseTexture = resources.baseTexture;
     this.tipTexture = resources.tipTexture;
     this.fieldTextures = resources.fieldTextures;
     this.fieldFramebuffers = resources.fieldFramebuffers;
@@ -280,7 +280,6 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       resources.materialCheckpointFramebuffer;
     this.framebuffer = resources.framebuffer;
     this.sourceFramebuffer = resources.sourceFramebuffer;
-    this.baseFramebuffer = resources.baseFramebuffer;
     this.surfaceSizeLocation = resources.surfaceSizeLocation;
     this.maxBranchCount = resources.maxBranchCount;
     this.singleFieldUpdateBatch = Array<GpuMaterialFieldUpdate | undefined>(
@@ -332,6 +331,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
 
   beginStroke(sourceCanvas?: OffscreenCanvas, branchCount = 1): void {
     this.assertUsable();
+    this.undoDirtyRect = null;
     if (
       !Number.isSafeInteger(branchCount) ||
       branchCount < 1 ||
@@ -439,8 +439,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         this.framebuffer,
       ];
     }
-    this.copyAccumToStrokeStartSource();
-    perfStage("gpuBaseCopy", () => this.copyAccumToBase());
+    // One immutable snapshot serves pickup, cancel, and the completed undo-1.
+    perfStage("gpuBaseCopy", () => this.copyAccumToStrokeStartSource());
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
     gl.viewport(0, 0, this.width, this.height);
     this.instanceCount = 0;
@@ -1110,6 +1110,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
             }),
             afterComposite:
               checkpoint &&
+              checkpoint === currentCheckpoints[branchIndex] &&
               !checkpoint.capture?.fromStrokeStart &&
               chunkIndex === segment.bristleChunks.length - 1
                 ? () => {
@@ -1126,6 +1127,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         compositedDistances[branchIndex] = runEndDistance;
         if (
           checkpoint &&
+          checkpoint === currentCheckpoints[branchIndex] &&
           !checkpoint.capture?.fromStrokeStart &&
           segment.bristleChunks.length === 0
         ) {
@@ -1140,8 +1142,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
 
     let passCount = this.bristleResources.drawBatch(bristleDraws);
-    for (const checkpoint of checkpointRefs) {
-      if (capturedCheckpoints.has(checkpoint)) continue;
+    // Intermediate captures are metadata only: field sampling already read F0.
+    for (const checkpoint of currentCheckpoints) {
+      if (!checkpoint || capturedCheckpoints.has(checkpoint)) continue;
       this.copySurfaceCheckpointToPerFlushAtlas(
         checkpoint,
         checkpointLayouts,
@@ -1537,7 +1540,18 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     });
   }
 
-  endStroke(): void {
+  restoreUndoToLayer(layer: Layer): boolean {
+    this.assertUsable();
+    const rect = this.undoDirtyRect;
+    this.undoDirtyRect = null;
+    if (this.strokeBegun || !rect) return false;
+    this.restoreBaseRectToAccum(rect);
+    this.commitRectsToLayer(layer, [rect]);
+    return !this.lost;
+  }
+
+  endStroke(retainUndo = false): void {
+    this.undoDirtyRect = retainUndo ? this.committedDirtyRect : null;
     this.instanceCount = 0;
     this.pendingBranchSegments = null;
     this.branchBatchActive = false;
@@ -1582,29 +1596,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     );
   }
 
-  private copyAccumToBase(): void {
-    const gl = this.gl;
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.baseFramebuffer);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.blitFramebuffer(
-      0,
-      0,
-      this.width,
-      this.height,
-      0,
-      0,
-      this.width,
-      this.height,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-  }
-
   private restoreBaseRectToAccum(rect: DirtyRect): void {
     const gl = this.gl;
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.baseFramebuffer);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sourceFramebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.framebuffer);
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);

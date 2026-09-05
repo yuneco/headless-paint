@@ -295,15 +295,17 @@ export function prepareBristleMixingFlush(
       : undefined;
   if (needsInitialCheckpoint && union) perfSample("checkpoints", 1);
 
-  let state = union
-    ? {
-        ...initialState,
-        checkpointCanvas: union.canvas,
-        checkpointPixels: union.pixels,
-        checkpointOriginX: union.originX,
-        checkpointOriginY: union.originY,
-      }
-    : initialState;
+  // Carried checkpoints remain the reference until an in-flush capture.
+  let state =
+    needsInitialCheckpoint && union
+      ? {
+          ...initialState,
+          checkpointCanvas: union.canvas,
+          checkpointPixels: union.pixels,
+          checkpointOriginX: union.originX,
+          checkpointOriginY: union.originY,
+        }
+      : initialState;
   const initialCheckpointPixels = state.checkpointPixels;
   if (!initialCheckpointPixels) {
     throw new Error("Brush mixing checkpoint pixels are missing");

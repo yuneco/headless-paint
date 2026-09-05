@@ -290,7 +290,7 @@ export function createIncrementalStrokeRenderer(
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
       if (gpuStrokeActive) {
         commitGpuStrokeToLayer();
-        gpuRuntime?.endStroke(gpuOwner);
+        gpuRuntime?.endStroke(gpuOwner, gpuOwner.label === "live");
         if (gpuStrokeLost) recoverLostGpuStroke();
       }
     },
@@ -326,7 +326,7 @@ interface GpuStrokeRuntimeBridge {
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
   cancelStroke(owner: object): boolean;
-  endStroke(owner: object): void;
+  endStroke(owner: object, retainUndo?: boolean): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
 }

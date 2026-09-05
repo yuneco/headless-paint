@@ -24,6 +24,8 @@ import {
 } from "@headless-paint/engine";
 import type { FilterPipelineConfig, InputPoint } from "@headless-paint/input";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { executeHistoryOp } from "./command-executor";
+import { getGpuUndoRuntime } from "./gpu-undo-cache";
 import {
   beginHistoryMutation,
   createHistoryState,
@@ -413,6 +415,160 @@ describe("GPU mixing feedMany parity", () => {
     expect(stages.gpuFieldUpdate.count).toBeGreaterThan(0);
     expect(stages.checkpointReadback.count).toBe(0);
   });
+});
+
+describe("GPU undo-1 cache byte parity", () => {
+  const cases = [
+    {
+      name: "stamp replay",
+      style: STAMP_MIXING_STYLE,
+      expand: EXPAND,
+      interval: 10,
+      compression: "none",
+    },
+    {
+      name: "stamp radial checkpoint",
+      style: STAMP_MIXING_STYLE,
+      expand: RADIAL_EXPAND_4,
+      interval: 1,
+      compression: "fast",
+    },
+    {
+      name: "rough replay",
+      style: ROUGH_MIXING_STYLE,
+      expand: RADIAL_EXPAND_4,
+      interval: 10,
+      compression: "none",
+    },
+    {
+      name: "rough checkpoint",
+      style: ROUGH_MIXING_STYLE,
+      expand: EXPAND,
+      interval: 1,
+      compression: "none",
+    },
+  ] as const;
+
+  for (const fixture of cases) {
+    it.each(["transparent", "opaque", "translucent"])(
+      `${fixture.name}: %s hit, next stroke, branch and deep undo match rebuild byte-for-byte`,
+      (substrate) => {
+        const accelerator = createTestAccelerator();
+        const referenceAccelerator = createTestAccelerator();
+        const runtime = getGpuUndoRuntime(accelerator);
+        if (!runtime) throw new Error("Missing GPU undo runtime");
+        const restore = vi.spyOn(runtime, "restoreUndoSnapshot");
+        const actual = createTestLayer();
+        const expected = createTestLayer();
+        const config: HistoryConfig = {
+          ...HISTORY_CONFIG,
+          checkpointInterval: fixture.interval,
+          checkpointCompression: fixture.compression,
+        };
+        if (substrate === "opaque") paintOpaqueBands(actual);
+        if (substrate === "translucent") {
+          const pixels = actual.ctx.createImageData(WIDTH, HEIGHT);
+          for (let offset = 0; offset < pixels.data.length; offset += 4) {
+            pixels.data.set([31, 119, 237, 1 + ((offset / 4) % 254)], offset);
+          }
+          actual.ctx.putImageData(pixels, 0, 0);
+        }
+        let history = createHistoryState(WIDTH, HEIGHT, { layerCount: 1 });
+        const draw = (layer: Layer, gpu: BrushAccelerator, seed: number) =>
+          simulateLiveStroke({
+            layer,
+            accelerator: gpu,
+            inputPoints: INPUT_POINTS,
+            style: fixture.style,
+            expand: fixture.expand,
+            filterPipeline: CAUSAL_FILTER_PIPELINE,
+            brushSeed: seed,
+            alphaLocked: false,
+          }).command;
+        const compareRebuild = (state: HistoryState, label: string) => {
+          expect(
+            rebuildLayerFromHistory(expected, state, undefined, {
+              accelerator: referenceAccelerator,
+            }).ok,
+          ).toBe(true);
+          expectPixelEqual(
+            actual,
+            expected,
+            `${fixture.name} ${substrate} ${label}`,
+          );
+        };
+        try {
+          for (let index = 0; index < 3; index++) {
+            history = beginHistoryMutation(
+              history,
+              { affectedLayers: [actual] },
+              config,
+            );
+            const command = draw(actual, accelerator, BRUSH_SEED + index);
+            history = pushCommand(
+              history,
+              command,
+              { afterLayer: actual },
+              config,
+            );
+          }
+          const result = executeHistoryOp("undo", history, {
+            layers: [actual],
+            accelerator,
+          });
+          expect(result.ok).toBe(true);
+          expect(restore).toHaveLastReturnedWith(true);
+          compareRebuild(result.next, "hit undo");
+
+          // Both start from the same visible pixels; only actual keeps GPU accum.
+          const forkBase = beginHistoryMutation(
+            result.next,
+            { affectedLayers: [actual] },
+            config,
+          );
+          const forkCommand = draw(actual, accelerator, BRUSH_SEED + 99);
+          draw(expected, referenceAccelerator, BRUSH_SEED + 99);
+          expectPixelEqual(
+            actual,
+            expected,
+            "stroke after hit vs stroke after rebuild",
+          );
+          const fork = pushCommand(
+            forkBase,
+            forkCommand,
+            { afterLayer: actual },
+            config,
+          );
+          expect(fork.currentIndex).toBe(history.currentIndex);
+          expect(fork.commands).not.toBe(history.commands);
+          const forkUndo = executeHistoryOp("undo", fork, {
+            layers: [actual],
+            accelerator,
+          });
+          expect(forkUndo.ok).toBe(true);
+          expect(restore).toHaveLastReturnedWith(true);
+          compareRebuild(forkUndo.next, "fork undo");
+
+          const deepUndo = executeHistoryOp("undo", forkUndo.next, {
+            layers: [actual],
+            accelerator,
+          });
+          expect(deepUndo.ok).toBe(true);
+          expect(restore).toHaveLastReturnedWith(false);
+          compareRebuild(deepUndo.next, "deep undo fallback");
+          const redone = executeHistoryOp("redo", deepUndo.next, {
+            layers: [actual],
+            accelerator,
+          });
+          expect(redone.ok).toBe(true);
+          compareRebuild(redone.next, "redo fallback");
+        } finally {
+          accelerator.dispose();
+          referenceAccelerator.dispose();
+        }
+      },
+    );
+  }
 });
 
 describe("GPU rough bristle parity", () => {

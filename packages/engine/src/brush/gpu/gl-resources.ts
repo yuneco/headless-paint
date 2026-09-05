@@ -27,7 +27,6 @@ export interface GpuStrokeGlResources {
   readonly branchDataBuffer: WebGLBuffer;
   readonly accumTexture: WebGLTexture;
   readonly sourceTexture: WebGLTexture;
-  readonly baseTexture: WebGLTexture;
   readonly tipTexture: WebGLTexture;
   readonly fieldTextures: readonly [WebGLTexture, WebGLTexture];
   readonly fieldFramebuffers: readonly [WebGLFramebuffer, WebGLFramebuffer];
@@ -38,7 +37,6 @@ export interface GpuStrokeGlResources {
   readonly fieldBatchRunDataTexture: WebGLTexture;
   readonly framebuffer: WebGLFramebuffer;
   readonly sourceFramebuffer: WebGLFramebuffer;
-  readonly baseFramebuffer: WebGLFramebuffer;
   readonly surfaceSizeLocation: WebGLUniformLocation;
   readonly strokeFieldUniforms: {
     readonly size: WebGLUniformLocation;
@@ -158,10 +156,6 @@ export function createGpuStrokeGlResources(
     gl.createTexture(),
     "WebGL source texture",
   );
-  const baseTexture = requireResource(
-    gl.createTexture(),
-    "WebGL stroke base texture",
-  );
   const tipTexture = requireResource(gl.createTexture(), "WebGL tip texture");
   const fieldTextures = [
     requireResource(gl.createTexture(), "WebGL field texture"),
@@ -198,10 +192,6 @@ export function createGpuStrokeGlResources(
   const sourceFramebuffer = requireResource(
     gl.createFramebuffer(),
     "WebGL source framebuffer",
-  );
-  const baseFramebuffer = requireResource(
-    gl.createFramebuffer(),
-    "WebGL stroke base framebuffer",
   );
   const surfaceSizeLocation = requireResource(
     gl.getUniformLocation(program, "uSurfaceSize"),
@@ -274,36 +264,6 @@ export function createGpuStrokeGlResources(
   configureBranchDataBuffer(gl, fieldMixProgram, branchDataBuffer);
   configureTexture2d(gl, accumTexture, gl.NEAREST);
   configureTexture2d(gl, sourceTexture, gl.NEAREST);
-  configureTexture2d(gl, baseTexture, gl.NEAREST);
-  gl.bindTexture(gl.TEXTURE_2D, baseTexture);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.RGBA8,
-    width,
-    height,
-    0,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    null,
-  );
-  perfMark("realloc:strokeBase", {
-    width,
-    height,
-    bytes: width * height * 4,
-    forceRecord: true,
-  });
-  gl.bindFramebuffer(gl.FRAMEBUFFER, baseFramebuffer);
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,
-    gl.COLOR_ATTACHMENT0,
-    gl.TEXTURE_2D,
-    baseTexture,
-    0,
-  );
-  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    throw new Error("GPU stroke base framebuffer is incomplete");
-  }
   configureTexture2d(gl, tipTexture, gl.LINEAR);
   for (const texture of fieldTextures) {
     configureTexture2d(gl, texture, gl.LINEAR);
@@ -386,7 +346,6 @@ export function createGpuStrokeGlResources(
     branchDataBuffer,
     accumTexture,
     sourceTexture,
-    baseTexture,
     tipTexture,
     fieldTextures,
     fieldFramebuffers,
@@ -397,7 +356,6 @@ export function createGpuStrokeGlResources(
     fieldBatchRunDataTexture,
     framebuffer,
     sourceFramebuffer,
-    baseFramebuffer,
     surfaceSizeLocation,
     strokeFieldUniforms,
     fieldMixUniforms,
@@ -423,7 +381,6 @@ export function disposeGpuStrokeGlResources(
   gl.deleteBuffer(resources.branchDataBuffer);
   gl.deleteTexture(resources.accumTexture);
   gl.deleteTexture(resources.sourceTexture);
-  gl.deleteTexture(resources.baseTexture);
   gl.deleteTexture(resources.tipTexture);
   for (const texture of resources.fieldTextures) gl.deleteTexture(texture);
   for (const framebuffer of resources.fieldFramebuffers) {
@@ -436,7 +393,6 @@ export function disposeGpuStrokeGlResources(
   gl.deleteTexture(resources.fieldBatchRunDataTexture);
   gl.deleteFramebuffer(resources.framebuffer);
   gl.deleteFramebuffer(resources.sourceFramebuffer);
-  gl.deleteFramebuffer(resources.baseFramebuffer);
 }
 
 export function createProgram(
