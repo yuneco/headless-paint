@@ -38,3 +38,5 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 - spray ブラシの `lineWidth` は「散布領域の直径」。粒子サイズは `dynamics.particleSize`（絶対px）で独立。
 - 非 mixing stamp + Expand の dab 配置・jitter は branch state 統一（2026-07-03）で意図的に変わった（branch ごと独立 seed・位相）。過去データの見た目互換はない（プロジェクト方針通り）。
+
+- **GPU undo-1 の React 境界（2026-09-06 spike）**: runtime で retain した command を useStrokeSession が DTO 化し、usePaintEngine が再生成していたため WeakMap の bind が常に miss した。内部 onStrokeCommit で元 command をそのまま push するよう修正。公開 DTO / persisted schema は維持。今後 runtime 単体 parity だけでなく React → history → executor を含む統合テストで hit を保証する。今回追加の bitmap/direct 2 ケースと既存 byte parity 12 ケースは sandbox の listen EPERM により未実行で、実ブラウザ検収が残る。

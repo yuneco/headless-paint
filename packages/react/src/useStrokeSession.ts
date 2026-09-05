@@ -46,6 +46,8 @@ export interface UseStrokeSessionConfig {
 }
 
 interface InternalUseStrokeSessionConfig extends UseStrokeSessionConfig {
+  /** Preserve runtime command identity for the GPU undo history bridge. */
+  readonly onStrokeCommit?: (command: StrokeCommand) => void;
   readonly accelerator?: BrushAccelerator | null;
   readonly restoreLayerBeforeStroke?: (layer: Layer) => void;
 }
@@ -123,6 +125,7 @@ export function useStrokeSessionWithAccelerator(
         now: () => performance.now(),
         requestRender: bumpRenderVersion,
         onCommit: (command) => {
+          configRef.current.onStrokeCommit?.(command);
           onStrokeCompleteRef.current?.(toStrokeCompleteData(command));
         },
         onDrawingChanged: (nextIsDrawing) => {
