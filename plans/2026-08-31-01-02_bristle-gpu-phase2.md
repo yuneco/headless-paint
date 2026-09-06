@@ -272,7 +272,7 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - **次アクション（未着手順）**:
   1. ~~C の低筆圧チューニング~~ → **C 採用・係数 0.9 で確定（§11.3）**
   1'. WebKit bitmap commit の `gl.finish` 修正（§11.1、`e2e259b`）の iPad 実機再計測: 矩形欠けの消失と gpuCommit コストの確認（Mac WebKit では +1.2ms/commit）
-  2. ~~field UV bbox 近似の解消~~ → **有害性なしと判定、対応しない（§11.4）**。正式化時に「既知の近似」として契約を明文化する
+  2. ~~field UV bbox 近似~~ → **§11.4 の「有害性なし」は誤判定。方向依存の鏡像バグと判明し §11.5 で修正済み**
   3. 正式化: gpu-acceleration.md へ bristle 反映（適格条件・3 pass モデル・perFlush 意味論・undo-1・texture 構成）→ planning-flow Phase 1-4 → `experiment/bristle-gpu` へ統合 → `feature/acrylic-v2-production` へ PR
 - **計測環境**: dev server `pnpm dev`（http、port 5174）。ランナー: `tools/bench/benchmark-rough-capture.mjs`（ENGINE/GPU_BACKEND/BASE_URL）、内訳: `tools/bench/results/probe6.mjs`（EXTRA/MIX/PRESSURE/LOOP/SHOT）、undo: `probe-undo.mjs`（EXTRA/MIX/STROKES）、官能撮影: `eval-shot.mjs`（STROKE=fixture|scurve|probe, MIX, PRE, LW, GPU_BACKEND + 第2引数にクエリ）、画像比較: `imgdiff.mjs` / `crop.mjs`
 - **flags**: `?gpuBackend=auto|webgl2|cpu`、`?bristleMask=field|simple`（default field）、`?gpuBristleField=perFlush|perRun`（default perFlush）、`?perfDebug=1`
@@ -310,5 +310,15 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - 画素差 |Δ|>25: (a) ink の 23.6% / (b) 32.6%。ただし内訳は点描分布 + 拾い色の位置の微差で、並べた目視では区別できない
 - 赤み成分（r − (g+b)/2）の差: 両方 ink の画素で平均 6.5/255（a）・6.3/255（b）。>20 の画素は GPU 側が赤い 3.9% / CPU 側が赤い 2.4%（a）、2.4% / 2.4%（b）
 - 構造: (a) では交差直後のループ底で「GPU が赤い縁」と「CPU が赤い縁」が隣接する帯として出る = 拾い色の着地位置がストローク沿いに数 px ズレる。(b) は帯内の点描ノイズのみで構造なし
-- **判定: 有害性なし。対応しない**（ユーザー方針「確認して有害性が見られなければ対応しない」）。正式化時に gpu-acceleration.md へ「mixing ON の composite は chunk bbox 全体への bilinear 近似で field を参照する（CPU は segment ごとの atlas 変換）。急カーブでは拾い色の着地が数 px ズレうる」を既知の近似として明記する
+- ~~判定: 有害性なし。対応しない~~ → **撤回（§11.5）**。この比較は緩い曲線 + 左→右主体で、方向依存の鏡像を見逃していた。正式化時に gpu-acceleration.md へ「mixing ON の composite は chunk bbox 全体への bilinear 近似で field を参照する（CPU は segment ごとの atlas 変換）。急カーブでは拾い色の着地が数 px ズレうる」を既知の近似として明記する
 - 撮影: `eval-shot.mjs`（PRE=1 MIX=1 LW=80、STROKE=fixture / probe をジグザグに改変）、赤み差分 heatmap はセッション scratchpad の一時スクリプト
+
+### 11.5 GPU 混色 composite の field 座標バグ修正（2026-09-06、ユーザー報告）
+
+- 症状（iPad 実機、ユーザー報告）: 混色 ON の bristle で、ストローク幅の一部だけが色帯にかかるとき、拾った色が**触れていない側**に着地する。進入方向で再現有無が変わる。Acrylic では起きない
+- 再現（Playwright WebKit、赤線 + 上半分だけ重なるアーチ、Pickup 0.021 / Restore 0.002）: 左→右のアーチは CPU/GPU とも外側（触れた側）に着地、**右→左のアーチは GPU だけ内側に着地**。CPU は両方向とも正しい
+- 根本原因: composite shader の `sampleMaterial` が chunk bbox 内の画素位置をそのまま field の (x, y) に正規化していた。field 更新 pass は run geometry（center, angle, sampleSize）で回転した正方形として書いているため、angle ≈ 0 のときだけ偶然一致し、右→左（angle ≈ π）では横断軸が鏡像になる。§5.6 で「bbox 全体への bilinear 近似」とペンディングにしていた契約そのもの
+- 修正: composite に `uFieldGeometry` を追加し、`local = R(−angle)·(p − center)`、`uv = clamp(local / sampleSize + 0.5)` の逆変換で読む。geometry は `updateMaterialField` → branch ごとの直近値 → composite target で運ぶ。perFlush の F0/F1 も同じ local frame で参照
+- 回帰テスト: `bristle-pass.test.ts` に左→右 / 右→左の CPU/GPU parity + 「拾った赤が接触側に着地」テストを追加。旧写像に戻すと右→左だけが落ちる（触れた側の赤み 0）ことを確認済み。差し戻し 1 回（テスト helper が混色用 stroke 開始スナップショットを渡していなかった。production は無変更）
+- 検収: 617 tests green、アーチ再現で GPU が CPU と一致。astra 案（ink pass で segment 沿いに読む）は不要になった
+- 別事象として残る: 透明下地からの黒混入（CPU/GPU 両方、agents-note 参照、後回し）

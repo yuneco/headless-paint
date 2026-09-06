@@ -1,7 +1,11 @@
 import { readBristleLowPressureGainDebugFlag } from "../bristle-mask";
 import { perfStage } from "../perf-debug";
 import { createProgram, requireResource } from "./gl-resources";
-import type { GpuBristleChunk, GpuSweepSegment } from "./gpu-stroke-surface";
+import type {
+  GpuBristleChunk,
+  GpuMaterialFieldUpdate,
+  GpuSweepSegment,
+} from "./gpu-stroke-surface";
 import {
   BRISTLE_COMPOSITE_FRAGMENT_SHADER_SOURCE,
   BRISTLE_COMPOSITE_VERTEX_SHADER_SOURCE,
@@ -50,6 +54,7 @@ interface CompositeUniforms {
   readonly branchIndex: WebGLUniformLocation;
   readonly useField: WebGLUniformLocation;
   readonly fieldMixWeight: WebGLUniformLocation;
+  readonly fieldGeometry: WebGLUniformLocation;
   readonly color: WebGLUniformLocation;
 }
 
@@ -58,6 +63,12 @@ export interface BristlePassTarget {
   readonly fieldTexture: WebGLTexture;
   readonly previousFieldTexture: WebGLTexture;
   readonly fieldMixWeight: number;
+  readonly fieldGeometry:
+    | Pick<
+        GpuMaterialFieldUpdate,
+        "centerX" | "centerY" | "angle" | "sampleSize"
+      >
+    | undefined;
   readonly fieldColumns: number;
   readonly fieldRows: number;
   readonly fieldTextureWidth: number;
@@ -156,6 +167,7 @@ export function createGpuBristlePassResources(
     branchIndex: uniformLocation(gl, compositeProgram, "uBranchIndex"),
     useField: uniformLocation(gl, compositeProgram, "uUseField"),
     fieldMixWeight: uniformLocation(gl, compositeProgram, "uFieldMixWeight"),
+    fieldGeometry: uniformLocation(gl, compositeProgram, "uFieldGeometry"),
     color: uniformLocation(gl, compositeProgram, "uColor"),
   };
   const maskVertexArray = requireResource(
@@ -630,6 +642,14 @@ export function createGpuBristlePassResources(
       chunk.useMaterialField && target.fieldColumns > 0 ? 1 : 0,
     );
     gl.uniform1f(compositeUniforms.fieldMixWeight, target.fieldMixWeight);
+    // Before the first update the field is uniform, so any valid frame works.
+    gl.uniform4f(
+      compositeUniforms.fieldGeometry,
+      target.fieldGeometry?.centerX ?? 0,
+      target.fieldGeometry?.centerY ?? 0,
+      target.fieldGeometry?.angle ?? 0,
+      target.fieldGeometry?.sampleSize ?? 1,
+    );
     gl.uniform4f(
       compositeUniforms.color,
       chunk.color.r / 255,

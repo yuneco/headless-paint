@@ -134,6 +134,7 @@ accum と layer の同一性が崩れる操作は engine / stroke の API が内
 - **同一 backend**: live / incremental / replay / Undo / Redo は入力点列が同じなら pixel 完全一致（全処理が GPU コマンド順で決まり、時間や event 配送に依存しない）。テストで保証する
 - **CPU 経路との差**: raster 規則・浮動小数点・texture format の差により byte 一致はしない。Tier B 契約（`packages/stroke/docs/parity-testing.md`）: alpha MAE ≤ 0.015、RGB MAE ≤ 0.02、`|Δ| > 0.1` の pixel 率 ≤ 1%、bbox 差 ≤ 1px
 - 混色の pickup タイミング（checkpoint 距離・update 距離）は CPU と同じ
+- GPU bristle の混色 composite は field 更新と同じ run geometry（center / angle / sampleSize）の逆変換 `R(-angle) * (documentPosition - center) / sampleSize + 0.5` を clamp して field を読む。perFlush の F0/F1 も現在の run の同じ local frame で参照する。
 - 同一 GPU 上での再現性は保証するが、GPU / ブラウザ間の bit 一致は保証しない。保存 command は backend を持たないため、別環境での replay は各環境の経路で描かれる
 
 ## lifecycle と障害

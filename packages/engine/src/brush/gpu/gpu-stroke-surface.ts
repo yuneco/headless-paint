@@ -235,6 +235,12 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private activeFieldIndex: 0 | 1 = 0;
   private branchCount = 1;
   private currentBranchIndex = 0;
+  // Advance in composite order, not enqueue order, so each queued run keeps
+  // its own frame and update-less tails inherit the preceding branch frame.
+  private readonly latestMaterialFieldUpdates: (
+    | GpuMaterialFieldUpdate
+    | undefined
+  )[] = [];
   private pendingBranchSegments: PendingBranchSegment[][] | null = null;
   private branchBatchActive = false;
   private readonly useFloatField: boolean;
@@ -343,6 +349,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     }
     this.branchCount = branchCount;
     this.currentBranchIndex = 0;
+    this.latestMaterialFieldUpdates.length = 0;
     this.materialFieldInitializedThisStroke = false;
     const gl = this.gl;
     if (sourceCanvas) {
@@ -680,6 +687,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       branchSegments.push({ dabs: [], bristleChunks: [] });
       return;
     }
+    this.latestMaterialFieldUpdates[this.currentBranchIndex] = update;
     const updates = this.singleFieldUpdateBatch;
     updates[this.currentBranchIndex] = update;
     try {
@@ -932,6 +940,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     branchIndex: number,
   ): void {
     if (!segment) return;
+    if (segment.update) {
+      this.latestMaterialFieldUpdates[branchIndex] = segment.update;
+    }
     this.drawDabs(segment.dabs);
     this.drawBristleChunks(segment.bristleChunks, branchIndex);
   }
@@ -1086,6 +1097,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       for (let branchIndex = 0; branchIndex < this.branchCount; branchIndex++) {
         const segment = branches[branchIndex]?.[segmentIndex];
         if (!segment) continue;
+        if (segment.update) {
+          this.latestMaterialFieldUpdates[branchIndex] = segment.update;
+        }
         this.drawDabs(segment.dabs);
         const checkpoint = checkpointBySegment.get(segment);
         const runDistance = Math.max(0, segment.update?.distancePx ?? 0);
@@ -1444,6 +1458,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
       fieldTexture: this.fieldTextures[fieldIndex],
       previousFieldTexture: this.fieldTextures[previousFieldIndex],
       fieldMixWeight: fieldInterpolation?.fieldMixWeight ?? 1,
+      fieldGeometry: this.latestMaterialFieldUpdates[branchIndex],
       fieldColumns: this.fieldColumns,
       fieldRows: this.fieldRows,
       fieldTextureWidth: this.fieldTextureWidth,

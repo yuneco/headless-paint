@@ -313,13 +313,21 @@ uniform int uFieldRowStride;
 uniform int uBranchIndex;
 uniform bool uUseField;
 uniform float uFieldMixWeight;
+uniform vec4 uFieldGeometry;
 uniform vec4 uColor;
 out vec4 outColor;
 
-vec4 sampleMaterial(vec2 localPosition) {
+vec4 sampleMaterial(vec2 documentPosition) {
   if (!uUseField) return uColor;
+  vec2 offset = documentPosition - uFieldGeometry.xy;
+  float cosine = cos(uFieldGeometry.z);
+  float sine = sin(uFieldGeometry.z);
+  vec2 local = vec2(
+    cosine * offset.x + sine * offset.y,
+    -sine * offset.x + cosine * offset.y
+  );
   vec2 normalized = clamp(
-    localPosition / vec2(uChunkSize),
+    local / uFieldGeometry.w + vec2(0.5),
     vec2(0.0),
     vec2(1.0)
   );
@@ -353,7 +361,7 @@ void main() {
     texturePixel + ivec2(uChunkSize.x, 0),
     0
   ).a;
-  vec4 material = sampleMaterial(localPosition);
+  vec4 material = sampleMaterial(documentPosition);
   float alpha = material.a * mask * ink;
   outColor = vec4(material.rgb * alpha, alpha);
 }
