@@ -300,4 +300,6 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - ユーザー判定「0.9 でいい。性能は一旦 OK、正しさ優先」→ `bristleMask` 既定を simple、`bristleLowP` 既定を 0.9 に（`field` / `bristleLowP` は比較用に残置）
 - 既定反転で Tier B parity テストが fail（alphaMae 0.0171 > 0.015、largeDelta 0.0206 > 0.01）。根本原因は CPU simple が samples×bands 格子 + bilinear、GPU が画素ごとノイズ評価という離散化差。CPU を GPU と同じ画素ごと評価（u→distance/pressure 線形補間、v→crossPx = −半径〜+半径）に置換して解消（テスト無変更で通過）
 - 結果: 615 tests green。S 字 CPU vs GPU 差 0.01%。Chromium CPU は simple の方が field より約 10ms 速い（OFF 62 vs 73ms、ON 92 vs 103ms）
-- 残: iPad 実機で `gl.finish` 修正のコスト確認（§11.1）、field UV bbox 近似の解消（次アクション 2）、正式化（次アクション 3）
+- 残: field UV bbox 近似の解消（次アクション 2。ユーザー確認: 現状の見た目では気づかない。緩い曲線では Tier B 内。急カーブ・自己交差の mixing ON で要確認）、正式化（次アクション 3）
+- iPad 実機で `gl.finish` 修正を確認済み（ユーザー 2026-09-06「1 は ok」）
+- 別事象として記録: bristle 混色で透明下地から黒が混ざる（CPU/GPU 両方、既存問題、agents-note 参照）。対応は正式化の後ろに積む

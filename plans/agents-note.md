@@ -27,6 +27,8 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 - **spray は小径だと粒子が極端に疎**: 仕様通り（密度が面積連動）だが、lineWidth 12 程度では 1 emission あたり粒子 1 個未満になりほぼ見えない。UX として小径時の密度下駄やプリセット側の density 引き上げを検討する余地がある。
 - **BrushPanelの設定同値比較を構造比較へ変更（2026-08-22）**: Bristle / Mixing追加時に手書きfield比較の漏れが再発したため、plain config全体の再帰的な同値比較へ置換した。今後BrushConfigへfieldを追加してもpreset選択表示のための列挙更新は不要。
 
+- **bristle 混色でまっさらなキャンバス上でも黒が混ざる（2026-09-06、iPad 実機、CPU/GPU 両方で再現・既存問題・対応は後回し）**: 薄い黄色でループを描くと、掠れの多い領域で黒が混ざり均一な薄黄色にならない。自己交差は不要。Pickup rate を上げ Restore rate を下げると顕著（観察時 pickup 0.018 / restore 0.004 / diffusion 0.05 / mix 15px / checkpoint 36px）。仮説: 掠れ領域の下地は透明（premultiplied 0,0,0,0）で、pickup がそれを黒として取り込んでいる（透明画素からの pickup は alpha 重みで no-op になるべき）。GPU の field UV bbox 近似とは別事象。Playwright WebKit の固定筆圧ジグザグ（黄色、Rough 80px、既定 rate）では再現せず、実ペンの筆圧変動 + 高 pickup が要る可能性。調査は `packages/engine/src/brush/mixing.ts` の pickup 式から
+
 ## 中期的に行うべき作業
 
 - **spray sizeJitterMode の整理（2026-07-04）**: 候補は `lognormal` / `bimodal` の2種類へ削減済み。`uniform` / `power` は互換フォールバックなしで削除する方針。`lognormal` はチップ4倍生成の特殊対応が残るため、今後完全に不採用にする場合は `useStrokeSession` / `replay` の tipSize 計算も戻す。
