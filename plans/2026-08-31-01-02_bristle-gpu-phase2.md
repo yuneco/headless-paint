@@ -272,7 +272,7 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - **次アクション（未着手順）**:
   1. ~~C の低筆圧チューニング~~ → **C 採用・係数 0.9 で確定（§11.3）**
   1'. WebKit bitmap commit の `gl.finish` 修正（§11.1、`e2e259b`）の iPad 実機再計測: 矩形欠けの消失と gpuCommit コストの確認（Mac WebKit では +1.2ms/commit）
-  2. field UV bbox 近似の解消（astra 案: ink pass で segment profile UV に沿って field を読み色付き ink を蓄積、composite は mask 掛けのみ。出力変更を伴うので採否と同時に）
+  2. ~~field UV bbox 近似の解消~~ → **有害性なしと判定、対応しない（§11.4）**。正式化時に「既知の近似」として契約を明文化する
   3. 正式化: gpu-acceleration.md へ bristle 反映（適格条件・3 pass モデル・perFlush 意味論・undo-1・texture 構成）→ planning-flow Phase 1-4 → `experiment/bristle-gpu` へ統合 → `feature/acrylic-v2-production` へ PR
 - **計測環境**: dev server `pnpm dev`（http、port 5174）。ランナー: `tools/bench/benchmark-rough-capture.mjs`（ENGINE/GPU_BACKEND/BASE_URL）、内訳: `tools/bench/results/probe6.mjs`（EXTRA/MIX/PRESSURE/LOOP/SHOT）、undo: `probe-undo.mjs`（EXTRA/MIX/STROKES）、官能撮影: `eval-shot.mjs`（STROKE=fixture|scurve|probe, MIX, PRE, LW, GPU_BACKEND + 第2引数にクエリ）、画像比較: `imgdiff.mjs` / `crop.mjs`
 - **flags**: `?gpuBackend=auto|webgl2|cpu`、`?bristleMask=field|simple`（default field）、`?gpuBristleField=perFlush|perRun`（default perFlush）、`?perfDebug=1`
@@ -303,3 +303,12 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - 残: field UV bbox 近似の解消（次アクション 2。ユーザー確認: 現状の見た目では気づかない。緩い曲線では Tier B 内。急カーブ・自己交差の mixing ON で要確認）、正式化（次アクション 3）
 - iPad 実機で `gl.finish` 修正を確認済み（ユーザー 2026-09-06「1 は ok」）
 - 別事象として記録: bristle 混色で透明下地から黒が混ざる（CPU/GPU 両方、既存問題、agents-note 参照）。対応は正式化の後ろに積む
+
+### 11.4 field UV bbox 近似の有害性確認（2026-09-06）
+
+- 条件: 赤帯 3 本の下地、混色 ON（既定 rate）、Rough 80px、WebKit。(a) 自己交差ループ fixture（comb-06）、(b) 鋭いジグザグ（振幅 ±200px、15px 刻み）。CPU vs GPU
+- 画素差 |Δ|>25: (a) ink の 23.6% / (b) 32.6%。ただし内訳は点描分布 + 拾い色の位置の微差で、並べた目視では区別できない
+- 赤み成分（r − (g+b)/2）の差: 両方 ink の画素で平均 6.5/255（a）・6.3/255（b）。>20 の画素は GPU 側が赤い 3.9% / CPU 側が赤い 2.4%（a）、2.4% / 2.4%（b）
+- 構造: (a) では交差直後のループ底で「GPU が赤い縁」と「CPU が赤い縁」が隣接する帯として出る = 拾い色の着地位置がストローク沿いに数 px ズレる。(b) は帯内の点描ノイズのみで構造なし
+- **判定: 有害性なし。対応しない**（ユーザー方針「確認して有害性が見られなければ対応しない」）。正式化時に gpu-acceleration.md へ「mixing ON の composite は chunk bbox 全体への bilinear 近似で field を参照する（CPU は segment ごとの atlas 変換）。急カーブでは拾い色の着地が数 px ズレうる」を既知の近似として明記する
+- 撮影: `eval-shot.mjs`（PRE=1 MIX=1 LW=80、STROKE=fixture / probe をジグザグに改変）、赤み差分 heatmap はセッション scratchpad の一時スクリプト
