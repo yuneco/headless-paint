@@ -267,6 +267,8 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 
 ## 10. セッション引き継ぎ（2026-09-06 時点の現在地）
 
+> **2026-09-06 更新**: 正式化は `plans/2026-09-06-15-17_bristle-gpu-formalize.md` で完了（`532e291`）。以下の引き継ぎ・次アクションは履歴として残す。比較用フラグ（`?bristleMask=` / `?gpuBristleField=` / `?bristleLowP=`）は削除済みで使えない。
+
 - **branch**: `experiment/bristle-mask-simplify`（615 tests green、tree clean。最新は §11.3 のコミット）。戻り点（C 棄却時）= `experiment/bristle-gpu` @ `8a210bf`
 - **確定済み**: perFlush 意味論の CPU/GPU 統一（時間基準バグ修正込み）/ undo-1 キャッシュ（直前 1 手 28ms）/ checkpoint コピー省略 / texture 3→2 枚 / iPad で mixing OFF も GPU 勝ち（tail latency）
 - **次アクション（未着手順）**:

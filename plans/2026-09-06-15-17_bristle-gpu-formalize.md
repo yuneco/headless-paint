@@ -76,3 +76,16 @@
 - `gl.finish` コストの削減（commit 頻度）
 - vitest browser の webkit instance 追加検討（WebKit 固有バグの自動検出）
 - CLAUDE.md / delegation skill の `--full-auto` → `-s workspace-write` 更新
+
+## 実装結果（2026-09-06）
+
+- Phase 1: `gpu-acceleration.md`（適格条件 / Rough bristle 3 pass / perFlush 意味論 / composite の field 逆変換 / commit 同期 / undo-1 契約 / 既知事項）、`brush-api.md`、`types.md`、engine README、stroke `history-api.md` / `stroke-machine.md` / `command-executor.md` / `parity-testing.md` を更新
+- Phase 2: ユーザー合意により codex の read-only レビューで代替。指摘 6 件（checkpoint は位置指定のみで画像コピーは branch 最後の 1 件 / F1 は diffusion 前 / miss 時の byte 一致は同一 backend 限定 / クローン push は「結び付け不可」 / `commands` 配列の参照同一性と同じ accelerator・Layer の共有が契約 / `transverseMaskCellPx` は横断座標スケール）を全て反映
+- Phase 3（`532e291`、codex 委譲）: 旧 field mask 経路・perRun cadence・3 つの debug global・URL フラグを削除。simple dropout + 係数 0.9（`SIMPLE_MASK_LOW_PRESSURE_GAIN`、shader 側は定数 0.9 と相互参照コメント）+ perFlush が唯一の経路。公開型は不変（`BristleDynamics.edgeTexture*` は互換フィールドとして残置、未参照）。738 行削除 / 258 行追加
+- 検収: 616 tests green（perRun 専用テスト 1 件削除ぶん減）。S 字 GPU は削除前と byte 一致・run 間 byte 一致・CPU 比 0.01%。アーチ両方向で拾い色は触れた側（混色 ON の撮影スクリプトは時間 emission の実時間依存で run 間に差が出るため、決定性の判定には S 字を使う）。probe6（WebKit、31 commit）: mixing OFF moveMany 103〜125ms / ON 123〜131ms（`gl.finish` 込みの削除前と同等）
+- Phase 4: ドキュメント↔コードの双方向確認で「profile atlas / 紙目 tile は stroke 開始時に 1 回 upload」が誤りと判明し、「同一オブジェクト参照の間は再 upload しない」に修正。docs に旧経路・フラグの残記述なし。公開 export の変更なし
+
+## 実装時の調整内容（補足）
+
+- spike 中の比較用切替（`?bristleMask=field|simple`、`?gpuBristleField=perRun|perFlush`、`?bristleLowP=`）は採否確定後に削除した。比較の経過は `plans/2026-08-31-01-02_bristle-gpu-phase2.md` §5-§11 に残る
+- codex の作業報告は `plans/notes/2026-09-06-bristle-mask-cleanup-report.md`

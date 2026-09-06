@@ -133,7 +133,7 @@ stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms
 - **混色（perFlush 意味論）**: material field は flush 単位で進める（stamp の `updateDistancePx` ごとではない）。順序は「flush 内の全 run の pickup / restore を field に適用 → その field（F1）で composite → composite 後に diffusion（最大 1 pass 相当）を掛けて次の flush へ持ち越す」。checkpoint は run（field 更新 1 回分の区間）ごとに**位置を指定**するが、同一 flush 内の pickup が読む画素は該当矩形の **flush 開始時点の accum** であり、run の描画結果は同じ flush 内の後続 pickup には反映されない。画像として次の flush へコピー保持するのは branch ごとに最後に指定された checkpoint だけ。composite は flush 開始時の field（F0）と F1 を run ごとの距離重み `runEndDistance / totalDistance` で mix する。**重みは run 内で定数**なので、run 境界で色が段になる（既知。制限の節を参照）。CPU 経路も同じ意味論（`endField` は diffusion 前）なので、flush の切り方（32ms / 1.5×lineWidth）は描画結果の一部であり、replay で flush を束ねたり広げたりしてはならない
 - **composite の field 参照**: field 更新 pass は run geometry（center / angle / sampleSize）で回転した正方形として checkpoint を読む。composite は同じ geometry の逆変換 `R(-angle) · (documentPosition − center) / sampleSize + 0.5` を clamp して field を読む。F0 / F1 とも現在の run の local frame で参照する
 - 混色 OFF では field 更新 pass と checkpoint snapshot は走らない
-- CPU の mask field 生成・texture upload は無い（dropout mask は shader 内で評価）。profile atlas と紙目 tile は stroke 開始時に 1 回 upload する
+- CPU 側での mask の事前生成・texture upload は無い（dropout mask は shader 内で評価）。profile atlas と紙目 tile は chunk が同じオブジェクトを参照している間は再 upload しない（差し替わったときだけ upload）
 
 ## 常駐（residency）と無効化の契約
 
