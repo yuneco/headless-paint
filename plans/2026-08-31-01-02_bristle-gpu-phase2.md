@@ -321,4 +321,4 @@ mixing ON、1 stroke 150 点、WebKit / Chromium:
 - 修正: composite に `uFieldGeometry` を追加し、`local = R(−angle)·(p − center)`、`uv = clamp(local / sampleSize + 0.5)` の逆変換で読む。geometry は `updateMaterialField` → branch ごとの直近値 → composite target で運ぶ。perFlush の F0/F1 も同じ local frame で参照
 - 回帰テスト: `bristle-pass.test.ts` に左→右 / 右→左の CPU/GPU parity + 「拾った赤が接触側に着地」テストを追加。旧写像に戻すと右→左だけが落ちる（触れた側の赤み 0）ことを確認済み。差し戻し 1 回（テスト helper が混色用 stroke 開始スナップショットを渡していなかった。production は無変更）
 - 検収: 617 tests green、アーチ再現で GPU が CPU と一致。astra 案（ink pass で segment 沿いに読む）は不要になった
-- 別事象として残る: 透明下地からの黒混入（CPU/GPU 両方、agents-note 参照、後回し）
+- 別事象として残る（いずれも CPU/GPU 両方、後回し、agents-note 参照）: 透明下地からの黒混入 / 混色の色が run 単位で階段状（fieldMixWeight が run ごとの定数。画素ごとの補間が改善案）
