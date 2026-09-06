@@ -9,6 +9,7 @@ import {
 import { sampleRotatedCheckpoint } from "../mixing";
 import { brushPerfDebug } from "../perf-debug";
 import {
+  type GpuBristleChunk,
   type GpuStrokeSurface,
   createGpuStrokeSurface,
 } from "./gpu-stroke-surface";
@@ -24,6 +25,354 @@ afterEach(() => {
 });
 
 describe("GpuStrokeSurface", () => {
+  it("bristle chunk の重複 mask を MAX 蓄積して layer に commit する", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(64, 48);
+    const surface = createGpuStrokeSurface(layer.width, layer.height);
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const chunk: GpuBristleChunk = {
+      // Nearly constant noise; pressure gives signed distances -/+0.0031.
+      // MAX keeps the stronger alpha (~191), while source-over would add alpha.
+      segments: [
+        {
+          ...makeSweepSegment(0, 1),
+          fromPressure: 0.558347518240826,
+          toPressure: 0.558347518240826,
+        },
+        {
+          ...makeSweepSegment(2, 3),
+          fromPressure: 0.5652364071297148,
+          toPressure: 0.5652364071297148,
+        },
+      ],
+      simpleMask: {
+        dropoutLengthPx: 1_000_000,
+        dropoutWidthPx: 1_000_000,
+        pressureCoverageResponse: 1,
+      },
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: { r: 220, g: 40, b: 20, a: 255 },
+      useMaterialField: false,
+    };
+    surface.pushBristleChunk(chunk);
+    surface.commitToLayer(layer);
+
+    const pixel = layer.ctx.getImageData(30, 32, 1, 1).data;
+    expect(pixel[0]).toBeGreaterThan(200);
+    expect(pixel[1]).toBeGreaterThan(25);
+    expect(pixel[3]).toBeGreaterThan(170);
+    expect(pixel[3]).toBeLessThan(205);
+    const stages = brushPerfDebug.snapshot().stages;
+    expect(stages.gpuBristleMask.count).toBe(1);
+    expect(stages.gpuBristleInk.count).toBe(1);
+    expect(stages.gpuBristleComposite.count).toBe(1);
+  });
+
+  it("perFlush は複数 bristle run を一つの atlas/composite にまとめる", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const layer = createLayer(64, 48);
+    const surface = createGpuStrokeSurface(layer.width, layer.height, "bitmap");
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const chunk: GpuBristleChunk = {
+      segments: [makeSweepSegment(0, 1)],
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: { r: 220, g: 40, b: 20, a: 255 },
+      useMaterialField: true,
+    };
+    const baseColor = { r: 220, g: 40, b: 20, a: 255 } as const;
+    const update = {
+      baseColor,
+      centerX: 30,
+      centerY: 32,
+      angle: 0,
+      sampleSize: 12,
+      columns: 2,
+      rows: 2,
+      pickupRatePerPx: 0.1,
+      restoreRatePerPx: 0,
+      diffusionRatePerPx: 0.05,
+      distancePx: 15,
+    } as const;
+    surface.initializeMaterialField(2, 2, baseColor);
+    surface.initializeMaterialCheckpoint(0, 0, 64);
+    surface.beginBranchBatch();
+    surface.pushBristleChunk(chunk);
+    surface.updateMaterialField(update);
+    surface.pushBristleChunk(chunk);
+    surface.updateMaterialField(update);
+    surface.endBranchBatch();
+    surface.commitToLayer(layer);
+
+    const snapshot = brushPerfDebug.snapshot();
+    expect(snapshot.stages.gpuBristleMask.count).toBe(1);
+    expect(snapshot.stages.gpuBristleInk.count).toBe(1);
+    expect(snapshot.stages.gpuBristleComposite.count).toBe(1);
+    expect(snapshot.stages.gpuFieldUpdate.count).toBe(1);
+    expect(snapshot.samples.gpuBristlePasses).toEqual([4]);
+  });
+
+  it("perFlush composite は flush 前後の field を距離進行度で補間する", () => {
+    const layer = createLayer(128, 128);
+    layer.ctx.fillStyle = "rgb(20, 210, 40)";
+    layer.ctx.fillRect(0, 0, layer.width, layer.height);
+    const surface = createGpuStrokeSurface(layer.width, layer.height, "bitmap");
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+    surface.beginStroke(layer.canvas);
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const baseColor = { r: 220, g: 30, b: 20, a: 255 } as const;
+    const makeChunk = (offsetX: number): GpuBristleChunk => ({
+      segments: [
+        {
+          ...makeSweepSegment(0, 1),
+          fromX: 20 + offsetX,
+          toX: 40 + offsetX,
+        },
+      ],
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: {
+        left: 12 + offsetX,
+        top: 22,
+        right: 48 + offsetX,
+        bottom: 42,
+      },
+      brushSize: 12,
+      depositHardness: 1,
+      color: baseColor,
+      useMaterialField: true,
+    });
+
+    surface.initializeMaterialField(2, 2, baseColor);
+    surface.initializeMaterialCheckpoint(0, 0, 128);
+    surface.beginBranchBatch();
+    for (const offsetX of [0, 36, 72]) {
+      surface.pushBristleChunk(makeChunk(offsetX));
+      surface.updateMaterialField({
+        baseColor,
+        centerX: 30 + offsetX,
+        centerY: 32,
+        angle: 0,
+        sampleSize: 12,
+        columns: 2,
+        rows: 2,
+        pickupRatePerPx: 1,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 4,
+      });
+    }
+    surface.endBranchBatch();
+    surface.commitToLayer(layer);
+
+    const first = layer.ctx.getImageData(30, 32, 1, 1).data;
+    const middle = layer.ctx.getImageData(66, 32, 1, 1).data;
+    const last = layer.ctx.getImageData(102, 32, 1, 1).data;
+    expect(first[0]).toBeGreaterThan(middle[0] ?? 0);
+    expect(middle[0]).toBeGreaterThan(last[0] ?? 0);
+    expect(first[1]).toBeLessThan(middle[1] ?? 0);
+    expect(middle[1]).toBeLessThan(last[1] ?? 0);
+  });
+
+  it("perFlush の flush-start sample は texture swap 後も現在の accum を参照する", () => {
+    const firstLayer = createLayer(64, 64);
+    const secondLayer = createLayer(64, 64);
+    for (const layer of [firstLayer, secondLayer]) {
+      layer.ctx.fillStyle = "rgb(20, 210, 40)";
+      layer.ctx.fillRect(0, 0, layer.width, layer.height);
+    }
+    const surface = createGpuStrokeSurface(64, 64, "bitmap");
+    expect(surface).not.toBeNull();
+    if (!surface) return;
+    surfaceUnderTest = surface;
+
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return;
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const baseColor = { r: 220, g: 30, b: 20, a: 255 } as const;
+    const chunk: GpuBristleChunk = {
+      segments: [makeSweepSegment(0, 1)],
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(64 * 64),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: baseColor,
+      useMaterialField: true,
+    };
+    const update = {
+      baseColor,
+      centerX: 30,
+      centerY: 32,
+      angle: 0,
+      sampleSize: 20,
+      columns: 2,
+      rows: 2,
+      pickupRatePerPx: 0.17,
+      restoreRatePerPx: 0,
+      diffusionRatePerPx: 0,
+      distancePx: 4,
+    } as const;
+    const render = (layer: typeof firstLayer) => {
+      surface.beginStroke(layer.canvas);
+      surface.initializeMaterialField(2, 2, baseColor);
+      surface.initializeMaterialCheckpoint(0, 0, 64);
+      for (let batch = 0; batch < 2; batch++) {
+        surface.beginBranchBatch();
+        surface.pushBristleChunk(chunk);
+        surface.updateMaterialField(update);
+        surface.snapshotMaterialCheckpoint(0, 0, 64);
+        surface.pushBristleChunk(chunk);
+        surface.updateMaterialField(update);
+        surface.endBranchBatch();
+      }
+      const field = surface.readMaterialFieldForTest();
+      surface.endStroke();
+      return field;
+    };
+
+    // sourceCanvas upload swaps accum/source on every beginStroke. Rendering
+    // must not depend on which physical texture is active after that swap.
+    expect(render(firstLayer)).toEqual(render(secondLayer));
+  });
+
+  it("perFlush field は各 bristle run の checkpoint geometry を積分する", () => {
+    const source = new OffscreenCanvas(72, 48);
+    const sourceCtx = source.getContext("2d");
+    expect(sourceCtx).not.toBeNull();
+    if (!sourceCtx) return;
+    sourceCtx.fillStyle = "rgb(235, 35, 25)";
+    sourceCtx.fillRect(0, 0, 24, source.height);
+    sourceCtx.fillStyle = "rgb(25, 210, 65)";
+    sourceCtx.fillRect(24, 0, 24, source.height);
+    sourceCtx.fillStyle = "rgb(30, 65, 235)";
+    sourceCtx.fillRect(48, 0, 24, source.height);
+
+    const baseColor = { r: 180, g: 180, b: 180, a: 255 } as const;
+    let expectedField = createMaterialField(4, 4, baseColor);
+    // Each run samples its checkpoint geometry from the flush-start image.
+    for (const [index, centerX] of [12, 36, 60].entries()) {
+      const checkpoint = sourceCtx.getImageData(index * 24, 0, 24, 24);
+      const sampled = sampleRotatedCheckpoint(
+        checkpoint,
+        index * 24,
+        0,
+        centerX,
+        24,
+        0,
+        8,
+        4,
+        4,
+      );
+      expectedField = advanceMaterialField(
+        expectedField,
+        sampled,
+        4,
+        4,
+        baseColor,
+        {
+          pickupRatePerPx: 0.12,
+          restoreRatePerPx: 0,
+          diffusionRatePerPx: 0,
+          distancePx: 4,
+        },
+      );
+    }
+    const expected = new Uint8ClampedArray(expectedField.length);
+    writeMaterialFieldPixels(expectedField, expected);
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    const perFlush = renderBristlePerFlushForTest(source);
+
+    expect(
+      materialFieldMae(expected, perFlush),
+      JSON.stringify({
+        expected: Array.from(expected.slice(0, 4)),
+        perFlush: Array.from(perFlush.slice(0, 4)),
+      }),
+    ).toBeLessThanOrEqual(0.02);
+    expect(brushPerfDebug.snapshot().samples.gpuBristlePasses).toEqual([3]);
+  });
+
   it("単色 field と円 tip の dab を layer に commit する", () => {
     const layer = createLayer(64, 48);
     const surface = createGpuStrokeSurface(layer.width, layer.height);
@@ -690,6 +1039,102 @@ describe("GpuStrokeSurface", () => {
     expect(brushPerfDebug.snapshot().samples.gpuCommitDraws).toEqual([4]);
   });
 });
+
+function makeSweepSegment(fromDistance: number, toDistance: number) {
+  return {
+    fromX: 20,
+    fromY: 32,
+    toX: 40,
+    toY: 32,
+    fromFrameX: 1,
+    fromFrameY: 0,
+    toFrameX: 1,
+    toFrameY: 0,
+    fromPressure: 1,
+    toPressure: 1,
+    fromDistance,
+    toDistance,
+    overlap: 1,
+    trialId: fromDistance,
+  } as const;
+}
+
+function renderBristlePerFlushForTest(
+  source: OffscreenCanvas,
+): Uint8ClampedArray {
+  const surface = createGpuStrokeSurface(source.width, source.height, "bitmap");
+  expect(surface).not.toBeNull();
+  if (!surface) return new Uint8ClampedArray();
+  try {
+    surface.beginStroke(source);
+    const profile = new OffscreenCanvas(2, 16);
+    const profileCtx = profile.getContext("2d");
+    expect(profileCtx).not.toBeNull();
+    if (!profileCtx) return new Uint8ClampedArray();
+    profileCtx.fillStyle = "white";
+    profileCtx.fillRect(0, 0, profile.width, profile.height);
+    const chunk: GpuBristleChunk = {
+      segments: [makeSweepSegment(0, 1)],
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
+      profileAtlas: profile,
+      grain: {
+        amount: 0,
+        softness: 0.1,
+        grainSeed: 1,
+        strokeSeed: 2,
+        toothHeights: new Float32Array(128 * 128),
+      },
+      bboxRect: { left: 12, top: 22, right: 48, bottom: 42 },
+      brushSize: 12,
+      depositHardness: 1,
+      color: { r: 180, g: 180, b: 180, a: 0 },
+      useMaterialField: false,
+    };
+    const baseColor = { r: 180, g: 180, b: 180, a: 255 } as const;
+    surface.initializeMaterialField(4, 4, baseColor);
+    surface.initializeMaterialCheckpoint(0, 0, 24);
+    surface.beginBranchBatch();
+    for (const [index, centerX] of [12, 36, 60].entries()) {
+      surface.pushBristleChunk(chunk);
+      surface.updateMaterialField({
+        baseColor,
+        centerX,
+        centerY: 24,
+        angle: 0,
+        sampleSize: 8,
+        columns: 4,
+        rows: 4,
+        pickupRatePerPx: 0.12,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 4,
+      });
+      if (index < 2) {
+        surface.snapshotMaterialCheckpoint((index + 1) * 24, 0, 24);
+      }
+    }
+    surface.endBranchBatch();
+    return surface.readMaterialFieldForTest();
+  } finally {
+    surface.dispose();
+  }
+}
+
+function materialFieldMae(
+  expected: Uint8ClampedArray,
+  actual: Uint8ClampedArray,
+): number {
+  expect(actual).toHaveLength(expected.length);
+  let absoluteDelta = 0;
+  for (let index = 0; index < expected.length; index++) {
+    absoluteDelta += Math.abs((expected[index] ?? 0) - (actual[index] ?? 0));
+  }
+  return absoluteDelta / expected.length / 255;
+}
 
 function expectChannelNear(actual: number | undefined, expected: number): void {
   expect(Math.abs((actual ?? 0) - expected)).toBeLessThanOrEqual(2);

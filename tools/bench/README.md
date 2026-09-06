@@ -15,3 +15,5 @@
 
 前提: `pnpm dev`（既定 `https://127.0.0.1:5174`、`BASE_URL` で変更可）でアプリを起動しておく。`playwright` はルートの devDependency を使う。
 結果は `tools/bench/results/`（gitignore 済み）に出る。
+
+| `benchmark-rough-capture.mjs` + `fixtures-rough-comb06-input.json` | Rough bristle の production 入力（461点）を再生し Call p50/p95・batch wall・undo1/undo9 を計測。`ENGINE=webkit GPU_BACKEND=webgl2 PERF_VARIANT=baseline REPEATS=4 node tools/bench/benchmark-rough-capture.mjs endpoints` |

@@ -1,6 +1,128 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRISTLE_DYNAMICS } from "../types";
-import { rasterizeBristleMask } from "./bristle-mask";
+import {
+  createSimpleBristleMaskEvaluator,
+  rasterizeBristleMask,
+} from "./bristle-mask";
+import { hashSeed } from "./prng";
+
+describe("simple bristle mask evaluator", () => {
+  it("is deterministic and omits edge micro texture", () => {
+    const samples = [
+      { pressure: 0.2, distance: 0 },
+      { pressure: 0.6, distance: 12 },
+      { pressure: 0.9, distance: 25 },
+    ];
+    const withEdgeTexture = createSimpleBristleMaskEvaluator(
+      samples,
+      40,
+      { ...DEFAULT_BRISTLE_DYNAMICS, edgeTextureAmount: 1 },
+      0.75,
+      17,
+    );
+    const withoutEdgeTexture = createSimpleBristleMaskEvaluator(
+      samples,
+      40,
+      { ...DEFAULT_BRISTLE_DYNAMICS, edgeTextureAmount: 0 },
+      0.75,
+      17,
+    );
+
+    for (const u of [0, 0.23, 1.61, 2]) {
+      for (const v of [0, 7.42, withEdgeTexture.height - 1]) {
+        expect(withEdgeTexture.evaluate(u, v)).toBe(
+          withoutEdgeTexture.evaluate(u, v),
+        );
+      }
+    }
+  });
+
+  it("maps fractional sample indices and both sweep edges to GPU coordinates", () => {
+    const evaluator = createSimpleBristleMaskEvaluator(
+      [
+        { distance: 0, pressure: 0.2 },
+        { distance: 8, pressure: 0.6 },
+        { distance: 32, pressure: 1 },
+      ],
+      8,
+      { ...DEFAULT_BRISTLE_DYNAMICS, dropoutLengthPx: 4, dropoutWidthPx: 2 },
+      0.75,
+      17,
+    );
+    // u=1.5 gives distance=20 (noise x=5), pressure=0.8, threshold=0.2975.
+    // v=0/last gives crossPx=-4/+4 (noise y=-2/+2).
+    for (const [v, noiseY] of [
+      [0, -2],
+      [evaluator.height - 1, 2],
+    ]) {
+      const broad =
+        hashSeed(hashSeed(17 ^ 0x510e527f, 5), noiseY) / 0x100000000;
+      expect(evaluator.evaluate(1.5, v)).toBeCloseTo(broad - 0.2975, 12);
+    }
+  });
+
+  it("does not depend on sample subdivision or transverse grid resolution", () => {
+    const coarse = createSimpleBristleMaskEvaluator(
+      [
+        { distance: 3, pressure: 0.2 },
+        { distance: 83, pressure: 0.8 },
+      ],
+      40,
+      { ...DEFAULT_BRISTLE_DYNAMICS, transverseMaskCellPx: 10 },
+      0.75,
+      17,
+    );
+    const dense = createSimpleBristleMaskEvaluator(
+      [
+        { distance: 3, pressure: 0.2 },
+        { distance: 23, pressure: 0.35 },
+        { distance: 83, pressure: 0.8 },
+      ],
+      40,
+      { ...DEFAULT_BRISTLE_DYNAMICS, transverseMaskCellPx: 0.25 },
+      0.75,
+      17,
+    );
+    for (const progress of [0.13, 0.4, 0.73, 0.91]) {
+      const denseU =
+        progress < 0.25 ? progress / 0.25 : 1 + (progress - 0.25) / 0.75;
+      for (const cross of [0, 0.13, 0.5, 0.87, 1]) {
+        expect(
+          coarse.evaluate(progress, cross * (coarse.height - 1)),
+        ).toBeCloseTo(dense.evaluate(denseU, cross * (dense.height - 1)), 12);
+      }
+    }
+  });
+
+  it("uses the fixed low-pressure gain and clamps pressure after interpolation", () => {
+    const samples = [
+      { distance: 0, pressure: -1 },
+      { distance: 8, pressure: 1 },
+    ];
+    const evaluator = createSimpleBristleMaskEvaluator(
+      samples,
+      8,
+      DEFAULT_BRISTLE_DYNAMICS,
+      1,
+      17,
+    );
+    const neutral = createSimpleBristleMaskEvaluator(
+      samples,
+      8,
+      DEFAULT_BRISTLE_DYNAMICS,
+      0,
+      17,
+    );
+    // At u=0.5, interpolated pressure is 0, so the threshold rises by 0.45 (gain 0.9).
+    expect(
+      evaluator.evaluate(0.5, 7.3) - neutral.evaluate(0.5, 7.3),
+    ).toBeCloseTo(-0.45, 12);
+    expect(evaluator.evaluate(1, 7.3) - neutral.evaluate(1, 7.3)).toBeCloseTo(
+      0.45,
+      12,
+    );
+  });
+});
 
 describe("bristle surface grain", () => {
   it("初回の未着彩cellへalpha floorを加えない", () => {

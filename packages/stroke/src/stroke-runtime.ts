@@ -30,6 +30,7 @@ import type {
   InputPoint,
 } from "@headless-paint/input";
 import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
+import { getGpuUndoRuntime, retainGpuUndo } from "./gpu-undo-cache";
 import {
   createIncrementalStrokeRenderer,
   createInitialBrushState,
@@ -285,6 +286,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function installPendingStart(start: PendingStart): void {
+    getGpuUndoRuntime(deps.accelerator)?.discardUndoSnapshot();
     const compiledFilterPipeline = compileFilterPipeline(
       start.config.filterPipeline,
     );
@@ -427,17 +429,19 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
     if (totalPoints >= 1) {
-      deps.onCommit(
-        createStrokeCommand(
-          frozenConfig.layer.id,
-          inputPoints,
-          frozenConfig.compiledFilterPipeline.config,
-          finalStrokeResult.state.expand,
-          frozenConfig.style,
-          brushSeed,
-          frozenConfig.alphaLocked,
-        ),
+      const command = createStrokeCommand(
+        frozenConfig.layer.id,
+        inputPoints,
+        frozenConfig.compiledFilterPipeline.config,
+        finalStrokeResult.state.expand,
+        frozenConfig.style,
+        brushSeed,
+        frozenConfig.alphaLocked,
       );
+      if (renderer?.usesGpu) {
+        retainGpuUndo(deps.accelerator, frozenConfig.layer, command);
+      }
+      deps.onCommit(command);
     }
 
     clearPendingLayer();

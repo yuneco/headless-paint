@@ -772,10 +772,10 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 | `pressureDynamics` | `BristlePressureDynamics` | 筆圧を着彩率へ反映する強さ。ブラシ幅は変えない |
 | `mixing` | `BrushMixing` | 任意の共通連続色場。毛束ごとの色reservoirではない |
 
-`bristleCount` は概念上の細い毛束数、`bristleFill` は平均毛束幅、2つのvariationは幅と配置の不均一さを表す。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`transverseMaskCellPx`、`dropoutLengthPx`、`dropoutWidthPx` は毛束数から独立した面掠れ場の解像度と相関長を定める。既定の`transverseMaskCellPx: 0.82`はLab COMBの横断mask解像度（約0.82px/cell）と一致する。
+`bristleCount` は概念上の細い毛束数、`bristleFill` は平均毛束幅、2つのvariationは幅と配置の不均一さを表す。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`dropoutLengthPx`、`dropoutWidthPx` は毛束数から独立した面掠れ（dropout mask）のstroke方向・横断方向の相関長を定める。`transverseMaskCellPx` は互換上残る横断座標のスケール（CPU rasterの補間座標 `v` の範囲 `lineWidth / transverseMaskCellPx`、下限30）で、面掠れは各pixelで評価されるため空間解像度や見た目を決めない。
 
-`depositHardness` と `edgeTexture*` は着彩/無着彩境界を定める。面掠れは符号付きpaint fieldのまま
-swept quadへ補間し、最終pixelでalphaへ変換する。これにより低筆圧時にも薄いalphaを全面へ
+`depositHardness` は着彩/無着彩境界の硬さを定める。`edgeTextureAmount` / `edgeTextureLengthPx` は旧mask経路の縁テクスチャ用で現在は参照されない（互換のため型に残る）。面掠れは符号付き距離のまま
+swept quadの各pixelで評価し、最終pixelでalphaへ変換する。これにより低筆圧時にも薄いalphaを全面へ
 積まず、不透明な着彩片の面積だけを減らす。`surfaceGrain` はdocument座標へ固定した
 Fine tooth（細かな紙目）を表す。接触判定はswept quad内のpixel-local pressureと紙目の高さを使い、
 描画chunkの平均筆圧には丸めない。初回に接触しなかった谷にも固定の再接触transferを適用するため、

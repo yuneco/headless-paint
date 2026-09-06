@@ -1,6 +1,10 @@
 import { perfMark, perfSample } from "../perf-debug";
 import { roundUpGpuAllocation } from "./field-strip";
-import type { GpuDab, GpuMaterialFieldUpdate } from "./gpu-stroke-surface";
+import type {
+  GpuBristleChunk,
+  GpuDab,
+  GpuMaterialFieldUpdate,
+} from "./gpu-stroke-surface";
 
 export interface MaterialCheckpoint {
   textureSize: number;
@@ -18,6 +22,7 @@ export interface PendingMaterialCheckpointCapture {
 
 export interface PendingBranchSegment {
   readonly dabs: GpuDab[];
+  readonly bristleChunks: GpuBristleChunk[];
   update?: GpuMaterialFieldUpdate;
   checkpoint?: PendingMaterialCheckpointCapture;
 }
@@ -49,6 +54,7 @@ export function queueMaterialCheckpoint(
   if (
     !capture.fromStrokeStart &&
     segment.dabs.length === 0 &&
+    segment.bristleChunks.length === 0 &&
     segment.update === undefined &&
     previous?.update !== undefined &&
     previous.checkpoint === undefined
@@ -60,7 +66,7 @@ export function queueMaterialCheckpoint(
     throw new Error("GPU branch segment already has a checkpoint");
   }
   segment.checkpoint = capture;
-  branchSegments.push({ dabs: [] });
+  branchSegments.push({ dabs: [], bristleChunks: [] });
   return true;
 }
 

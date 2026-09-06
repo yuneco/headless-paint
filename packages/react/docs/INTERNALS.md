@@ -34,6 +34,8 @@ headless-paint のコアパッケージ（engine / input / stroke）を React �
 
 **境界**: 履歴への記録は責務外。ストローク完了時に `onStrokeComplete` コールバックでデータを通知し、呼び出し側が記録する。時間ベース emission の replay は保存済み `inputPoints.timestamp` で行い、React hook の timer は live 入力補完だけを担当する。
 
+内部の `useStrokeSessionWithAccelerator` は `onStrokeCommit` に runtime が確定した command を同一インスタンスのまま渡す。`usePaintEngine` は `command.layerId` の entry を使って履歴へ記録する。GPU undo-1 の retain / bind は command のオブジェクト同一性に依存するため、途中で再生成・複製しない。公開 `useStrokeSession` の `onStrokeComplete` / `StrokeCompleteData` と persisted 形式は変更しない。
+
 ### usePaintEngine
 
 useStrokeSession + useLayers + 履歴 + wrap shift のオーケストレーションを担当する。
@@ -41,7 +43,7 @@ useStrokeSession + useLayers + 履歴 + wrap shift のオーケストレーシ�
 | 責務 | 詳細 |
 |------|------|
 | レイヤー管理の内包 | 内部で `useLayers` を呼び出し、entries / activeEntry 等を戻り値に委譲する |
-| ストロークと履歴の接続 | committed layer への初回書き込み直前に `beginHistoryMutation`、`onStrokeComplete` で `createStrokeCommand` → `pushCommand` |
+| ストロークと履歴の接続 | committed layer への初回書き込み直前に `beginHistoryMutation`、内部 `onStrokeCommit` で runtime の `StrokeCommand` をそのまま `pushCommand` |
 | レイヤー操作の履歴連携 | addLayer / removeLayer / moveLayerUp / moveLayerDown / duplicateLayer / mergeLayerDown の各操作で対応するコマンドを作成。remove-layer / duplicate-layer / merge-layer-down は pixels または pixel dependency の変更直前に `beginHistoryMutation` |
 | Wrap shift | 最初の非ゼロ移動を適用する直前に全 entry へ `beginHistoryMutation`、ドラッグ完了時に `createWrapShiftCommand` → `pushCommand` |
 | Undo/Redo | コマンド種別に応じた3分岐の処理（後述） |

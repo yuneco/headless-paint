@@ -60,11 +60,19 @@ export interface IncrementalStrokeRenderer {
   cancel(): boolean;
 }
 
+type GpuCommitCadence = "perFlush" | "final";
+
+type IncrementalStrokeRendererInternalConfig =
+  IncrementalStrokeRendererConfig & {
+    readonly gpuCommitCadence?: GpuCommitCadence;
+  };
+
 const BRISTLE_BATCH_INTERVAL_MS = 32;
 
 export function createIncrementalStrokeRenderer(
-  config: IncrementalStrokeRendererConfig,
+  config: IncrementalStrokeRendererInternalConfig,
 ): IncrementalStrokeRenderer {
+  const gpuCommitCadence = config.gpuCommitCadence ?? "perFlush";
   const compiledFilterPipeline = compileFilterPipeline(config.filterPipeline);
   const compiledExpand = compileExpand(config.expand);
   const gpuRuntime = getGpuStrokeRuntime(config.accelerator);
@@ -74,8 +82,9 @@ export function createIncrementalStrokeRenderer(
   };
   const gpuStrokeEligible =
     gpuRuntime !== null &&
-    config.style.brush.type === "stamp" &&
-    isBrushMixingActive(config.style.brush.mixing) &&
+    ((config.style.brush.type === "stamp" &&
+      isBrushMixingActive(config.style.brush.mixing)) ||
+      config.style.brush.type === "bristle") &&
     config.style.compositeOperation === "source-over" &&
     !config.alphaLocked &&
     (gpuRuntime?.supportsBranchCount(compiledExpand.outputCount) ?? false);
@@ -104,7 +113,9 @@ export function createIncrementalStrokeRenderer(
       gpuStrokeActive = !!gpuRuntime?.beginStroke(
         gpuOwner,
         config.layer,
-        gpuResidencyHit ? undefined : samplingLayer?.canvas,
+        gpuResidencyHit
+          ? undefined
+          : (samplingLayer?.canvas ?? config.layer.canvas),
         compiledExpand.outputCount,
       );
     }
@@ -133,6 +144,12 @@ export function createIncrementalStrokeRenderer(
     if (!gpuStrokeActive) return false;
     gpuStrokeLost ||= gpuRuntime?.isStrokeLost(gpuOwner) ?? true;
     return gpuStrokeLost;
+  }
+
+  function commitGpuStrokeToLayer(): void {
+    if (!gpuStrokeActive || detectGpuStrokeLoss()) return;
+    gpuRuntime?.commitToLayer(gpuOwner, config.layer);
+    detectGpuStrokeLoss();
   }
 
   function appendProcessedBatch(
@@ -221,10 +238,7 @@ export function createIncrementalStrokeRenderer(
     if (gpuStrokeActive) gpuInputPoints.push(...points);
     if (config.style.brush.type !== "bristle") {
       for (const point of points) processBatch([point]);
-      if (gpuStrokeActive && !detectGpuStrokeLoss()) {
-        gpuRuntime?.commitToLayer(gpuOwner, config.layer);
-        detectGpuStrokeLoss();
-      }
+      if (gpuCommitCadence === "perFlush") commitGpuStrokeToLayer();
       return;
     }
     for (const point of points) {
@@ -234,6 +248,7 @@ export function createIncrementalStrokeRenderer(
       ) {
         processBatch(pendingBristlePoints);
         pendingBristlePoints = [];
+        if (gpuCommitCadence === "perFlush") commitGpuStrokeToLayer();
       }
     }
   }
@@ -274,11 +289,8 @@ export function createIncrementalStrokeRenderer(
       strokeSession = strokeResult.state;
       appendProcessedBatch(strokeResult.state, strokeResult.renderUpdate);
       if (gpuStrokeActive) {
-        if (!detectGpuStrokeLoss()) {
-          gpuRuntime?.commitToLayer(gpuOwner, config.layer);
-          detectGpuStrokeLoss();
-        }
-        gpuRuntime?.endStroke(gpuOwner);
+        commitGpuStrokeToLayer();
+        gpuRuntime?.endStroke(gpuOwner, gpuOwner.label === "live");
         if (gpuStrokeLost) recoverLostGpuStroke();
       }
     },
@@ -314,7 +326,7 @@ interface GpuStrokeRuntimeBridge {
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
   cancelStroke(owner: object): boolean;
-  endStroke(owner: object): void;
+  endStroke(owner: object, retainUndo?: boolean): void;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
 }

@@ -13,6 +13,7 @@ import {
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
 } from "../types";
+import { brushPerfDebug } from "./perf-debug";
 
 function makeBrush(
   overrides?: Partial<BristleBrushConfig["dynamics"]>,
@@ -242,5 +243,40 @@ describe("bristle brush", () => {
     expect(mixing).toBeDefined();
     expect(mixing?.lastUpdateDistance).toBeGreaterThan(0);
     expect(mixing?.checkpointCanvas).toBeDefined();
+  });
+
+  it("複数checkpointのreadbackをflushあたり2回に束ねる", () => {
+    brushPerfDebug.enabled = true;
+    brushPerfDebug.reset();
+    try {
+      const source = createLayer(800, 120);
+      source.ctx.fillStyle = "rgb(210, 45, 35)";
+      source.ctx.fillRect(0, 0, 800, 120);
+      const target = createLayer(800, 120);
+      target.ctx.drawImage(source.canvas, 0, 0);
+      const brush: BristleBrushConfig = {
+        ...makeBrush(),
+        mixing: {
+          ...DEFAULT_BRUSH_MIXING,
+          enabled: true,
+          updateDistancePx: 4,
+          checkpointDistancePx: 8,
+        },
+      };
+
+      renderBrushStroke(
+        target,
+        longLine(1),
+        makeStyle(brush),
+        0,
+        initialState(),
+        source,
+      );
+
+      expect(brushPerfDebug.snapshot().stages.checkpointReadback.count).toBe(2);
+    } finally {
+      brushPerfDebug.enabled = false;
+      brushPerfDebug.reset();
+    }
   });
 });

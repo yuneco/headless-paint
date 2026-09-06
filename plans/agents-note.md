@@ -4,6 +4,9 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 発見した課題・改善候補
 
+- **Rough bristle simple mask のCPUをpixel procedural化（2026-09-06、実ブラウザ検収済み: Tier B 通過・S字 CPU/GPU 差 0.01%）**: simple既定・low-pressure gain 0.9のworking treeを保持し、CPUのsample×band格子とbilinearをsimple経路から除去した。quadのuからdistance/pressureを線形補間し、v=0〜rows−1をcrossPx=−brushSize/2〜+brushSize/2に対応させてGPUと同じbroad noiseを各pixelで評価する。ノンブラウザ範囲140テストは通過。指定incremental Tier Bテストは無変更で、依頼側の実ブラウザ検収待ち（修正前alpha MAE 0.0171、large delta率0.0206）。過去のCPU grid/GPU procedural間の未達計測・速度測定は旧実装の値なので、今回のparityや性能の根拠に流用しない。詳細は `plans/2026-09-06-04-31_bristle-cpu-procedural-parity.md`。
+- **Rough bristle CPU/GPU mask の実機観察を自動比較で再現できず（2026-08-31）**: 60px・mixing OFF の同一 `createBristleMaskField`、曲線/可変筆圧、Fine tooth、direct/repeated contact、atlas/field high-water mark再利用を含む比較を追加した。Playwright WebKitではCPU/GPU maskのcoverage `12.3307% / 12.3242%`、alpha MAE `0.000177`、`|Δ|>0.1` `0.0130%`、coverage差 `0.0065pt`でTier B内。incremental end-to-endもMAE `0.000295`だった。実Safariスクリーンショットの「GPUがベタ塗り」観察とは一致しないため、再調査時は観察に使った入力列・seed・canvasサイズ・commit mode・比較画像をfixtureとして固定し、Safari実機の同じmask readbackでPlaywrightとの差を切り分ける。
+- **Rough bristle GPU spike の chunk texture 上限（2026-08-31、field 座標契約は2026-09-06修正）**: `GpuStrokeSurface` は stroke 開始時に brush size / flush 距離上限を受け取らないため、chunk-local mask / ink texture の最大寸法を事前確定して無再確保にできない。Phase 0 は要求寸法の high-water mark までだけ拡張し以後再利用する仮実装。正式化するなら beginStroke の内部IFへ最大chunk寸法を渡すか、brush非依存surface内で許容する固定bucket規則が必要。mixing composite の旧 bbox 正規化は run の回転・sampleSize を無視し、右→左で横断軸の鏡像を起こしていた。field 更新 geometry の逆変換へ変更し、既存 segment.update と branch ごとの直近値から運ぶことで追加 attachment は不要となった。両方向の回帰テストを追加、build / lint / typecheck とノンブラウザ140テストは通過。追加テスト・実ブラウザの検収は依頼側待ち。詳細は `plans/2026-09-06-14-21_bristle-composite-field-geometry.md`。
 - **GPU stroke owner は restore/rebuild より先に終了する（2026-08-30）**: 二指 Undo の `draw-cancel → restoreLayerBeforeStroke → rebuild` と、Toolbar Undo が final pointer event より先行する経路で、live renderer の owner を残したまま rebuild renderer を開始して `gpuStaleOwnerRecovered` に依存できた。履歴操作は active stroke を同期 cancel し、`StrokeRuntime.restoreSnapshot` も renderer を先に cancel/end してから layer を復元する順序へ修正した。perf-debug は直近32 event、`residencyInvalidated.reason`（`runtimeRestore` / `executorUndo` 等）、stale owner の開始経路・時刻・回復経路を保持する。次の iPad JSON では Undo 後 strokeStart の最後の `residency.hit=true`、`gpuUpload` なし、`gpuStaleOwnerRecovered` なしを確認する。
 - **workspace build が declaration 型エラーを表示しても exit 0 になり得る（2026-08-30）**: `pnpm -r build` 中の `vite-plugin-dts` が test helper の TypeScript error を複数表示した一方、各 Vite build とコマンド全体は成功終了した。今回はログを確認して型注釈を修正し、再実行でエラー表示も解消した。CI / 検収で exit code だけを green 判定に使うと型エラーを見逃すため、root `typecheck` の併用または declaration diagnostics を build failure にする設定を検討する。
 - **Acrylicの幅波打ち回帰はcoalesced入力の再提示が根因、実機gate通過（2026-08-25）**: Apple Pencilの失敗strokeには、`37792, 37796, 37792, 37796`のようにSafariが直前の`getCoalescedEvents()`群を次callbackでも再提示した痕跡が大量にあった。旧samplingは距離があれば古いtimestampも採用したため、経路が周期的に後退・再前進して輪郭が波打った。WebKitで300点の各batchを二重提示すると修正前は599点を採用し、幅標準偏差は`1.513 / 1.442 / 1.456px`、古いtimestampと同時刻・同座標の再提示を拒否すると300点・`1.156 / 1.004 / 1.000px`へ戻った。`40c76e8`をiPad + Apple Pencilで再確認し、波打ち解消をユーザーが承認したため完了。`PressureDynamics.smoothingMs=50`は現行Acrylicの官能調整値として残すが、根因修正ではない。
@@ -24,6 +27,12 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 - **spray は小径だと粒子が極端に疎**: 仕様通り（密度が面積連動）だが、lineWidth 12 程度では 1 emission あたり粒子 1 個未満になりほぼ見えない。UX として小径時の密度下駄やプリセット側の density 引き上げを検討する余地がある。
 - **BrushPanelの設定同値比較を構造比較へ変更（2026-08-22）**: Bristle / Mixing追加時に手書きfield比較の漏れが再発したため、plain config全体の再帰的な同値比較へ置換した。今後BrushConfigへfieldを追加してもpreset選択表示のための列挙更新は不要。
 
+- **bristle 混色でまっさらなキャンバス上でも黒が混ざる（2026-09-06、iPad 実機、CPU/GPU 両方で再現・既存問題・対応は後回し）**: 薄い黄色でループを描くと、掠れの多い領域で黒が混ざり均一な薄黄色にならない。自己交差は不要。Pickup rate を上げ Restore rate を下げると顕著（観察時 pickup 0.018 / restore 0.004 / diffusion 0.05 / mix 15px / checkpoint 36px）。仮説: 掠れ領域の下地は透明（premultiplied 0,0,0,0）で、pickup がそれを黒として取り込んでいる（透明画素からの pickup は alpha 重みで no-op になるべき）。GPU の field UV bbox 近似とは別事象。Playwright WebKit の固定筆圧ジグザグ（黄色、Rough 80px、既定 rate）では再現せず、実ペンの筆圧変動 + 高 pickup が要る可能性。調査は `packages/engine/src/brush/mixing.ts` の pickup 式から
+
+- **GPU 混色の field UV bbox 近似は「既知の近似」として据え置き（2026-09-06 ユーザー決定）**: 自己交差ループ・鋭いジグザグ + 赤帯下地で CPU/GPU を比較し、拾い色の着地が急カーブで数 px ズレる（赤み差 平均 6.5/255、>20 の画素 数%）が目視不能と判定。正式化ドキュメントに近似として明記する。将来「拾い色の位置精度」が要件になったら astra 案（ink pass で segment profile UV に沿って field を読む）で置換する
+
+- **bristle 混色の色が run 単位で階段状に変わる（2026-09-06、CPU/GPU 両方、後回し）**: perFlush 意味論では field を flush 単位で更新し、composite が F0/F1 を `fieldMixWeight = runEndDistance / totalDistance` で mix する。この weight は **run（segment）ごとの定数**（gpu-stroke-surface.ts の composite 準備ループ、CPU は interpolation atlas の slot 単位）なので、run 境界で色が段になる。Acrylic（stamp）は dab ごとに field を更新するため滑らか。改善案: weight を run の開始/終了の 2 値で渡し、画素ごとに run 内の進行率（composite の geometry 逆変換で得られる local.x、または ink pass が書く along 距離）で補間する。CPU 側も同じ画素補間が必要で、cross-backend Tier B を維持すること
+
 ## 中期的に行うべき作業
 
 - **spray sizeJitterMode の整理（2026-07-04）**: 候補は `lognormal` / `bimodal` の2種類へ削減済み。`uniform` / `power` は互換フォールバックなしで削除する方針。`lognormal` はチップ4倍生成の特殊対応が残るため、今後完全に不採用にする場合は `useStrokeSession` / `replay` の tipSize 計算も戻す。
@@ -33,5 +42,15 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## ユーザーに覚えておいて欲しいこと
 
+- **Bristle 比較経路削除の引き継ぎ（2026-09-06、Phase 3 タスク A）**: simple dropout + 係数0.9 + perFlush に一本化。CPU の `rows` は横断補間座標のスケールだけで field grid は不要。stamp 用の update/dab/checkpoint 順は `drawStampBranchSegments` に維持。docs / 公開型は未編集。静的検査とノンブラウザ213件 + evaluator4件は成功、Canvas/WebGL 依存検収は Claude に引き継ぐ。詳細は `plans/2026-09-06-bristle-mask-cleanup-report.md`。gpu-acceleration.md の pickup 説明には「最初の run は前 flush の carried checkpoint を読む」例外を補足する余地がある。
+
 - spray ブラシの `lineWidth` は「散布領域の直径」。粒子サイズは `dynamics.particleSize`（絶対px）で独立。
 - 非 mixing stamp + Expand の dab 配置・jitter は branch state 統一（2026-07-03）で意図的に変わった（branch ごと独立 seed・位相）。過去データの見た目互換はない（プロジェクト方針通り）。
+
+- **GPU undo-1 の React 境界（2026-09-06 spike）**: runtime で retain した command を useStrokeSession が DTO 化し、usePaintEngine が再生成していたため WeakMap の bind が常に miss した。内部 onStrokeCommit で元 command をそのまま push するよう修正。公開 DTO / persisted schema は維持。今後 runtime 単体 parity だけでなく React → history → executor を含む統合テストで hit を保証する。今回追加の bitmap/direct 2 ケースと既存 byte parity 12 ケースは sandbox の listen EPERM により未実行で、実ブラウザ検収が残る。
+
+- **stroke command の同一性は undo-1 キャッシュの契約（2026-09-06）**: GPU undo-1 キャッシュは command オブジェクトの同一性（WeakMap）で履歴と対応付ける。react 層等で command をクローン・再生成して push すると静かに無効化される（テストは通るのに実アプリで不発、という形で現れた）。中間層を書くときは「セッションが生成した command はそのまま push する」こと。packages/react/src/usePaintEngine.test.ts に実 GPU + StrictMode の hit 検証テストあり
+- **bristle の perFlush 意味論は描画仕様（2026-09-06）**: flush 境界（32ms / 1.5×lineWidth）が混色の見た目に影響する仕様になった。replay や最適化で flush を束ねたり拡大したりすると決定性が壊れる。表示 commit の束ね方（undo 時の final commit 化など）とは別物として扱うこと
+- **WebKit の性能計測の罠（再確認）**: stage 計時は GPU 同期待ちが後段 stage に付け替わる。原因特定は Chromium の attribution + 「CPU 仕事が増えたか」の新旧比較で行う。render pass 1 本 ≈0.2-0.3ms の固定費が WebKit(Metal) の支配項になりやすい
+- **WebKit の `transferToImageBitmap` は GPU 同期を含まない（2026-09-06）**: `gl.flush` では queue 済み blit の完了を保証せず、commit bitmap に stale tile が混ざって「同じ入力で run ごとに結果が違う・commit tile 境界で矩形欠け」になる。`gl.finish` を直前に置いて解決（`e2e259b`）。WebGL canvas の中身を Canvas2D / ImageBitmap 経由で読む箇所を新設するときは必ず同期を入れ、**決定性は「同一入力を 3 run 撮って byte 比較」で確認する**（Chromium では再現しない。vitest browser は chromium のみなので WebKit 固有バグは自動テストの外にある。webkit instance 追加を検討）
+- **codex CLI 0.153 で `--full-auto` が廃止**（2026-09-06）: `codex exec -s workspace-write ...` を使う。CLAUDE.md と `.claude/skills/delegation` の記載が旧式なので更新が必要

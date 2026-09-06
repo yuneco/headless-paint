@@ -64,6 +64,15 @@ interface LayerResidency {
   valid: boolean;
 }
 
+interface UndoSnapshot {
+  readonly residentBeforeStroke: boolean;
+  readonly layer: Layer;
+  readonly surface: GpuStrokeSurface;
+  readonly token?: object;
+  readonly index?: number;
+  readonly branch?: object;
+}
+
 /** Internal runtime contract. It is intentionally absent from the public type. */
 interface BrushAcceleratorRuntime extends BrushAccelerator {
   supportsBranchCount(branchCount: number): boolean;
@@ -77,7 +86,11 @@ interface BrushAcceleratorRuntime extends BrushAccelerator {
   leave(owner: object): void;
   commitToLayer(owner: object, layer: Layer): void;
   cancelStroke(owner: object): boolean;
-  endStroke(owner: object): void;
+  endStroke(owner: object, retainUndo?: boolean): void;
+  retainUndoSnapshot(layer: Layer, token: object): boolean;
+  bindUndoSnapshot(token: object, index: number, branch: object): void;
+  discardUndoSnapshot(token?: object): void;
+  restoreUndoSnapshot(layer: Layer, index: number, branch: object): boolean;
   isStrokeLost(owner: object): boolean;
   isLayerResident(layer: Layer): boolean;
   getActiveSurface(): GpuStrokeSurface | null;
@@ -128,12 +141,20 @@ export function createBrushAccelerator(
   const commitMode = options.commitMode ?? "bitmap";
   const resolution = resolveBrushAcceleratorBackend(options, {
     webgl2Available: () => {
-      surface = createGpuStrokeSurface(1, 1, commitMode);
+      surface = createSurface(1, 1, commitMode);
       return surface !== null;
     },
   });
   if (resolution.backend === "cpu" || !surface) return null;
   return new WebGl2BrushAccelerator(surface, options);
+}
+
+function createSurface(
+  width: number,
+  height: number,
+  commitMode: "bitmap" | "direct",
+): GpuStrokeSurface | null {
+  return createGpuStrokeSurface(width, height, commitMode);
 }
 
 function probeWebGl2Availability(): boolean {
@@ -168,11 +189,15 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   private currentOwner: object | null = null;
   private activeSurface: GpuStrokeSurface | null = null;
   private activeLayer: Layer | null = null;
+  private undoSnapshot: UndoSnapshot | null = null;
+  private undoEligible = false;
+  private residentBeforeStroke = false;
   private disposed = false;
   private permanentlyUnavailable = false;
 
   constructor(surface: GpuStrokeSurface, options: BrushAcceleratorOptions) {
     this.surface = surface;
+    this.observeContextLoss(surface);
     this.maxBranches = sanitizeMaxBranches(options.maxBranches);
     this.resident = options.resident ?? true;
     this.commitMode = options.commitMode ?? "bitmap";
@@ -198,6 +223,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       return;
     }
     try {
+      this.discardUndoSnapshot();
       surface.beginStroke(layer.canvas, 1);
       surface.endStroke();
       this.validateResidency(layer, surface);
@@ -213,6 +239,8 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     reason: GpuResidencyInvalidationReason = "external",
   ): void {
     perfMark("residencyInvalidated", { reason });
+    if (this.undoSnapshot?.layer === layer) this.discardUndoSnapshot();
+    if (this.activeLayer === layer) this.undoEligible = false;
     const residency = this.residencies.get(layer);
     if (residency) residency.valid = false;
     if (this.residentLayer === layer) this.residentLayer = null;
@@ -222,6 +250,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.discardUndoSnapshot();
     if (this.activeOwner) {
       this.activeSurface?.endStroke();
     }
@@ -284,6 +313,8 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     perfMark("residency", { hit: residencyHit });
     if (!residencyHit && !sourceCanvas) return false;
     try {
+      // The two-texture surface reuses the previous snapshot at stroke start.
+      this.discardUndoSnapshot();
       surface.beginStroke(residencyHit ? undefined : sourceCanvas, branchCount);
     } catch {
       this.invalidate(layer, "contextLost");
@@ -291,6 +322,8 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       return false;
     }
     this.validateResidency(layer, surface);
+    this.undoEligible = true;
+    this.residentBeforeStroke = residencyHit;
     this.activeOwner = owner;
     this.activeSurface = surface;
     this.activeLayer = layer;
@@ -346,10 +379,18 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     return true;
   }
 
-  endStroke(owner: object): void {
+  endStroke(owner: object, retainUndo = false): void {
     if (this.activeOwner !== owner) return;
     const lost = this.activeSurface?.lost ?? false;
-    this.activeSurface?.endStroke();
+    const keep = retainUndo && this.undoEligible && !lost;
+    this.activeSurface?.endStroke(keep);
+    if (keep && this.activeLayer && this.activeSurface) {
+      this.undoSnapshot = {
+        residentBeforeStroke: this.residentBeforeStroke,
+        layer: this.activeLayer,
+        surface: this.activeSurface,
+      };
+    }
     if (lost && this.activeLayer) {
       this.invalidate(this.activeLayer, "contextLost");
     }
@@ -357,6 +398,59 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     this.currentOwner = null;
     this.activeSurface = null;
     this.activeLayer = null;
+  }
+
+  retainUndoSnapshot(layer: Layer, token: object): boolean {
+    const snapshot = this.undoSnapshot;
+    if (!snapshot || snapshot.layer !== layer || snapshot.token) return false;
+    this.undoSnapshot = { ...snapshot, token };
+    return true;
+  }
+
+  bindUndoSnapshot(token: object, index: number, branch: object): void {
+    if (this.undoSnapshot?.token !== token) return;
+    this.undoSnapshot = { ...this.undoSnapshot, index, branch };
+  }
+
+  discardUndoSnapshot(token?: object): void {
+    if (token && this.undoSnapshot?.token !== token) return;
+    this.undoSnapshot = null;
+  }
+
+  restoreUndoSnapshot(layer: Layer, index: number, branch: object): boolean {
+    const snapshot = this.undoSnapshot;
+    // A lookup consumes N=1 even on a miss; redo and deep undo use rebuild.
+    this.discardUndoSnapshot();
+    if (
+      !snapshot ||
+      this.activeOwner ||
+      this.disposed ||
+      snapshot.layer !== layer ||
+      snapshot.index !== index ||
+      snapshot.branch !== branch ||
+      snapshot.surface !== this.surface ||
+      layer.width !== snapshot.surface.width ||
+      layer.height !== snapshot.surface.height ||
+      !this.prepareResidency(layer, snapshot.surface)
+    )
+      return false;
+    try {
+      if (!snapshot.surface.restoreUndoToLayer(layer)) {
+        this.invalidate(layer, "executorUndo");
+        return false;
+      }
+      // Restore the residency state as well as pixels. In particular a CPU
+      // base stays nonresident, as it does after the conventional rebuild.
+      if (snapshot.residentBeforeStroke) {
+        this.validateResidency(layer, snapshot.surface);
+      } else {
+        this.invalidate(layer, "executorUndo");
+      }
+      return true;
+    } catch {
+      this.invalidate(layer, "executorUndo");
+      return false;
+    }
   }
 
   isStrokeLost(owner: object): boolean {
@@ -393,22 +487,36 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   ): GpuStrokeSurface | null {
     if (this.disposed || this.permanentlyUnavailable) return null;
     if (this.surface?.lost) {
+      this.discardUndoSnapshot();
       this.permanentlyUnavailable = true;
       return null;
     }
     if (this.surface?.width === width && this.surface.height === height) {
       return this.surface;
     }
+    this.discardUndoSnapshot();
     this.surface?.dispose();
-    this.surface = createGpuStrokeSurface(width, height, this.commitMode);
+    this.surface = createSurface(width, height, this.commitMode);
     if (!this.surface) {
       this.permanentlyUnavailable = true;
       return null;
     }
+    this.observeContextLoss(this.surface);
     if (this.residentLayer) {
       this.invalidate(this.residentLayer, "surfaceResize");
     }
     return this.surface;
+  }
+
+  private observeContextLoss(surface: GpuStrokeSurface): void {
+    surface.canvas?.addEventListener("webglcontextlost", () => {
+      if (this.surface !== surface || this.disposed) return;
+      this.discardUndoSnapshot();
+      this.permanentlyUnavailable = true;
+      if (this.activeLayer) this.invalidate(this.activeLayer, "contextLost");
+      if (this.residentLayer)
+        this.invalidate(this.residentLayer, "contextLost");
+    });
   }
 
   private prepareResidency(layer: Layer, surface: GpuStrokeSurface): boolean {

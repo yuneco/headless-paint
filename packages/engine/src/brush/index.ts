@@ -104,6 +104,7 @@ export function renderBrushStroke(
       if (
         isBrushMixingActive(style.brush.mixing) &&
         (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !gpuSurface &&
         !brushPerfDebug.nullStages.nullFullCopy
       ) {
         throw new Error(
@@ -118,6 +119,7 @@ export function renderBrushStroke(
         state ?? DEFAULT_BRUSH_RENDER_STATE,
         overlapCount,
         sourceLayer ?? layer,
+        accelerator,
       );
   }
 }

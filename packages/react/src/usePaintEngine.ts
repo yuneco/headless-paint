@@ -12,6 +12,7 @@ import type {
   Layer,
   LayerMeta,
   PendingOverlay,
+  StrokeCommand,
   StrokeStyle,
 } from "@headless-paint/core";
 import type { CompiledFilterPipeline, InputPoint } from "@headless-paint/core";
@@ -21,7 +22,6 @@ import {
   canUndo as checkCanUndo,
   computeCumulativeOffset,
   createHistoryState,
-  createStrokeCommand,
   createTransformLayerCommand,
   createWrapShiftCommand,
   pushCommand,
@@ -44,10 +44,7 @@ import type {
 import { useBrushAccelerator } from "./paint-engine/useBrushAccelerator";
 import type { InitialLayer, LayerEntry } from "./useLayers";
 import { useLayers } from "./useLayers";
-import type {
-  StrokeCompleteData,
-  StrokeStartOptions,
-} from "./useStrokeSession";
+import type { StrokeStartOptions } from "./useStrokeSession";
 import { useStrokeSessionWithAccelerator } from "./useStrokeSession";
 
 export type {
@@ -261,22 +258,12 @@ export function usePaintEngine<TCustom = never>(
   );
 
   // ── ストロークセッション ──
-  const onStrokeComplete = useCallback(
-    (data: StrokeCompleteData) => {
-      if (data.totalPoints < 1) return;
+  const onStrokeCommit = useCallback(
+    (command: StrokeCommand) => {
+      if (command.inputPoints.length < 1) return;
 
-      const currentEntry = findEntry(activeLayerId ?? "");
+      const currentEntry = findEntry(command.layerId);
       if (!currentEntry) return;
-
-      const command = createStrokeCommand(
-        currentEntry.id,
-        data.inputPoints,
-        data.filterPipelineConfig,
-        data.expandConfig,
-        data.strokeStyle,
-        data.brushSeed,
-        data.alphaLocked,
-      );
       const next = pushCommand(
         historyStateRef.current,
         command,
@@ -289,7 +276,7 @@ export function usePaintEngine<TCustom = never>(
       strokeHistoryBeforeBeginRef.current = null;
       commitHistoryState(next);
     },
-    [findEntry, activeLayerId, entriesRef, commitHistoryState],
+    [findEntry, entriesRef, commitHistoryState],
   );
 
   const restoreLayerBeforeStroke = useCallback(
@@ -316,7 +303,7 @@ export function usePaintEngine<TCustom = never>(
     compiledFilterPipeline,
     expandConfig,
     compiledExpand,
-    onStrokeComplete,
+    onStrokeCommit,
     registry,
     accelerator,
     restoreLayerBeforeStroke,
@@ -325,8 +312,8 @@ export function usePaintEngine<TCustom = never>(
   useEffect(() => {
     const brush = strokeStyle.brush;
     if (
-      brush.type === "stamp" &&
-      isBrushMixingActive(brush.mixing) &&
+      ((brush.type === "stamp" && isBrushMixingActive(brush.mixing)) ||
+        brush.type === "bristle") &&
       activeEntry?.committedLayer
     ) {
       accelerator?.warmUp(activeEntry.committedLayer);

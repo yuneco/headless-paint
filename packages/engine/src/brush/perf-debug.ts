@@ -20,6 +20,9 @@ export const BRUSH_PERF_STAGE_NAMES = [
   "gpuUpload",
   "gpuBaseCopy",
   "gpuCancelRestore",
+  "gpuBristleMask",
+  "gpuBristleInk",
+  "gpuBristleComposite",
   "samplingLayerCopy",
   "appendCommitted",
   "renderUpdateCallback",
@@ -45,6 +48,7 @@ export const BRUSH_PERF_SAMPLE_NAMES = [
   "gpuBranches",
   "gpuCommitPixels",
   "gpuCommitDraws",
+  "gpuBristlePasses",
 ] as const;
 
 export type BrushPerfSampleName = (typeof BRUSH_PERF_SAMPLE_NAMES)[number];
@@ -56,6 +60,9 @@ const BRUSH_PERF_BATCH_STAGE_NAMES = [
   "gpuCommit",
   "gpuBaseCopy",
   "gpuCancelRestore",
+  "gpuBristleMask",
+  "gpuBristleInk",
+  "gpuBristleComposite",
   "checkpointReadback",
   "dabDraw",
   "samplingLayerCopy",
@@ -72,6 +79,7 @@ export type BrushPerfEventName =
   | "gpuUpload"
   | "gpuCommit"
   | "realloc:fieldStrip"
+  | "realloc:fieldBatchCheckpoints"
   | "realloc:snapshotArray"
   | "realloc:commitCanvas"
   | "realloc:accum"
@@ -238,6 +246,7 @@ function createSamples(): Record<BrushPerfSampleName, number[]> {
     gpuBranches: [],
     gpuCommitPixels: [],
     gpuCommitDraws: [],
+    gpuBristlePasses: [],
   };
 }
 
@@ -415,6 +424,7 @@ function createBrushPerfDebug(): BrushPerfDebug {
           gpuBranches: [...samples.gpuBranches],
           gpuCommitPixels: [...samples.gpuCommitPixels],
           gpuCommitDraws: [...samples.gpuCommitDraws],
+          gpuBristlePasses: [...samples.gpuBristlePasses],
         },
         stageSeries: Object.fromEntries(
           BRUSH_PERF_STAGE_NAMES.map((name) => [name, [...stageSeries[name]]]),
