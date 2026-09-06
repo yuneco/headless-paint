@@ -5,7 +5,6 @@ import {
   unregisterGpuLayerResidency,
 } from "./gpu-layer-residency";
 import {
-  type BristleFieldCadence,
   type GpuStrokeSurface,
   createGpuStrokeSurface,
 } from "./gpu-stroke-surface";
@@ -140,33 +139,22 @@ export function createBrushAccelerator(
 ): BrushAccelerator | null {
   let surface: GpuStrokeSurface | null = null;
   const commitMode = options.commitMode ?? "bitmap";
-  const bristleFieldCadence = readBristleFieldCadenceDebugFlag();
   const resolution = resolveBrushAcceleratorBackend(options, {
     webgl2Available: () => {
-      surface = createSurface(1, 1, commitMode, bristleFieldCadence);
+      surface = createSurface(1, 1, commitMode);
       return surface !== null;
     },
   });
   if (resolution.backend === "cpu" || !surface) return null;
-  return new WebGl2BrushAccelerator(surface, options, bristleFieldCadence);
-}
-
-function readBristleFieldCadenceDebugFlag(): BristleFieldCadence {
-  const value = (
-    globalThis as typeof globalThis & {
-      __headlessPaintGpuBristleField?: unknown;
-    }
-  ).__headlessPaintGpuBristleField;
-  return value === "perRun" ? "perRun" : "perFlush";
+  return new WebGl2BrushAccelerator(surface, options);
 }
 
 function createSurface(
   width: number,
   height: number,
   commitMode: "bitmap" | "direct",
-  bristleFieldCadence: BristleFieldCadence,
 ): GpuStrokeSurface | null {
-  return createGpuStrokeSurface(width, height, commitMode, bristleFieldCadence);
+  return createGpuStrokeSurface(width, height, commitMode);
 }
 
 function probeWebGl2Availability(): boolean {
@@ -195,7 +183,6 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   private readonly maxBranches: number;
   private readonly resident: boolean;
   private readonly commitMode: "bitmap" | "direct";
-  private readonly bristleFieldCadence: BristleFieldCadence;
   private readonly residencies = new WeakMap<Layer, LayerResidency>();
   private residentLayer: Layer | null = null;
   private activeOwner: object | null = null;
@@ -208,17 +195,12 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
   private disposed = false;
   private permanentlyUnavailable = false;
 
-  constructor(
-    surface: GpuStrokeSurface,
-    options: BrushAcceleratorOptions,
-    bristleFieldCadence: BristleFieldCadence,
-  ) {
+  constructor(surface: GpuStrokeSurface, options: BrushAcceleratorOptions) {
     this.surface = surface;
     this.observeContextLoss(surface);
     this.maxBranches = sanitizeMaxBranches(options.maxBranches);
     this.resident = options.resident ?? true;
     this.commitMode = options.commitMode ?? "bitmap";
-    this.bristleFieldCadence = bristleFieldCadence;
   }
 
   warmUp(layer: Layer): void {
@@ -514,12 +496,7 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     }
     this.discardUndoSnapshot();
     this.surface?.dispose();
-    this.surface = createSurface(
-      width,
-      height,
-      this.commitMode,
-      this.bristleFieldCadence,
-    );
+    this.surface = createSurface(width, height, this.commitMode);
     if (!this.surface) {
       this.permanentlyUnavailable = true;
       return null;

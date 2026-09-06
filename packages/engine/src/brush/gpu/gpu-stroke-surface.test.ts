@@ -41,22 +41,26 @@ describe("GpuStrokeSurface", () => {
     if (!profileCtx) return;
     profileCtx.fillStyle = "white";
     profileCtx.fillRect(0, 0, profile.width, profile.height);
-    const lowDistance = -0.0031;
-    const highDistance = 0.0031;
     const chunk: GpuBristleChunk = {
-      segments: [makeSweepSegment(0, 1), makeSweepSegment(2, 3)],
-      maskField: new Float32Array([
-        lowDistance,
-        lowDistance,
-        highDistance,
-        highDistance,
-        lowDistance,
-        lowDistance,
-        highDistance,
-        highDistance,
-      ]),
-      maskFieldColumns: 4,
-      maskFieldRows: 2,
+      // Nearly constant noise; pressure gives signed distances -/+0.0031.
+      // MAX keeps the stronger alpha (~191), while source-over would add alpha.
+      segments: [
+        {
+          ...makeSweepSegment(0, 1),
+          fromPressure: 0.558347518240826,
+          toPressure: 0.558347518240826,
+        },
+        {
+          ...makeSweepSegment(2, 3),
+          fromPressure: 0.5652364071297148,
+          toPressure: 0.5652364071297148,
+        },
+      ],
+      simpleMask: {
+        dropoutLengthPx: 1_000_000,
+        dropoutWidthPx: 1_000_000,
+        pressureCoverageResponse: 1,
+      },
       profileAtlas: profile,
       grain: {
         amount: 0,
@@ -89,12 +93,7 @@ describe("GpuStrokeSurface", () => {
     brushPerfDebug.enabled = true;
     brushPerfDebug.reset();
     const layer = createLayer(64, 48);
-    const surface = createGpuStrokeSurface(
-      layer.width,
-      layer.height,
-      "bitmap",
-      "perFlush",
-    );
+    const surface = createGpuStrokeSurface(layer.width, layer.height, "bitmap");
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -108,9 +107,11 @@ describe("GpuStrokeSurface", () => {
     profileCtx.fillRect(0, 0, profile.width, profile.height);
     const chunk: GpuBristleChunk = {
       segments: [makeSweepSegment(0, 1)],
-      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
-      maskFieldColumns: 2,
-      maskFieldRows: 2,
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
       profileAtlas: profile,
       grain: {
         amount: 0,
@@ -161,12 +162,7 @@ describe("GpuStrokeSurface", () => {
     const layer = createLayer(128, 128);
     layer.ctx.fillStyle = "rgb(20, 210, 40)";
     layer.ctx.fillRect(0, 0, layer.width, layer.height);
-    const surface = createGpuStrokeSurface(
-      layer.width,
-      layer.height,
-      "bitmap",
-      "perFlush",
-    );
+    const surface = createGpuStrokeSurface(layer.width, layer.height, "bitmap");
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -187,9 +183,11 @@ describe("GpuStrokeSurface", () => {
           toX: 40 + offsetX,
         },
       ],
-      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
-      maskFieldColumns: 2,
-      maskFieldRows: 2,
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
       profileAtlas: profile,
       grain: {
         amount: 0,
@@ -248,7 +246,7 @@ describe("GpuStrokeSurface", () => {
       layer.ctx.fillStyle = "rgb(20, 210, 40)";
       layer.ctx.fillRect(0, 0, layer.width, layer.height);
     }
-    const surface = createGpuStrokeSurface(64, 64, "bitmap", "perFlush");
+    const surface = createGpuStrokeSurface(64, 64, "bitmap");
     expect(surface).not.toBeNull();
     if (!surface) return;
     surfaceUnderTest = surface;
@@ -262,9 +260,11 @@ describe("GpuStrokeSurface", () => {
     const baseColor = { r: 220, g: 30, b: 20, a: 255 } as const;
     const chunk: GpuBristleChunk = {
       segments: [makeSweepSegment(0, 1)],
-      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
-      maskFieldColumns: 2,
-      maskFieldRows: 2,
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
       profileAtlas: profile,
       grain: {
         amount: 0,
@@ -327,15 +327,46 @@ describe("GpuStrokeSurface", () => {
     sourceCtx.fillStyle = "rgb(30, 65, 235)";
     sourceCtx.fillRect(48, 0, 24, source.height);
 
-    const perRun = renderBristleFieldCadenceForTest(source, "perRun");
+    const baseColor = { r: 180, g: 180, b: 180, a: 255 } as const;
+    let expectedField = createMaterialField(4, 4, baseColor);
+    // Each run samples its checkpoint geometry from the flush-start image.
+    for (const [index, centerX] of [12, 36, 60].entries()) {
+      const checkpoint = sourceCtx.getImageData(index * 24, 0, 24, 24);
+      const sampled = sampleRotatedCheckpoint(
+        checkpoint,
+        index * 24,
+        0,
+        centerX,
+        24,
+        0,
+        8,
+        4,
+        4,
+      );
+      expectedField = advanceMaterialField(
+        expectedField,
+        sampled,
+        4,
+        4,
+        baseColor,
+        {
+          pickupRatePerPx: 0.12,
+          restoreRatePerPx: 0,
+          diffusionRatePerPx: 0,
+          distancePx: 4,
+        },
+      );
+    }
+    const expected = new Uint8ClampedArray(expectedField.length);
+    writeMaterialFieldPixels(expectedField, expected);
     brushPerfDebug.enabled = true;
     brushPerfDebug.reset();
-    const perFlush = renderBristleFieldCadenceForTest(source, "perFlush");
+    const perFlush = renderBristlePerFlushForTest(source);
 
     expect(
-      materialFieldMae(perRun, perFlush),
+      materialFieldMae(expected, perFlush),
       JSON.stringify({
-        perRun: Array.from(perRun.slice(0, 4)),
+        expected: Array.from(expected.slice(0, 4)),
         perFlush: Array.from(perFlush.slice(0, 4)),
       }),
     ).toBeLessThanOrEqual(0.02);
@@ -1009,7 +1040,7 @@ describe("GpuStrokeSurface", () => {
   });
 });
 
-function makeSweepSegment(fromFieldColumn: number, toFieldColumn: number) {
+function makeSweepSegment(fromDistance: number, toDistance: number) {
   return {
     fromX: 20,
     fromY: 32,
@@ -1021,25 +1052,17 @@ function makeSweepSegment(fromFieldColumn: number, toFieldColumn: number) {
     toFrameY: 0,
     fromPressure: 1,
     toPressure: 1,
-    fromDistance: fromFieldColumn,
-    toDistance: toFieldColumn,
-    fromFieldColumn,
-    toFieldColumn,
+    fromDistance,
+    toDistance,
     overlap: 1,
-    trialId: fromFieldColumn,
+    trialId: fromDistance,
   } as const;
 }
 
-function renderBristleFieldCadenceForTest(
+function renderBristlePerFlushForTest(
   source: OffscreenCanvas,
-  cadence: "perRun" | "perFlush",
 ): Uint8ClampedArray {
-  const surface = createGpuStrokeSurface(
-    source.width,
-    source.height,
-    "bitmap",
-    cadence,
-  );
+  const surface = createGpuStrokeSurface(source.width, source.height, "bitmap");
   expect(surface).not.toBeNull();
   if (!surface) return new Uint8ClampedArray();
   try {
@@ -1052,9 +1075,11 @@ function renderBristleFieldCadenceForTest(
     profileCtx.fillRect(0, 0, profile.width, profile.height);
     const chunk: GpuBristleChunk = {
       segments: [makeSweepSegment(0, 1)],
-      maskField: new Float32Array([-0.0031, -0.0031, 0.0031, 0.0031]),
-      maskFieldColumns: 2,
-      maskFieldRows: 2,
+      simpleMask: {
+        dropoutLengthPx: 40,
+        dropoutWidthPx: 4,
+        pressureCoverageResponse: 1,
+      },
       profileAtlas: profile,
       grain: {
         amount: 0,

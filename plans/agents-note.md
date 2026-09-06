@@ -42,6 +42,8 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## ユーザーに覚えておいて欲しいこと
 
+- **Bristle 比較経路削除の引き継ぎ（2026-09-06、Phase 3 タスク A）**: simple dropout + 係数0.9 + perFlush に一本化。CPU の `rows` は横断補間座標のスケールだけで field grid は不要。stamp 用の update/dab/checkpoint 順は `drawStampBranchSegments` に維持。docs / 公開型は未編集。静的検査とノンブラウザ213件 + evaluator4件は成功、Canvas/WebGL 依存検収は Claude に引き継ぐ。詳細は `plans/2026-09-06-bristle-mask-cleanup-report.md`。gpu-acceleration.md の pickup 説明には「最初の run は前 flush の carried checkpoint を読む」例外を補足する余地がある。
+
 - spray ブラシの `lineWidth` は「散布領域の直径」。粒子サイズは `dynamics.particleSize`（絶対px）で独立。
 - 非 mixing stamp + Expand の dab 配置・jitter は branch state 統一（2026-07-03）で意図的に変わった（branch ごと独立 seed・位相）。過去データの見た目互換はない（プロジェクト方針通り）。
 

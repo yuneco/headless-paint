@@ -104,7 +104,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?, accelerator?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
-| `createBrushAccelerator(options?)` | 混色stampをWebGL2で描くGPU加速器を生成（非対応環境は `null`）。詳細は [gpu-acceleration.md](./gpu-acceleration.md) |
+| `createBrushAccelerator(options?)` | 混色stampとRough bristleをWebGL2で描くGPU加速器を生成（非対応環境は `null`）。詳細は [gpu-acceleration.md](./gpu-acceleration.md) |
 | `resolveBrushAcceleratorBackend(options?, env?)` | 加速器を生成せずに backend（`webgl2` / `cpu`）と判定理由を返す |
 | `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit, timeSpacingMs?, spacingAt?)` | 固定/局所可変の距離ベース + 時間ベース emission を走査（stamp / spray 共有） |
 | `timeSpacingMsFromRate(emissionsPerSecond)` | 吹きつけレートを時間ベース emission 間隔 ms に変換 |

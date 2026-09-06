@@ -38,33 +38,6 @@ import {
 const EXPERIMENT_LAYER_SIZE = Number(
   new URLSearchParams(window.location.search).get("layerSize") ?? "0",
 );
-const gpuBristleField = new URLSearchParams(window.location.search).get(
-  "gpuBristleField",
-);
-const bristleMask = new URLSearchParams(window.location.search).get(
-  "bristleMask",
-);
-(
-  globalThis as typeof globalThis & {
-    __headlessPaintGpuBristleField?: "perRun" | "perFlush";
-  }
-).__headlessPaintGpuBristleField =
-  gpuBristleField === "perRun" ? "perRun" : "perFlush";
-(
-  globalThis as typeof globalThis & {
-    __headlessPaintBristleMask?: "field" | "simple";
-  }
-).__headlessPaintBristleMask = bristleMask === "field" ? "field" : "simple";
-const bristleLowP = new URLSearchParams(window.location.search).get(
-  "bristleLowP",
-);
-if (bristleLowP !== null && Number.isFinite(Number(bristleLowP))) {
-  (
-    globalThis as typeof globalThis & {
-      __headlessPaintBristleLowPressureGain?: number;
-    }
-  ).__headlessPaintBristleLowPressureGain = Number(bristleLowP);
-}
 const LAYER_WIDTH =
   EXPERIMENT_LAYER_SIZE > 0 ? EXPERIMENT_LAYER_SIZE : 1024 * 2;
 const LAYER_HEIGHT = LAYER_WIDTH;

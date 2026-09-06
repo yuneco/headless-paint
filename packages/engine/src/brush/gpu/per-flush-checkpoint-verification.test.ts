@@ -69,7 +69,7 @@ describe("perFlush checkpoint copy elision", () => {
       if (!ctx) throw new Error("Missing tip context");
       ctx.fillStyle = "white";
       ctx.fillRect(0, 0, 2, 32);
-      const surface = createGpuStrokeSurface(256, 256, "bitmap", "perFlush");
+      const surface = createGpuStrokeSurface(256, 256, "bitmap");
       if (!surface) throw new Error("WebGL2 is required");
       // Observe actual image copies, not the metadata-only checkpoint requests.
       const copies = vi.spyOn(
@@ -187,7 +187,7 @@ function measureCheckpointMismatch(options: {
   // Same footprint on both backends; integral origins avoid resampling noise.
   const tileSize = Math.ceil(8 * Math.SQRT2 + 32 * 2 + 4);
   const tileOrigin = 128 - tileSize / 2;
-  const surface = createGpuStrokeSurface(256, 256, "bitmap", "perFlush");
+  const surface = createGpuStrokeSurface(256, 256, "bitmap");
   if (!surface) throw new Error("WebGL2 is required for this verification");
   const chunk = makeUniformChunk(tip, 0);
   const gpuUpdate = {
@@ -342,15 +342,16 @@ function makeUniformChunk(
         toPressure: 1,
         fromDistance: 0,
         toDistance: 1,
-        fromFieldColumn: 0,
-        toFieldColumn: 1,
         overlap: 1,
         trialId: 0,
       },
     ],
-    maskField: new Float32Array([1, 1, 1, 1]),
-    maskFieldColumns: 2,
-    maskFieldRows: 2,
+    // Keep this checkpoint fixture uniformly opaque with procedural dropout.
+    simpleMask: {
+      dropoutLengthPx: 1_000_000,
+      dropoutWidthPx: 1_000_000,
+      pressureCoverageResponse: 1,
+    },
     profileAtlas,
     grain: {
       amount: 0,

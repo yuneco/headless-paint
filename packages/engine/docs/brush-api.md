@@ -113,7 +113,7 @@ function renderBrushStroke(
    - `brush.dynamics.emissionsPerSecond` が正の有限数なら、`StrokePoint.timestamp` の進行に応じて静止中も粒子バーストを追加する
 5. `"bristle"`: 荒いハケ方式で描画:
    - Catmull-Rom補間後の中心線を`geometryStepPx`間隔で走査し、seed固定の1D毛束断面を連続quadへ掃引する
-   - 毛束数とは独立したstroke-spaceの面掠れを合成する。既定のsimple maskはCPU/GPUともにquad内で距離・横断位置・筆圧を線形補間し、各pixelでbroad noiseとpressure thresholdを評価する。内部debug切替のfield経路は低解像度の符号付きpaint fieldを補間する。最終pixelのalphaへ変換し、重複quadは`max(alpha)`で結合する。筆圧はブラシ幅ではなく着彩率へ作用する
+   - 毛束数とは独立したstroke-spaceの面掠れ（dropout mask）を合成する。CPU/GPUともにquad内で距離・横断位置・筆圧を線形補間し、各pixelで `broad value noise(distance / dropoutLengthPx, crossPx / dropoutWidthPx) − threshold` を評価する。threshold は `0.5 + (0.5 − effectivePressure) × 0.9`（低筆圧係数 0.9 は内部定数）、effectivePressure は `pressureDynamics.coverage` で筆圧を 0.5 へ寄せた値。符号付き距離を `depositHardness` で最終pixelのalphaへ変換し、重複quadは`max(alpha)`で結合する。筆圧はブラシ幅ではなく着彩率へ作用する。GPU経路（[gpu-acceleration.md](./gpu-acceleration.md)）も同じ式をshader内で評価する
    - document座標へ固定したsurface grain（紙目）を面掠れと同じsoftware rasterへ統合し、pixel-local pressureで接触を判定する
    - 急な折返しはcuspとして分割し、短いbristle lag（毛束の遅れ）で横断方向を追従させる
    - 同じ場所への反復接触は、紙目の谷に対する確率的な再接触として不透明な着彩片の面積を段階的に増やす。初回の未着彩cellへ半透明の着彩floorは加えず、顔料厚レイヤーも追加しない

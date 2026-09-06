@@ -11,10 +11,9 @@ import {
 } from "../../types";
 import {
   type BristleMaskSweepSample,
-  createBristleMaskField,
   createSimpleBristleMaskEvaluator,
   getFineToothHeightTile,
-  rasterizeBristleMaskFieldForTest,
+  rasterizeBristleMaskEvaluatorForTest,
 } from "../bristle-mask";
 import { brushPerfDebug } from "../perf-debug";
 import {
@@ -54,7 +53,7 @@ describe("GPU bristle mask parity", () => {
     },
   );
 
-  it("matches the CPU raster for the same rough bristle field and sweep", () => {
+  it("matches the CPU raster for the same rough bristle simple mask and sweep", () => {
     const width = 160;
     const height = 96;
     const brushSize = 60;
@@ -63,14 +62,14 @@ describe("GPU bristle mask parity", () => {
     const originY = 19;
     const samples = createCurvedSamples();
     const dynamics = ROUGH_BRISTLE.dynamics;
-    const field = createBristleMaskField(
+    const field = createSimpleBristleMaskEvaluator(
       samples,
       brushSize,
       dynamics,
       ROUGH_BRISTLE.pressureDynamics.coverage,
       seed,
     );
-    const cpuMask = rasterizeBristleMaskFieldForTest(
+    const cpuMask = rasterizeBristleMaskEvaluatorForTest(
       field,
       samples,
       brushSize,
@@ -90,9 +89,11 @@ describe("GPU bristle mask parity", () => {
     const profile = new OffscreenCanvas(2, brushSize);
     const chunk: GpuBristleChunk = {
       segments: createSegments(samples, dynamics.geometryStepPx),
-      maskField: field.values,
-      maskFieldColumns: field.width,
-      maskFieldRows: field.height,
+      simpleMask: {
+        dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
+        dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
+        pressureCoverageResponse: ROUGH_BRISTLE.pressureDynamics.coverage,
+      },
       profileAtlas: profile,
       grain: {
         amount: dynamics.surfaceGrain.amount,
@@ -147,7 +148,7 @@ describe("GPU bristle mask parity", () => {
       ROUGH_BRISTLE.pressureDynamics.coverage,
       seed,
     );
-    const cpuMask = rasterizeBristleMaskFieldForTest(
+    const cpuMask = rasterizeBristleMaskEvaluatorForTest(
       field,
       samples,
       brushSize,
@@ -166,9 +167,6 @@ describe("GPU bristle mask parity", () => {
     const pass = createGpuBristlePassResources(gl, width, height);
     const chunk: GpuBristleChunk = {
       segments: createSegments(samples, dynamics.geometryStepPx),
-      maskField: new Float32Array(0),
-      maskFieldColumns: 0,
-      maskFieldRows: 0,
       simpleMask: {
         dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
         dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
@@ -291,13 +289,8 @@ describe("GPU bristle mask parity", () => {
     expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
   });
 
-  it("does not generate or upload a CPU mask field in GPU simple mode", () => {
-    const debugGlobal = globalThis as typeof globalThis & {
-      __headlessPaintBristleMask?: "field" | "simple";
-    };
-    const previousMode = debugGlobal.__headlessPaintBristleMask;
+  it("does not generate or upload a CPU mask field in the GPU path", () => {
     const previousPerfEnabled = brushPerfDebug.enabled;
-    debugGlobal.__headlessPaintBristleMask = "simple";
     brushPerfDebug.enabled = true;
     brushPerfDebug.reset();
 
@@ -348,7 +341,6 @@ describe("GPU bristle mask parity", () => {
       expect(snapshot.samples.fieldCells).toEqual([]);
     } finally {
       accelerator.dispose();
-      debugGlobal.__headlessPaintBristleMask = previousMode;
       brushPerfDebug.enabled = previousPerfEnabled;
       brushPerfDebug.reset();
     }
@@ -454,10 +446,6 @@ function createStrokePoints(): StrokePoint[] {
 }
 
 function createLargerWarmupChunk(chunk: GpuBristleChunk): GpuBristleChunk {
-  const columns = chunk.maskFieldColumns + 37;
-  const rows = chunk.maskFieldRows + 19;
-  const field = new Float32Array(columns * rows);
-  field.fill(-1);
   return {
     ...chunk,
     segments: [
@@ -478,13 +466,8 @@ function createLargerWarmupChunk(chunk: GpuBristleChunk): GpuBristleChunk {
           overlap: 0,
           trialId: 0,
         }),
-        fromFieldColumn: 0,
-        toFieldColumn: 1,
       },
     ],
-    maskField: field,
-    maskFieldColumns: columns,
-    maskFieldRows: rows,
     bboxRect: {
       left: chunk.bboxRect.left,
       top: chunk.bboxRect.top,
@@ -561,8 +544,6 @@ function createSegments(
       toPressure: to.pressure,
       fromDistance: from.distance,
       toDistance: to.distance,
-      fromFieldColumn: index - 1,
-      toFieldColumn: index,
       overlap: 0,
       trialId: Math.round(
         ((from.distance + to.distance) * 0.5) / Math.max(0.5, geometryStepPx),

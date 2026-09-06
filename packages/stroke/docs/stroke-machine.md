@@ -69,7 +69,7 @@ interface StrokeRuntimeDeps {
   readonly onCommit: (command: StrokeCommand) => void;
   readonly onDrawingChanged: (isDrawing: boolean) => void;
   readonly randomSeed?: () => number;          // brushSeed 省略時の seed 生成を注入
-  readonly accelerator?: BrushAccelerator | null; // GPU加速器（engine の createBrushAccelerator）。省略時は CPU 経路
+  readonly accelerator?: BrushAccelerator | null; // GPU加速器（engine の createBrushAccelerator）。省略時は CPU 経路。GPU stroke の確定時に command を undo-1 の token として登録する（history-api.md）
   readonly restoreLayerBeforeStroke?: (layer: Layer) => void; // GPU context loss 時に layer を stroke 開始前へ戻す hook（history rebuild 等）。未注入なら復元せず CPU で描き直すのみ
 }
 

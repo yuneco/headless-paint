@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DEFAULT_BRISTLE_DYNAMICS } from "../types";
 import {
   createSimpleBristleMaskEvaluator,
@@ -7,8 +7,6 @@ import {
 import { hashSeed } from "./prng";
 
 describe("simple bristle mask evaluator", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
   it("is deterministic and omits edge micro texture", () => {
     const samples = [
       { pressure: 0.2, distance: 0 },
@@ -40,7 +38,6 @@ describe("simple bristle mask evaluator", () => {
   });
 
   it("maps fractional sample indices and both sweep edges to GPU coordinates", () => {
-    vi.stubGlobal("__headlessPaintBristleLowPressureGain", 0.9);
     const evaluator = createSimpleBristleMaskEvaluator(
       [
         { distance: 0, pressure: 0.2 },
@@ -97,12 +94,11 @@ describe("simple bristle mask evaluator", () => {
     }
   });
 
-  it("applies the low-pressure gain flag and clamps pressure after interpolation", () => {
+  it("uses the fixed low-pressure gain and clamps pressure after interpolation", () => {
     const samples = [
       { distance: 0, pressure: -1 },
       { distance: 8, pressure: 1 },
     ];
-    vi.stubGlobal("__headlessPaintBristleLowPressureGain", 0.4);
     const evaluator = createSimpleBristleMaskEvaluator(
       samples,
       8,
@@ -110,20 +106,19 @@ describe("simple bristle mask evaluator", () => {
       1,
       17,
     );
-    vi.stubGlobal("__headlessPaintBristleLowPressureGain", 0);
     const neutral = createSimpleBristleMaskEvaluator(
       samples,
       8,
       DEFAULT_BRISTLE_DYNAMICS,
-      1,
+      0,
       17,
     );
-    // At u=0.5, interpolated pressure is 0, so the threshold rises by 0.2.
+    // At u=0.5, interpolated pressure is 0, so the threshold rises by 0.45 (gain 0.9).
     expect(
       evaluator.evaluate(0.5, 7.3) - neutral.evaluate(0.5, 7.3),
-    ).toBeCloseTo(-0.2, 12);
+    ).toBeCloseTo(-0.45, 12);
     expect(evaluator.evaluate(1, 7.3) - neutral.evaluate(1, 7.3)).toBeCloseTo(
-      0.2,
+      0.45,
       12,
     );
   });

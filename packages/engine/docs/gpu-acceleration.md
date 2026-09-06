@@ -101,13 +101,13 @@ react（`usePaintEngine`）はこれを内包する。`gpuBackend?: "auto" | "we
 
 stroke 開始時に次をすべて満たすときだけ GPU 経路になる。満たさない stroke は同じ入力で CPU 経路で描かれる（自動、通知なし）。
 
-- ブラシが `stamp` で `mixing` が有効（`isBrushMixingActive`）
+- ブラシが `stamp` で `mixing` が有効（`isBrushMixingActive`）、または `bristle`（Rough bristle。`mixing` の有無を問わない）
 - `compositeOperation` が `source-over`
 - `alphaLocked` でない
 - Expand の branch 数（`compiledExpand.outputCount`）が `maxBranches` 以下
 - 加速器が有効で surface を確保できた（context lost でない）
 
-Rough bristle・spray・非混色 stamp は対象外（現状は CPU 経路のみ）。
+spray・非混色 stamp は対象外（CPU 経路のみ）。
 
 ## 描画モデル
 
@@ -117,6 +117,23 @@ Rough bristle・spray・非混色 stamp は対象外（現状は CPU 経路の�
 - **checkpoint snapshot**: `checkpointDistancePx` ごとに、accum の局所 tile を branch 別の snapshot texture へ GPU 内で blit する。tile の中心は CPU の `captureCheckpoint` と同じだが、寸法は stroke 中に変わらないよう筆圧による stampSize の上限（`lineWidth × (1 + pressureDynamics.size)`）から決め、32px 単位で確保して縮小しない（sampling 位置は CPU と同一で、tile が大きい分は読まれない）。field の sampling 元はこの snapshot であり、CPU 経路の「直近 checkpoint 時点の tile を読む」時間基準を再現する
 - **commit**: pointer batch ごとに 1 回、branch 別 dirty rect を commit canvas（1024²）へ敷き詰めて一括 blit し、`transferToImageBitmap()` で得た 1 枚の ImageBitmap から rect ごとに `layer.ctx.drawImage` で書き戻す（WebGL canvas を drawImage の source にする回数を pass あたり 1 回に抑える。iOS WebKit では source 化ごとに snapshot copy が走るため）。dab ごとや点ごとには書き戻さない
 - **readback なし**: 上記のどこにも `getImageData` / `readPixels` は無く、GPU stroke 中は `layer.ctx` を drawImage の source にもしない（iOS WebKit では GPU-backed canvas の source 化ごとに snapshot copy が走るため）
+- **commit の同期**: WebKit の `transferToImageBitmap()` は queue 済みの blit 完了を待たない（`gl.flush` では不十分）ため、直前に `gl.finish()` で同期する。これが無いと bitmap に古い tile が混ざり、同じ入力でも結果が run ごとに変わる
+- **全画面 texture は accum と base の 2 枚**（layer 同寸 RGBA8。2K で 16MB × 2、4K で 64MB × 2）。base は stroke 開始時の accum 複製で、cancel の復元と undo-1（後述）に使う
+
+### Rough bristle
+
+stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms 経過、または移動距離が `lineWidth × 1.5` に達した時点。`packages/stroke/src/incremental-stroke.ts` の `shouldFlushBristleBatch`）でまとめて engine に渡し、engine は flush ごとに chunk（確定した中心線周辺の bbox）を GPU surface へ積む。1 chunk は chunk-local の atlas 上で 3 pass で描かれ、最後に accum へ合成される。
+
+| pass | 内容 |
+|---|---|
+| mask | 掃引 quad を描き、fragment ごとに面掠れ（simple dropout mask: broad value noise 1 octave − 筆圧閾値。CPU と同一式を画素評価）と document 座標固定の紙目接触を評価して alpha を得る。quad の頂点属性は `(distance, crossPx ∈ [−lineWidth/2, +lineWidth/2])` と筆圧 |
+| ink | profile atlas（seed 固定の 1D 毛束断面）を quad に沿って描く |
+| composite | `mask × ink × material` を premultiplied で accum に `source-over`。material は混色 OFF なら `uColor`、混色 ON なら material field |
+
+- **混色（perFlush 意味論）**: material field は flush 単位で進める（stamp の `updateDistancePx` ごとではない）。順序は「flush 内の全 run の pickup / restore を field に適用 → その field（F1）で composite → composite 後に diffusion（最大 1 pass 相当）を掛けて次の flush へ持ち越す」。checkpoint は run（field 更新 1 回分の区間）ごとに**位置を指定**するが、同一 flush 内の pickup が読む画素は該当矩形の **flush 開始時点の accum** であり、run の描画結果は同じ flush 内の後続 pickup には反映されない。画像として次の flush へコピー保持するのは branch ごとに最後に指定された checkpoint だけ。composite は flush 開始時の field（F0）と F1 を run ごとの距離重み `runEndDistance / totalDistance` で mix する。**重みは run 内で定数**なので、run 境界で色が段になる（既知。制限の節を参照）。CPU 経路も同じ意味論（`endField` は diffusion 前）なので、flush の切り方（32ms / 1.5×lineWidth）は描画結果の一部であり、replay で flush を束ねたり広げたりしてはならない
+- **composite の field 参照**: field 更新 pass は run geometry（center / angle / sampleSize）で回転した正方形として checkpoint を読む。composite は同じ geometry の逆変換 `R(-angle) · (documentPosition − center) / sampleSize + 0.5` を clamp して field を読む。F0 / F1 とも現在の run の local frame で参照する
+- 混色 OFF では field 更新 pass と checkpoint snapshot は走らない
+- CPU の mask field 生成・texture upload は無い（dropout mask は shader 内で評価）。profile atlas と紙目 tile は stroke 開始時に 1 回 upload する
 
 ## 常駐（residency）と無効化の契約
 
@@ -129,12 +146,26 @@ accum と layer の同一性が崩れる操作は engine / stroke の API が内
 
 **engine / stroke の API を経由せずに `layer.ctx` へ直接描いた場合は、呼び出し側が `accelerator.invalidate(layer)` を呼ぶ必要がある**。呼ばないと次の GPU stroke が古い accum の上に描かれる。
 
+## undo-1 スナップショット
+
+GPU stroke の終了時、stroke 開始前の accum（base texture）を **直前 1 手ぶん**だけ保持し、その stroke の Undo を history rebuild なしで復元する（WebKit で 355ms → 28ms 級）。2 手目以降の Undo と Redo は従来どおり history rebuild。保持は加速器あたり 1 件（次の GPU stroke 開始で置き換わる）。
+
+契約は stroke パッケージの `gpu-undo-cache.ts`（structural bridge。公開 API ではない）が仲介する:
+
+1. `createStrokeRuntime` が stroke 確定時に `retainGpuUndo(accelerator, layer, command)` で **確定した `StrokeCommand` オブジェクトを token として**登録する
+2. `pushCommand` が `bindGpuUndoHistory` で「その command が history の末尾に入った index と `commands` 配列（参照）」を snapshot に結び付ける。push された command が登録 token と別オブジェクトなら結び付けられず、その stroke の undo-1 は使えない
+3. `executeHistoryOp("undo")` は対象 command が `stroke` のとき `restoreUndoSnapshot(layer, currentIndex, commands)` を試み、hit なら rebuild を省略する。判定は index と **`commands` 配列の参照同一性**、layer インスタンスと寸法、加速器と surface の同一性。miss は通常の rebuild へ fallback する（試行 1 回で snapshot は消費される）。同一 backend・同一描画条件なら hit / miss の結果は byte 一致。context lost や dispose 後の rebuild は CPU 経路になり、Tier B の範囲で差が出る
+4. 非 GPU の commit、checkpoint 復元、`invalidate`、rebuild 開始は snapshot を破棄する
+
+**呼び出し側の義務**: (a) runtime が確定した command オブジェクトをそのまま history に push する（DTO 化・クローン・再生成すると token が一致しない）、(b) `HistoryState.commands` 配列を複製しない（`[...commands]` は参照が変わり miss になる）、(c) runtime と executor に同じ accelerator と同じ Layer インスタンスを渡す、(d) Undo は `executeHistoryOp` 経由で行う。どれかが崩れると結果は正しいまま undo-1 だけが静かに無効化される。`createIncrementalStrokeRenderer` を直接使う低レベル利用では登録は行われない。react の `usePaintEngine` はこの契約を守る（`packages/react/docs/INTERNALS.md`）。
+
 ## 決定性と parity
 
 - **同一 backend**: live / incremental / replay / Undo / Redo は入力点列が同じなら pixel 完全一致（全処理が GPU コマンド順で決まり、時間や event 配送に依存しない）。テストで保証する
 - **CPU 経路との差**: raster 規則・浮動小数点・texture format の差により byte 一致はしない。Tier B 契約（`packages/stroke/docs/parity-testing.md`）: alpha MAE ≤ 0.015、RGB MAE ≤ 0.02、`|Δ| > 0.1` の pixel 率 ≤ 1%、bbox 差 ≤ 1px
-- 混色の pickup タイミング（checkpoint 距離・update 距離）は CPU と同じ
-- GPU bristle の混色 composite は field 更新と同じ run geometry（center / angle / sampleSize）の逆変換 `R(-angle) * (documentPosition - center) / sampleSize + 0.5` を clamp して field を読む。perFlush の F0/F1 も現在の run の同じ local frame で参照する。
+- 混色の pickup タイミング（stamp: checkpoint 距離・update 距離 / bristle: flush 単位）は CPU と同じ
+- Rough bristle の dropout mask は CPU / GPU とも同じ式を画素ごとに評価するため、混色 OFF では実質一致（S 字 fixture で `|Δ| > 25/255` の画素が ink の 0.01%）。混色 ON は Tier B 内（Rough 150 点 fixture で alpha MAE 0 / RGB MAE 0.0013）
+- WebKit の bitmap commit は `gl.finish` 同期が決定性の前提（描画モデルの「commit の同期」）。vitest の browser mode は chromium のみで WebKit 固有の挙動は自動テストの外にあるため、WebKit 側の決定性は同一入力を複数 run 撮って byte 比較する（`tools/bench/results`）
 - 同一 GPU 上での再現性は保証するが、GPU / ブラウザ間の bit 一致は保証しない。保存 command は backend を持たないため、別環境での replay は各環境の経路で描かれる
 
 ## lifecycle と障害
@@ -150,7 +181,8 @@ accum と layer の同一性が崩れる操作は engine / stroke の API が内
 - branch 上限 64（既定）。UI 上それ以上作れる場合は CPU 経路になる
 - `compositeOperation` は `source-over` のみ
 - WebGPU は未対応（WebGL2 のみ）
+- Rough bristle 混色の既知事項（CPU / GPU 共通）: field の mix 重みが run 単位の定数のため色が run 境界で階段状に変わる。掠れの多い領域で透明な下地から黒が混ざる（透明画素の pickup 処理）。いずれも perFlush 意味論の仕様上の挙動として記録済みで、修正時は CPU / GPU を同時に変える
 
 ## デバッグ
 
-`brushPerfDebug`（`perfDebug` 有効時のみ動作、通常時はゼロコスト）で stage 計測・stall 記録を取得できる。apps/web の評価パネルは現在の backend（`webgl2` / `cpu` と auto の判定理由）を表示し、切替は設定を永続化してリロードする。
+`brushPerfDebug`（`perfDebug` 有効時のみ動作、通常時はゼロコスト）で stage 計測・stall 記録を取得できる。apps/web の評価パネルは現在の backend（`webgl2` / `cpu` と auto の判定理由）と commit mode を表示し、切替は設定を永続化してリロードする。apps/web の URL フラグは `?gpuBackend=auto|webgl2|cpu`、`?gpuCommit=bitmap|direct`、`?perfDebug=1` の 3 つ。

@@ -23,11 +23,6 @@ const CHROME_USER_AGENT =
   "Mozilla/5.0 AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36";
 
 beforeEach(() => {
-  (
-    globalThis as typeof globalThis & {
-      __headlessPaintGpuBristleField?: "perRun" | "perFlush";
-    }
-  ).__headlessPaintGpuBristleField = undefined;
   vi.mocked(createGpuStrokeSurface)
     .mockReset()
     .mockReturnValue({
@@ -48,12 +43,7 @@ describe("createBrushAccelerator", () => {
     const accelerator = createBrushAccelerator({ backend: "webgl2" });
 
     expect(accelerator).not.toBeNull();
-    expect(createGpuStrokeSurface).toHaveBeenCalledWith(
-      1,
-      1,
-      "bitmap",
-      "perFlush",
-    );
+    expect(createGpuStrokeSurface).toHaveBeenCalledWith(1, 1, "bitmap");
     accelerator?.dispose();
   });
 
@@ -64,31 +54,7 @@ describe("createBrushAccelerator", () => {
     });
 
     expect(accelerator).not.toBeNull();
-    expect(createGpuStrokeSurface).toHaveBeenCalledWith(
-      1,
-      1,
-      "direct",
-      "perFlush",
-    );
-    accelerator?.dispose();
-  });
-
-  it("debug flag で旧 perRun cadence を強制できる", () => {
-    (
-      globalThis as typeof globalThis & {
-        __headlessPaintGpuBristleField?: "perRun" | "perFlush";
-      }
-    ).__headlessPaintGpuBristleField = "perRun";
-
-    const accelerator = createBrushAccelerator({ backend: "webgl2" });
-
-    expect(accelerator).not.toBeNull();
-    expect(createGpuStrokeSurface).toHaveBeenCalledWith(
-      1,
-      1,
-      "bitmap",
-      "perRun",
-    );
+    expect(createGpuStrokeSurface).toHaveBeenCalledWith(1, 1, "direct");
     accelerator?.dispose();
   });
 

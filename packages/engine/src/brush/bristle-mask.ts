@@ -1,10 +1,5 @@
 import type { BristleDynamics } from "../types";
-import {
-  brushPerfDebug,
-  perfElapsed,
-  perfSample,
-  perfStage,
-} from "./perf-debug";
+import { brushPerfDebug, perfElapsed, perfStage } from "./perf-debug";
 import { hashSeed } from "./prng";
 
 export interface BristleMaskSample {
@@ -19,14 +14,6 @@ export interface BristleMaskSweepSample extends BristleMaskSample {
   readonly frameY: number;
   readonly breakBefore?: boolean;
 }
-
-export interface BristleMaskField {
-  readonly width: number;
-  readonly height: number;
-  readonly values: Float32Array<ArrayBuffer>;
-}
-
-export type BristleMaskMode = "field" | "simple";
 
 interface BristleMaskEvaluator {
   readonly height: number;
@@ -44,6 +31,8 @@ const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
 >();
+// Must match SIMPLE_MASK_LOW_PRESSURE_GAIN in gpu/shader-sources.ts.
+const SIMPLE_MASK_LOW_PRESSURE_GAIN = 0.9;
 const GRAIN_HEIGHT_CACHE_LIMIT = 8;
 const GRAIN_TILE_SIZE = 128;
 const REPEAT_CONTACT_STRENGTH = 0.75;
@@ -66,7 +55,7 @@ interface SurfaceContactRaster {
 
 /**
  * stroke-spaceの符号付きpaint distanceをswept quadの各pixelで求め、
- * 最終alphaへ変換する。simpleは直接評価、fieldは格子から補間する。
+ * simple dropoutを直接評価して最終alphaへ変換する。
  *
  * atlasを先にalpha化してCanvasで重ねると、区間境界のsource-overにより
  * 低筆圧の未着彩部へ薄いalphaが蓄積するため、このmaskはsoftware rasterで
@@ -91,24 +80,15 @@ export function rasterizeBristleMask(
   const ctx = getContext(canvas, "bristle swept mask");
   if (samples.length < 2) return canvas;
 
-  const field =
-    readBristleMaskModeDebugFlag() === "simple"
-      ? createSimpleBristleMaskEvaluator(
-          samples,
-          brushSize,
-          dynamics,
-          pressureCoverageResponse,
-          seed,
-        )
-      : createBristleMaskField(
-          samples,
-          brushSize,
-          dynamics,
-          pressureCoverageResponse,
-          seed,
-        );
-  rasterizeBristleMaskFieldIntoCanvas(
-    field,
+  const evaluator = createSimpleBristleMaskEvaluator(
+    samples,
+    brushSize,
+    dynamics,
+    pressureCoverageResponse,
+    seed,
+  );
+  rasterizeBristleMaskIntoCanvas(
+    evaluator,
     samples,
     brushSize,
     dynamics,
@@ -121,8 +101,8 @@ export function rasterizeBristleMask(
   return canvas;
 }
 
-export function rasterizeBristleMaskFieldForTest(
-  field: BristleMaskField | BristleMaskEvaluator,
+export function rasterizeBristleMaskEvaluatorForTest(
+  evaluator: BristleMaskEvaluator,
   samples: readonly BristleMaskSweepSample[],
   brushSize: number,
   dynamics: BristleDynamics,
@@ -133,10 +113,10 @@ export function rasterizeBristleMaskFieldForTest(
   height: number,
 ): OffscreenCanvas {
   const canvas = new OffscreenCanvas(width, height);
-  const ctx = getContext(canvas, "bristle swept mask field test");
+  const ctx = getContext(canvas, "bristle swept mask evaluator test");
   if (samples.length < 2) return canvas;
-  rasterizeBristleMaskFieldIntoCanvas(
-    field,
+  rasterizeBristleMaskIntoCanvas(
+    evaluator,
     samples,
     brushSize,
     dynamics,
@@ -149,8 +129,8 @@ export function rasterizeBristleMaskFieldForTest(
   return canvas;
 }
 
-function rasterizeBristleMaskFieldIntoCanvas(
-  field: BristleMaskField | BristleMaskEvaluator,
+function rasterizeBristleMaskIntoCanvas(
+  evaluator: BristleMaskEvaluator,
   samples: readonly BristleMaskSweepSample[],
   brushSize: number,
   dynamics: BristleDynamics,
@@ -170,11 +150,8 @@ function rasterizeBristleMaskFieldIntoCanvas(
     ? performance.now() - uploadCreateStartedAt
     : 0;
   const halfWidth = brushSize / 2;
-  const maxV = field.height - 1;
-  const evaluate =
-    "evaluate" in field
-      ? field.evaluate
-      : (u: number, v: number) => sampleFieldDistance(field, u, v);
+  const maxV = evaluator.height - 1;
+  const evaluate = evaluator.evaluate;
   perfStage("maskRaster", () => {
     const surface = createSurfaceContactRaster(
       dynamics,
@@ -249,24 +226,6 @@ function rasterizeBristleMaskFieldIntoCanvas(
   }
 }
 
-export function createBristleMaskField(
-  samples: readonly BristleMaskSample[],
-  brushSize: number,
-  dynamics: BristleDynamics,
-  pressureCoverageResponse: number,
-  seed: number,
-): BristleMaskField {
-  return perfStage("maskField", () =>
-    createBristleMaskFieldUnmeasured(
-      samples,
-      brushSize,
-      dynamics,
-      pressureCoverageResponse,
-      seed,
-    ),
-  );
-}
-
 /** Internal simple-mask evaluator; u/v use the CPU sweep's sample/band indices. */
 export function createSimpleBristleMaskEvaluator(
   samples: readonly BristleMaskSample[],
@@ -280,7 +239,6 @@ export function createSimpleBristleMaskEvaluator(
     Math.ceil(brushSize / Math.max(0.25, dynamics.transverseMaskCellPx)),
   );
   const coverageResponse = clamp(pressureCoverageResponse, 0, 1);
-  const lowPressureGain = readBristleLowPressureGainDebugFlag();
 
   if (brushPerfDebug.nullStages.nullField) {
     return { height: rows, evaluate: () => 1 };
@@ -308,112 +266,11 @@ export function createSimpleBristleMaskEvaluator(
       );
       const pressure = clamp(samplePressure(samples, u), 0, 1);
       const effectivePressure = 0.5 + (pressure - 0.5) * coverageResponse;
-      const threshold = 0.5 + (0.5 - effectivePressure) * lowPressureGain;
+      const threshold =
+        0.5 + (0.5 - effectivePressure) * SIMPLE_MASK_LOW_PRESSURE_GAIN;
       return broad - threshold;
     },
   };
-}
-
-export function readBristleMaskModeDebugFlag(): BristleMaskMode {
-  const value = (
-    globalThis as typeof globalThis & {
-      __headlessPaintBristleMask?: unknown;
-    }
-  ).__headlessPaintBristleMask;
-  return value === "field" ? "field" : "simple";
-}
-
-export function readBristleLowPressureGainDebugFlag(): number {
-  const value = (
-    globalThis as typeof globalThis & {
-      __headlessPaintBristleLowPressureGain?: unknown;
-    }
-  ).__headlessPaintBristleLowPressureGain;
-  return typeof value === "number" && Number.isFinite(value)
-    ? clamp(value, 0, 1)
-    : 0.9;
-}
-
-function createBristleMaskFieldUnmeasured(
-  samples: readonly BristleMaskSample[],
-  brushSize: number,
-  dynamics: BristleDynamics,
-  pressureCoverageResponse: number,
-  seed: number,
-): BristleMaskField {
-  const width = Math.max(1, samples.length);
-  const bands = Math.max(
-    30,
-    Math.ceil(brushSize / Math.max(0.25, dynamics.transverseMaskCellPx)),
-  );
-  const values = new Float32Array(width * bands);
-  const coverageResponse = clamp(pressureCoverageResponse, 0, 1);
-
-  if (brushPerfDebug.nullStages.nullField) {
-    values.fill(1);
-    perfSample("fieldCells", values.length);
-    return { width, height: bands, values };
-  }
-
-  for (let band = 0; band < bands; band++) {
-    const crossPx = (-0.5 + (band + 0.5) / bands) * brushSize;
-    for (let index = 0; index < samples.length; index++) {
-      const sample = samples[index];
-      if (!sample) continue;
-      const broad = valueNoise2d(
-        sample.distance / Math.max(4, dynamics.dropoutLengthPx),
-        crossPx / Math.max(0.5, dynamics.dropoutWidthPx),
-        seed ^ 0x510e527f,
-      );
-      const detail = valueNoise2d(
-        sample.distance / Math.max(2, dynamics.dropoutLengthPx * 0.46),
-        crossPx / Math.max(0.35, dynamics.dropoutWidthPx * 0.58),
-        seed ^ 0x1f83d9ab,
-      );
-      const pressure = clamp(sample.pressure, 0, 1);
-      const effectivePressure = 0.5 + (pressure - 0.5) * coverageResponse;
-      const threshold = 0.5 + (0.5 - effectivePressure) * 0.98;
-      let signal = broad * 0.78 + detail * 0.22;
-      if (dynamics.edgeTextureAmount > 0) {
-        const micro = valueNoise2d(
-          sample.distance / Math.max(2, dynamics.edgeTextureLengthPx),
-          crossPx / Math.max(2, dynamics.dropoutWidthPx * 0.2),
-          seed ^ 0x5be0cd19,
-        );
-        const envelope = 1 - smoothstep(Math.abs(signal - threshold) / 0.34);
-        signal +=
-          (micro * 2 - 1) *
-          0.32 *
-          clamp(dynamics.edgeTextureAmount, 0, 1) *
-          envelope;
-      }
-      values[band * width + index] = signal - threshold;
-    }
-  }
-  perfSample("fieldCells", values.length);
-  return { width, height: bands, values };
-}
-
-function sampleFieldDistance(
-  field: BristleMaskField,
-  u: number,
-  v: number,
-): number {
-  const clampedU = clamp(u, 0, field.width - 1);
-  const clampedV = clamp(v, 0, field.height - 1);
-  const u0 = Math.floor(clampedU);
-  const v0 = Math.floor(clampedV);
-  const u1 = Math.min(field.width - 1, u0 + 1);
-  const v1 = Math.min(field.height - 1, v0 + 1);
-  const fu = clampedU - u0;
-  const fv = clampedV - v0;
-  const top =
-    (field.values[v0 * field.width + u0] ?? -1) * (1 - fu) +
-    (field.values[v0 * field.width + u1] ?? -1) * fu;
-  const bottom =
-    (field.values[v1 * field.width + u0] ?? -1) * (1 - fu) +
-    (field.values[v1 * field.width + u1] ?? -1) * fu;
-  return top * (1 - fv) + bottom * fv;
 }
 
 function rasterizeTriangle(

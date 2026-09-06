@@ -76,14 +76,14 @@ export const BRISTLE_MASK_VERTEX_SHADER_SOURCE = `#version 300 es
 precision highp float;
 
 layout(location = 0) in vec2 aPosition;
-layout(location = 1) in vec2 aFieldCoord;
+layout(location = 1) in vec2 aStrokeCoord;
 layout(location = 2) in float aPressure;
 layout(location = 3) in float aTrialId;
 
 uniform vec2 uAtlasSize;
 uniform vec2 uAtlasOrigin;
 
-out vec2 vFieldCoord;
+out vec2 vStrokeCoord;
 out float vPressure;
 flat out float vTrialId;
 
@@ -94,7 +94,7 @@ void main() {
     0.0,
     1.0
   );
-  vFieldCoord = aFieldCoord;
+  vStrokeCoord = aStrokeCoord;
   vPressure = aPressure;
   vTrialId = aTrialId;
 }
@@ -104,11 +104,7 @@ export const BRISTLE_MASK_FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 precision highp int;
 
-uniform sampler2D uMaskField;
 uniform sampler2D uTooth;
-uniform ivec2 uFieldSize;
-uniform ivec2 uMaskFieldTextureSize;
-uniform ivec2 uMaskFieldOrigin;
 uniform vec2 uAtlasSize;
 uniform vec2 uAtlasOrigin;
 uniform ivec2 uDocumentOrigin;
@@ -117,12 +113,13 @@ uniform float uGrainAmount;
 uniform float uGrainSoftness;
 uniform uint uGrainSeed;
 uniform uint uStrokeSeed;
-uniform bool uSimpleMask;
 uniform vec2 uDropoutSize;
 uniform float uPressureCoverageResponse;
-uniform float uLowPressureGain;
 
-in vec2 vFieldCoord;
+// Must match SIMPLE_MASK_LOW_PRESSURE_GAIN in ../bristle-mask.ts.
+const float SIMPLE_MASK_LOW_PRESSURE_GAIN = 0.9;
+
+in vec2 vStrokeCoord;
 in float vPressure;
 flat in float vTrialId;
 out vec4 outColor;
@@ -158,32 +155,6 @@ float valueNoise2d(vec2 position, uint seed) {
   );
 }
 
-float sampleField(vec2 coord) {
-  vec2 clamped = clamp(coord, vec2(0.0), vec2(uFieldSize - ivec2(1)));
-  ivec2 p0 = ivec2(floor(clamped));
-  ivec2 p1 = min(p0 + ivec2(1), uFieldSize - ivec2(1));
-  vec2 fraction = clamped - vec2(p0);
-  vec2 p0Uv =
-    (vec2(uMaskFieldOrigin + p0) + vec2(0.5)) /
-    vec2(uMaskFieldTextureSize);
-  vec2 p1Uv =
-    (vec2(uMaskFieldOrigin + p1) + vec2(0.5)) /
-    vec2(uMaskFieldTextureSize);
-  return mix(
-    mix(
-      texture(uMaskField, p0Uv).r,
-      texture(uMaskField, vec2(p1Uv.x, p0Uv.y)).r,
-      fraction.x
-    ),
-    mix(
-      texture(uMaskField, vec2(p0Uv.x, p1Uv.y)).r,
-      texture(uMaskField, p1Uv).r,
-      fraction.x
-    ),
-    fraction.y
-  );
-}
-
 float activationFromDistance(float distance, float hardness) {
   float transition = 0.018 + 0.282 * pow(1.0 - clamp(hardness, 0.0, 1.0), 2.0);
   return smoothstep(0.0, 1.0, (distance + transition * 0.5) / transition);
@@ -191,13 +162,13 @@ float activationFromDistance(float distance, float hardness) {
 
 float simpleMaskDistance() {
   float broad = valueNoise2d(
-    vFieldCoord / uDropoutSize,
+    vStrokeCoord / uDropoutSize,
     uStrokeSeed ^ 0x510e527fu
   );
   float pressure = clamp(vPressure, 0.0, 1.0);
   float effectivePressure =
     0.5 + (pressure - 0.5) * uPressureCoverageResponse;
-  float threshold = 0.5 + (0.5 - effectivePressure) * uLowPressureGain;
+  float threshold = 0.5 + (0.5 - effectivePressure) * SIMPLE_MASK_LOW_PRESSURE_GAIN;
   return broad - threshold;
 }
 
@@ -231,7 +202,7 @@ bool hasSurfaceContact(ivec2 documentPixel, float pressure, int trialId) {
 
 void main() {
   float alpha = activationFromDistance(
-    uSimpleMask ? simpleMaskDistance() : sampleField(vFieldCoord),
+    simpleMaskDistance(),
     uDepositHardness
   );
   ivec2 localPixel = ivec2(

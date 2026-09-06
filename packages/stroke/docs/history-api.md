@@ -81,6 +81,19 @@ checkpoint coverage 判定は command 種別ごとに次のレイヤーを対象
 | `duplicate-layer` | `command.sourceLayerId` |
 | `merge-layer-down` | `command.sourceLayerId`, `command.targetLayerId` |
 
+### GPU undo-1 と command の同一性
+
+GPU 加速器（engine の `createBrushAccelerator`）を使う stroke では、`createStrokeRuntime` が確定時に `StrokeCommand` オブジェクトを token として加速器に登録し、`pushCommand` がその command を history の index / branch に結び付ける。`executeHistoryOp("undo")` はこの結び付きが有効なとき rebuild を省略して GPU 内の stroke 開始前スナップショットから復元する（直前 1 手のみ。engine の [gpu-acceleration.md](../../engine/docs/gpu-acceleration.md) 「undo-1 スナップショット」）。
+
+契約（どれかが崩れると結果は正しいまま undo-1 だけが静かに無効化される）:
+
+- `onCommit` で受け取った command オブジェクトをそのまま `pushCommand` に渡す。DTO 化・クローン・再生成した command は token と一致しない
+- `HistoryState.commands` 配列を複製しない。復元判定は `currentIndex` と `commands` の**参照同一性**で行う（`[...state.commands]` は miss になる）
+- runtime（`createStrokeRuntime`）と executor（`executeHistoryOp`）に同じ accelerator と同じ Layer インスタンスを渡す
+- Undo は `executeHistoryOp` 経由で行う。`createIncrementalStrokeRenderer` を直接使う低レベル利用では登録は行われない
+
+仲介は `gpu-undo-cache.ts` の `retainGpuUndo` / `bindGpuUndoHistory` / `getGpuUndoRuntime`（内部）。
+
 ## undo / redo / canUndo / canRedo
 
 ```typescript

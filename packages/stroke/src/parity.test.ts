@@ -588,16 +588,11 @@ describe("GPU rough bristle parity", () => {
   });
 
   it("GPU perFlush mixing の live/replay/undo/redo が byte-identical", () => {
-    const debugGlobal = globalThis as typeof globalThis & {
-      __headlessPaintGpuBristleField?: "perRun" | "perFlush";
-    };
-    debugGlobal.__headlessPaintGpuBristleField = "perFlush";
     const accelerator = createTestAccelerator();
     try {
       expectRoughMixingHistoryParity(accelerator, "GPU perFlush rough");
     } finally {
       accelerator.dispose();
-      debugGlobal.__headlessPaintGpuBristleField = undefined;
     }
   });
 

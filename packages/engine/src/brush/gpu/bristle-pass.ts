@@ -1,4 +1,3 @@
-import { readBristleLowPressureGainDebugFlag } from "../bristle-mask";
 import { perfStage } from "../perf-debug";
 import { createProgram, requireResource } from "./gl-resources";
 import type {
@@ -21,19 +20,14 @@ const INK_VERTEX_FLOATS = 4;
 interface MaskUniforms {
   readonly atlasSize: WebGLUniformLocation;
   readonly atlasOrigin: WebGLUniformLocation;
-  readonly fieldSize: WebGLUniformLocation;
-  readonly fieldTextureSize: WebGLUniformLocation;
-  readonly fieldOrigin: WebGLUniformLocation;
   readonly documentOrigin: WebGLUniformLocation;
   readonly depositHardness: WebGLUniformLocation;
   readonly grainAmount: WebGLUniformLocation;
   readonly grainSoftness: WebGLUniformLocation;
   readonly grainSeed: WebGLUniformLocation;
   readonly strokeSeed: WebGLUniformLocation;
-  readonly simpleMask: WebGLUniformLocation;
   readonly dropoutSize: WebGLUniformLocation;
   readonly pressureCoverageResponse: WebGLUniformLocation;
-  readonly lowPressureGain: WebGLUniformLocation;
 }
 
 interface InkUniforms {
@@ -128,18 +122,13 @@ export function createGpuBristlePassResources(
   const maskUniforms: MaskUniforms = {
     atlasSize: uniformLocation(gl, maskProgram, "uAtlasSize"),
     atlasOrigin: uniformLocation(gl, maskProgram, "uAtlasOrigin"),
-    fieldSize: uniformLocation(gl, maskProgram, "uFieldSize"),
-    fieldTextureSize: uniformLocation(gl, maskProgram, "uMaskFieldTextureSize"),
-    fieldOrigin: uniformLocation(gl, maskProgram, "uMaskFieldOrigin"),
     documentOrigin: uniformLocation(gl, maskProgram, "uDocumentOrigin"),
     depositHardness: uniformLocation(gl, maskProgram, "uDepositHardness"),
     grainAmount: uniformLocation(gl, maskProgram, "uGrainAmount"),
     grainSoftness: uniformLocation(gl, maskProgram, "uGrainSoftness"),
     grainSeed: uniformLocation(gl, maskProgram, "uGrainSeed"),
     strokeSeed: uniformLocation(gl, maskProgram, "uStrokeSeed"),
-    simpleMask: uniformLocation(gl, maskProgram, "uSimpleMask"),
     dropoutSize: uniformLocation(gl, maskProgram, "uDropoutSize"),
-    lowPressureGain: uniformLocation(gl, maskProgram, "uLowPressureGain"),
     pressureCoverageResponse: uniformLocation(
       gl,
       maskProgram,
@@ -182,10 +171,6 @@ export function createGpuBristlePassResources(
     gl.createBuffer(),
     "GPU bristle vertex buffer",
   );
-  const maskFieldTexture = requireResource(
-    gl.createTexture(),
-    "GPU bristle mask field texture",
-  );
   const toothTexture = requireResource(
     gl.createTexture(),
     "GPU bristle tooth texture",
@@ -207,23 +192,10 @@ export function createGpuBristlePassResources(
     "GPU bristle atlas framebuffer",
   );
 
-  configureTexture(gl, maskFieldTexture, gl.NEAREST);
   configureTexture(gl, toothTexture, gl.NEAREST);
   configureTexture(gl, profileTexture, gl.LINEAR);
   configureTexture(gl, fallbackMaterialTexture, gl.NEAREST);
   configureTexture(gl, atlasTexture, gl.NEAREST);
-  gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.R32F,
-    1,
-    1,
-    0,
-    gl.RED,
-    gl.FLOAT,
-    new Float32Array([0]),
-  );
   gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
   gl.framebufferTexture2D(
     gl.FRAMEBUFFER,
@@ -248,7 +220,6 @@ export function createGpuBristlePassResources(
   );
   configureGeometry(gl, maskVertexArray, inkVertexArray, vertexBuffer);
   gl.useProgram(maskProgram);
-  gl.uniform1i(uniformLocation(gl, maskProgram, "uMaskField"), 0);
   gl.uniform1i(uniformLocation(gl, maskProgram, "uTooth"), 1);
   gl.useProgram(inkProgram);
   gl.uniform1i(uniformLocation(gl, inkProgram, "uProfile"), 0);
@@ -260,8 +231,6 @@ export function createGpuBristlePassResources(
 
   let atlasWidth = 0;
   let atlasHeight = 0;
-  let maskFieldTextureWidth = 1;
-  let maskFieldTextureHeight = 1;
   let profileTextureWidth = 0;
   let profileTextureHeight = 0;
   let vertexBufferCapacity = 0;
@@ -288,7 +257,6 @@ export function createGpuBristlePassResources(
     const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
     const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
     ensureAtlasSize(chunkWidth * 2, chunkHeight);
-    uploadMaskFields([chunk]);
     uploadTooth(chunk);
     gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
     prepareAtlas();
@@ -332,71 +300,6 @@ export function createGpuBristlePassResources(
       null,
     );
     atlasStatusNeedsCheck = true;
-  }
-
-  function uploadMaskFields(chunks: readonly GpuBristleChunk[]): number[] {
-    const usedWidth = chunks.reduce(
-      (maximum, chunk) =>
-        chunk.simpleMask ? maximum : Math.max(maximum, chunk.maskFieldColumns),
-      0,
-    );
-    const usedHeight = chunks.reduce(
-      (sum, chunk) => sum + (chunk.simpleMask ? 0 : chunk.maskFieldRows),
-      0,
-    );
-    const origins: number[] = [];
-    if (usedWidth === 0 || usedHeight === 0) {
-      return chunks.map(() => 0);
-    }
-    const packed = new Float32Array(usedWidth * usedHeight);
-    let originY = 0;
-    for (const chunk of chunks) {
-      origins.push(originY);
-      if (chunk.simpleMask) continue;
-      for (let row = 0; row < chunk.maskFieldRows; row++) {
-        packed.set(
-          chunk.maskField.subarray(
-            row * chunk.maskFieldColumns,
-            (row + 1) * chunk.maskFieldColumns,
-          ),
-          (originY + row) * usedWidth,
-        );
-      }
-      originY += chunk.maskFieldRows;
-    }
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
-    if (
-      usedWidth > maskFieldTextureWidth ||
-      usedHeight > maskFieldTextureHeight
-    ) {
-      maskFieldTextureWidth = Math.max(maskFieldTextureWidth, usedWidth);
-      maskFieldTextureHeight = Math.max(maskFieldTextureHeight, usedHeight);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.R32F,
-        maskFieldTextureWidth,
-        maskFieldTextureHeight,
-        0,
-        gl.RED,
-        gl.FLOAT,
-        null,
-      );
-    }
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      0,
-      0,
-      usedWidth,
-      usedHeight,
-      gl.RED,
-      gl.FLOAT,
-      packed,
-    );
-    return origins;
   }
 
   function uploadTooth(chunk: GpuBristleChunk): void {
@@ -471,9 +374,6 @@ export function createGpuBristlePassResources(
 
   function drawAtlasPage(page: AtlasPage): void {
     perfStage("gpuBristleMask", () => {
-      const fieldOrigins = uploadMaskFields(
-        page.slots.map((slot) => slot.chunk),
-      );
       const first = page.slots[0];
       const sharedTooth = page.slots.every(
         (slot) =>
@@ -493,7 +393,7 @@ export function createGpuBristlePassResources(
         if (!slot) continue;
         if (!sharedTooth) uploadTooth(slot.chunk);
         if (!sharedProfile) uploadProfile(slot.chunk.profileAtlas);
-        drawMask(slot.chunk, slot.x, slot.y, fieldOrigins[index] ?? 0);
+        drawMask(slot.chunk, slot.x, slot.y);
         drawInk(slot.chunk, slot.x + slot.width, slot.y);
       }
     });
@@ -504,7 +404,6 @@ export function createGpuBristlePassResources(
     chunk: GpuBristleChunk,
     atlasX: number,
     atlasY: number,
-    fieldOriginY = 0,
   ): void {
     gl.viewport(0, 0, atlasWidth, atlasHeight);
     const vertices = createMaskVertices(chunk);
@@ -513,17 +412,6 @@ export function createGpuBristlePassResources(
     gl.useProgram(maskProgram);
     gl.uniform2f(maskUniforms.atlasSize, atlasWidth, atlasHeight);
     gl.uniform2f(maskUniforms.atlasOrigin, atlasX, atlasY);
-    gl.uniform2i(
-      maskUniforms.fieldSize,
-      chunk.maskFieldColumns,
-      chunk.maskFieldRows,
-    );
-    gl.uniform2i(
-      maskUniforms.fieldTextureSize,
-      maskFieldTextureWidth,
-      maskFieldTextureHeight,
-    );
-    gl.uniform2i(maskUniforms.fieldOrigin, 0, fieldOriginY);
     gl.uniform2i(
       maskUniforms.documentOrigin,
       chunk.bboxRect.left,
@@ -534,22 +422,15 @@ export function createGpuBristlePassResources(
     gl.uniform1f(maskUniforms.grainSoftness, chunk.grain.softness);
     gl.uniform1ui(maskUniforms.grainSeed, chunk.grain.grainSeed >>> 0);
     gl.uniform1ui(maskUniforms.strokeSeed, chunk.grain.strokeSeed >>> 0);
-    gl.uniform1i(maskUniforms.simpleMask, chunk.simpleMask ? 1 : 0);
     gl.uniform2f(
       maskUniforms.dropoutSize,
-      chunk.simpleMask?.dropoutLengthPx ?? 1,
-      chunk.simpleMask?.dropoutWidthPx ?? 1,
+      chunk.simpleMask.dropoutLengthPx,
+      chunk.simpleMask.dropoutWidthPx,
     );
     gl.uniform1f(
       maskUniforms.pressureCoverageResponse,
-      chunk.simpleMask?.pressureCoverageResponse ?? 0,
+      chunk.simpleMask.pressureCoverageResponse,
     );
-    gl.uniform1f(
-      maskUniforms.lowPressureGain,
-      chunk.simpleMask ? readBristleLowPressureGainDebugFlag() : 0.9,
-    );
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, maskFieldTexture);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, toothTexture);
     gl.enable(gl.BLEND);
@@ -691,7 +572,6 @@ export function createGpuBristlePassResources(
     gl.deleteVertexArray(maskVertexArray);
     gl.deleteVertexArray(inkVertexArray);
     gl.deleteBuffer(vertexBuffer);
-    gl.deleteTexture(maskFieldTexture);
     gl.deleteTexture(toothTexture);
     gl.deleteTexture(profileTexture);
     gl.deleteTexture(fallbackMaterialTexture);
@@ -715,12 +595,6 @@ function createAtlasPages(
     if (width * 2 > maxTextureSize || height > maxTextureSize) {
       throw new Error("GPU bristle chunk exceeds the atlas texture limit");
     }
-    if (
-      draw.chunk.maskFieldColumns > maxTextureSize ||
-      draw.chunk.maskFieldRows > maxTextureSize
-    ) {
-      throw new Error("GPU bristle mask field exceeds the texture limit");
-    }
     return [{ ...draw, width, height }];
   });
   if (entries.length === 0) return [];
@@ -742,7 +616,6 @@ function createAtlasPages(
   let y = 0;
   let rowHeight = 0;
   let usedWidth = 0;
-  let maskRows = 0;
 
   const finishPage = () => {
     if (slots.length === 0) return;
@@ -752,14 +625,10 @@ function createAtlasPages(
     y = 0;
     rowHeight = 0;
     usedWidth = 0;
-    maskRows = 0;
   };
 
   for (const entry of entries) {
     const slotWidth = entry.width * 2;
-    if (maskRows > 0 && maskRows + entry.chunk.maskFieldRows > maxTextureSize) {
-      finishPage();
-    }
     if (x > 0 && x + slotWidth > packWidth) {
       x = 0;
       y += rowHeight;
@@ -770,7 +639,6 @@ function createAtlasPages(
     x += slotWidth;
     rowHeight = Math.max(rowHeight, entry.height);
     usedWidth = Math.max(usedWidth, x);
-    maskRows += entry.chunk.maskFieldRows;
   }
   finishPage();
   return pages;
@@ -781,37 +649,36 @@ function createMaskVertices(chunk: GpuBristleChunk): Float32Array {
   const halfWidth = chunk.brushSize / 2;
   const originX = chunk.bboxRect.left;
   const originY = chunk.bboxRect.top;
-  const simple = chunk.simpleMask !== undefined;
   for (const segment of chunk.segments) {
     const fromLeft = maskVertex(
       segment.fromX + segment.fromFrameY * halfWidth - originX,
       segment.fromY - segment.fromFrameX * halfWidth - originY,
-      simple ? segment.fromDistance : segment.fromFieldColumn,
-      simple ? -halfWidth : 0,
+      segment.fromDistance,
+      -halfWidth,
       segment.fromPressure,
       segment.trialId,
     );
     const fromRight = maskVertex(
       segment.fromX - segment.fromFrameY * halfWidth - originX,
       segment.fromY + segment.fromFrameX * halfWidth - originY,
-      simple ? segment.fromDistance : segment.fromFieldColumn,
-      simple ? halfWidth : chunk.maskFieldRows - 1,
+      segment.fromDistance,
+      halfWidth,
       segment.fromPressure,
       segment.trialId,
     );
     const toLeft = maskVertex(
       segment.toX + segment.toFrameY * halfWidth - originX,
       segment.toY - segment.toFrameX * halfWidth - originY,
-      simple ? segment.toDistance : segment.toFieldColumn,
-      simple ? -halfWidth : 0,
+      segment.toDistance,
+      -halfWidth,
       segment.toPressure,
       segment.trialId,
     );
     const toRight = maskVertex(
       segment.toX - segment.toFrameY * halfWidth - originX,
       segment.toY + segment.toFrameX * halfWidth - originY,
-      simple ? segment.toDistance : segment.toFieldColumn,
-      simple ? halfWidth : chunk.maskFieldRows - 1,
+      segment.toDistance,
+      halfWidth,
       segment.toPressure,
       segment.trialId,
     );
