@@ -25,7 +25,7 @@ Canvas2Dベースのペイントライブラリ。OffscreenCanvasでヘッドレ
 
 **委譲プロンプトの書き方・検収手順・差し戻しの型は delegation skill に必ず従う。** 最重要の不変則のみここに置く:
 
-- `codex exec --full-auto "<プロンプト>" </dev/null` 単独起動（`</dev/null` 必須・`&&` チェーン禁止）
+- `codex exec -s workspace-write "<プロンプト>" </dev/null` 単独起動（`</dev/null` 必須・`&&` チェーン禁止。codex 0.153 以降 `--full-auto` は廃止）
 - **codex の「テスト通過」報告を検収とみなさない**。codex sandbox では browser テスト（vitest browser mode）が実行できないため、報告は常にノンブラウザ範囲のみ。検収（`pnpm -r build && pnpm test && pnpm lint` のフル実行 + 核心テストの現物確認）は Claude 側で実施し、green になってからコミットする
 - 検収でテストが落ちたら「直して」で返さず、根本原因を特定・分類して差し戻す。production バグの場合は該当テストを変更禁止と明記する
 - 読み取り専用レビューは `codex review`（`/codex-review` skill）を使う。委譲とは用途を分ける
