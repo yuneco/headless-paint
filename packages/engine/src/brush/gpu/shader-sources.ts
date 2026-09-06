@@ -374,13 +374,11 @@ vec4 checkpointTexel(ivec2 tilePixel, int branchIndex) {
   ) {
     return vec4(0.0);
   }
-  vec4 premultiplied = texelFetch(
+  return texelFetch(
     uCheckpoints,
     ivec3(tilePixel.x, checkpointSize.y - 1 - tilePixel.y, branchIndex),
     0
   );
-  if (premultiplied.a <= 0.0) return vec4(0.0);
-  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
 }
 
 vec4 sampleCheckpointBilinear(vec2 documentPosition, int branchIndex) {
@@ -388,7 +386,7 @@ vec4 sampleCheckpointBilinear(vec2 documentPosition, int branchIndex) {
     documentPosition - uCheckpointRects[branchIndex].xy - vec2(0.5);
   ivec2 p0 = ivec2(floor(samplePosition));
   vec2 fraction = samplePosition - vec2(p0);
-  return mix(
+  vec4 premultiplied = mix(
     mix(
       checkpointTexel(p0, branchIndex),
       checkpointTexel(p0 + ivec2(1, 0), branchIndex),
@@ -401,6 +399,8 @@ vec4 sampleCheckpointBilinear(vec2 documentPosition, int branchIndex) {
     ),
     fraction.y
   );
+  if (premultiplied.a <= 0.0) return vec4(0.0);
+  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
 }
 
 void main() {
@@ -466,9 +466,7 @@ vec4 checkpointTexel(
     tilePixel.x,
     checkpointSize.y - 1 - tilePixel.y
   );
-  vec4 premultiplied = texelFetch(uCheckpoints, atlasPixel, 0);
-  if (premultiplied.a <= 0.0) return vec4(0.0);
-  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
+  return texelFetch(uCheckpoints, atlasPixel, 0);
 }
 
 vec4 sampleCheckpointBilinear(
@@ -479,7 +477,7 @@ vec4 sampleCheckpointBilinear(
   vec2 samplePosition = documentPosition - checkpointRect.xy - vec2(0.5);
   ivec2 p0 = ivec2(floor(samplePosition));
   vec2 fraction = samplePosition - vec2(p0);
-  return mix(
+  vec4 premultiplied = mix(
     mix(
       checkpointTexel(p0, checkpointRect, atlasOrigin),
       checkpointTexel(p0 + ivec2(1, 0), checkpointRect, atlasOrigin),
@@ -492,6 +490,8 @@ vec4 sampleCheckpointBilinear(
     ),
     fraction.y
   );
+  if (premultiplied.a <= 0.0) return vec4(0.0);
+  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
 }
 
 vec4 flushStartTexel(ivec2 tilePixel, vec4 checkpointRect) {
@@ -510,13 +510,11 @@ vec4 flushStartTexel(ivec2 tilePixel, vec4 checkpointRect) {
   ) {
     return vec4(0.0);
   }
-  vec4 premultiplied = texelFetch(
+  return texelFetch(
     uFlushStartAccum,
     ivec2(documentPixel.x, uSurfaceDimensions.y - 1 - documentPixel.y),
     0
   );
-  if (premultiplied.a <= 0.0) return vec4(0.0);
-  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
 }
 
 vec4 sampleFlushStartBilinear(
@@ -526,7 +524,7 @@ vec4 sampleFlushStartBilinear(
   vec2 samplePosition = documentPosition - checkpointRect.xy - vec2(0.5);
   ivec2 p0 = ivec2(floor(samplePosition));
   vec2 fraction = samplePosition - vec2(p0);
-  return mix(
+  vec4 premultiplied = mix(
     mix(
       flushStartTexel(p0, checkpointRect),
       flushStartTexel(p0 + ivec2(1, 0), checkpointRect),
@@ -539,6 +537,8 @@ vec4 sampleFlushStartBilinear(
     ),
     fraction.y
   );
+  if (premultiplied.a <= 0.0) return vec4(0.0);
+  return vec4(premultiplied.rgb / premultiplied.a, premultiplied.a);
 }
 
 void main() {

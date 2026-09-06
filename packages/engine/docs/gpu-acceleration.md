@@ -114,6 +114,7 @@ spray・非混色 stamp は対象外（CPU 経路のみ）。
 - **accum**: layer 同寸の RGBA8 texture（premultiplied）。stroke 開始時に layer 内容を upload（常駐 hit 時は省略）
 - **dab**: instanced draw。fragment = tip mask × 混色 field（bilinear）。`source-over`（premultiplied）で accum へ蓄積。Expand は branch ごとの instance を branch 0 → 1 → … の順に flush し、CPU 経路と同じ重なり順を保つ
 - **混色 field**: `fieldColumns × fieldRows` を branch 数分縦に並べた strip texture（RGBA16F。無ければ RGBA8）。`updateDistancePx` ごとに pickup / restore / diffusion を全 branch 1 pass で更新（式は CPU の `advanceMaterialField` と同一）
+- checkpoint の補間は CPU / GPU 共通で alpha 重み付き（premultiplied 補間 → unpremultiply）とし、透明画素は色に寄与しない
 - **checkpoint snapshot**: `checkpointDistancePx` ごとに、accum の局所 tile を branch 別の snapshot texture へ GPU 内で blit する。tile の中心は CPU の `captureCheckpoint` と同じだが、寸法は stroke 中に変わらないよう筆圧による stampSize の上限（`lineWidth × (1 + pressureDynamics.size)`）から決め、32px 単位で確保して縮小しない（sampling 位置は CPU と同一で、tile が大きい分は読まれない）。field の sampling 元はこの snapshot であり、CPU 経路の「直近 checkpoint 時点の tile を読む」時間基準を再現する
 - **commit**: pointer batch ごとに 1 回、branch 別 dirty rect を commit canvas（1024²）へ敷き詰めて一括 blit し、`transferToImageBitmap()` で得た 1 枚の ImageBitmap から rect ごとに `layer.ctx.drawImage` で書き戻す（WebGL canvas を drawImage の source にする回数を pass あたり 1 回に抑える。iOS WebKit では source 化ごとに snapshot copy が走るため）。dab ごとや点ごとには書き戻さない
 - **readback なし**: 上記のどこにも `getImageData` / `readPixels` は無く、GPU stroke 中は `layer.ctx` を drawImage の source にもしない（iOS WebKit では GPU-backed canvas の source 化ごとに snapshot copy が走るため）
@@ -181,7 +182,7 @@ GPU stroke の終了時、stroke 開始前の accum（base texture）を **直�
 - branch 上限 64（既定）。UI 上それ以上作れる場合は CPU 経路になる
 - `compositeOperation` は `source-over` のみ
 - WebGPU は未対応（WebGL2 のみ）
-- Rough bristle 混色の既知事項（CPU / GPU 共通）: field の mix 重みが run 単位の定数のため色が run 境界で階段状に変わる。掠れの多い領域で透明な下地から黒が混ざる（透明画素の pickup 処理）。いずれも perFlush 意味論の仕様上の挙動として記録済みで、修正時は CPU / GPU を同時に変える
+- Rough bristle 混色の既知事項（CPU / GPU 共通）: field の mix 重みが run 単位の定数のため色が run 境界で階段状に変わる。perFlush 意味論の仕様上の挙動として記録済みで、修正時は CPU / GPU を同時に変える
 
 ## デバッグ
 

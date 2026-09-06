@@ -825,14 +825,21 @@ function sampleBilinear(
   const offset01 = (y1 * source.width + x0) * 4;
   const offset11 = (y1 * source.width + x1) * 4;
 
-  for (let channel = 0; channel < 4; channel++) {
+  // Accumulate premultiplied color so transparent texels add no black.
+  const a00 = inside00 ? (source.data[offset00 + 3] ?? 0) * w00 : 0;
+  const a10 = inside10 ? (source.data[offset10 + 3] ?? 0) * w10 : 0;
+  const a01 = inside01 ? (source.data[offset01 + 3] ?? 0) * w01 : 0;
+  const a11 = inside11 ? (source.data[offset11 + 3] ?? 0) * w11 : 0;
+  const alpha = a00 + a10 + a01 + a11;
+  for (let channel = 0; channel < 3; channel++) {
     let value = 0;
-    if (inside00) value += (source.data[offset00 + channel] ?? 0) * w00;
-    if (inside10) value += (source.data[offset10 + channel] ?? 0) * w10;
-    if (inside01) value += (source.data[offset01 + channel] ?? 0) * w01;
-    if (inside11) value += (source.data[offset11 + channel] ?? 0) * w11;
-    output[outputOffset + channel] = value;
+    if (inside00) value += (source.data[offset00 + channel] ?? 0) * a00;
+    if (inside10) value += (source.data[offset10 + channel] ?? 0) * a10;
+    if (inside01) value += (source.data[offset01 + channel] ?? 0) * a01;
+    if (inside11) value += (source.data[offset11 + channel] ?? 0) * a11;
+    output[outputOffset + channel] = alpha > 0 ? value / alpha : 0;
   }
+  output[outputOffset + 3] = alpha;
 }
 
 function uploadMaterialCanvas(

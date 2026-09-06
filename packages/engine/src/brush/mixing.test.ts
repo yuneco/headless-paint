@@ -4,7 +4,64 @@ import {
   getActiveMixing,
   prepareBristleMixingInterpolationProfiles,
   prepareMixingState,
+  sampleRotatedCheckpoint,
 } from "./mixing";
+
+describe("sampleRotatedCheckpoint", () => {
+  it.each([
+    { label: "horizontal", centerX: 1, centerY: 0.5 },
+    { label: "vertical", centerX: 0.5, centerY: 1 },
+    { label: "outside tile", centerX: 0, centerY: 0.5 },
+  ])("preserves opaque color at a half-alpha $label boundary", (center) => {
+    const source: ImageData = {
+      width: 2,
+      height: 2,
+      colorSpace: "srgb",
+      data: new Uint8ClampedArray([
+        240, 200, 80, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      ]),
+    };
+    const sampled = sampleRotatedCheckpoint(
+      source,
+      0,
+      0,
+      center.centerX,
+      center.centerY,
+      0,
+      1,
+      1,
+      1,
+    );
+    // Straight RGB is unchanged; 0.5 alpha rounds to 128 in the byte output.
+    expect(Array.from(sampled)).toEqual([240, 200, 80, 128]);
+  });
+
+  it("returns zero RGBA when all contributing texels are transparent", () => {
+    const source: ImageData = {
+      width: 1,
+      height: 1,
+      colorSpace: "srgb",
+      data: new Uint8ClampedArray([240, 200, 80, 0]),
+    };
+    expect(
+      Array.from(sampleRotatedCheckpoint(source, 0, 0, 1, 1, 0, 1, 1, 1)),
+    ).toEqual([0, 0, 0, 0]);
+  });
+
+  it("weights all four colors by their alpha before unpremultiplying", () => {
+    const source: ImageData = {
+      width: 2,
+      height: 2,
+      colorSpace: "srgb",
+      data: new Uint8ClampedArray([
+        255, 0, 0, 255, 0, 255, 0, 85, 0, 0, 255, 170, 255, 255, 255, 0,
+      ]),
+    };
+    expect(
+      Array.from(sampleRotatedCheckpoint(source, 0, 0, 1, 1, 0, 1, 1, 1)),
+    ).toEqual([128, 42, 85, 128]);
+  });
+});
 
 describe("getActiveMixing", () => {
   it("disables the complete mixing stage when pickup is zero", () => {

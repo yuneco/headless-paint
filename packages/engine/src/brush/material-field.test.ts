@@ -4,11 +4,45 @@ import {
   createMaterialField,
   writeMaterialFieldPixels,
 } from "./material-field";
+import { sampleRotatedCheckpoint } from "./mixing";
 
 const RED = { r: 255, g: 0, b: 0, a: 255 };
 const BLUE_SAMPLE = new Uint8ClampedArray([0, 0, 255, 255]);
 
 describe("material field", () => {
+  it("keeps yellow baseColor when mixing repeatedly across transparent substrate", () => {
+    const yellow = { r: 255, g: 255, b: 80, a: 255 };
+    const checkpoint: ImageData = {
+      width: 2,
+      height: 1,
+      colorSpace: "srgb",
+      data: new Uint8ClampedArray([255, 255, 80, 255, 0, 0, 0, 0]),
+    };
+    // Three field cells sample opaque yellow, the half-alpha edge, and clear.
+    const sampled = sampleRotatedCheckpoint(
+      checkpoint,
+      0,
+      0,
+      1,
+      0.5,
+      0,
+      1.5,
+      3,
+      1,
+    );
+    const initial = createMaterialField(3, 1, yellow);
+    let field = initial;
+    for (let step = 0; step < 20; step++) {
+      field = advanceMaterialField(field, sampled, 3, 1, yellow, {
+        pickupRatePerPx: 1,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0.05,
+        distancePx: 15,
+      });
+    }
+    expect(field).toEqual(initial);
+  });
+
   it("pickup/restoreは距離で正規化される", () => {
     const initial = createMaterialField(1, 1, RED);
     const oneStep = advanceMaterialField(initial, BLUE_SAMPLE, 1, 1, RED, {

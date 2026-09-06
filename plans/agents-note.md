@@ -27,7 +27,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 - **spray は小径だと粒子が極端に疎**: 仕様通り（密度が面積連動）だが、lineWidth 12 程度では 1 emission あたり粒子 1 個未満になりほぼ見えない。UX として小径時の密度下駄やプリセット側の density 引き上げを検討する余地がある。
 - **BrushPanelの設定同値比較を構造比較へ変更（2026-08-22）**: Bristle / Mixing追加時に手書きfield比較の漏れが再発したため、plain config全体の再帰的な同値比較へ置換した。今後BrushConfigへfieldを追加してもpreset選択表示のための列挙更新は不要。
 
-- **bristle 混色でまっさらなキャンバス上でも黒が混ざる（2026-09-06、iPad 実機、CPU/GPU 両方で再現・既存問題・対応は後回し）**: 薄い黄色でループを描くと、掠れの多い領域で黒が混ざり均一な薄黄色にならない。自己交差は不要。Pickup rate を上げ Restore rate を下げると顕著（観察時 pickup 0.018 / restore 0.004 / diffusion 0.05 / mix 15px / checkpoint 36px）。仮説: 掠れ領域の下地は透明（premultiplied 0,0,0,0）で、pickup がそれを黒として取り込んでいる（透明画素からの pickup は alpha 重みで no-op になるべき）。GPU の field UV bbox 近似とは別事象。Playwright WebKit の固定筆圧ジグザグ（黄色、Rough 80px、既定 rate）では再現せず、実ペンの筆圧変動 + 高 pickup が要る可能性。調査は `packages/engine/src/brush/mixing.ts` の pickup 式から
+- **混色の透明境界で黒が混ざる原因を修正（2026-09-06、実ブラウザ検収待ち）**: checkpointのstraight RGBA bilinearが透明黒をRGB平均へ含めていた。stamp / bristle共通のCPU samplingをalpha重み付きに、GPUの通常checkpoint・batch checkpoint・flush-startをpremultiplied補間後のunpremultiplyに統一した。pickup / restore / diffusionと既存parity契約（≤1/255）は未変更。追加CPU回帰6件は旧式で全件失敗・修正式で成功。GPU回帰6件と既存browserテストはClaude検収待ち。build / lint / typecheck成功。詳細は `plans/2026-09-06-15-56_checkpoint-alpha-verification.md`。
 
 - **GPU 混色の field UV bbox 近似は「既知の近似」として据え置き（2026-09-06 ユーザー決定）**: 自己交差ループ・鋭いジグザグ + 赤帯下地で CPU/GPU を比較し、拾い色の着地が急カーブで数 px ズレる（赤み差 平均 6.5/255、>20 の画素 数%）が目視不能と判定。正式化ドキュメントに近似として明記する。将来「拾い色の位置精度」が要件になったら astra 案（ink pass で segment profile UV に沿って field を読む）で置換する
 
