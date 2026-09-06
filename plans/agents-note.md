@@ -35,6 +35,8 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 中期的に行うべき作業
 
+- **実 Chrome での GPU 経路の評価（2026-09-06、優先度低）**: Playwright headless Chromium は SwiftShader なので GPU 経路の commit が 8〜14ms/回（bitmap / direct とも）になり判断材料にならない。現方針「auto は WebKit 系のみ GPU」は未検証のまま。実機 Chrome（Mac / Windows / Android）で `?gpuBackend=webgl2` の stroke / commit を計り、Chromium でも GPU を既定にするかを決める
+
 - **spray sizeJitterMode の整理（2026-07-04）**: 候補は `lognormal` / `bimodal` の2種類へ削減済み。`uniform` / `power` は互換フォールバックなしで削除する方針。`lognormal` はチップ4倍生成の特殊対応が残るため、今後完全に不採用にする場合は `useStrokeSession` / `replay` の tipSize 計算も戻す。
 
 - **時間 emission（吹き付け）**: `plans/pendings/2026-06-18-20-58_stamp-time-dabs.md` 側に spray を対象として追記して実施する（spray 計画で合意済みの後続作業）。`brush/scheduler.ts` に `walkTimeEmissions()` を並列追加する拡張点は確保済み。

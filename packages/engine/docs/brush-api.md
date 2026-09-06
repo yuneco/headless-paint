@@ -117,7 +117,7 @@ function renderBrushStroke(
    - document座標へ固定したsurface grain（紙目）を面掠れと同じsoftware rasterへ統合し、pixel-local pressureで接触を判定する
    - 急な折返しはcuspとして分割し、短いbristle lag（毛束の遅れ）で横断方向を追従させる
    - 同じ場所への反復接触は、紙目の谷に対する確率的な再接触として不透明な着彩片の面積を段階的に増やす。初回の未着彩cellへ半透明の着彩floorは加えず、顔料厚レイヤーも追加しない
-   - 混色時は共通の連続色場を毛束断面全体へ適用してからalpha maskを掛ける。毛束単位へ色を固定しない
+   - 混色時は共通の連続色場を毛束断面全体へ適用してからalpha maskを掛ける。毛束単位へ色を固定しない。色場は flush 単位で更新され、run 内では開始/終了時点の色場を run の進行率で線形補間する（[gpu-acceleration.md](./gpu-acceleration.md) の perFlush 意味論）
    - pendingはengine境界でno-opとし、確定済みchunkだけを表示する
 
 面掠れを先に8-bit alpha atlasへ変換して区間ごとにCanvas合成してはならない。線形補間で生じた薄いalphaが区間境界の`source-over`で蓄積し、低筆圧部が「疎な不透明片」ではなく「薄い全面着彩」へ変わるためである。bristle rendererは全canvasを再生せず、新しく確定した中心線の周辺だけを局所canvasへ描いて合成する。chunk境界には不透明paint向けの小さな重なりを持たせる。半透明paintでは重なり濃度が見える可能性があるため、初期versionの対象外とする。
