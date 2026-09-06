@@ -58,7 +58,7 @@ export interface BristleMixingFlushResult {
 }
 
 export interface BristleMixingInterpolationProfiles {
-  readonly canvases: readonly OffscreenCanvas[];
+  readonly canvases: readonly (readonly [OffscreenCanvas, OffscreenCanvas?])[];
 }
 
 export function getActiveMixing(
@@ -407,7 +407,7 @@ export function prepareBristleMixingInterpolationProfiles(
   tipCanvas: OffscreenCanvas,
   startField: Float32Array,
   endField: Float32Array,
-  weights: readonly number[],
+  runWeights: readonly (readonly [number, number])[],
 ): BristleMixingInterpolationProfiles | null {
   return perfStage("materialUpload", () => {
     if (brushPerfDebug.nullStages.nullMaterialUpload) return null;
@@ -421,6 +421,34 @@ export function prepareBristleMixingInterpolationProfiles(
     const rows = state.fieldPixels.height;
     const profileWidth = tipCanvas.width;
     const profileHeight = tipCanvas.height;
+    // These are the flush's pre-diffusion endpoints from prepareBristleMixingFlush.
+    // Scan all texels/RGBA once per flush, not once per run. CPU fields use
+    // byte-scale floats; normalize the maximum to the shader's 0..1 scale.
+    let maxFieldDelta = 0;
+    for (let index = 0; index < startField.length; index++) {
+      maxFieldDelta = Math.max(
+        maxFieldDelta,
+        Math.abs(endField[index] - startField[index]),
+      );
+    }
+    maxFieldDelta /= 255;
+    // Adjacent runs share their endpoint profile. Upload each weight only once.
+    const weights: number[] = [];
+    const slots = new Map<number, number>();
+    const slotFor = (weight: number) => {
+      const resolvedWeight = Math.max(0, Math.min(1, weight));
+      const existing = slots.get(resolvedWeight);
+      if (existing !== undefined) return existing;
+      const slot = weights.length;
+      weights.push(resolvedWeight);
+      slots.set(resolvedWeight, slot);
+      return slot;
+    };
+    const profileSlots = runWeights.map(([w0, w1]) =>
+      maxFieldDelta * Math.abs(w1 - w0) < 1 / 255
+        ? ([slotFor(w1)] as const)
+        : ([slotFor(w0), slotFor(w1)] as const),
+    );
     const requiredCapacity = weights.length + 1;
     let cached = BRISTLE_INTERPOLATION_CACHE.get(state.renderCanvas);
     if (
@@ -523,7 +551,15 @@ export function prepareBristleMixingInterpolationProfiles(
     if (finalCanvas) stateRenderCtx.drawImage(finalCanvas, 0, 0);
     stateRenderCtx.restore();
 
-    return { canvases: cached.renderCanvases.slice(0, weights.length) };
+    return {
+      canvases: profileSlots.map(([start, end]) => {
+        const startCanvas = cached.renderCanvases[start];
+        if (!startCanvas) throw new Error("Bristle start profile is missing");
+        return end === undefined
+          ? ([startCanvas] as const)
+          : ([startCanvas, cached.renderCanvases[end]] as const);
+      }),
+    };
   });
 }
 

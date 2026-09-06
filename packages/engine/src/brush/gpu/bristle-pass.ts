@@ -47,7 +47,8 @@ interface CompositeUniforms {
   readonly fieldRowStride: WebGLUniformLocation;
   readonly branchIndex: WebGLUniformLocation;
   readonly useField: WebGLUniformLocation;
-  readonly fieldMixWeight: WebGLUniformLocation;
+  readonly fieldMixWeights: WebGLUniformLocation;
+  readonly fieldMixSpan: WebGLUniformLocation;
   readonly fieldGeometry: WebGLUniformLocation;
   readonly color: WebGLUniformLocation;
 }
@@ -56,7 +57,8 @@ export interface BristlePassTarget {
   readonly accumFramebuffer: WebGLFramebuffer;
   readonly fieldTexture: WebGLTexture;
   readonly previousFieldTexture: WebGLTexture;
-  readonly fieldMixWeight: number;
+  readonly fieldMixWeights: readonly [number, number];
+  readonly fieldMixSpan: readonly [number, number];
   readonly fieldGeometry:
     | Pick<
         GpuMaterialFieldUpdate,
@@ -155,7 +157,8 @@ export function createGpuBristlePassResources(
     fieldRowStride: uniformLocation(gl, compositeProgram, "uFieldRowStride"),
     branchIndex: uniformLocation(gl, compositeProgram, "uBranchIndex"),
     useField: uniformLocation(gl, compositeProgram, "uUseField"),
-    fieldMixWeight: uniformLocation(gl, compositeProgram, "uFieldMixWeight"),
+    fieldMixWeights: uniformLocation(gl, compositeProgram, "uFieldMixWeights"),
+    fieldMixSpan: uniformLocation(gl, compositeProgram, "uFieldMixSpan"),
     fieldGeometry: uniformLocation(gl, compositeProgram, "uFieldGeometry"),
     color: uniformLocation(gl, compositeProgram, "uColor"),
   };
@@ -522,7 +525,8 @@ export function createGpuBristlePassResources(
       compositeUniforms.useField,
       chunk.useMaterialField && target.fieldColumns > 0 ? 1 : 0,
     );
-    gl.uniform1f(compositeUniforms.fieldMixWeight, target.fieldMixWeight);
+    gl.uniform2f(compositeUniforms.fieldMixWeights, ...target.fieldMixWeights);
+    gl.uniform2f(compositeUniforms.fieldMixSpan, ...target.fieldMixSpan);
     // Before the first update the field is uniform, so any valid frame works.
     gl.uniform4f(
       compositeUniforms.fieldGeometry,

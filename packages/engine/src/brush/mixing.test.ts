@@ -120,10 +120,10 @@ describe("prepareBristleMixingInterpolationProfiles", () => {
       tip,
       start,
       end,
-      [0.2, 0.8],
+      [[0.2, 0.8]],
     );
     for (const [profileIndex, weight] of [0.2, 0.8].entries()) {
-      const actual = profiles?.canvases[profileIndex];
+      const actual = profiles?.canvases[0]?.[profileIndex];
       expect(actual).toBeDefined();
       const field = new OffscreenCanvas(3, 2);
       const fieldCtx = field.getContext("2d");
@@ -148,5 +148,39 @@ describe("prepareBristleMixingInterpolationProfiles", () => {
         expectedCtx.getImageData(0, 0, 2, 12).data,
       );
     }
+  });
+
+  it("shares run endpoints and uses one end profile below one byte of weight", () => {
+    const tip = new OffscreenCanvas(2, 12);
+    const state = prepareMixingState(
+      tip,
+      { r: 20, g: 40, b: 60, a: 255 },
+      DEFAULT_BRUSH_MIXING,
+      undefined,
+    );
+    // A full-range channel delta makes the color and weight thresholds equal.
+    const start = state.field.slice();
+    const end = state.field.slice();
+    start[0] = 0;
+    end[0] = 255;
+    const profiles = prepareBristleMixingInterpolationProfiles(
+      state,
+      tip,
+      start,
+      end,
+      [
+        [0, 0.5],
+        [0.5, 1],
+        [1 - 0.5 / 255, 1],
+        [1, 1],
+        [0, 1 / 255],
+      ],
+    );
+    expect(profiles?.canvases.map((run) => run.length)).toEqual([
+      2, 2, 1, 1, 2,
+    ]);
+    expect(profiles?.canvases[0]?.[1]).toBe(profiles?.canvases[1]?.[0]);
+    expect(profiles?.canvases[2]?.[0]).toBe(profiles?.canvases[1]?.[1]);
+    expect(profiles?.canvases[3]?.[0]).toBe(profiles?.canvases[1]?.[1]);
   });
 });

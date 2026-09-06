@@ -283,7 +283,8 @@ uniform ivec2 uFieldTextureSize;
 uniform int uFieldRowStride;
 uniform int uBranchIndex;
 uniform bool uUseField;
-uniform float uFieldMixWeight;
+uniform vec2 uFieldMixWeights;
+uniform vec2 uFieldMixSpan;
 uniform vec4 uFieldGeometry;
 uniform vec4 uColor;
 out vec4 outColor;
@@ -308,10 +309,21 @@ vec4 sampleMaterial(vec2 documentPosition) {
       clamp(normalized.y * float(uFieldSize.y) - 0.5, 0.0, float(uFieldSize.y - 1))
   );
   vec2 fieldUv = (fieldTexel + vec2(0.5)) / vec2(uFieldTextureSize);
+  float progress = clamp(
+    (local.x - uFieldMixSpan.x) / max(uFieldMixSpan.y - uFieldMixSpan.x, 0.0001),
+    0.0,
+    1.0
+  );
+  // Unlike CPU's maxFieldDelta * abs(w1 - w0) test, GPU keeps the
+  // conservative weight-only test: updated fields live only in GPU textures,
+  // with no CPU mirror of their maximum delta. Avoid a field-pass readback.
+  float weight = abs(uFieldMixWeights.y - uFieldMixWeights.x) < 1.0 / 255.0
+    ? uFieldMixWeights.y
+    : mix(uFieldMixWeights.x, uFieldMixWeights.y, progress);
   return mix(
     texture(uPreviousField, fieldUv),
     texture(uField, fieldUv),
-    clamp(uFieldMixWeight, 0.0, 1.0)
+    clamp(weight, 0.0, 1.0)
   );
 }
 

@@ -28,3 +28,17 @@ codex read-only レビューで代替（ユーザー合意）。
 ## Phase 4: レビュー
 
 ドキュメント↔コードの双方向確認、`review-library-usage`、probe6 で CPU 混色 ON の増分が +15% 以内であること。
+
+## 実装結果（2026-09-06）
+
+- GPU: composite に `uFieldMixWeights = (w0, w1)` と `uFieldMixSpan = (x0, x1)`（run の最初 / 最後の sweep segment を field geometry の逆変換にかけた local.x）を渡し、画素ごとに `mix(w0, w1, progress)`。追加 uniform 2 つ、pass 数不変
+- CPU: run ごとに開始 / 終了 profile の 2 枚を用意し、ink を 2 回掃引して run 始点→終点の線形グラデーションで `(1 − t)·I0 + t·I1`（destination-out / destination-in + lighter）。endInk canvas は WeakMap で再利用
+- 省略判定（差し戻し 2）: CPU は flush ごとに `max|F1 − F0|` を 1 回走査し `× |w1 − w0| < 1/255` なら 1 枚描き。GPU は重み差のみ（更新後 field を CPU 側が持たないため。出力差はどちらも ≤ 1/255）
+- 性能（Chromium CPU、混色 ON、150 点、白地 = pickup なし）: 修正前 100ms → 補間実装 124〜129ms（+25%）→ canvas 再利用 121〜127ms → **色差ゲート 92〜98ms（修正前と同等）**。pickup が起きた flush だけ blend が走るので、実描画では色帯を横切った直後のみ +コスト（最悪ケースは全 run blend で +25%）。GPU（WebKit）は変化なし
+- 見た目: 赤帯を横切った直線ストロークで run 境界の段が消え、CPU / GPU とも連続（画像を共有済み）
+- テスト: 641 green。追加 `bristle-mixing-interpolation.test.ts`（CPU / GPU × 3 方向の赤み連続性）、`bristle-mixing-profile-selection.test.ts`（省略判定）
+
+## 実装時の調整内容（補足）
+
+- 差し戻し 1（canvas 再利用・fill 範囲縮小）は software raster では効かなかった（gradient fill と lighter 合成の画素コストが本体）。差し戻し 2 の色差ゲートで解決
+- codex の報告: `plans/notes/2026-09-06-bristle-mixing-run-interpolation-report.md`

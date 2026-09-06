@@ -31,7 +31,7 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 - **GPU 混色の field UV bbox 近似は「既知の近似」として据え置き（2026-09-06 ユーザー決定）**: 自己交差ループ・鋭いジグザグ + 赤帯下地で CPU/GPU を比較し、拾い色の着地が急カーブで数 px ズレる（赤み差 平均 6.5/255、>20 の画素 数%）が目視不能と判定。正式化ドキュメントに近似として明記する。将来「拾い色の位置精度」が要件になったら astra 案（ink pass で segment profile UV に沿って field を読む）で置換する
 
-- **bristle 混色の色が run 単位で階段状に変わる（2026-09-06、CPU/GPU 両方、後回し）**: perFlush 意味論では field を flush 単位で更新し、composite が F0/F1 を `fieldMixWeight = runEndDistance / totalDistance` で mix する。この weight は **run（segment）ごとの定数**（gpu-stroke-surface.ts の composite 準備ループ、CPU は interpolation atlas の slot 単位）なので、run 境界で色が段になる。Acrylic（stamp）は dab ごとに field を更新するため滑らか。改善案: weight を run の開始/終了の 2 値で渡し、画素ごとに run 内の進行率（composite の geometry 逆変換で得られる local.x、または ink pass が書く along 距離）で補間する。CPU 側も同じ画素補間が必要で、cross-backend Tier B を維持すること
+- **bristle 混色の run 内線形補間を実装（2026-09-06、実ブラウザ検収済み・641 tests green）**: GPU は branch ごとの開始/終了距離重みと、既存 chunk の最初/最後の sweep segment を field geometry へ逆変換した local.x 範囲を composite に渡す。CPU は両端の profile を描いて run 始点→終点の alpha gradient で相補的に重み付けし、lighter で RGB/alpha を加算する。差<1/255 は定数扱い、隣接 run の端点 profile は共有。build/lint/typecheck とノンブラウザ16ファイル214件は成功。中心線の隣接赤み差≤8/255を測るCPU/GPU×3方向の回帰を追加したが、listen EPERMにより新旧の画素検証は未実施。Tier B / cross-backend / checkpoint契約の継続通過、旧定数重みでの失敗、CPU混色ON +15%以内の性能検収はClaude待ち。詳細は `plans/notes/2026-09-06-bristle-mixing-run-interpolation-report.md`。
 
 ## 中期的に行うべき作業
 
