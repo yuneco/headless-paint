@@ -37,6 +37,9 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 中期的に行うべき作業
 
+- **リリース前の確認事項（ユーザー方針 2026-09-07）**: (1) **紙目テクスチャの外部化**: ハケの見た目は「ストローク追従の掠れ（dropout、stroke-space の value noise）」と「document 固定の紙目（Fine tooth、`getFineToothHeightTile` の 128² 高さマップ）」の積。まず紙目だけを外部の高さマップ（サンプル画像数種）に差し替えられるようにして表現の幅を評価する。掠れ・毛束断面の外部化はその結果を見てから。Lab（work.local/lab-replay-src）に画像テクスチャ資産は無いので、サンプルは新規に用意する。GPU shader の 128 固定タイルは uniform 化が必要。(2) **太さ・透明度の筆圧連動**: bristle は画素ごとに筆圧を持つので、透明度は composite に係数を掛けるだけ、太さは掃引半幅をサンプルごとに変える。stamp（Acrylic）の透明度は「spacing 正規化した dab alpha」で扱う（下記）
+- **stamp の透明度設計メモ（2026-09-07）**: `pressureDynamics.flow` は dab ごとの alpha なので spacing と tip 径で結果が変わり「ユーザーの考える透明度」にならない。目標: 1 パスの芯で目標不透明度 T、交差・折り返しは重なって濃くなる（Procreate 風）。方式: ブラシ設定（spacing、tip 径、hardness）から 1 パスあたりの画素の平均重なり数 N を較正し、dab alpha を `a = 1 − (1 − T)^(1/N)` にする。N はブラシ確定時に直線ストロークの中心線の蓄積 alpha から 1 回だけ算出（tip profile 依存なので解析式より実測が確実）。縁は芯より重なりが少ないので薄くなる（自然）。筆圧連動は T を `T(p)` にする。GPU 加速器は dab alpha を instance 属性で持つので式の置換のみ
+
 - **実 Chrome での GPU 経路の評価（2026-09-06、優先度低）**: Playwright headless Chromium は SwiftShader なので GPU 経路の commit が 8〜14ms/回（bitmap / direct とも）になり判断材料にならない。現方針「auto は WebKit 系のみ GPU」は未検証のまま。実機 Chrome（Mac / Windows / Android）で `?gpuBackend=webgl2` の stroke / commit を計り、Chromium でも GPU を既定にするかを決める
 
 - **spray sizeJitterMode の整理（2026-07-04）**: 候補は `lognormal` / `bimodal` の2種類へ削減済み。`uniform` / `power` は互換フォールバックなしで削除する方針。`lognormal` はチップ4倍生成の特殊対応が残るため、今後完全に不採用にする場合は `useStrokeSession` / `replay` の tipSize 計算も戻す。
