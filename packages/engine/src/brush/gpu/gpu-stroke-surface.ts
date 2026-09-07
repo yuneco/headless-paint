@@ -7,7 +7,9 @@ import {
 } from "./bristle-pass";
 import {
   type DirtyRect,
+  type PendingGpuCommit,
   commitRectsToLayer,
+  transferPendingCommit,
   unionDirtyRects,
 } from "./commit-packing";
 import {
@@ -155,7 +157,9 @@ export interface GpuStrokeSurface {
   pushDab(dab: GpuDab): void;
   pushBristleChunk(chunk: GpuBristleChunk): void;
   flush(): void;
-  commitToLayer(layer: Layer): void;
+  commitToLayer(layer: Layer, defer?: boolean): boolean;
+  pollPendingCommit(): boolean;
+  drainPendingCommit(): void;
   cancelStroke(): void;
   endStroke(retainUndo?: boolean): void;
   restoreUndoToLayer(layer: Layer): boolean;
@@ -208,6 +212,8 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private dirtyRects: (DirtyRect | null)[] = [null];
   private committedDirtyRect: DirtyRect | null = null;
   private committedLayer: Layer | null = null;
+  private pendingCommit: PendingGpuCommit | null = null;
+  private pendingCommitPolls = 0;
   private tipSource: OffscreenCanvas | null = null;
   private tipWidth = 0;
   private tipHeight = 0;
@@ -250,6 +256,9 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     this.glResources = resources;
     this.canvas = resources.canvas;
     this.gl = resources.gl;
+    this.canvas.addEventListener("webglcontextlost", () => {
+      this.discardPendingCommit();
+    });
     this.program = resources.program;
     this.fieldMixProgram = resources.fieldMixProgram;
     this.fieldBatchMixProgram = resources.fieldBatchMixProgram;
@@ -1422,23 +1431,73 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     );
   }
 
-  commitToLayer(layer: Layer): void {
+  commitToLayer(layer: Layer, defer = false): boolean {
+    this.drainPendingCommit();
     this.assertStrokeBegun();
     this.flush();
-    if (this.lost) return;
+    if (this.lost) return false;
     const commitRects = this.normalizedDirtyRects();
     this.dirtyRects = Array<DirtyRect | null>(this.branchCount).fill(null);
-    if (commitRects.length === 0) return;
+    if (commitRects.length === 0) return false;
 
     this.committedLayer = layer;
     this.committedDirtyRect = unionDirtyRects([
       this.committedDirtyRect,
       ...commitRects,
     ]);
-    this.commitRectsToLayer(layer, commitRects);
+    this.commitRectsToLayer(layer, commitRects, defer);
+    return this.pendingCommit !== null;
+  }
+
+  pollPendingCommit(): boolean {
+    if (!this.pendingCommit) return true;
+    if (this.lost) {
+      this.discardPendingCommit();
+      return true;
+    }
+    this.pendingCommitPolls++;
+    const status = this.gl.clientWaitSync(this.pendingCommit.fence, 0, 0);
+    if (status === this.gl.TIMEOUT_EXPIRED) return false;
+    if (
+      status === this.gl.ALREADY_SIGNALED ||
+      status === this.gl.CONDITION_SATISFIED
+    ) {
+      this.transferPendingCommit(false);
+    } else {
+      // WAIT_FAILED is an error, never evidence that the blit completed.
+      this.drainPendingCommit();
+    }
+    return true;
+  }
+
+  drainPendingCommit(): void {
+    if (!this.pendingCommit) return;
+    if (this.lost) {
+      this.discardPendingCommit();
+      return;
+    }
+    this.transferPendingCommit(true);
+  }
+
+  private transferPendingCommit(drain: boolean): void {
+    const pending = this.pendingCommit;
+    if (!pending) return;
+    this.pendingCommit = null;
+    perfSample("gpuCommitPolls", this.pendingCommitPolls);
+    this.pendingCommitPolls = 0;
+    transferPendingCommit(pending, drain);
+  }
+
+  private discardPendingCommit(): void {
+    if (!this.pendingCommit) return;
+    this.gl.deleteSync(this.pendingCommit.fence);
+    this.pendingCommit = null;
+    perfSample("gpuCommitPolls", this.pendingCommitPolls);
+    this.pendingCommitPolls = 0;
   }
 
   cancelStroke(): void {
+    this.drainPendingCommit();
     this.assertStrokeBegun();
     perfStage("gpuCancelRestore", () => {
       const pendingDirtyRect = unionDirtyRects(this.normalizedDirtyRects());
@@ -1463,19 +1522,25 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   private commitRectsToLayer(
     layer: Layer,
     commitRects: readonly DirtyRect[],
+    defer = false,
   ): void {
-    commitRectsToLayer({
-      layer,
-      rects: commitRects,
-      gl: this.gl,
-      framebuffer: this.framebuffer,
-      sourceHeight: this.height,
-      canvas: this.canvas,
-      mode: this.commitMode,
-    });
+    this.drainPendingCommit();
+    this.pendingCommit = commitRectsToLayer(
+      {
+        layer,
+        rects: commitRects,
+        gl: this.gl,
+        framebuffer: this.framebuffer,
+        sourceHeight: this.height,
+        canvas: this.canvas,
+        mode: this.commitMode,
+      },
+      defer,
+    );
   }
 
   restoreUndoToLayer(layer: Layer): boolean {
+    this.drainPendingCommit();
     this.assertUsable();
     const rect = this.undoDirtyRect;
     this.undoDirtyRect = null;
@@ -1486,6 +1551,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
   }
 
   endStroke(retainUndo = false): void {
+    this.drainPendingCommit();
     this.undoDirtyRect = retainUndo ? this.committedDirtyRect : null;
     this.instanceCount = 0;
     this.pendingBranchSegments = null;

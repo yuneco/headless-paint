@@ -37,3 +37,25 @@ commit を「blit + fence を置いて即返る」に変え、fence の完了を
 - 採否判定（閾値方針）: Mac WebKit probe6 で moveMany が −20% 以上（113〜129 → ≤ 95ms 目安）。未達なら棄却して戻す
 
 ## Phase 4: レビュー
+
+## 実装時の調整・検収引き継ぎ（2026-09-07）
+
+既存の低レベル commit 直後の画素読み取り契約（per-flush checkpoint 等、テスト無変更）を保つため、内部 commit に `defer = false` を追加。stroke runtime が注入する内部 callback がある live perFlush のみ遅延指定する。standalone / final / 複数 pass / direct は同期。poll 上限 8 回、失敗または上限で drain、context lost は破棄。
+
+実装・追加テスト名・検収結果・docs 補足候補は [実装報告](notes/2026-09-07-gpu-deferred-commit-report.md) に記載。実ブラウザ検収・Mac WebKit probe6 の採否判定は Claude 待ち。コミットなし、packages/*/docs・既存テスト無変更。
+
+## 実装結果（2026-09-07）
+
+- 実装は codex（報告: `plans/notes/2026-09-07-gpu-deferred-commit-report.md`）。commit-packing を blit / 転写の 2 フェーズに分離し、surface が pending 1 件と fence を保持。runtime が `deps.setTimeout(0)` で最大 8 回ポーリングし、転写後に `requestRender`。次の commit / endStroke / cancel / undo 復元 / dispose は同期 drain、context lost は破棄。複数 pass・direct・final cadence は従来どおり同期
+- 性能（Mac Playwright WebKit、probe6、150 点、31 commit）:
+
+| | 修正前（finish 同期） | 非同期 commit |
+|---|---|---|
+| mixing OFF moveMany | 103〜125ms | **24〜30ms** |
+| mixing ON moveMany | 113〜131ms | **38〜43ms** |
+| ポーリング回数 | — | 1 回 / commit（最初の setTimeout(0) で fence 完了） |
+
+  moveMany は入力処理の main thread 時間。転写（`gpuCommit` stage 11〜18ms/stroke）はタイマー側で走り、合計でも 40〜60ms 級 → **採用（−20% 基準を大きく超過）**。理由: finish の待ちが GPU drain そのもので、ポーリングに置き換えると main thread から消え、GPU 側の作業は変わらない
+- 決定性: S 字 3 run byte 一致、非同期化前の GPU 出力と byte 一致、CPU 比 0.01%
+- テスト: 672 tests green（追加 24 件: pending 中の endStroke / poll / cancel / final cadence / runtime のポーリング経路）
+- 未確認: iPad 実機（ポーリング間隔 = setTimeout(0) の実効遅延と、体感の表示遅延）

@@ -155,7 +155,18 @@ interface CommitRectsOptions {
   readonly mode: "bitmap" | "direct";
 }
 
-export function commitRectsToLayer(options: CommitRectsOptions): void {
+/** One pass owns the default framebuffer until transferred or discarded. */
+export interface PendingGpuCommit {
+  readonly fence: WebGLSync;
+  readonly options: CommitRectsOptions;
+  readonly tiles: readonly PackedCommitTile[];
+}
+
+/** The caller must drain any previous pending pass before calling this. */
+export function commitRectsToLayer(
+  options: CommitRectsOptions,
+  defer = false,
+): PendingGpuCommit | null {
   const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
   const commitTiles = options.rects.flatMap(createCommitTiles);
   const committedPixels = commitTiles.reduce(
@@ -166,46 +177,101 @@ export function commitRectsToLayer(options: CommitRectsOptions): void {
   let commitPasses = 0;
   let bitmapMs = 0;
   let drawMs = 0;
-  while (tileIndex < commitTiles.length) {
-    const packed = packCommitRound(commitTiles, tileIndex);
-    commitPasses++;
-    blitCommitPass(
-      options.gl,
-      options.framebuffer,
-      options.sourceHeight,
-      packed,
-    );
-    let bitmap: ImageBitmap | null = null;
-    if (
-      options.mode === "bitmap" &&
-      typeof options.canvas.transferToImageBitmap === "function"
-    ) {
-      const bitmapStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-      try {
-        // WebKit's transferToImageBitmap does not wait for the queued blit
-        // (gl.flush alone is insufficient); without a full sync the bitmap can
-        // carry stale tiles, so commits become non-deterministic on Safari.
-        options.gl.finish();
-        bitmap = options.canvas.transferToImageBitmap();
-      } catch {
-        blitCommitPass(
-          options.gl,
-          options.framebuffer,
-          options.sourceHeight,
-          packed,
+  let deferred = false;
+  try {
+    while (tileIndex < commitTiles.length) {
+      const packed = packCommitRound(commitTiles, tileIndex);
+      commitPasses++;
+      blitCommitPass(
+        options.gl,
+        options.framebuffer,
+        options.sourceHeight,
+        packed,
+      );
+      // Multiple passes share the same canvas. Keep the entire commit synchronous.
+      if (
+        defer &&
+        options.mode === "bitmap" &&
+        packed.length === commitTiles.length &&
+        typeof options.canvas.transferToImageBitmap === "function"
+      ) {
+        const fence = options.gl.fenceSync(
+          options.gl.SYNC_GPU_COMMANDS_COMPLETE,
+          0,
         );
+        if (fence) {
+          // Submit the fence as well as the blit; polling itself never flushes.
+          options.gl.flush();
+          deferred = true;
+          return { fence, options, tiles: packed };
+        }
       }
-      if (brushPerfDebug.enabled) {
-        bitmapMs += performance.now() - bitmapStartedAt;
-      }
+      const timing = transferCommitPass(options, packed, true);
+      bitmapMs += timing.bitmapMs;
+      drawMs += timing.drawMs;
+      tileIndex += packed.length;
     }
-    if (
-      bitmap &&
-      (bitmap.width !== COMMIT_CANVAS_SIZE ||
-        bitmap.height !== COMMIT_CANVAS_SIZE)
-    ) {
-      bitmap.close();
-      bitmap = null;
+    return null;
+  } finally {
+    if (brushPerfDebug.enabled) {
+      perfSample("gpuCommitPixels", committedPixels);
+      perfSample("gpuCommitDraws", commitTiles.length);
+      if (!deferred)
+        perfMark("gpuCommit", {
+          mode: options.mode,
+          passes: commitPasses,
+          pixels: committedPixels,
+          bitmapMs: Number(bitmapMs.toFixed(3)),
+          drawMs: Number(drawMs.toFixed(3)),
+        });
+      brushPerfDebug.recordStage("gpuCommit", startedAt);
+    }
+  }
+}
+
+export function transferPendingCommit(
+  pending: PendingGpuCommit,
+  drain: boolean,
+): void {
+  const startedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  try {
+    const timing = transferCommitPass(pending.options, pending.tiles, drain);
+    if (brushPerfDebug.enabled) {
+      perfMark("gpuCommit", {
+        mode: pending.options.mode,
+        passes: 1,
+        pixels: pending.tiles.reduce(
+          (total, tile) => total + tile.width * tile.height,
+          0,
+        ),
+        bitmapMs: Number(timing.bitmapMs.toFixed(3)),
+        drawMs: Number(timing.drawMs.toFixed(3)),
+      });
+    }
+  } finally {
+    pending.options.gl.deleteSync(pending.fence);
+    if (brushPerfDebug.enabled)
+      brushPerfDebug.recordStage("gpuCommit", startedAt);
+  }
+}
+
+function transferCommitPass(
+  options: CommitRectsOptions,
+  packed: readonly PackedCommitTile[],
+  finish: boolean,
+): { readonly bitmapMs: number; readonly drawMs: number } {
+  let bitmap: ImageBitmap | null = null;
+  let bitmapMs = 0;
+  if (
+    options.mode === "bitmap" &&
+    typeof options.canvas.transferToImageBitmap === "function"
+  ) {
+    const bitmapStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+    try {
+      // WebKit needs either a signaled fence or finish before transferring.
+      if (finish) options.gl.finish();
+      bitmap = options.canvas.transferToImageBitmap();
+    } catch {
       blitCommitPass(
         options.gl,
         options.framebuffer,
@@ -213,43 +279,46 @@ export function commitRectsToLayer(options: CommitRectsOptions): void {
         packed,
       );
     }
-    const drawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
-    try {
-      if (bitmap) {
-        try {
-          drawCommitTiles(options.layer, bitmap, packed);
-        } catch {
-          bitmap.close();
-          bitmap = null;
-          blitCommitPass(
-            options.gl,
-            options.framebuffer,
-            options.sourceHeight,
-            packed,
-          );
-          drawCommitTiles(options.layer, options.canvas, packed);
-        }
-      } else {
+    if (brushPerfDebug.enabled) bitmapMs = performance.now() - bitmapStartedAt;
+  }
+  if (
+    bitmap &&
+    (bitmap.width !== COMMIT_CANVAS_SIZE ||
+      bitmap.height !== COMMIT_CANVAS_SIZE)
+  ) {
+    bitmap.close();
+    bitmap = null;
+    blitCommitPass(
+      options.gl,
+      options.framebuffer,
+      options.sourceHeight,
+      packed,
+    );
+  }
+  const drawStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  try {
+    if (bitmap) {
+      try {
+        drawCommitTiles(options.layer, bitmap, packed);
+      } catch {
+        bitmap.close();
+        bitmap = null;
+        blitCommitPass(
+          options.gl,
+          options.framebuffer,
+          options.sourceHeight,
+          packed,
+        );
         drawCommitTiles(options.layer, options.canvas, packed);
       }
-    } finally {
-      if (brushPerfDebug.enabled) {
-        drawMs += performance.now() - drawStartedAt;
-      }
-      bitmap?.close();
+    } else {
+      drawCommitTiles(options.layer, options.canvas, packed);
     }
-    tileIndex += packed.length;
+  } finally {
+    bitmap?.close();
   }
-  if (brushPerfDebug.enabled) {
-    perfSample("gpuCommitPixels", committedPixels);
-    perfSample("gpuCommitDraws", commitTiles.length);
-    perfMark("gpuCommit", {
-      mode: options.mode,
-      passes: commitPasses,
-      pixels: committedPixels,
-      bitmapMs: Number(bitmapMs.toFixed(3)),
-      drawMs: Number(drawMs.toFixed(3)),
-    });
-    brushPerfDebug.recordStage("gpuCommit", startedAt);
-  }
+  return {
+    bitmapMs,
+    drawMs: brushPerfDebug.enabled ? performance.now() - drawStartedAt : 0,
+  };
 }

@@ -100,6 +100,8 @@ interface PendingStart {
   readonly config: StrokeStartConfig;
 }
 
+const MAX_GPU_COMMIT_POLLS = 8;
+
 const DEFAULT_RANDOM_SEED = (): number => (Math.random() * 0xffffffff) | 0;
 
 function getPerfDebug():
@@ -137,6 +139,8 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   let disposed = false;
   let drawing = false;
   let emissionTimer: unknown | null = null;
+  let gpuCommitTimer: unknown | null = null;
+  let gpuCommitPollGeneration = 0;
   let pendingStart: PendingStart | null = null;
 
   let strokeSession: StrokeSessionState | null = null;
@@ -334,6 +338,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       restoreLayerOnGpuLoss: deps.restoreLayerBeforeStroke
         ? () => deps.restoreLayerBeforeStroke?.(start.config.layer)
         : undefined,
+      onGpuCommitPending: scheduleGpuCommitPoll,
       onRenderUpdate: (update) => {
         brushState = update.brushState;
       },
@@ -393,6 +398,32 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     );
   }
 
+  function scheduleGpuCommitPoll(poll: () => boolean, drain: () => void): void {
+    cancelGpuCommitPoll();
+    const generation = gpuCommitPollGeneration;
+    let polls = 0;
+    const tick = () => {
+      if (disposed || generation !== gpuCommitPollGeneration) return;
+      gpuCommitTimer = null;
+      polls++;
+      if (poll()) {
+        deps.requestRender();
+      } else if (polls >= MAX_GPU_COMMIT_POLLS) {
+        drain();
+        deps.requestRender();
+      } else {
+        gpuCommitTimer = deps.setTimeout(tick, 0);
+      }
+    };
+    gpuCommitTimer = deps.setTimeout(tick, 0);
+  }
+
+  function cancelGpuCommitPoll(): void {
+    gpuCommitPollGeneration++;
+    if (gpuCommitTimer !== null) deps.clearTimeout(gpuCommitTimer);
+    gpuCommitTimer = null;
+  }
+
   function scheduleEmission(): void {
     cancelEmission();
     if (!frozenConfig) return;
@@ -413,6 +444,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function finalizeCommit(): void {
+    cancelGpuCommitPoll();
     if (!frozenConfig || !filterState || !strokeSession) {
       releaseSession();
       return;
@@ -425,6 +457,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     strokeSession = finalStrokeResult.state;
     currentRenderUpdate = finalStrokeResult.renderUpdate;
     feedPendingRendererPoints();
+    cancelGpuCommitPoll();
     renderer?.finalize();
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
@@ -449,6 +482,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function restoreSnapshot(preservePendingStart: boolean): void {
+    cancelGpuCommitPoll();
     // A history rebuild may start a new GPU renderer on the same accelerator.
     // Release the live owner first so recovery never needs the stale-owner path.
     const rendererUsesGpu = renderer?.usesGpu ?? false;
@@ -473,6 +507,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function releaseSession(preservePendingStart = false): void {
+    cancelGpuCommitPoll();
     renderer?.cancel();
     strokeSession = null;
     filterState = null;

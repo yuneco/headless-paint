@@ -84,7 +84,9 @@ interface BrushAcceleratorRuntime extends BrushAccelerator {
   ): boolean;
   enter(owner: object): void;
   leave(owner: object): void;
-  commitToLayer(owner: object, layer: Layer): void;
+  commitToLayer(owner: object, layer: Layer, defer?: boolean): boolean;
+  pollPendingCommit(owner: object): boolean;
+  drainPendingCommit(owner: object): void;
   cancelStroke(owner: object): boolean;
   endStroke(owner: object, retainUndo?: boolean): void;
   retainUndoSnapshot(layer: Layer, token: object): boolean;
@@ -338,13 +340,14 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
     if (this.currentOwner === owner) this.currentOwner = null;
   }
 
-  commitToLayer(owner: object, layer: Layer): void {
-    if (this.activeOwner !== owner) return;
+  commitToLayer(owner: object, layer: Layer, defer = false): boolean {
+    if (this.activeOwner !== owner) return false;
+    let pending = false;
     try {
-      this.activeSurface?.commitToLayer(layer);
+      pending = this.activeSurface?.commitToLayer(layer, defer) ?? false;
     } catch {
       this.invalidate(layer, "contextLost");
-      return;
+      return false;
     }
     if (this.activeSurface && !this.activeSurface.lost) {
       this.validateResidency(layer, this.activeSurface);
@@ -352,6 +355,17 @@ class WebGl2BrushAccelerator implements BrushAcceleratorRuntime {
       this.invalidate(layer, "contextLost");
       this.permanentlyUnavailable = true;
     }
+    return pending;
+  }
+
+  pollPendingCommit(owner: object): boolean {
+    if (this.activeOwner !== owner) return true;
+    return this.activeSurface?.pollPendingCommit() ?? true;
+  }
+
+  drainPendingCommit(owner: object): void {
+    if (this.activeOwner !== owner) return;
+    this.activeSurface?.drainPendingCommit();
   }
 
   cancelStroke(owner: object): boolean {

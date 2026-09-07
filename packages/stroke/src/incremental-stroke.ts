@@ -65,6 +65,11 @@ type GpuCommitCadence = "perFlush" | "final";
 type IncrementalStrokeRendererInternalConfig =
   IncrementalStrokeRendererConfig & {
     readonly gpuCommitCadence?: GpuCommitCadence;
+    /** Runtime owns timers; standalone renderers retain synchronous commits. */
+    readonly onGpuCommitPending?: (
+      poll: () => boolean,
+      drain: () => void,
+    ) => void;
   };
 
 const BRISTLE_BATCH_INTERVAL_MS = 32;
@@ -148,8 +153,23 @@ export function createIncrementalStrokeRenderer(
 
   function commitGpuStrokeToLayer(): void {
     if (!gpuStrokeActive || detectGpuStrokeLoss()) return;
-    gpuRuntime?.commitToLayer(gpuOwner, config.layer);
-    detectGpuStrokeLoss();
+    const defer =
+      !finalized &&
+      gpuCommitCadence === "perFlush" &&
+      !!config.onGpuCommitPending;
+    const pending = gpuRuntime?.commitToLayer(gpuOwner, config.layer, defer);
+    if (!detectGpuStrokeLoss() && pending) {
+      config.onGpuCommitPending?.(
+        () =>
+          finalized ||
+          detectGpuStrokeLoss() ||
+          (gpuRuntime?.pollPendingCommit(gpuOwner) ?? true),
+        () => {
+          if (!finalized && !detectGpuStrokeLoss())
+            gpuRuntime?.drainPendingCommit(gpuOwner);
+        },
+      );
+    }
   }
 
   function appendProcessedBatch(
@@ -324,7 +344,9 @@ interface GpuStrokeRuntimeBridge {
   ): boolean;
   enter(owner: object): void;
   leave(owner: object): void;
-  commitToLayer(owner: object, layer: Layer): void;
+  commitToLayer(owner: object, layer: Layer, defer?: boolean): boolean;
+  pollPendingCommit(owner: object): boolean;
+  drainPendingCommit(owner: object): void;
   cancelStroke(owner: object): boolean;
   endStroke(owner: object, retainUndo?: boolean): void;
   isStrokeLost(owner: object): boolean;
