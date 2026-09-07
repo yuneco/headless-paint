@@ -32,7 +32,7 @@ interface BrushAcceleratorOptions {
   readonly maxBranches?: number;
   /** accum を stroke 間で常駐させる。既定 true */
   readonly resident?: boolean;
-  /** デバッグ用。commit の書き戻し方式。既定 "bitmap"（pass ごとに ImageBitmap 1 枚を経由。WebKit の transferToImageBitmap は queue 済み blit を待たないため直前に gl.finish で同期する）。"direct" は WebGL canvas を rect ごとに直接 drawImage する */
+  /** デバッグ用。commit の書き戻し方式。既定 "bitmap"（pass ごとに ImageBitmap 1 枚を経由。blit 後に fence を置き、完了をポーリングしてから転写する）。"direct" は WebGL canvas を rect ごとに同期で直接 drawImage する */
   readonly commitMode?: "bitmap" | "direct";
 }
 
@@ -118,7 +118,8 @@ spray・非混色 stamp は対象外（CPU 経路のみ）。
 - **checkpoint snapshot**: `checkpointDistancePx` ごとに、accum の局所 tile を branch 別の snapshot texture へ GPU 内で blit する。tile の中心は CPU の `captureCheckpoint` と同じだが、寸法は stroke 中に変わらないよう筆圧による stampSize の上限（`lineWidth × (1 + pressureDynamics.size)`）から決め、32px 単位で確保して縮小しない（sampling 位置は CPU と同一で、tile が大きい分は読まれない）。field の sampling 元はこの snapshot であり、CPU 経路の「直近 checkpoint 時点の tile を読む」時間基準を再現する
 - **commit**: pointer batch ごとに 1 回、branch 別 dirty rect を commit canvas（1024²）へ敷き詰めて一括 blit し、`transferToImageBitmap()` で得た 1 枚の ImageBitmap から rect ごとに `layer.ctx.drawImage` で書き戻す（WebGL canvas を drawImage の source にする回数を pass あたり 1 回に抑える。iOS WebKit では source 化ごとに snapshot copy が走るため）。dab ごとや点ごとには書き戻さない
 - **readback なし**: 上記のどこにも `getImageData` / `readPixels` は無く、GPU stroke 中は `layer.ctx` を drawImage の source にもしない（iOS WebKit では GPU-backed canvas の source 化ごとに snapshot copy が走るため）
-- **commit の同期**: WebKit の `transferToImageBitmap()` は queue 済みの blit 完了を待たない（`gl.flush` では不十分）ため、直前に `gl.finish()` で同期する。これが無いと bitmap に古い tile が混ざり、同じ入力でも結果が run ごとに変わる
+- **commit の非同期化**: WebKit の `transferToImageBitmap()` は queue 済みの blit 完了を待たない（`gl.flush` では不十分）。同期に `gl.finish()` を使うと GPU パイプラインの drain（Mac WebKit で 1 commit ≈ 1.5ms、1 stroke で 40〜60ms）を main thread が待つため、bitmap mode の commit は「tiles を commit canvas へ blit → `fenceSync` を置いて即返る（pending）」とし、stroke runtime が `setTimeout(0)` でポーリングして `clientWaitSync(fence, 0, 0)` が signaled になった時点で `transferToImageBitmap()` → layer へ描く（`clientWaitSync` の timeout 上限は WebKit / Chromium とも 0 で、待つことはできない）。転写が済むと runtime は `requestRender` を呼ぶ。表示は最大でもポーリング間隔ぶん（数 ms）遅れるだけ
+- **同期 drain**: pending がある状態で次の commit・`endStroke`・`cancelStroke`・undo 復元・`dispose`・context lost に入るときは `gl.finish()` で drain してから転写する。stroke 終了時点の layer は同期 commit と byte 一致し、決定性の契約は変わらない。direct mode は従来どおり同期
 - **全画面 texture は accum と base の 2 枚**（layer 同寸 RGBA8。2K で 16MB × 2、4K で 64MB × 2）。base は stroke 開始時の accum 複製で、cancel の復元と undo-1（後述）に使う
 
 ### Rough bristle
@@ -166,7 +167,7 @@ GPU stroke の終了時、stroke 開始前の accum（base texture）を **直�
 - **CPU 経路との差**: raster 規則・浮動小数点・texture format の差により byte 一致はしない。Tier B 契約（`packages/stroke/docs/parity-testing.md`）: alpha MAE ≤ 0.015、RGB MAE ≤ 0.02、`|Δ| > 0.1` の pixel 率 ≤ 1%、bbox 差 ≤ 1px
 - 混色の pickup タイミング（stamp: checkpoint 距離・update 距離 / bristle: flush 単位）は CPU と同じ
 - Rough bristle の dropout mask は CPU / GPU とも同じ式を画素ごとに評価するため、混色 OFF では実質一致（S 字 fixture で `|Δ| > 25/255` の画素が ink の 0.01%）。混色 ON は Tier B 内（Rough 150 点 fixture で alpha MAE 0 / RGB MAE 0.0013）
-- WebKit の bitmap commit は `gl.finish` 同期が決定性の前提（描画モデルの「commit の同期」）。vitest の browser mode は chromium のみで WebKit 固有の挙動は自動テストの外にあるため、WebKit 側の決定性は同一入力を複数 run 撮って byte 比較する（`tools/bench/results`）
+- WebKit の bitmap commit は fence 完了後に転写すること（描画モデルの「commit の非同期化」）が決定性の前提。vitest の browser mode は chromium のみで WebKit 固有の挙動は自動テストの外にあるため、WebKit 側の決定性は同一入力を複数 run 撮って byte 比較する（`tools/bench/results`）
 - 同一 GPU 上での再現性は保証するが、GPU / ブラウザ間の bit 一致は保証しない。保存 command は backend を持たないため、別環境での replay は各環境の経路で描かれる
 
 ## lifecycle と障害

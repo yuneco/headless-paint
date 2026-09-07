@@ -62,10 +62,10 @@ active 中の start（多重開始）は前ストロークを auto-cancel（`can
 createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime
 
 interface StrokeRuntimeDeps {
-  readonly setTimeout: (fn, ms) => unknown;   // 決定的テスト用に注入
+  readonly setTimeout: (fn, ms) => unknown;   // 決定的テスト用に注入。時間 emission と GPU commit（fence 完了）のポーリングに使う
   readonly clearTimeout: (id) => void;
   readonly now: () => number;                  // emission 合成点の timestamp
-  readonly requestRender: () => void;          // rAF coalesce は呼び出し側実装でも可
+  readonly requestRender: () => void;          // rAF coalesce は呼び出し側実装でも可。GPU commit の転写完了時にも呼ばれる
   readonly onCommit: (command: StrokeCommand) => void;
   readonly onDrawingChanged: (isDrawing: boolean) => void;
   readonly randomSeed?: () => number;          // brushSeed 省略時の seed 生成を注入
