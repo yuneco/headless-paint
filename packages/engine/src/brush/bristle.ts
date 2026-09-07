@@ -40,6 +40,54 @@ interface BristleRenderResult {
   readonly mixing?: BrushMixingState;
 }
 
+interface BristleEndInkCache {
+  readonly canvas: OffscreenCanvas;
+  readonly ctx: OffscreenCanvasRenderingContext2D;
+}
+
+// The render canvas survives immutable mixing-state updates, but is replaced
+// when mixing is initialized again. Scratch pixels never become mixing state.
+const BRISTLE_END_INK_CACHE = new WeakMap<
+  OffscreenCanvas,
+  BristleEndInkCache
+>();
+
+function prepareEndInk(
+  owner: OffscreenCanvas,
+  width: number,
+  height: number,
+): BristleEndInkCache {
+  let cached = BRISTLE_END_INK_CACHE.get(owner);
+  if (!cached) {
+    const canvas = perfStage(
+      "canvasAlloc",
+      () => new OffscreenCanvas(width, height),
+    );
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Bristle interpolation requires Canvas2D");
+    cached = { canvas, ctx };
+    BRISTLE_END_INK_CACHE.set(owner, cached);
+  } else {
+    const { canvas, ctx } = cached;
+    if (width > canvas.width || height > canvas.height) {
+      perfStage("canvasAlloc", () => {
+        if (width > canvas.width) {
+          canvas.width = Math.max(width, canvas.width * 2);
+        }
+        if (height > canvas.height) {
+          canvas.height = Math.max(height, canvas.height * 2);
+        }
+      });
+    } else {
+      // drawSweep leaves the transform at identity. Ignore pixels outside the
+      // current run; the final copy uses an explicit source rectangle.
+      ctx.clearRect(0, 0, width, height);
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+  return cached;
+}
+
 export function renderBristleBrushStroke(
   layer: Layer,
   points: readonly StrokePoint[],
@@ -438,11 +486,12 @@ function renderCpuMixingRuns(
   const flush = prepareBristleMixingFlush(updateInputs, initialMixingState);
   let mixingState = flush.state;
   let updateIndex = 0;
-  let mixWeight = 1;
+  let mixWeight = 0;
   const runWeights = runs.map((run) => {
+    const startWeight = mixWeight;
     const update = run.updateInput ? flush.updates[updateIndex++] : undefined;
     if (update) mixWeight = update.mixWeight;
-    return mixWeight;
+    return [startWeight, mixWeight] as const;
   });
   const paintProfiles = prepareBristleMixingInterpolationProfiles(
     mixingState,
@@ -462,10 +511,13 @@ function renderCpuMixingRuns(
       run.points,
       style,
       brush,
-      paintProfiles?.canvases[runIndex] ?? mixingState.renderCanvas,
+      paintProfiles?.canvases[runIndex]?.[0] ?? mixingState.renderCanvas,
       profile,
       seed,
       true,
+      undefined,
+      paintProfiles?.canvases[runIndex]?.[1],
+      mixingState.renderCanvas,
     );
     if (update?.capturesCheckpoint) {
       mixingState = stageBristleMixingCheckpoint(update.input, mixingState);
@@ -488,6 +540,8 @@ function renderSweepRun(
   seed: number,
   coloredProfile: boolean,
   accelerator?: BrushAccelerator | null,
+  endPaintProfile?: OffscreenCanvas,
+  endInkOwner?: OffscreenCanvas,
 ): void {
   if (points.length < 2) return;
   const margin = style.lineWidth / 2 + 4;
@@ -554,7 +608,69 @@ function renderSweepRun(
       inkCtx.fillStyle = "#000";
       inkCtx.fillRect(0, 0, width, height);
     } else {
-      drawSweep(inkCtx, paintProfile, points, style.lineWidth, minX, minY);
+      const start = points[0];
+      const end = points[points.length - 1];
+      if (
+        endPaintProfile &&
+        endInkOwner &&
+        start &&
+        end &&
+        Math.hypot(end.x - start.x, end.y - start.y) >= 0.001
+      ) {
+        const { canvas: endInk, ctx: endCtx } = prepareEndInk(
+          endInkOwner,
+          width,
+          height,
+        );
+        const inkBounds = drawSweep(
+          inkCtx,
+          paintProfile,
+          points,
+          style.lineWidth,
+          minX,
+          minY,
+          true,
+        );
+        drawSweep(endCtx, endPaintProfile, points, style.lineWidth, minX, minY);
+        if (!inkBounds) return;
+        const gradient = inkCtx.createLinearGradient(
+          start.x - minX,
+          start.y - minY,
+          end.x - minX,
+          end.y - minY,
+        );
+        gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+        gradient.addColorStop(1, "rgba(0, 0, 0, 1)");
+        inkCtx.globalCompositeOperation = "destination-out";
+        inkCtx.fillStyle = gradient;
+        inkCtx.fillRect(
+          inkBounds.x,
+          inkBounds.y,
+          inkBounds.width,
+          inkBounds.height,
+        );
+        endCtx.globalCompositeOperation = "destination-in";
+        endCtx.fillStyle = gradient;
+        endCtx.fillRect(
+          inkBounds.x,
+          inkBounds.y,
+          inkBounds.width,
+          inkBounds.height,
+        );
+        // Add the complementary premultiplied colors and alphas. Source-over
+        // would attenuate ink0 again and create a dip in alpha at mid-run.
+        inkCtx.globalCompositeOperation = "lighter";
+        inkCtx.drawImage(endInk, 0, 0, width, height, 0, 0, width, height);
+      } else {
+        drawSweep(
+          inkCtx,
+          endPaintProfile ?? paintProfile,
+          points,
+          style.lineWidth,
+          minX,
+          minY,
+        );
+      }
     }
   });
   perfStage("composite", () => {
@@ -562,11 +678,9 @@ function renderSweepRun(
       inkCtx.globalCompositeOperation = "source-in";
       inkCtx.fillStyle = colorToStyle(style.color);
       inkCtx.fillRect(0, 0, width, height);
-      inkCtx.globalCompositeOperation = "source-over";
     }
     inkCtx.globalCompositeOperation = "destination-in";
     inkCtx.drawImage(mask, 0, 0);
-    inkCtx.globalCompositeOperation = "source-over";
   });
 
   perfStage("layerDraw", () => {
@@ -664,7 +778,17 @@ function drawSweep(
   brushSize: number,
   originX: number,
   originY: number,
-): void {
+  collectBounds = false,
+): {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+} | null {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
   ctx.imageSmoothingEnabled = true;
   for (let index = 1; index < points.length; index++) {
     const from = points[index - 1];
@@ -690,14 +814,21 @@ function drawSweep(
           }
         : sampledFrame;
     const overlap = segmentOverlap(from, to, brushSize);
-    ctx.setTransform(
-      frame.x,
-      frame.y,
-      -frame.y,
-      frame.x,
-      (from.x + to.x) / 2 - originX,
-      (from.y + to.y) / 2 - originY,
-    );
+    const centerX = (from.x + to.x) / 2 - originX;
+    const centerY = (from.y + to.y) / 2 - originY;
+    if (collectBounds) {
+      const halfLength = length / 2 + overlap;
+      const halfWidth = brushSize / 2;
+      const extentX =
+        Math.abs(frame.x) * halfLength + Math.abs(frame.y) * halfWidth;
+      const extentY =
+        Math.abs(frame.y) * halfLength + Math.abs(frame.x) * halfWidth;
+      minX = Math.min(minX, centerX - extentX);
+      minY = Math.min(minY, centerY - extentY);
+      maxX = Math.max(maxX, centerX + extentX);
+      maxY = Math.max(maxY, centerY + extentY);
+    }
+    ctx.setTransform(frame.x, frame.y, -frame.y, frame.x, centerX, centerY);
     ctx.drawImage(
       atlas,
       -length / 2 - overlap,
@@ -707,6 +838,14 @@ function drawSweep(
     );
   }
   ctx.resetTransform();
+  if (!collectBounds || minX === Number.POSITIVE_INFINITY) return null;
+  // Integer edges plus a pixel of padding retain the quad's antialias fringe.
+  // Both profiles use the same quads, so these bounds cover both ink images.
+  const left = Math.max(0, Math.floor(minX) - 1);
+  const top = Math.max(0, Math.floor(minY) - 1);
+  const right = Math.min(ctx.canvas.width, Math.ceil(maxX) + 1);
+  const bottom = Math.min(ctx.canvas.height, Math.ceil(maxY) + 1);
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 function segmentOverlap(

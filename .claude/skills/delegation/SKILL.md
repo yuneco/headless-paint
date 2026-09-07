@@ -22,7 +22,7 @@ description: "codex への実装委譲と検収のフロー。codex exec で作�
 
 ## 2. 呼び出しの既知の罠（実測済み）
 
-- `codex exec --full-auto "<プロンプト>" </dev/null` で単独起動。**`</dev/null` 必須**（無いと stdin 待ちでハング）、**`&&` チェーン禁止**
+- `codex exec -s workspace-write "<プロンプト>" </dev/null` で単独起動（codex 0.153 以降 `--full-auto` は廃止。読み取り専用の調査は `-s read-only`）。**`</dev/null` 必須**（無いと stdin 待ちでハング）、**`&&` チェーン禁止**
 - 難所は `-c model_reasoning_effort=high` を付ける
 - **codex sandbox では vitest browser runner が起動できない**（`listen EPERM ::1`）。外部ネットも不可
   - → codex の「テスト通過」報告は**常にノンブラウザ範囲のみ**。browser mode のテスト・E2E は一度も走っていない

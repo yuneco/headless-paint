@@ -58,7 +58,7 @@ export interface BristleMixingFlushResult {
 }
 
 export interface BristleMixingInterpolationProfiles {
-  readonly canvases: readonly OffscreenCanvas[];
+  readonly canvases: readonly (readonly [OffscreenCanvas, OffscreenCanvas?])[];
 }
 
 export function getActiveMixing(
@@ -407,7 +407,7 @@ export function prepareBristleMixingInterpolationProfiles(
   tipCanvas: OffscreenCanvas,
   startField: Float32Array,
   endField: Float32Array,
-  weights: readonly number[],
+  runWeights: readonly (readonly [number, number])[],
 ): BristleMixingInterpolationProfiles | null {
   return perfStage("materialUpload", () => {
     if (brushPerfDebug.nullStages.nullMaterialUpload) return null;
@@ -421,6 +421,34 @@ export function prepareBristleMixingInterpolationProfiles(
     const rows = state.fieldPixels.height;
     const profileWidth = tipCanvas.width;
     const profileHeight = tipCanvas.height;
+    // These are the flush's pre-diffusion endpoints from prepareBristleMixingFlush.
+    // Scan all texels/RGBA once per flush, not once per run. CPU fields use
+    // byte-scale floats; normalize the maximum to the shader's 0..1 scale.
+    let maxFieldDelta = 0;
+    for (let index = 0; index < startField.length; index++) {
+      maxFieldDelta = Math.max(
+        maxFieldDelta,
+        Math.abs(endField[index] - startField[index]),
+      );
+    }
+    maxFieldDelta /= 255;
+    // Adjacent runs share their endpoint profile. Upload each weight only once.
+    const weights: number[] = [];
+    const slots = new Map<number, number>();
+    const slotFor = (weight: number) => {
+      const resolvedWeight = Math.max(0, Math.min(1, weight));
+      const existing = slots.get(resolvedWeight);
+      if (existing !== undefined) return existing;
+      const slot = weights.length;
+      weights.push(resolvedWeight);
+      slots.set(resolvedWeight, slot);
+      return slot;
+    };
+    const profileSlots = runWeights.map(([w0, w1]) =>
+      maxFieldDelta * Math.abs(w1 - w0) < 1 / 255
+        ? ([slotFor(w1)] as const)
+        : ([slotFor(w0), slotFor(w1)] as const),
+    );
     const requiredCapacity = weights.length + 1;
     let cached = BRISTLE_INTERPOLATION_CACHE.get(state.renderCanvas);
     if (
@@ -523,7 +551,15 @@ export function prepareBristleMixingInterpolationProfiles(
     if (finalCanvas) stateRenderCtx.drawImage(finalCanvas, 0, 0);
     stateRenderCtx.restore();
 
-    return { canvases: cached.renderCanvases.slice(0, weights.length) };
+    return {
+      canvases: profileSlots.map(([start, end]) => {
+        const startCanvas = cached.renderCanvases[start];
+        if (!startCanvas) throw new Error("Bristle start profile is missing");
+        return end === undefined
+          ? ([startCanvas] as const)
+          : ([startCanvas, cached.renderCanvases[end]] as const);
+      }),
+    };
   });
 }
 
@@ -825,14 +861,21 @@ function sampleBilinear(
   const offset01 = (y1 * source.width + x0) * 4;
   const offset11 = (y1 * source.width + x1) * 4;
 
-  for (let channel = 0; channel < 4; channel++) {
+  // Accumulate premultiplied color so transparent texels add no black.
+  const a00 = inside00 ? (source.data[offset00 + 3] ?? 0) * w00 : 0;
+  const a10 = inside10 ? (source.data[offset10 + 3] ?? 0) * w10 : 0;
+  const a01 = inside01 ? (source.data[offset01 + 3] ?? 0) * w01 : 0;
+  const a11 = inside11 ? (source.data[offset11 + 3] ?? 0) * w11 : 0;
+  const alpha = a00 + a10 + a01 + a11;
+  for (let channel = 0; channel < 3; channel++) {
     let value = 0;
-    if (inside00) value += (source.data[offset00 + channel] ?? 0) * w00;
-    if (inside10) value += (source.data[offset10 + channel] ?? 0) * w10;
-    if (inside01) value += (source.data[offset01 + channel] ?? 0) * w01;
-    if (inside11) value += (source.data[offset11 + channel] ?? 0) * w11;
-    output[outputOffset + channel] = value;
+    if (inside00) value += (source.data[offset00 + channel] ?? 0) * a00;
+    if (inside10) value += (source.data[offset10 + channel] ?? 0) * a10;
+    if (inside01) value += (source.data[offset01 + channel] ?? 0) * a01;
+    if (inside11) value += (source.data[offset11 + channel] ?? 0) * a11;
+    output[outputOffset + channel] = alpha > 0 ? value / alpha : 0;
   }
+  output[outputOffset + 3] = alpha;
 }
 
 function uploadMaterialCanvas(

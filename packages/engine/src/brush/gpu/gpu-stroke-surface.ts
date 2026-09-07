@@ -1009,11 +1009,18 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
         this.drawDabs(segment.dabs);
         const checkpoint = checkpointBySegment.get(segment);
         const runDistance = Math.max(0, segment.update?.distancePx ?? 0);
-        const runEndDistance =
-          (compositedDistances[branchIndex] ?? 0) + runDistance;
+        const runStartDistance = compositedDistances[branchIndex] ?? 0;
+        const runEndDistance = runStartDistance + runDistance;
         const totalDistance = updateDistances[branchIndex] ?? 0;
-        const fieldMixWeight =
-          totalDistance > 0 ? clampUnit(runEndDistance / totalDistance) : 1;
+        const target = this.bristleTarget(branchIndex, {
+          previousFieldIndex: fieldStartIndex,
+          fieldIndex: fieldEndIndex,
+          fieldMixWeights: [
+            totalDistance > 0 ? clampUnit(runStartDistance / totalDistance) : 1,
+            totalDistance > 0 ? clampUnit(runEndDistance / totalDistance) : 1,
+          ],
+          chunks: segment.bristleChunks,
+        });
         for (
           let chunkIndex = 0;
           chunkIndex < segment.bristleChunks.length;
@@ -1023,11 +1030,7 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
           if (!chunk) continue;
           bristleDraws.push({
             chunk,
-            target: this.bristleTarget(branchIndex, {
-              previousFieldIndex: fieldStartIndex,
-              fieldIndex: fieldEndIndex,
-              fieldMixWeight,
-            }),
+            target,
             afterComposite:
               checkpoint &&
               checkpoint === currentCheckpoints[branchIndex] &&
@@ -1353,18 +1356,38 @@ class WebGl2StrokeSurface implements GpuStrokeSurface {
     fieldInterpolation?: {
       readonly previousFieldIndex: 0 | 1;
       readonly fieldIndex: 0 | 1;
-      readonly fieldMixWeight: number;
+      readonly fieldMixWeights: readonly [number, number];
+      readonly chunks: readonly GpuBristleChunk[];
     },
   ) {
     const previousFieldIndex =
       fieldInterpolation?.previousFieldIndex ?? this.activeFieldIndex;
     const fieldIndex = fieldInterpolation?.fieldIndex ?? this.activeFieldIndex;
+    const fieldGeometry = this.latestMaterialFieldUpdates[branchIndex];
+    let firstSegment: GpuSweepSegment | undefined;
+    let lastSegment: GpuSweepSegment | undefined;
+    for (const chunk of fieldInterpolation?.chunks ?? []) {
+      firstSegment ??= chunk.segments[0];
+      lastSegment = chunk.segments[chunk.segments.length - 1] ?? lastSegment;
+    }
+    // Use the very same document-to-field frame as sampleMaterial, across
+    // all chunks in this run (including reverse strokes and expanded branches).
+    const cosine = Math.cos(fieldGeometry?.angle ?? 0);
+    const sine = Math.sin(fieldGeometry?.angle ?? 0);
+    const localX = (x: number, y: number) =>
+      cosine * (x - (fieldGeometry?.centerX ?? 0)) +
+      sine * (y - (fieldGeometry?.centerY ?? 0));
+    const fieldMixSpan: readonly [number, number] = [
+      firstSegment ? localX(firstSegment.fromX, firstSegment.fromY) : 0,
+      lastSegment ? localX(lastSegment.toX, lastSegment.toY) : 0,
+    ];
     return {
       accumFramebuffer: this.framebuffer,
       fieldTexture: this.fieldTextures[fieldIndex],
       previousFieldTexture: this.fieldTextures[previousFieldIndex],
-      fieldMixWeight: fieldInterpolation?.fieldMixWeight ?? 1,
-      fieldGeometry: this.latestMaterialFieldUpdates[branchIndex],
+      fieldMixWeights: fieldInterpolation?.fieldMixWeights ?? ([1, 1] as const),
+      fieldMixSpan,
+      fieldGeometry,
       fieldColumns: this.fieldColumns,
       fieldRows: this.fieldRows,
       fieldTextureWidth: this.fieldTextureWidth,

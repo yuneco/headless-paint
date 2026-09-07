@@ -1,18 +1,215 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLayer } from "../../layer";
 import { DEFAULT_BRUSH_MIXING } from "../../types";
-import { writeMaterialFieldPixels } from "../material-field";
+import {
+  advanceMaterialField,
+  createMaterialField,
+  writeMaterialFieldPixels,
+} from "../material-field";
 import {
   type MixingUpdateInput,
   finalizeBristleMixingCheckpoint,
   prepareBristleMixingFlush,
   prepareMixingState,
+  sampleRotatedCheckpoint,
   stageBristleMixingCheckpoint,
 } from "../mixing";
+import { createProgram } from "./gl-resources";
 import {
   type GpuBristleChunk,
   createGpuStrokeSurface,
 } from "./gpu-stroke-surface";
+import {
+  BRANCH_DATA_FLOATS,
+  FIELD_BATCH_MIX_FRAGMENT_SHADER_SOURCE,
+  FIELD_MIX_FRAGMENT_SHADER_SOURCE,
+  FIELD_VERTEX_SHADER_SOURCE,
+} from "./shader-sources";
+
+describe("checkpoint alpha-weighted interpolation", () => {
+  it.each(["stamp", "carried", "flush-start"] as const)(
+    "%s sampler preserves yellow RGB and half alpha at a transparent boundary",
+    (path) => {
+      const gl = new OffscreenCanvas(1, 1).getContext("webgl2", {
+        antialias: false,
+        premultipliedAlpha: false,
+      });
+      if (!gl) throw new Error("WebGL2 is required");
+      const source =
+        path === "stamp"
+          ? FIELD_MIX_FRAGMENT_SHADER_SOURCE
+          : FIELD_BATCH_MIX_FRAGMENT_SHADER_SOURCE;
+      const sample =
+        path === "stamp"
+          ? "sampleCheckpointBilinear(uProbe, 0)"
+          : path === "carried"
+            ? "sampleCheckpointBilinear(uProbe, vec4(0, 0, 2, 2), ivec2(0))"
+            : "sampleFlushStartBilinear(uProbe, vec4(0, 0, 2, 2))";
+      // Expose the production sampler's straight RGBA before field pickup.
+      const program = createProgram(
+        gl,
+        FIELD_VERTEX_SHADER_SOURCE,
+        `${source.slice(0, source.indexOf("void main()"))}
+uniform vec2 uProbe;
+void main() { outColor = ${sample}; }`,
+        "checkpoint sampling regression",
+      );
+      const texture = gl.createTexture();
+      const branchDataBuffer = gl.createBuffer();
+      try {
+        gl.useProgram(program);
+        const target = path === "stamp" ? gl.TEXTURE_2D_ARRAY : gl.TEXTURE_2D;
+        gl.bindTexture(target, texture);
+        gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        // Premultiplied checkpoint: opaque yellow on the left, clear on the right.
+        const pixels = new Uint8Array([
+          255, 255, 0, 255, 0, 0, 0, 0, 255, 255, 0, 255, 0, 0, 0, 0,
+        ]);
+        if (path === "stamp") {
+          gl.texImage3D(
+            target,
+            0,
+            gl.RGBA8,
+            2,
+            2,
+            1,
+            0,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            pixels,
+          );
+          const branchData = new Float32Array(BRANCH_DATA_FLOATS);
+          branchData.set([0, 0, 2, 2]);
+          gl.bindBuffer(gl.UNIFORM_BUFFER, branchDataBuffer);
+          gl.bufferData(gl.UNIFORM_BUFFER, branchData, gl.STATIC_DRAW);
+          gl.uniformBlockBinding(
+            program,
+            gl.getUniformBlockIndex(program, "BranchData"),
+            0,
+          );
+          gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, branchDataBuffer);
+        } else {
+          gl.texImage2D(
+            target,
+            0,
+            gl.RGBA8,
+            2,
+            2,
+            0,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            pixels,
+          );
+        }
+        gl.uniform1i(
+          gl.getUniformLocation(
+            program,
+            path === "flush-start" ? "uFlushStartAccum" : "uCheckpoints",
+          ),
+          0,
+        );
+        gl.uniform2i(
+          gl.getUniformLocation(program, "uSurfaceDimensions"),
+          2,
+          2,
+        );
+        gl.viewport(0, 0, 1, 1);
+        for (const [x, expected] of [
+          [1, [255, 255, 0, 128]],
+          [0, [255, 255, 0, 128]],
+          [1.5, [0, 0, 0, 0]],
+        ] as const) {
+          gl.uniform2f(gl.getUniformLocation(program, "uProbe"), x, 0.5);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          const actual = new Uint8Array(4);
+          gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, actual);
+          expect(gl.getError()).toBe(gl.NO_ERROR);
+          expect(Array.from(actual)).toEqual([...expected]);
+        }
+      } finally {
+        gl.deleteBuffer(branchDataBuffer);
+        gl.deleteTexture(texture);
+        gl.deleteProgram(program);
+      }
+    },
+  );
+
+  it.each(["stamp", "carried", "flush-start"] as const)(
+    "%s checkpoint pickup matches CPU at a transparent yellow boundary",
+    (path) => {
+      const layer = createLayer(256, 256);
+      layer.ctx.fillStyle = "yellow";
+      layer.ctx.fillRect(0, 0, 128, 256);
+      const baseColor = { r: 0, g: 0, b: 255, a: 255 };
+      const surface = createGpuStrokeSurface(256, 256, "bitmap");
+      if (!surface) throw new Error("WebGL2 is required");
+      const update = {
+        baseColor,
+        centerX: 128,
+        centerY: 128.5,
+        angle: 0,
+        sampleSize: 1,
+        columns: 1,
+        rows: 1,
+        pickupRatePerPx: 1,
+        restoreRatePerPx: 0,
+        diffusionRatePerPx: 0,
+        distancePx: 32,
+      };
+      try {
+        surface.beginStroke(layer.canvas);
+        surface.initializeMaterialField(1, 1, baseColor);
+        surface.initializeMaterialCheckpoint(88, 88, 80);
+        surface.beginBranchBatch();
+        if (path !== "stamp") {
+          const chunk = makeUniformChunk(new OffscreenCanvas(2, 32), 0);
+          surface.pushBristleChunk(chunk);
+          if (path === "flush-start") {
+            surface.updateMaterialField({ ...update, pickupRatePerPx: 0 });
+            surface.snapshotMaterialCheckpoint(88, 88, 80);
+            surface.pushBristleChunk(chunk);
+          }
+        }
+        surface.updateMaterialField(update);
+        surface.endBranchBatch();
+        const sampled = sampleRotatedCheckpoint(
+          layer.ctx.getImageData(88, 88, 80, 80),
+          88,
+          88,
+          128,
+          128.5,
+          0,
+          1,
+          1,
+          1,
+        );
+        expect(Array.from(sampled)).toEqual([255, 255, 0, 128]);
+        const cpu = advanceMaterialField(
+          createMaterialField(1, 1, baseColor),
+          sampled,
+          1,
+          1,
+          baseColor,
+          update,
+        );
+        const cpuPixels = new Uint8ClampedArray(4);
+        writeMaterialFieldPixels(cpu, cpuPixels);
+        const gpu = surface.readMaterialFieldForTest();
+        // Saturated pickup of half-alpha yellow into blue gives mid-gray.
+        for (let channel = 0; channel < 3; channel++) {
+          expect(Math.abs(gpu[channel] - 127.5)).toBeLessThanOrEqual(1);
+          expect(
+            Math.abs(gpu[channel] - cpuPixels[channel]),
+          ).toBeLessThanOrEqual(1);
+        }
+        expect(gpu[3]).toBe(255);
+      } finally {
+        surface.dispose();
+      }
+    },
+  );
+});
 
 // The first run reads the carried image; only subsequent runs switch to F0.
 describe("perFlush carried checkpoint parity contract", () => {

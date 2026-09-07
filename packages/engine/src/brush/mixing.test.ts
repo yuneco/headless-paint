@@ -4,7 +4,64 @@ import {
   getActiveMixing,
   prepareBristleMixingInterpolationProfiles,
   prepareMixingState,
+  sampleRotatedCheckpoint,
 } from "./mixing";
+
+describe("sampleRotatedCheckpoint", () => {
+  it.each([
+    { label: "horizontal", centerX: 1, centerY: 0.5 },
+    { label: "vertical", centerX: 0.5, centerY: 1 },
+    { label: "outside tile", centerX: 0, centerY: 0.5 },
+  ])("preserves opaque color at a half-alpha $label boundary", (center) => {
+    const source: ImageData = {
+      width: 2,
+      height: 2,
+      colorSpace: "srgb",
+      data: new Uint8ClampedArray([
+        240, 200, 80, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      ]),
+    };
+    const sampled = sampleRotatedCheckpoint(
+      source,
+      0,
+      0,
+      center.centerX,
+      center.centerY,
+      0,
+      1,
+      1,
+      1,
+    );
+    // Straight RGB is unchanged; 0.5 alpha rounds to 128 in the byte output.
+    expect(Array.from(sampled)).toEqual([240, 200, 80, 128]);
+  });
+
+  it("returns zero RGBA when all contributing texels are transparent", () => {
+    const source: ImageData = {
+      width: 1,
+      height: 1,
+      colorSpace: "srgb",
+      data: new Uint8ClampedArray([240, 200, 80, 0]),
+    };
+    expect(
+      Array.from(sampleRotatedCheckpoint(source, 0, 0, 1, 1, 0, 1, 1, 1)),
+    ).toEqual([0, 0, 0, 0]);
+  });
+
+  it("weights all four colors by their alpha before unpremultiplying", () => {
+    const source: ImageData = {
+      width: 2,
+      height: 2,
+      colorSpace: "srgb",
+      data: new Uint8ClampedArray([
+        255, 0, 0, 255, 0, 255, 0, 85, 0, 0, 255, 170, 255, 255, 255, 0,
+      ]),
+    };
+    expect(
+      Array.from(sampleRotatedCheckpoint(source, 0, 0, 1, 1, 0, 1, 1, 1)),
+    ).toEqual([128, 42, 85, 128]);
+  });
+});
 
 describe("getActiveMixing", () => {
   it("disables the complete mixing stage when pickup is zero", () => {
@@ -63,10 +120,10 @@ describe("prepareBristleMixingInterpolationProfiles", () => {
       tip,
       start,
       end,
-      [0.2, 0.8],
+      [[0.2, 0.8]],
     );
     for (const [profileIndex, weight] of [0.2, 0.8].entries()) {
-      const actual = profiles?.canvases[profileIndex];
+      const actual = profiles?.canvases[0]?.[profileIndex];
       expect(actual).toBeDefined();
       const field = new OffscreenCanvas(3, 2);
       const fieldCtx = field.getContext("2d");
@@ -91,5 +148,39 @@ describe("prepareBristleMixingInterpolationProfiles", () => {
         expectedCtx.getImageData(0, 0, 2, 12).data,
       );
     }
+  });
+
+  it("shares run endpoints and uses one end profile below one byte of weight", () => {
+    const tip = new OffscreenCanvas(2, 12);
+    const state = prepareMixingState(
+      tip,
+      { r: 20, g: 40, b: 60, a: 255 },
+      DEFAULT_BRUSH_MIXING,
+      undefined,
+    );
+    // A full-range channel delta makes the color and weight thresholds equal.
+    const start = state.field.slice();
+    const end = state.field.slice();
+    start[0] = 0;
+    end[0] = 255;
+    const profiles = prepareBristleMixingInterpolationProfiles(
+      state,
+      tip,
+      start,
+      end,
+      [
+        [0, 0.5],
+        [0.5, 1],
+        [1 - 0.5 / 255, 1],
+        [1, 1],
+        [0, 1 / 255],
+      ],
+    );
+    expect(profiles?.canvases.map((run) => run.length)).toEqual([
+      2, 2, 1, 1, 2,
+    ]);
+    expect(profiles?.canvases[0]?.[1]).toBe(profiles?.canvases[1]?.[0]);
+    expect(profiles?.canvases[2]?.[0]).toBe(profiles?.canvases[1]?.[1]);
+    expect(profiles?.canvases[3]?.[0]).toBe(profiles?.canvases[1]?.[1]);
   });
 });

@@ -114,6 +114,7 @@ spray・非混色 stamp は対象外（CPU 経路のみ）。
 - **accum**: layer 同寸の RGBA8 texture（premultiplied）。stroke 開始時に layer 内容を upload（常駐 hit 時は省略）
 - **dab**: instanced draw。fragment = tip mask × 混色 field（bilinear）。`source-over`（premultiplied）で accum へ蓄積。Expand は branch ごとの instance を branch 0 → 1 → … の順に flush し、CPU 経路と同じ重なり順を保つ
 - **混色 field**: `fieldColumns × fieldRows` を branch 数分縦に並べた strip texture（RGBA16F。無ければ RGBA8）。`updateDistancePx` ごとに pickup / restore / diffusion を全 branch 1 pass で更新（式は CPU の `advanceMaterialField` と同一）
+- checkpoint の補間は CPU / GPU 共通で alpha 重み付き（premultiplied 補間 → unpremultiply）とし、透明画素は色に寄与しない
 - **checkpoint snapshot**: `checkpointDistancePx` ごとに、accum の局所 tile を branch 別の snapshot texture へ GPU 内で blit する。tile の中心は CPU の `captureCheckpoint` と同じだが、寸法は stroke 中に変わらないよう筆圧による stampSize の上限（`lineWidth × (1 + pressureDynamics.size)`）から決め、32px 単位で確保して縮小しない（sampling 位置は CPU と同一で、tile が大きい分は読まれない）。field の sampling 元はこの snapshot であり、CPU 経路の「直近 checkpoint 時点の tile を読む」時間基準を再現する
 - **commit**: pointer batch ごとに 1 回、branch 別 dirty rect を commit canvas（1024²）へ敷き詰めて一括 blit し、`transferToImageBitmap()` で得た 1 枚の ImageBitmap から rect ごとに `layer.ctx.drawImage` で書き戻す（WebGL canvas を drawImage の source にする回数を pass あたり 1 回に抑える。iOS WebKit では source 化ごとに snapshot copy が走るため）。dab ごとや点ごとには書き戻さない
 - **readback なし**: 上記のどこにも `getImageData` / `readPixels` は無く、GPU stroke 中は `layer.ctx` を drawImage の source にもしない（iOS WebKit では GPU-backed canvas の source 化ごとに snapshot copy が走るため）
@@ -130,7 +131,7 @@ stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms
 | ink | profile atlas（seed 固定の 1D 毛束断面）を quad に沿って描く |
 | composite | `mask × ink × material` を premultiplied で accum に `source-over`。material は混色 OFF なら `uColor`、混色 ON なら material field |
 
-- **混色（perFlush 意味論）**: material field は flush 単位で進める（stamp の `updateDistancePx` ごとではない）。順序は「flush 内の全 run の pickup / restore を field に適用 → その field（F1）で composite → composite 後に diffusion（最大 1 pass 相当）を掛けて次の flush へ持ち越す」。checkpoint は run（field 更新 1 回分の区間）ごとに**位置を指定**するが、同一 flush 内の pickup が読む画素は該当矩形の **flush 開始時点の accum** であり、run の描画結果は同じ flush 内の後続 pickup には反映されない。画像として次の flush へコピー保持するのは branch ごとに最後に指定された checkpoint だけ。composite は flush 開始時の field（F0）と F1 を run ごとの距離重み `runEndDistance / totalDistance` で mix する。**重みは run 内で定数**なので、run 境界で色が段になる（既知。制限の節を参照）。CPU 経路も同じ意味論（`endField` は diffusion 前）なので、flush の切り方（32ms / 1.5×lineWidth）は描画結果の一部であり、replay で flush を束ねたり広げたりしてはならない
+- **混色（perFlush 意味論）**: material field は flush 単位で進める（stamp の `updateDistancePx` ごとではない）。順序は「flush 内の全 run の pickup / restore を field に適用 → その field（F1）で composite → composite 後に diffusion（最大 1 pass 相当）を掛けて次の flush へ持ち越す」。checkpoint は run（field 更新 1 回分の区間）ごとに**位置を指定**するが、同一 flush 内の pickup が読む画素は該当矩形の **flush 開始時点の accum** であり、run の描画結果は同じ flush 内の後続 pickup には反映されない。画像として次の flush へコピー保持するのは branch ごとに最後に指定された checkpoint だけ。composite は flush 開始時の field（F0）と F1 を距離重みで mix する。重みは run の開始値 `w0 = runStartDistance / totalDistance` と終了値 `w1 = runEndDistance / totalDistance` を run 内の進行率で線形補間する（GPU は run geometry の local.x から進行率を得る。CPU は run 始点→終点の直線グラデーションで近似する。補間の省略判定は CPU が `max|F1 − F0| × |w1 − w0| < 1/255`（flush ごとに field 差を 1 回走査）、GPU が `|w1 − w0| < 1/255`。どちらも省略時の出力差は 1/255 以下）。CPU 経路も同じ意味論（`endField` は diffusion 前）なので、flush の切り方（32ms / 1.5×lineWidth）は描画結果の一部であり、replay で flush を束ねたり広げたりしてはならない
 - **composite の field 参照**: field 更新 pass は run geometry（center / angle / sampleSize）で回転した正方形として checkpoint を読む。composite は同じ geometry の逆変換 `R(-angle) · (documentPosition − center) / sampleSize + 0.5` を clamp して field を読む。F0 / F1 とも現在の run の local frame で参照する
 - 混色 OFF では field 更新 pass と checkpoint snapshot は走らない
 - CPU 側での mask の事前生成・texture upload は無い（dropout mask は shader 内で評価）。profile atlas と紙目 tile は chunk が同じオブジェクトを参照している間は再 upload しない（差し替わったときだけ upload）
@@ -181,7 +182,6 @@ GPU stroke の終了時、stroke 開始前の accum（base texture）を **直�
 - branch 上限 64（既定）。UI 上それ以上作れる場合は CPU 経路になる
 - `compositeOperation` は `source-over` のみ
 - WebGPU は未対応（WebGL2 のみ）
-- Rough bristle 混色の既知事項（CPU / GPU 共通）: field の mix 重みが run 単位の定数のため色が run 境界で階段状に変わる。掠れの多い領域で透明な下地から黒が混ざる（透明画素の pickup 処理）。いずれも perFlush 意味論の仕様上の挙動として記録済みで、修正時は CPU / GPU を同時に変える
 
 ## デバッグ
 
