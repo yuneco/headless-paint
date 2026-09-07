@@ -699,11 +699,18 @@ interface SprayBrushConfig {
   readonly pressureDynamics: SprayPressureDynamics;
 }
 
+interface BristleHeightMap {
+  readonly width: number; // texel 数（1..2048）
+  readonly height: number; // texel 数（1..2048）
+  readonly heights: Float32Array; // row-major、width * height、0..1（1 = 山）
+}
+
 interface BristleSurfaceGrain {
-  readonly scalePx: number;
+  readonly scalePx: number; // procedural: ノイズのセル幅 px / heightMap: 1 texel あたりの px
   readonly amount: number;
   readonly hardness: number;
-  readonly seed: number;
+  readonly seed: number; // procedural の紙目 seed。heightMap 指定時も接触判定の hash に使う
+  readonly heightMap?: BristleHeightMap; // 指定時は procedural Fine tooth の代わりに使う
 }
 
 interface BristleDynamics {
@@ -781,6 +788,16 @@ Fine tooth（細かな紙目）を表す。接触判定はswept quad内のpixel-
 描画chunkの平均筆圧には丸めない。初回に接触しなかった谷にも固定の再接触transferを適用するため、
 同じ場所を繰り返すと不透明な着彩片の面積が徐々に増える。専用の反復強度パラメータや
 顔料厚layerは持たない。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
+
+紙目の高さの取得元は2通りある。`surfaceGrain.heightMap` が未指定なら、`seed` と `scalePx`（ノイズのセル幅）から
+生成した 128² の procedural Fine tooth（2周波 value noise）を document 座標でタイル状に繰り返す。
+`heightMap` を指定すると、その `heights` を document 座標でタイル状に繰り返し、`scalePx` は 1 texel あたりの
+px（拡大率）として働く。どちらも texel は `positiveMod(floor(documentX / scalePx), width)`（Y も同様）で
+nearest に選ぶ（heightMap の場合。procedural は scalePx が焼き込み済みなので scale 1 相当）。接触判定の式
+（`amount` / `hardness` / 反復接触の確率）は取得元によらず同一で、CPU と GPU の両経路で同じ契約を守る。
+`heightMap` はブラシ設定のメモリ上のデータであり、永続化・シリアライズの対象ではない。寸法は 1..2048 で、
+超える場合は描画時に throw する。非整数の `scalePx` では floor の境界が CPU / GPU でわずかに食い違い得る。
+画像から `heightMap` を作るには `createHeightMapFromImageData`（[brush-api.md](./brush-api.md)）を使う。
 
 初期版は不透明またはほぼ不透明なpaintを対象とする。掃引chunk間の重なりはこの契約の下で継ぎ目を防ぐために使い、半透明paintの厳密な重なり濃度は保証しない。pending描画は常にno-opで、確定描画だけを表示する。
 
