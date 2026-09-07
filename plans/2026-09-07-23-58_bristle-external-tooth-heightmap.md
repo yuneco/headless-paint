@@ -141,6 +141,20 @@ stroke / react パッケージは `BristleBrushConfig` をそのまま運ぶだ�
 - 実ブラウザ（WebKit + Chromium）で取得済みテクスチャ 7 種 × scale {1, 2, 4} × contrast {1, 2, 4} を描画し、procedural と比較
 - 結果と「掠れ・断面も外部化するか」の判断を `plans/agents-note.md` へ記録
 
+## 実装結果（2026-09-08）
+
+- engine: `types.ts`（`BristleHeightMap`、`surfaceGrain.heightMap`）、`brush/height-map.ts`（`createHeightMapFromImageData`）、`bristle-mask.ts` の resolver（procedural は 128² / scale 1、heightMap はそのまま / grain.scalePx）と可変寸法サンプリング、GPU の `toothMap` / `toothScalePx`、shader の `uToothSize` / `uToothScale` と負座標対応 `positiveMod`
+- web: `vite-eval-textures.ts`（dev 専用 `/eval-textures/`、basename 一致のみ・symlink 拒否）、`BristleGrainEvaluation.tsx` の Source / Max size / Contrast / Invert / Normalize / Scale（px/texel）/ Contact hardness 表記
+- テスト: height-map 変換 5 件、CPU タイリング・scale・procedural 一致・入力検証、GPU parity（64×32 map、scale 1 / 2、負座標）、middleware 17 件。フル検収（build / typecheck / lint / test 57 ファイル 703 件）green
+- 実ブラウザ（Chromium、Paper001、contrast 1.6、scale 2）で CPU / WebGL2 とも紙目付きのストロークを確認、コンソールエラーなし
+- 官能評価（7 種 × scale × contrast、procedural 比較、外部化を掠れ・断面へ広げるかの判断）はユーザー実施待ち
+
+### 実装時の調整内容（補足）
+
+- サンプル画像は合成生成から ambientCG CC0 の displacement map へ変更（ユーザー方針）。画像はリポジトリに入れず `work.local/paper-textures/` に置き、dev サーバーだけが配信する
+- ユーザー要望で Contrast（`createHeightMapFromImageData` の option）と Max size（読み込み時の長辺上限）を追加
+- vitest の browser テストは repo root から実行すること。`packages/engine` 内で `vitest run` すると node モードになり `OffscreenCanvas is not defined` で落ちる（検収時に誤認しかけた）
+
 ## 完了条件
 
 - heightMap 指定で CPU / GPU とも紙目が画像由来になり、未指定時の出力は従来と byte 一致
