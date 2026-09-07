@@ -286,11 +286,18 @@ export interface SprayBrushConfig {
   readonly pressureDynamics: SprayPressureDynamics;
 }
 
+export interface BristleHeightMap {
+  readonly width: number; // texel 数（1..2048）
+  readonly height: number; // texel 数（1..2048）
+  readonly heights: Float32Array; // row-major、width * height、0..1（1 = 山）
+}
+
 export interface BristleSurfaceGrain {
   readonly scalePx: number;
   readonly amount: number;
   readonly hardness: number;
   readonly seed: number;
+  readonly heightMap?: BristleHeightMap;
 }
 
 export interface BristleDynamics {

@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { existsSync, readFileSync } from "node:fs";
 import { defineConfig } from "vite";
+import { evalTexturesPlugin } from "./vite-eval-textures";
 
 const resolveSource = (path: string) => new URL(path, import.meta.url).pathname;
 const httpsDirectory = new URL("../../work.local/https/", import.meta.url);
@@ -25,7 +26,7 @@ export default defineConfig(({ command }) => ({
   define: {
     __HP_BUILD_ID__: JSON.stringify(new Date().toISOString().slice(0, 19)),
   },
-  plugins: [react()],
+  plugins: [react(), evalTexturesPlugin()],
   server: {
     https: localHttpsOptions(),
   },

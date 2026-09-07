@@ -7,6 +7,7 @@ export type {
   BristleBranchRenderState,
   BristleBrushConfig,
   BristleDynamics,
+  BristleHeightMap,
   BristlePressureDynamics,
   BristleSurfaceGrain,
   BristleSweepPointState,
@@ -42,6 +43,10 @@ export type {
   StrokePoint,
   StrokeStyle,
 } from "./types";
+export {
+  type HeightMapFromImageOptions,
+  createHeightMapFromImageData,
+} from "./brush/height-map";
 export {
   AIRBRUSH,
   BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX,

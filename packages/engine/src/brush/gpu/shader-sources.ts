@@ -105,6 +105,8 @@ precision highp float;
 precision highp int;
 
 uniform sampler2D uTooth;
+uniform ivec2 uToothSize;
+uniform float uToothScale;
 uniform vec2 uAtlasSize;
 uniform vec2 uAtlasOrigin;
 uniform ivec2 uDocumentOrigin;
@@ -172,12 +174,19 @@ float simpleMaskDistance() {
   return broad - threshold;
 }
 
+int positiveMod(int value, int size) {
+  // GLSL ES leaves negative operands of % undefined. Keep both operands
+  // non-negative; -(value + 1) also avoids overflow at the minimum int.
+  return value >= 0 ? value % size : size - 1 - (-(value + 1) % size);
+}
+
+ivec2 positiveMod(ivec2 value, ivec2 size) {
+  return ivec2(positiveMod(value.x, size.x), positiveMod(value.y, size.y));
+}
+
 bool hasSurfaceContact(ivec2 documentPixel, float pressure, int trialId) {
   if (uGrainAmount <= 0.0) return true;
-  ivec2 tile = ivec2(
-    ((documentPixel.x % 128) + 128) % 128,
-    ((documentPixel.y % 128) + 128) % 128
-  );
+  ivec2 tile = positiveMod(ivec2(floor(vec2(documentPixel) / uToothScale)), uToothSize);
   float height = texelFetch(uTooth, tile, 0).r;
   float contact = clamp(pressure, 0.0, 1.0);
   float directCoverage = smoothstep(

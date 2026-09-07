@@ -11,7 +11,7 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
-import { getFineToothHeightTile, rasterizeBristleMask } from "./bristle-mask";
+import { rasterizeBristleMask, resolveBristleToothMap } from "./bristle-mask";
 import { getBristleProfileAtlas } from "./bristle-profile";
 import {
   type BrushAccelerator,
@@ -560,6 +560,7 @@ function renderSweepRun(
       dropoutWidthPx: Math.max(0.5, brush.dynamics.dropoutWidthPx),
       pressureCoverageResponse: clamp(brush.pressureDynamics.coverage, 0, 1),
     };
+    const tooth = resolveBristleToothMap(brush.dynamics.surfaceGrain);
     gpuSurface.pushBristleChunk({
       segments: createGpuSweepSegments(points, style.lineWidth, brush),
       simpleMask,
@@ -572,10 +573,8 @@ function renderSweepRun(
           0.01 + (1 - clamp(brush.dynamics.surfaceGrain.hardness, 0, 1)) * 0.24,
         grainSeed: brush.dynamics.surfaceGrain.seed,
         strokeSeed: seed,
-        toothHeights: getFineToothHeightTile(
-          brush.dynamics.surfaceGrain.seed,
-          brush.dynamics.surfaceGrain.scalePx,
-        ),
+        toothMap: tooth.map,
+        toothScalePx: tooth.scalePx,
       },
       bboxRect: { left: minX, top: minY, right: maxX, bottom: maxY },
       brushSize: style.lineWidth,

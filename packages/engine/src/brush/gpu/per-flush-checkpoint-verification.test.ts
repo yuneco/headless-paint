@@ -555,7 +555,12 @@ function makeUniformChunk(
       softness: 0.1,
       grainSeed: 1,
       strokeSeed: 2,
-      toothHeights: new Float32Array(128 * 128),
+      toothMap: {
+        width: 128,
+        height: 128,
+        heights: new Float32Array(128 * 128),
+      },
+      toothScalePx: 1,
     },
     bboxRect: { left: 100, top: 100, right: 156, bottom: 156 },
     brushSize: 32,

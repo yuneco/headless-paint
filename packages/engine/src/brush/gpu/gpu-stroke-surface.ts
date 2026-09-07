@@ -1,4 +1,4 @@
-import type { Color, Layer } from "../../types";
+import type { BristleHeightMap, Color, Layer } from "../../types";
 import { brushPerfDebug, perfMark, perfSample, perfStage } from "../perf-debug";
 import {
   type GpuBristleDraw,
@@ -90,7 +90,8 @@ export interface GpuGrainParams {
   readonly softness: number;
   readonly grainSeed: number;
   readonly strokeSeed: number;
-  readonly toothHeights: Float32Array<ArrayBuffer>;
+  readonly toothMap: BristleHeightMap;
+  readonly toothScalePx: number;
 }
 
 export interface GpuBristleChunk {

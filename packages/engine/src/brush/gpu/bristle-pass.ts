@@ -1,3 +1,4 @@
+import type { BristleHeightMap } from "../../types";
 import { perfStage } from "../perf-debug";
 import { createProgram, requireResource } from "./gl-resources";
 import type {
@@ -18,6 +19,8 @@ const MASK_VERTEX_FLOATS = 6;
 const INK_VERTEX_FLOATS = 4;
 
 interface MaskUniforms {
+  readonly toothSize: WebGLUniformLocation;
+  readonly toothScale: WebGLUniformLocation;
   readonly atlasSize: WebGLUniformLocation;
   readonly atlasOrigin: WebGLUniformLocation;
   readonly documentOrigin: WebGLUniformLocation;
@@ -122,6 +125,8 @@ export function createGpuBristlePassResources(
     "GPU bristle composite",
   );
   const maskUniforms: MaskUniforms = {
+    toothSize: uniformLocation(gl, maskProgram, "uToothSize"),
+    toothScale: uniformLocation(gl, maskProgram, "uToothScale"),
     atlasSize: uniformLocation(gl, maskProgram, "uAtlasSize"),
     atlasOrigin: uniformLocation(gl, maskProgram, "uAtlasOrigin"),
     documentOrigin: uniformLocation(gl, maskProgram, "uDocumentOrigin"),
@@ -207,8 +212,6 @@ export function createGpuBristlePassResources(
     atlasTexture,
     0,
   );
-  gl.bindTexture(gl.TEXTURE_2D, toothTexture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 128, 128, 0, gl.RED, gl.FLOAT, null);
   gl.bindTexture(gl.TEXTURE_2D, fallbackMaterialTexture);
   gl.texImage2D(
     gl.TEXTURE_2D,
@@ -239,7 +242,9 @@ export function createGpuBristlePassResources(
   let vertexBufferCapacity = 0;
   let atlasStatusNeedsCheck = false;
   let profileSource: OffscreenCanvas | null = null;
-  let toothSource: Float32Array<ArrayBuffer> | null = null;
+  let toothSource: BristleHeightMap | null = null;
+  let toothTextureWidth = 0;
+  let toothTextureHeight = 0;
   const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
 
   function draw(chunk: GpuBristleChunk, target: BristlePassTarget): void {
@@ -306,22 +311,39 @@ export function createGpuBristlePassResources(
   }
 
   function uploadTooth(chunk: GpuBristleChunk): void {
-    if (toothSource === chunk.grain.toothHeights) return;
+    const map = chunk.grain.toothMap;
+    if (toothSource === map) return;
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.bindTexture(gl.TEXTURE_2D, toothTexture);
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      0,
-      0,
-      128,
-      128,
-      gl.RED,
-      gl.FLOAT,
-      chunk.grain.toothHeights,
-    );
-    toothSource = chunk.grain.toothHeights;
+    if (map.width !== toothTextureWidth || map.height !== toothTextureHeight) {
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.R32F,
+        map.width,
+        map.height,
+        0,
+        gl.RED,
+        gl.FLOAT,
+        map.heights,
+      );
+      toothTextureWidth = map.width;
+      toothTextureHeight = map.height;
+    } else {
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        0,
+        0,
+        map.width,
+        map.height,
+        gl.RED,
+        gl.FLOAT,
+        map.heights,
+      );
+    }
+    toothSource = map;
   }
 
   function uploadProfile(profile: OffscreenCanvas): void {
@@ -379,8 +401,7 @@ export function createGpuBristlePassResources(
     perfStage("gpuBristleMask", () => {
       const first = page.slots[0];
       const sharedTooth = page.slots.every(
-        (slot) =>
-          slot.chunk.grain.toothHeights === first?.chunk.grain.toothHeights,
+        (slot) => slot.chunk.grain.toothMap === first?.chunk.grain.toothMap,
       );
       const sharedProfile = page.slots.every(
         (slot) => slot.chunk.profileAtlas === first?.chunk.profileAtlas,
@@ -421,6 +442,12 @@ export function createGpuBristlePassResources(
       chunk.bboxRect.top,
     );
     gl.uniform1f(maskUniforms.depositHardness, chunk.depositHardness);
+    gl.uniform2i(
+      maskUniforms.toothSize,
+      chunk.grain.toothMap.width,
+      chunk.grain.toothMap.height,
+    );
+    gl.uniform1f(maskUniforms.toothScale, chunk.grain.toothScalePx);
     gl.uniform1f(maskUniforms.grainAmount, chunk.grain.amount);
     gl.uniform1f(maskUniforms.grainSoftness, chunk.grain.softness);
     gl.uniform1ui(maskUniforms.grainSeed, chunk.grain.grainSeed >>> 0);

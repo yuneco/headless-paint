@@ -12,8 +12,8 @@ import {
 import {
   type BristleMaskSweepSample,
   createSimpleBristleMaskEvaluator,
-  getFineToothHeightTile,
   rasterizeBristleMaskEvaluatorForTest,
+  resolveBristleToothMap,
 } from "../bristle-mask";
 import { brushPerfDebug } from "../perf-debug";
 import {
@@ -100,10 +100,8 @@ describe("GPU bristle mask parity", () => {
         softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
         grainSeed: dynamics.surfaceGrain.seed,
         strokeSeed: seed,
-        toothHeights: getFineToothHeightTile(
-          dynamics.surfaceGrain.seed,
-          dynamics.surfaceGrain.scalePx,
-        ),
+        toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
+        toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
       },
       bboxRect: {
         left: originX,
@@ -131,6 +129,131 @@ describe("GPU bristle mask parity", () => {
       pass.dispose();
     }
   });
+
+  it.each([1, 2])(
+    "matches CPU external 64x32 tooth maps at scale=%s, including negative coordinates",
+    (scalePx) => {
+      const width = 160;
+      const height = 96;
+      const brushSize = 60;
+      const seed = 0x1234abcd;
+      const originX = -43;
+      const originY = -31;
+      const samples = createCurvedSamples().map((sample) => ({
+        ...sample,
+        x: sample.x - 80,
+        y: sample.y - 50,
+      }));
+      const heightMap = {
+        width: 64,
+        height: 32,
+        heights: Float32Array.from({ length: 64 * 32 }, (_, index) => {
+          const x = index % 64;
+          const y = Math.floor(index / 64);
+          const checker = (Math.floor(x / 4) + Math.floor(y / 4)) % 2;
+          return (0.6 * x) / 63 + 0.4 * checker;
+        }),
+      };
+      const dynamics = {
+        ...ROUGH_BRISTLE.dynamics,
+        surfaceGrain: {
+          ...ROUGH_BRISTLE.dynamics.surfaceGrain,
+          heightMap,
+          scalePx,
+        },
+      };
+      const field = createSimpleBristleMaskEvaluator(
+        samples,
+        brushSize,
+        dynamics,
+        ROUGH_BRISTLE.pressureDynamics.coverage,
+        seed,
+      );
+      const canvas = new OffscreenCanvas(width, height);
+      const gl = canvas.getContext("webgl2");
+      expect(gl).not.toBeNull();
+      if (!gl) return;
+      const pass = createGpuBristlePassResources(gl, width, height);
+      const profile = new OffscreenCanvas(2, brushSize);
+      const chunk: GpuBristleChunk = {
+        segments: createSegments(samples, dynamics.geometryStepPx),
+        simpleMask: {
+          dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
+          dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
+          pressureCoverageResponse: ROUGH_BRISTLE.pressureDynamics.coverage,
+        },
+        profileAtlas: profile,
+        grain: {
+          amount: dynamics.surfaceGrain.amount,
+          softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
+          grainSeed: dynamics.surfaceGrain.seed,
+          strokeSeed: seed,
+          toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
+          toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
+        },
+        bboxRect: {
+          left: originX,
+          top: originY,
+          right: originX + width,
+          bottom: originY + height,
+        },
+        brushSize,
+        depositHardness: dynamics.depositHardness,
+        color: { r: 0, g: 0, b: 0, a: 255 },
+        useMaterialField: false,
+      };
+
+      try {
+        const procedural = resolveBristleToothMap(
+          ROUGH_BRISTLE.dynamics.surfaceGrain,
+        );
+        pass.readMaskForTest(
+          createLargerWarmupChunk({
+            ...chunk,
+            grain: {
+              ...chunk.grain,
+              toothMap: procedural.map,
+              toothScalePx: procedural.scalePx,
+            },
+          }),
+        );
+        // Resize 128² -> 64x32, sub-upload a replacement, then restore the first map.
+        const replacement = {
+          ...heightMap,
+          heights: heightMap.heights.map((height) => 1 - height),
+        };
+        for (const map of [heightMap, replacement, heightMap]) {
+          const cpuMask = rasterizeBristleMaskEvaluatorForTest(
+            field,
+            samples,
+            brushSize,
+            {
+              ...dynamics,
+              surfaceGrain: { ...dynamics.surfaceGrain, heightMap: map },
+            },
+            seed,
+            originX,
+            originY,
+            width,
+            height,
+          );
+          const nextChunk = {
+            ...chunk,
+            grain: { ...chunk.grain, toothMap: map },
+          };
+          const gpuAlpha = pass.readMaskForTest(nextChunk);
+          const metrics = compareAlpha(readCanvasAlpha(cpuMask), gpuAlpha);
+          expect(metrics.cpuCoverage).toBeGreaterThan(0);
+          expect(metrics.alphaMae).toBeLessThanOrEqual(0.015);
+          expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
+          expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
+          expect(pass.readMaskForTest(nextChunk)).toEqual(gpuAlpha);
+        }
+      } finally {
+        pass.dispose();
+      }
+    },
+  );
 
   it("reports procedural simple mask parity and stays deterministic", () => {
     const width = 160;
@@ -178,10 +301,8 @@ describe("GPU bristle mask parity", () => {
         softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
         grainSeed: dynamics.surfaceGrain.seed,
         strokeSeed: seed,
-        toothHeights: getFineToothHeightTile(
-          dynamics.surfaceGrain.seed,
-          dynamics.surfaceGrain.scalePx,
-        ),
+        toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
+        toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
       },
       bboxRect: {
         left: originX,

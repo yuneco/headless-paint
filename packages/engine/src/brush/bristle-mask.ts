@@ -1,4 +1,9 @@
-import type { BristleDynamics } from "../types";
+import type {
+  BristleDynamics,
+  BristleHeightMap,
+  BristleSurfaceGrain,
+} from "../types";
+import { validateHeightMapDimensions } from "./height-map";
 import { brushPerfDebug, perfElapsed, perfStage } from "./perf-debug";
 import { hashSeed } from "./prng";
 
@@ -41,6 +46,7 @@ const REPEAT_CONTACT_EXPOSURE_PER_PASS = 0.24;
 const FIXED_CONTACT_HASH_SALT = 0x243f6a88;
 const REPEAT_CONTACT_HASH_SALT = 0x85a308d3;
 const grainHeightCache = new Map<string, Float32Array<ArrayBuffer>>();
+const grainMapCache = new WeakMap<Float32Array, BristleHeightMap>();
 const nullRasterCache = new Map<string, ImageData>();
 
 interface SurfaceContactRaster {
@@ -48,7 +54,8 @@ interface SurfaceContactRaster {
   readonly softness: number;
   readonly grainSeed: number;
   readonly strokeSeed: number;
-  readonly heights: Float32Array<ArrayBuffer>;
+  readonly map: BristleHeightMap;
+  readonly scalePx: number;
   readonly originX: number;
   readonly originY: number;
 }
@@ -348,13 +355,14 @@ function rasterizeTriangle(
   }
 }
 
-function createSurfaceContactRaster(
+export function createSurfaceContactRaster(
   dynamics: BristleDynamics,
   strokeSeed: number,
   originX: number,
   originY: number,
 ): SurfaceContactRaster | undefined {
   const grain = dynamics.surfaceGrain;
+  const resolved = resolveBristleToothMap(grain);
   const amount = clamp(grain.amount, 0, 1);
   if (amount <= 0) return undefined;
   return {
@@ -362,13 +370,13 @@ function createSurfaceContactRaster(
     softness: 0.01 + (1 - clamp(grain.hardness, 0, 1)) * 0.24,
     grainSeed: grain.seed,
     strokeSeed,
-    heights: getFineToothHeightTile(grain.seed, grain.scalePx),
+    ...resolved,
     originX,
     originY,
   };
 }
 
-function hasSurfaceContact(
+export function hasSurfaceContact(
   surface: SurfaceContactRaster,
   localX: number,
   localY: number,
@@ -378,9 +386,15 @@ function hasSurfaceContact(
   if (brushPerfDebug.nullStages.nullContact) return true;
   const documentX = surface.originX + localX;
   const documentY = surface.originY + localY;
-  const tileX = positiveModulo(documentX, GRAIN_TILE_SIZE);
-  const tileY = positiveModulo(documentY, GRAIN_TILE_SIZE);
-  const height = surface.heights[tileY * GRAIN_TILE_SIZE + tileX] ?? 0;
+  const tileX = positiveModulo(
+    Math.floor(documentX / surface.scalePx),
+    surface.map.width,
+  );
+  const tileY = positiveModulo(
+    Math.floor(documentY / surface.scalePx),
+    surface.map.height,
+  );
+  const height = surface.map.heights[tileY * surface.map.width + tileX] ?? 0;
   const contact = clamp(pressure, 0, 1);
   const directCoverage = smoothstep(
     (contact - height + surface.softness) / (surface.softness * 2),
@@ -445,6 +459,30 @@ function documentHashUnit(seed: number, x: number, y: number): number {
 function positiveModulo(value: number, modulus: number): number {
   const remainder = value % modulus;
   return remainder < 0 ? remainder + modulus : remainder;
+}
+
+/** Internal CPU/GPU sampling contract; procedural scale is already baked in. */
+export function resolveBristleToothMap(grain: BristleSurfaceGrain): {
+  readonly map: BristleHeightMap;
+  readonly scalePx: number;
+} {
+  if (grain.heightMap) {
+    const { width, height, heights } = grain.heightMap;
+    validateHeightMapDimensions(width, height);
+    if (heights.length !== width * height) {
+      throw new RangeError(
+        "Bristle height map heights length must equal width * height",
+      );
+    }
+    return { map: grain.heightMap, scalePx: grain.scalePx };
+  }
+  const heights = getFineToothHeightTile(grain.seed, grain.scalePx);
+  let map = grainMapCache.get(heights);
+  if (!map) {
+    map = { width: GRAIN_TILE_SIZE, height: GRAIN_TILE_SIZE, heights };
+    grainMapCache.set(heights, map);
+  }
+  return { map, scalePx: 1 };
 }
 
 export function getFineToothHeightTile(

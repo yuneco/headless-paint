@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_BRISTLE_DYNAMICS } from "../types";
 import {
   createSimpleBristleMaskEvaluator,
+  createSurfaceContactRaster,
+  getFineToothHeightTile,
+  hasSurfaceContact,
   rasterizeBristleMask,
+  resolveBristleToothMap,
 } from "./bristle-mask";
 import { hashSeed } from "./prng";
 
@@ -121,6 +125,155 @@ describe("simple bristle mask evaluator", () => {
       0.45,
       12,
     );
+  });
+});
+
+describe("bristle height map sampling", () => {
+  const grain = DEFAULT_BRISTLE_DYNAMICS.surfaceGrain;
+  const heightMap = {
+    width: 3,
+    height: 2,
+    heights: new Float32Array([0, 0.25, 1, 0.75, 0.5, 0.125]),
+  };
+
+  it.each([1, 2])(
+    "tiles document coordinates, including negatives, with scale=%s",
+    (scalePx) => {
+      const resolved = resolveBristleToothMap({ ...grain, heightMap, scalePx });
+      expect(resolved.map).toBe(heightMap);
+      expect(resolved.scalePx).toBe(scalePx);
+      for (const [texelX, texelY, expectedHeight] of [
+        [0, 0, 0],
+        [1, 0, 0.25],
+        [2, 0, 1],
+        [0, 1, 0.75],
+        [1, 1, 0.5],
+        [2, 1, 0.125],
+      ]) {
+        for (const repeat of [-3, -1, 0, 2]) {
+          for (let offset = 0; offset < scalePx; offset++) {
+            const documentX = (texelX + repeat * 3) * scalePx + offset;
+            const documentY = (texelY + repeat * 2) * scalePx + offset;
+            for (const pressure of [0.1, 0.4, 0.8]) {
+              const surface = createSurfaceContactRaster(
+                {
+                  ...DEFAULT_BRISTLE_DYNAMICS,
+                  surfaceGrain: { ...grain, amount: 1, heightMap, scalePx },
+                },
+                17,
+                -23,
+                -19,
+              );
+              if (!surface) throw new Error("Expected contact raster");
+              // A 1x1 map isolates the expected texel while retaining document hashes.
+              const expected = {
+                ...surface,
+                map: {
+                  width: 1,
+                  height: 1,
+                  heights: new Float32Array([expectedHeight]),
+                },
+              };
+              expect(
+                hasSurfaceContact(
+                  surface,
+                  documentX + 23,
+                  documentY + 19,
+                  pressure,
+                  3,
+                ),
+              ).toBe(
+                hasSurfaceContact(
+                  expected,
+                  documentX + 23,
+                  documentY + 19,
+                  pressure,
+                  3,
+                ),
+              );
+            }
+          }
+        }
+      }
+    },
+  );
+
+  it.each([0.5, 1, 2, 4, 7.5])(
+    "preserves the exact legacy procedural heights at scale=%s",
+    (scalePx) => {
+      const resolved = resolveBristleToothMap({ ...grain, scalePx });
+      const legacy = getFineToothHeightTile(grain.seed, scalePx);
+      expect(resolved.map.heights).toBe(legacy);
+      expect(resolved.scalePx).toBe(1);
+      expect(resolved.map.width).toBe(128);
+      expect(resolved.map.height).toBe(128);
+      expect(resolveBristleToothMap({ ...grain, scalePx }).map).toBe(
+        resolved.map,
+      );
+      for (let y = -129; y <= 129; y++) {
+        for (let x = -129; x <= 129; x++) {
+          const oldX = ((x % 128) + 128) % 128;
+          const oldY = ((y % 128) + 128) % 128;
+          const newX =
+            ((Math.floor(x / resolved.scalePx) % resolved.map.width) +
+              resolved.map.width) %
+            resolved.map.width;
+          const newY =
+            ((Math.floor(y / resolved.scalePx) % resolved.map.height) +
+              resolved.map.height) %
+            resolved.map.height;
+          if (
+            resolved.map.heights[newY * resolved.map.width + newX] !==
+            legacy[oldY * 128 + oldX]
+          ) {
+            throw new Error(`Procedural height changed at ${x},${y}`);
+          }
+        }
+      }
+    },
+  );
+
+  it.each([0, -1, 1.5, 2049, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects invalid map dimensions: %s",
+    (dimension) => {
+      for (const map of [
+        { ...heightMap, width: dimension },
+        { ...heightMap, height: dimension },
+      ]) {
+        expect(() =>
+          resolveBristleToothMap({ ...grain, heightMap: map }),
+        ).toThrow(RangeError);
+        expect(() =>
+          createSurfaceContactRaster(
+            {
+              ...DEFAULT_BRISTLE_DYNAMICS,
+              surfaceGrain: { ...grain, amount: 0, heightMap: map },
+            },
+            1,
+            0,
+            0,
+          ),
+        ).toThrow(RangeError);
+      }
+    },
+  );
+
+  it.each([5, 7])("rejects mismatched heights length: %s", (length) => {
+    expect(() =>
+      resolveBristleToothMap({
+        ...grain,
+        heightMap: { ...heightMap, heights: new Float32Array(length) },
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it.each([1, 2048])("accepts boundary dimensions: %s", (width) => {
+    const map = {
+      width,
+      height: width,
+      heights: new Float32Array(width * width),
+    };
+    expect(resolveBristleToothMap({ ...grain, heightMap: map }).map).toBe(map);
   });
 });
 
