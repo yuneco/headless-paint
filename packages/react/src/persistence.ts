@@ -713,19 +713,11 @@ function parseBristleBrushConfig(
   const grain = dynamics.surfaceGrain as Record<string, unknown>;
   const pressure = value.pressureDynamics;
   if (
-    !Number.isInteger(dynamics.bristleCount) ||
-    (dynamics.bristleCount as number) < 1 ||
-    (dynamics.bristleCount as number) > 128 ||
-    !isFiniteInRange(dynamics.bristleFill, 0.1, 2.4) ||
-    !isUnitNumber(dynamics.bristleWidthVariation) ||
-    !isUnitNumber(dynamics.bristleSpacingVariation) ||
     !isFiniteInRange(dynamics.geometryStepPx, 0.5, 16) ||
     !isFiniteInRange(dynamics.transverseMaskCellPx, 0.25, 32) ||
     !isFiniteInRange(dynamics.dropoutLengthPx, 1, 2048) ||
     !isFiniteInRange(dynamics.dropoutWidthPx, 0.25, 2048) ||
     !isUnitNumber(dynamics.depositHardness) ||
-    !isUnitNumber(dynamics.edgeTextureAmount) ||
-    !isFiniteInRange(dynamics.edgeTextureLengthPx, 0.5, 2048) ||
     !isFiniteInRange(dynamics.cuspAngleThresholdDeg, 0, 180) ||
     !isUnitNumber(dynamics.cuspDetectionSpanRatio) ||
     !isUnitNumber(dynamics.lagLengthRatio) ||
@@ -733,7 +725,9 @@ function parseBristleBrushConfig(
     !isUnitNumber(grain.amount) ||
     !isUnitNumber(grain.hardness) ||
     !Number.isInteger(grain.seed) ||
-    !isUnitNumber(pressure.coverage)
+    "coverage" in pressure ||
+    !isUnitNumber(pressure.dropout) ||
+    !isUnitNumber(pressure.size)
   ) {
     return null;
   }
@@ -742,17 +736,11 @@ function parseBristleBrushConfig(
   return {
     type: "bristle",
     dynamics: {
-      bristleCount: dynamics.bristleCount as number,
-      bristleFill: dynamics.bristleFill as number,
-      bristleWidthVariation: dynamics.bristleWidthVariation as number,
-      bristleSpacingVariation: dynamics.bristleSpacingVariation as number,
       geometryStepPx: dynamics.geometryStepPx as number,
       transverseMaskCellPx: dynamics.transverseMaskCellPx as number,
       dropoutLengthPx: dynamics.dropoutLengthPx as number,
       dropoutWidthPx: dynamics.dropoutWidthPx as number,
       depositHardness: dynamics.depositHardness as number,
-      edgeTextureAmount: dynamics.edgeTextureAmount as number,
-      edgeTextureLengthPx: dynamics.edgeTextureLengthPx as number,
       cuspAngleThresholdDeg: dynamics.cuspAngleThresholdDeg as number,
       cuspDetectionSpanRatio: dynamics.cuspDetectionSpanRatio as number,
       lagLengthRatio: dynamics.lagLengthRatio as number,
@@ -763,7 +751,10 @@ function parseBristleBrushConfig(
         seed: grain.seed as number,
       },
     },
-    pressureDynamics: { coverage: pressure.coverage as number },
+    pressureDynamics: {
+      dropout: pressure.dropout as number,
+      size: pressure.size as number,
+    },
     mixing: parsedMixing.mixing,
   };
 }

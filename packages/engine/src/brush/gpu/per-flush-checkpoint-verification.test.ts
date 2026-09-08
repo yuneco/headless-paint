@@ -535,6 +535,8 @@ function makeUniformChunk(
         fromFrameY: 0,
         toFrameX: 1,
         toFrameY: 0,
+        fromHalfWidth: 16,
+        toHalfWidth: 16,
         fromPressure: 1,
         toPressure: 1,
         fromDistance: 0,
@@ -547,7 +549,7 @@ function makeUniformChunk(
     simpleMask: {
       dropoutLengthPx: 1_000_000,
       dropoutWidthPx: 1_000_000,
-      pressureCoverageResponse: 1,
+      dropoutResponse: 1,
     },
     profileAtlas,
     grain: {

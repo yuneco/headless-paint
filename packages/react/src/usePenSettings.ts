@@ -70,7 +70,7 @@ function normalizeSprayPressureDynamics(
 function normalizeBristlePressureDynamics(
   value: BristlePressureDynamics,
 ): BristlePressureDynamics {
-  return { coverage: value.coverage };
+  return { dropout: value.dropout, size: value.size };
 }
 
 function normalizeBrushConfig(brush: BrushConfig): BrushConfig {
@@ -160,10 +160,11 @@ export function usePenSettings(
           return normalizeBrushConfig({
             ...current,
             pressureDynamics: {
-              coverage:
-                "coverage" in dynamics
-                  ? dynamics.coverage
-                  : current.pressureDynamics.coverage,
+              dropout:
+                "dropout" in dynamics
+                  ? dynamics.dropout
+                  : current.pressureDynamics.dropout,
+              size: dynamics.size,
             },
           });
         }

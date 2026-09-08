@@ -42,24 +42,24 @@ describe("GpuStrokeSurface", () => {
     profileCtx.fillStyle = "white";
     profileCtx.fillRect(0, 0, profile.width, profile.height);
     const chunk: GpuBristleChunk = {
-      // Nearly constant noise; pressure gives signed distances -/+0.0031.
+      // Convert legacy pressures to retain signed distances -/+0.0031.
       // MAX keeps the stronger alpha (~191), while source-over would add alpha.
       segments: [
         {
           ...makeSweepSegment(0, 1),
-          fromPressure: 0.558347518240826,
-          toPressure: 0.558347518240826,
+          fromPressure: 0.5 + (0.558347518240826 - 0.5) * 0.9,
+          toPressure: 0.5 + (0.558347518240826 - 0.5) * 0.9,
         },
         {
           ...makeSweepSegment(2, 3),
-          fromPressure: 0.5652364071297148,
-          toPressure: 0.5652364071297148,
+          fromPressure: 0.5 + (0.5652364071297148 - 0.5) * 0.9,
+          toPressure: 0.5 + (0.5652364071297148 - 0.5) * 0.9,
         },
       ],
       simpleMask: {
         dropoutLengthPx: 1_000_000,
         dropoutWidthPx: 1_000_000,
-        pressureCoverageResponse: 1,
+        dropoutResponse: 1,
       },
       profileAtlas: profile,
       grain: {
@@ -90,7 +90,7 @@ describe("GpuStrokeSurface", () => {
     expect(pixel[3]).toBeLessThan(205);
     const stages = brushPerfDebug.snapshot().stages;
     expect(stages.gpuBristleMask.count).toBe(1);
-    expect(stages.gpuBristleInk.count).toBe(1);
+    expect(stages.gpuBristleInk.count).toBe(0);
     expect(stages.gpuBristleComposite.count).toBe(1);
   });
 
@@ -115,7 +115,7 @@ describe("GpuStrokeSurface", () => {
       simpleMask: {
         dropoutLengthPx: 40,
         dropoutWidthPx: 4,
-        pressureCoverageResponse: 1,
+        dropoutResponse: 1,
       },
       profileAtlas: profile,
       grain: {
@@ -196,7 +196,7 @@ describe("GpuStrokeSurface", () => {
       simpleMask: {
         dropoutLengthPx: 40,
         dropoutWidthPx: 4,
-        pressureCoverageResponse: 1,
+        dropoutResponse: 1,
       },
       profileAtlas: profile,
       grain: {
@@ -278,7 +278,7 @@ describe("GpuStrokeSurface", () => {
       simpleMask: {
         dropoutLengthPx: 40,
         dropoutWidthPx: 4,
-        pressureCoverageResponse: 1,
+        dropoutResponse: 1,
       },
       profileAtlas: profile,
       grain: {
@@ -1066,6 +1066,8 @@ function makeSweepSegment(fromDistance: number, toDistance: number) {
     fromFrameY: 0,
     toFrameX: 1,
     toFrameY: 0,
+    fromHalfWidth: 6,
+    toHalfWidth: 6,
     fromPressure: 1,
     toPressure: 1,
     fromDistance,
@@ -1094,7 +1096,7 @@ function renderBristlePerFlushForTest(
       simpleMask: {
         dropoutLengthPx: 40,
         dropoutWidthPx: 4,
-        pressureCoverageResponse: 1,
+        dropoutResponse: 1,
       },
       profileAtlas: profile,
       grain: {

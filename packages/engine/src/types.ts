@@ -301,17 +301,11 @@ export interface BristleSurfaceGrain {
 }
 
 export interface BristleDynamics {
-  readonly bristleCount: number;
-  readonly bristleFill: number;
-  readonly bristleWidthVariation: number;
-  readonly bristleSpacingVariation: number;
   readonly geometryStepPx: number;
   readonly transverseMaskCellPx: number;
   readonly dropoutLengthPx: number;
   readonly dropoutWidthPx: number;
   readonly depositHardness: number;
-  readonly edgeTextureAmount: number;
-  readonly edgeTextureLengthPx: number;
   readonly cuspAngleThresholdDeg: number;
   readonly cuspDetectionSpanRatio: number;
   readonly lagLengthRatio: number;
@@ -319,21 +313,16 @@ export interface BristleDynamics {
 }
 
 export interface BristlePressureDynamics {
-  readonly coverage: number;
+  readonly dropout: number;
+  readonly size: number;
 }
 
 export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
-  bristleCount: 57,
-  bristleFill: 1.8,
-  bristleWidthVariation: 0.62,
-  bristleSpacingVariation: 0.72,
   geometryStepPx: 1,
   transverseMaskCellPx: 0.82,
   dropoutLengthPx: 58,
   dropoutWidthPx: 1,
   depositHardness: 1,
-  edgeTextureAmount: 0.12,
-  edgeTextureLengthPx: 7,
   cuspAngleThresholdDeg: 65,
   cuspDetectionSpanRatio: 0.14,
   lagLengthRatio: 0.3,
@@ -346,7 +335,8 @@ export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
 };
 
 export const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {
-  coverage: 1,
+  dropout: 1,
+  size: 0,
 };
 
 export interface BristleBrushConfig {

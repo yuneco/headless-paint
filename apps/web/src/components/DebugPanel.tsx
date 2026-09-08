@@ -44,12 +44,6 @@ const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 const PATTERN_MODES: PatternMode[] = ["none", "grid", "repeat-x", "repeat-y"];
 const SIZE_JITTER_MODES = ["lognormal", "bimodal"] as const;
 
-function getPrimaryPressureResponse(brush: BrushConfig): number {
-  return brush.type === "bristle"
-    ? brush.pressureDynamics.coverage
-    : brush.pressureDynamics.size;
-}
-
 function supportsCommonSmoothing(brush: BrushConfig): boolean {
   return !(
     brush.type === "bristle" ||
@@ -108,8 +102,15 @@ function DebugPanelComponent({
 
   const penDataRef = useRef({
     lineWidth: penSettings.lineWidth,
-    pressureResponse: getPrimaryPressureResponse(penSettings.brush),
+    pressureResponse: penSettings.brush.pressureDynamics.size,
+    dropout:
+      penSettings.brush.type === "bristle"
+        ? penSettings.brush.pressureDynamics.dropout
+        : 0,
   });
+
+  const pressureResponseControllerRef = useRef<Controller | null>(null);
+  const dropoutControllerRef = useRef<Controller | null>(null);
 
   const brushDynamics =
     penSettings.brush.type === "stamp"
@@ -360,21 +361,37 @@ function DebugPanelComponent({
           penSettingsRef.current.setLineWidth(value);
         });
 
-      penFolder
+      pressureResponseControllerRef.current = penFolder
         .add(penDataRef.current, "pressureResponse", 0, 1, 0.05)
-        .name("Pressure Response")
+        .name(
+          penSettingsRef.current.brush.type === "bristle"
+            ? "Size（筆圧で太さ）"
+            : "Pressure Response",
+        )
         .listen()
         .onChange((value: number) => {
           const ps = penSettingsRef.current;
-          if (ps.brush.type === "bristle") {
-            ps.setBrushPressureDynamics({ coverage: value });
-            return;
-          }
           ps.setBrushPressureDynamics({
             ...ps.brush.pressureDynamics,
             size: value,
           });
         });
+
+      dropoutControllerRef.current = penFolder
+        .add(penDataRef.current, "dropout", 0, 1, 0.05)
+        .name("Dropout（筆圧で掠れ）")
+        .listen()
+        .onChange((value: number) => {
+          const ps = penSettingsRef.current;
+          if (ps.brush.type !== "bristle") return;
+          ps.setBrushPressureDynamics({
+            ...ps.brush.pressureDynamics,
+            dropout: value,
+          });
+        });
+      if (penSettingsRef.current.brush.type !== "bristle") {
+        dropoutControllerRef.current.hide();
+      }
 
       penFolder.open();
 
@@ -616,6 +633,8 @@ function DebugPanelComponent({
       guiRef.current?.destroy();
       guiRef.current = null;
       smoothingControllerRefs.current = [];
+      pressureResponseControllerRef.current = null;
+      dropoutControllerRef.current = null;
     };
   }, []);
 
@@ -665,9 +684,16 @@ function DebugPanelComponent({
 
   useEffect(() => {
     penDataRef.current.lineWidth = penSettings.lineWidth;
-    penDataRef.current.pressureResponse = getPrimaryPressureResponse(
-      penSettings.brush,
-    );
+    penDataRef.current.pressureResponse =
+      penSettings.brush.pressureDynamics.size;
+    if (penSettings.brush.type === "bristle") {
+      penDataRef.current.dropout = penSettings.brush.pressureDynamics.dropout;
+      pressureResponseControllerRef.current?.name("Size（筆圧で太さ）");
+      dropoutControllerRef.current?.show();
+    } else {
+      pressureResponseControllerRef.current?.name("Pressure Response");
+      dropoutControllerRef.current?.hide();
+    }
   }, [penSettings.lineWidth, penSettings.brush]);
 
   useEffect(() => {

@@ -65,7 +65,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Mat3Like` | gl-matrix `mat3` 互換の flat 3x3 行列 |
 | `QuadCorners` | 変換後矩形の4隅 `[tl, tr, bl, br]` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
-| `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig`） |
+| `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig \| BristleBrushConfig`） |
 | `BrushRenderState` | ブラシレンダリング状態 `{ seed, tipCanvas, branches }` |
 
 ### Layer 管理関数

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderBrushStroke } from ".";
+import { calculateRadius } from "../draw";
 import { createLayer } from "../layer";
 import type {
   BristleBrushConfig,
@@ -105,6 +106,34 @@ function alphaStats(layer: ReturnType<typeof createLayer>): {
 }
 
 describe("bristle brush", () => {
+  it.each([0, 1])(
+    "size=%s uses calculateRadius for the rendered sweep width",
+    (size) => {
+      for (const pressure of [0.25, 1]) {
+        const brush = {
+          ...makeBrush(),
+          pressureDynamics: { dropout: 0, size },
+        };
+        const style = makeStyle(brush);
+        const layer = createLayer(200, 120);
+        renderBrushStroke(layer, line(pressure), style, 0, initialState());
+        const radius = calculateRadius(
+          pressure,
+          style.lineWidth,
+          size,
+          style.pressureCurve,
+        );
+        const image = layer.ctx.getImageData(100, 0, 1, 120);
+        for (let y = 0; y < 120; y++) {
+          const inside = y + 0.5 >= 60 - radius && y + 0.5 < 60 + radius;
+          expect(image.data[y * 4 + 3], `pressure=${pressure}, y=${y}`).toBe(
+            inside ? 255 : 0,
+          );
+        }
+      }
+    },
+  );
+
   it("連続sweepで長いストロークを列方向に分断しない", () => {
     const layer = createLayer(200, 120);
     renderBrushStroke(layer, line(1), makeStyle(), 0, initialState());

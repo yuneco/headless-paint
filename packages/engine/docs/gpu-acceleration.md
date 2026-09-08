@@ -128,7 +128,7 @@ stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms
 
 | pass | 内容 |
 |---|---|
-| mask | 掃引 quad を描き、fragment ごとに面掠れ（simple dropout mask: broad value noise 1 octave − 筆圧閾値。CPU と同一式を画素評価）と document 座標固定の紙目接触を評価して alpha を得る。quad の頂点属性は `(distance, crossPx ∈ [−lineWidth/2, +lineWidth/2])` と筆圧 |
+| mask | 掃引 quad を描き、fragment ごとに面掠れ（simple dropout mask: broad value noise 1 octave − 筆圧閾値。CPU と同一式を画素評価）と document 座標固定の紙目接触を評価して alpha を得る。quad の頂点属性は `(distance, crossPx)` と筆圧。crossPx は基準 `lineWidth` の横断座標で、quad の実際の半幅はサンプルごとに `pressureDynamics.size` で決まる（±サンプル半幅） |
 | ink | 混色時のみ。断面の色場（alpha 1 の断面 canvas に乗せた色）を quad に沿って描く。非混色では断面が一様なのでこの pass は省略し、mask の alpha だけで composite する |
 | composite | `mask × ink × material` を premultiplied で accum に `source-over`。material は混色 OFF なら `uColor`、混色 ON なら material field |
 

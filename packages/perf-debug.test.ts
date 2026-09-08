@@ -119,9 +119,12 @@ describe("brush perf null stages", () => {
 
     brushPerfDebug.nullStages.nullRaster = false;
     brushPerfDebug.nullStages.nullContact = true;
+    // 断面が一様（alpha 1）になったため、直線ストロークでは通常の掃引と
+    // null（bbox 全面塗り）の被覆が一致する。null が下回らないことだけを確認する
     const normalSweep = renderBristleCoverage(false);
     const nullSweep = renderBristleCoverage(true);
-    expect(nullSweep).toBeGreaterThan(normalSweep);
+    expect(normalSweep).toBeGreaterThan(0);
+    expect(nullSweep).toBeGreaterThanOrEqual(normalSweep);
     expect(brushPerfDebug.snapshot().stages.drawSweep.count).toBe(2);
   });
 

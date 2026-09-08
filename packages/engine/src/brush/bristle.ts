@@ -1,3 +1,4 @@
+import { calculateRadius, evaluateParametricCurve } from "../draw";
 import { colorToStyle } from "../layer";
 import { interpolateStrokePointsCentripetal } from "../stroke-interpolation";
 import type {
@@ -12,7 +13,7 @@ import type {
   StrokeStyle,
 } from "../types";
 import { rasterizeBristleMask, resolveBristleToothMap } from "./bristle-mask";
-import { getBristleProfileAtlas } from "./bristle-profile";
+import { getBristleSectionCanvas } from "./bristle-section";
 import {
   type BrushAccelerator,
   getActiveGpuStrokeSurface,
@@ -34,6 +35,7 @@ import { type EmissionPoint, walkEmissions } from "./scheduler";
 
 interface ResolvedSweepPoint extends BristleSweepPointState {
   readonly breakBefore: boolean;
+  readonly halfWidth: number;
 }
 
 interface BristleRenderResult {
@@ -136,23 +138,26 @@ export function renderBristleBrushStroke(
   }
 
   const resolved = perfStage("sweepResolve", () =>
-    resolveSweepPoints(emissions, branch.bristle, style.lineWidth, brush),
-  );
-  const profile = getBristleProfileAtlas(
-    style.lineWidth,
-    brush.dynamics,
-    state.seed,
+    resolveSweepPoints(
+      emissions,
+      branch.bristle,
+      style.lineWidth,
+      brush,
+      style.pressureCurve,
+    ),
   );
   const mixing = getActiveMixing(brush.mixing);
-  let mixingState = mixing
-    ? prepareMixingState(
-        profile,
-        style.color,
-        mixing,
-        branch.mixing,
-        accelerator,
-      )
-    : undefined;
+  const profile = mixing ? getBristleSectionCanvas(style.lineWidth) : null;
+  let mixingState =
+    mixing && profile
+      ? prepareMixingState(
+          profile,
+          style.color,
+          mixing,
+          branch.mixing,
+          accelerator,
+        )
+      : undefined;
   const renderResult = renderRuns(
     layer,
     resolved.points,
@@ -189,6 +194,7 @@ function resolveSweepPoints(
   previous: BristleBranchRenderState | undefined,
   brushSize: number,
   brush: BristleBrushConfig,
+  pressureCurve: StrokeStyle["pressureCurve"],
 ): {
   readonly points: readonly ResolvedSweepPoint[];
   readonly state: BristleBranchRenderState;
@@ -197,6 +203,12 @@ function resolveSweepPoints(
   if (previous?.lastSweepPoint) {
     points.push({
       ...previous.lastSweepPoint,
+      halfWidth: calculateRadius(
+        previous.lastSweepPoint.pressure,
+        brushSize,
+        brush.pressureDynamics.size,
+        pressureCurve,
+      ),
       breakBefore: false,
     });
   }
@@ -220,6 +232,12 @@ function resolveSweepPoints(
 
   for (const emission of emissions) {
     const pressure = Math.max(0, Math.min(1, emission.pressure ?? 0.5));
+    const halfWidth = calculateRadius(
+      pressure,
+      brushSize,
+      brush.pressureDynamics.size,
+      pressureCurve,
+    );
     let frameX = emission.directionX * frameSign;
     let frameY = emission.directionY * frameSign;
     if (incomingX !== undefined && incomingY !== undefined) {
@@ -236,6 +254,7 @@ function resolveSweepPoints(
           x: emission.x,
           y: emission.y,
           pressure,
+          halfWidth,
           directionX: emission.directionX,
           directionY: emission.directionY,
           frameX: incomingFrameX,
@@ -292,6 +311,7 @@ function resolveSweepPoints(
       x: emission.x,
       y: emission.y,
       pressure,
+      halfWidth,
       directionX: emission.directionX,
       directionY: emission.directionY,
       frameX,
@@ -328,7 +348,7 @@ function renderRuns(
   points: readonly ResolvedSweepPoint[],
   style: StrokeStyle,
   brush: BristleBrushConfig,
-  profile: OffscreenCanvas,
+  profile: OffscreenCanvas | null,
   seed: number,
   sourceLayer: Layer,
   mixing: BrushMixing | null,
@@ -339,7 +359,12 @@ function renderRuns(
     return { mixing: initialMixingState };
   }
 
-  if (mixing && initialMixingState && !getActiveGpuStrokeSurface(accelerator)) {
+  if (
+    mixing &&
+    profile &&
+    initialMixingState &&
+    !getActiveGpuStrokeSurface(accelerator)
+  ) {
     return renderCpuMixingRuns(
       layer,
       points,
@@ -363,7 +388,7 @@ function renderRuns(
     const point = points[index];
     if (!point || point.distance + 0.0001 < nextUpdateDistance) continue;
     const mixingUpdateInput =
-      mixing && mixingState
+      mixing && profile && mixingState
         ? createMixingUpdateInput(
             point,
             profile,
@@ -535,8 +560,8 @@ function renderSweepRun(
   points: readonly ResolvedSweepPoint[],
   style: StrokeStyle,
   brush: BristleBrushConfig,
-  paintProfile: OffscreenCanvas,
-  profileAtlas: OffscreenCanvas,
+  paintProfile: OffscreenCanvas | null,
+  profileAtlas: OffscreenCanvas | null,
   seed: number,
   coloredProfile: boolean,
   accelerator?: BrushAccelerator | null,
@@ -544,7 +569,11 @@ function renderSweepRun(
   endInkOwner?: OffscreenCanvas,
 ): void {
   if (points.length < 2) return;
-  const margin = style.lineWidth / 2 + 4;
+  const margin =
+    points.reduce(
+      (maximum, point) => Math.max(maximum, point.halfWidth),
+      style.lineWidth / 2,
+    ) + 4;
   const bounds = resolvePointBounds(points);
   const minX = Math.floor(bounds.minX - margin);
   const minY = Math.floor(bounds.minY - margin);
@@ -558,11 +587,16 @@ function renderSweepRun(
     const simpleMask = {
       dropoutLengthPx: Math.max(4, brush.dynamics.dropoutLengthPx),
       dropoutWidthPx: Math.max(0.5, brush.dynamics.dropoutWidthPx),
-      pressureCoverageResponse: clamp(brush.pressureDynamics.coverage, 0, 1),
+      dropoutResponse: clamp(brush.pressureDynamics.dropout, 0, 1),
     };
     const tooth = resolveBristleToothMap(brush.dynamics.surfaceGrain);
     gpuSurface.pushBristleChunk({
-      segments: createGpuSweepSegments(points, style.lineWidth, brush),
+      segments: createGpuSweepSegments(
+        points,
+        style.lineWidth,
+        brush,
+        style.pressureCurve,
+      ),
       simpleMask,
       profileAtlas,
       grain: {
@@ -592,10 +626,13 @@ function renderSweepRun(
   if (!inkCtx) throw new Error("Bristle sweep requires Canvas2D");
 
   const mask = rasterizeBristleMask(
-    points,
+    points.map((point) => ({
+      ...point,
+      pressure: evaluateParametricCurve(point.pressure, style.pressureCurve),
+    })),
     style.lineWidth,
     brush.dynamics,
-    brush.pressureDynamics.coverage,
+    brush.pressureDynamics.dropout,
     seed,
     minX,
     minY,
@@ -721,6 +758,7 @@ function createGpuSweepSegments(
   points: readonly ResolvedSweepPoint[],
   brushSize: number,
   brush: BristleBrushConfig,
+  pressureCurve: StrokeStyle["pressureCurve"],
 ): GpuSweepSegment[] {
   const segments: GpuSweepSegment[] = [];
   for (let index = 1; index < points.length; index++) {
@@ -737,8 +775,10 @@ function createGpuSweepSegments(
       fromFrameY: from.frameY,
       toFrameX: to.frameX,
       toFrameY: to.frameY,
-      fromPressure: from.pressure,
-      toPressure: to.pressure,
+      fromHalfWidth: from.halfWidth,
+      toHalfWidth: to.halfWidth,
+      fromPressure: evaluateParametricCurve(from.pressure, pressureCurve),
+      toPressure: evaluateParametricCurve(to.pressure, pressureCurve),
       fromDistance: from.distance,
       toDistance: to.distance,
       overlap: segmentOverlap(from, to, brushSize),
@@ -772,7 +812,7 @@ function resolvePointBounds(points: readonly ResolvedSweepPoint[]): {
 
 function drawSweep(
   ctx: OffscreenCanvasRenderingContext2D,
-  atlas: OffscreenCanvas,
+  atlas: OffscreenCanvas | null,
   points: readonly ResolvedSweepPoint[],
   brushSize: number,
   originX: number,
@@ -817,7 +857,7 @@ function drawSweep(
     const centerY = (from.y + to.y) / 2 - originY;
     if (collectBounds) {
       const halfLength = length / 2 + overlap;
-      const halfWidth = brushSize / 2;
+      const halfWidth = Math.max(from.halfWidth, to.halfWidth);
       const extentX =
         Math.abs(frame.x) * halfLength + Math.abs(frame.y) * halfWidth;
       const extentY =
@@ -828,13 +868,33 @@ function drawSweep(
       maxY = Math.max(maxY, centerY + extentY);
     }
     ctx.setTransform(frame.x, frame.y, -frame.y, frame.x, centerX, centerY);
-    ctx.drawImage(
-      atlas,
-      -length / 2 - overlap,
-      -brushSize / 2,
-      length + overlap * 2,
-      brushSize,
-    );
+    const left = -length / 2 - overlap;
+    const right = length / 2 + overlap;
+    // A cusp can retain a frame opposite the current direction of travel.
+    const leftHalfWidth = alignment >= 0 ? from.halfWidth : to.halfWidth;
+    const rightHalfWidth = alignment >= 0 ? to.halfWidth : from.halfWidth;
+    ctx.beginPath();
+    ctx.moveTo(left, -leftHalfWidth);
+    ctx.lineTo(left, leftHalfWidth);
+    ctx.lineTo(right, rightHalfWidth);
+    ctx.lineTo(right, -rightHalfWidth);
+    ctx.closePath();
+    if (atlas) {
+      // Retain the existing section/color-field sweep for mixing. The mask
+      // supplies the exact per-sample silhouette and reference-width noise.
+      const halfWidth = Math.max(from.halfWidth, to.halfWidth);
+      if (from.halfWidth === to.halfWidth) {
+        ctx.drawImage(atlas, left, -halfWidth, right - left, halfWidth * 2);
+      } else {
+        ctx.save();
+        ctx.clip();
+        ctx.drawImage(atlas, left, -halfWidth, right - left, halfWidth * 2);
+        ctx.restore();
+      }
+    } else {
+      ctx.fillStyle = "white";
+      ctx.fill();
+    }
   }
   ctx.resetTransform();
   if (!collectBounds || minX === Number.POSITIVE_INFINITY) return null;

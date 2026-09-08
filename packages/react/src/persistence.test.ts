@@ -13,6 +13,44 @@ import {
   importPaintSettings,
 } from "./persistence";
 
+function createBristleSettingsSnapshot() {
+  return exportPaintSettings({
+    tool: "pen",
+    transform: createViewTransform() as ViewTransform,
+    background: {
+      color: { r: 255, g: 255, b: 255, a: 255 },
+      visible: true,
+    },
+    pen: {
+      color: { r: 20, g: 50, b: 80, a: 255 },
+      lineWidth: 64,
+      pressureCurve: { y1: 0.15, y2: 0.8 },
+      eraser: false,
+      brush: {
+        ...ROUGH_BRISTLE,
+        dynamics: {
+          geometryStepPx: 1,
+          transverseMaskCellPx: 0.82,
+          dropoutLengthPx: 58,
+          dropoutWidthPx: 1,
+          depositHardness: 1,
+          cuspAngleThresholdDeg: 65,
+          cuspDetectionSpanRatio: 0.14,
+          lagLengthRatio: 0.3,
+          surfaceGrain: { scalePx: 4, amount: 1, hardness: 0.75, seed: 1 },
+        },
+        pressureDynamics: { dropout: 0.5, size: 1 },
+      },
+    },
+    smoothing: { enabled: false, windowSize: 1 },
+    expand: {
+      levels: [
+        { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
+      ],
+    },
+  });
+}
+
 describe("persistence", () => {
   it("exports and imports settings snapshot", () => {
     const transform = createViewTransform();
@@ -195,30 +233,16 @@ describe("persistence", () => {
     });
   });
 
-  it("exports and imports the complete bristle brush contract", () => {
-    const snapshot = exportPaintSettings({
-      tool: "pen",
-      transform: createViewTransform() as ViewTransform,
-      background: {
-        color: { r: 255, g: 255, b: 255, a: 255 },
-        visible: true,
-      },
-      pen: {
-        color: { r: 20, g: 50, b: 80, a: 255 },
-        lineWidth: 64,
-        pressureCurve: { y1: 0.15, y2: 0.8 },
-        eraser: false,
-        brush: ROUGH_BRISTLE,
-      },
-      smoothing: { enabled: false, windowSize: 1 },
-      expand: {
-        levels: [
-          { mode: "none", offset: { x: 0, y: 0 }, angle: 0, divisions: 1 },
-        ],
-      },
-    });
+  it("exports and imports the complete bristle brush contract with dropout 0.5 and size 1", () => {
+    const snapshot = createBristleSettingsSnapshot();
 
-    expect(importPaintSettings(snapshot)?.pen.brush).toEqual(ROUGH_BRISTLE);
+    expect(
+      importPaintSettings(JSON.parse(JSON.stringify(snapshot)))?.pen.brush,
+    ).toEqual(snapshot.pen.brush);
+    expect(snapshot.pen.brush.pressureDynamics).toEqual({
+      dropout: 0.5,
+      size: 1,
+    });
 
     const missingGeometryStep = JSON.parse(JSON.stringify(snapshot)) as {
       pen: { brush: { dynamics: { geometryStepPx?: number } } };
@@ -232,6 +256,86 @@ describe("persistence", () => {
     invalidGrain.pen.brush.dynamics.surfaceGrain.scalePx = 0;
     expect(importPaintSettings(invalidGrain)).toBeNull();
   });
+
+  it.each([{ coverage: 0.5 }, { coverage: 0.5, dropout: 0.5, size: 1 }])(
+    "rejects legacy bristle coverage pressure dynamics: %j",
+    (pressureDynamics) => {
+      const snapshot = createBristleSettingsSnapshot();
+      expect(
+        importPaintSettings({
+          ...snapshot,
+          pen: {
+            ...snapshot.pen,
+            brush: { ...snapshot.pen.brush, pressureDynamics },
+          },
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it("ignores removed bristle dynamics fields when restoring settings", () => {
+    const snapshot = createBristleSettingsSnapshot();
+    if (snapshot.pen.brush.type !== "bristle")
+      throw new Error("Expected bristle");
+    const legacy = {
+      ...snapshot,
+      pen: {
+        ...snapshot.pen,
+        brush: {
+          ...snapshot.pen.brush,
+          dynamics: {
+            ...snapshot.pen.brush.dynamics,
+            bristleCount: 57,
+            bristleFill: 1.8,
+            bristleWidthVariation: 0.5,
+            bristleSpacingVariation: 0.5,
+            edgeTextureAmount: 0.5,
+            edgeTextureLengthPx: 10,
+          },
+        },
+      },
+    };
+    expect(importPaintSettings(legacy)?.pen.brush).toEqual(snapshot.pen.brush);
+  });
+
+  it.each(["dropout", "size"] as const)(
+    "validates bristle pressure %s as a required finite number in 0..1",
+    (field) => {
+      const snapshot = createBristleSettingsSnapshot();
+      const withValue = (value: unknown) => ({
+        ...snapshot,
+        pen: {
+          ...snapshot.pen,
+          brush: {
+            ...snapshot.pen.brush,
+            pressureDynamics: {
+              ...snapshot.pen.brush.pressureDynamics,
+              [field]: value,
+            },
+          },
+        },
+      });
+      for (const value of [
+        -0.01,
+        1.01,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        undefined,
+        null,
+        "0.5",
+      ]) {
+        expect(importPaintSettings(withValue(value))).toBeNull();
+      }
+      for (const value of [0, 1]) {
+        expect(
+          importPaintSettings(withValue(value))?.pen.brush.pressureDynamics,
+        ).toEqual({
+          ...snapshot.pen.brush.pressureDynamics,
+          [field]: value,
+        });
+      }
+    },
+  );
 
   it("旧mixing propertyだけのstamp設定は専用変換せずrejectする", () => {
     const legacyRatioOnly = {

@@ -30,7 +30,7 @@ interface MaskUniforms {
   readonly grainSeed: WebGLUniformLocation;
   readonly strokeSeed: WebGLUniformLocation;
   readonly dropoutSize: WebGLUniformLocation;
-  readonly pressureCoverageResponse: WebGLUniformLocation;
+  readonly dropoutResponse: WebGLUniformLocation;
 }
 
 interface InkUniforms {
@@ -50,6 +50,7 @@ interface CompositeUniforms {
   readonly fieldRowStride: WebGLUniformLocation;
   readonly branchIndex: WebGLUniformLocation;
   readonly useField: WebGLUniformLocation;
+  readonly useInk: WebGLUniformLocation;
   readonly fieldMixWeights: WebGLUniformLocation;
   readonly fieldMixSpan: WebGLUniformLocation;
   readonly fieldGeometry: WebGLUniformLocation;
@@ -136,11 +137,7 @@ export function createGpuBristlePassResources(
     grainSeed: uniformLocation(gl, maskProgram, "uGrainSeed"),
     strokeSeed: uniformLocation(gl, maskProgram, "uStrokeSeed"),
     dropoutSize: uniformLocation(gl, maskProgram, "uDropoutSize"),
-    pressureCoverageResponse: uniformLocation(
-      gl,
-      maskProgram,
-      "uPressureCoverageResponse",
-    ),
+    dropoutResponse: uniformLocation(gl, maskProgram, "uDropoutResponse"),
   };
   const inkUniforms: InkUniforms = {
     atlasSize: uniformLocation(gl, inkProgram, "uAtlasSize"),
@@ -162,6 +159,7 @@ export function createGpuBristlePassResources(
     fieldRowStride: uniformLocation(gl, compositeProgram, "uFieldRowStride"),
     branchIndex: uniformLocation(gl, compositeProgram, "uBranchIndex"),
     useField: uniformLocation(gl, compositeProgram, "uUseField"),
+    useInk: uniformLocation(gl, compositeProgram, "uUseInk"),
     fieldMixWeights: uniformLocation(gl, compositeProgram, "uFieldMixWeights"),
     fieldMixSpan: uniformLocation(gl, compositeProgram, "uFieldMixSpan"),
     fieldGeometry: uniformLocation(gl, compositeProgram, "uFieldGeometry"),
@@ -403,12 +401,8 @@ export function createGpuBristlePassResources(
       const sharedTooth = page.slots.every(
         (slot) => slot.chunk.grain.toothMap === first?.chunk.grain.toothMap,
       );
-      const sharedProfile = page.slots.every(
-        (slot) => slot.chunk.profileAtlas === first?.chunk.profileAtlas,
-      );
       if (first) {
         uploadTooth(first.chunk);
-        uploadProfile(first.chunk.profileAtlas);
       }
       prepareAtlas();
       clearAtlas();
@@ -416,12 +410,19 @@ export function createGpuBristlePassResources(
         const slot = page.slots[index];
         if (!slot) continue;
         if (!sharedTooth) uploadTooth(slot.chunk);
-        if (!sharedProfile) uploadProfile(slot.chunk.profileAtlas);
         drawMask(slot.chunk, slot.x, slot.y);
-        drawInk(slot.chunk, slot.x + slot.width, slot.y);
+        if (slot.chunk.useMaterialField) {
+          const profile = slot.chunk.profileAtlas;
+          if (!profile)
+            throw new Error("Bristle mixing requires a section canvas");
+          uploadProfile(profile);
+          drawInk(slot.chunk, slot.x + slot.width, slot.y, profile);
+        }
       }
     });
-    perfStage("gpuBristleInk", () => {});
+    if (page.slots.some((slot) => slot.chunk.useMaterialField)) {
+      perfStage("gpuBristleInk", () => {});
+    }
   }
 
   function drawMask(
@@ -458,8 +459,8 @@ export function createGpuBristlePassResources(
       chunk.simpleMask.dropoutWidthPx,
     );
     gl.uniform1f(
-      maskUniforms.pressureCoverageResponse,
-      chunk.simpleMask.pressureCoverageResponse,
+      maskUniforms.dropoutResponse,
+      chunk.simpleMask.dropoutResponse,
     );
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, toothTexture);
@@ -473,6 +474,7 @@ export function createGpuBristlePassResources(
     chunk: GpuBristleChunk,
     atlasX: number,
     atlasY: number,
+    profile: OffscreenCanvas,
   ): void {
     gl.viewport(0, 0, atlasWidth, atlasHeight);
     const vertices = createInkVertices(chunk);
@@ -483,8 +485,8 @@ export function createGpuBristlePassResources(
     gl.uniform2f(inkUniforms.atlasOrigin, atlasX, atlasY);
     gl.uniform2f(
       inkUniforms.profileScale,
-      chunk.profileAtlas.width / profileTextureWidth,
-      chunk.profileAtlas.height / profileTextureHeight,
+      profile.width / profileTextureWidth,
+      profile.height / profileTextureHeight,
     );
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, profileTexture);
@@ -552,6 +554,7 @@ export function createGpuBristlePassResources(
       compositeUniforms.useField,
       chunk.useMaterialField && target.fieldColumns > 0 ? 1 : 0,
     );
+    gl.uniform1i(compositeUniforms.useInk, chunk.useMaterialField ? 1 : 0);
     gl.uniform2f(compositeUniforms.fieldMixWeights, ...target.fieldMixWeights);
     gl.uniform2f(compositeUniforms.fieldMixSpan, ...target.fieldMixSpan);
     // Before the first update the field is uniform, so any valid frame works.
@@ -677,39 +680,38 @@ function createAtlasPages(
 
 function createMaskVertices(chunk: GpuBristleChunk): Float32Array {
   const values: number[] = [];
-  const halfWidth = chunk.brushSize / 2;
   const originX = chunk.bboxRect.left;
   const originY = chunk.bboxRect.top;
   for (const segment of chunk.segments) {
     const fromLeft = maskVertex(
-      segment.fromX + segment.fromFrameY * halfWidth - originX,
-      segment.fromY - segment.fromFrameX * halfWidth - originY,
+      segment.fromX + segment.fromFrameY * segment.fromHalfWidth - originX,
+      segment.fromY - segment.fromFrameX * segment.fromHalfWidth - originY,
       segment.fromDistance,
-      -halfWidth,
+      -segment.fromHalfWidth,
       segment.fromPressure,
       segment.trialId,
     );
     const fromRight = maskVertex(
-      segment.fromX - segment.fromFrameY * halfWidth - originX,
-      segment.fromY + segment.fromFrameX * halfWidth - originY,
+      segment.fromX - segment.fromFrameY * segment.fromHalfWidth - originX,
+      segment.fromY + segment.fromFrameX * segment.fromHalfWidth - originY,
       segment.fromDistance,
-      halfWidth,
+      segment.fromHalfWidth,
       segment.fromPressure,
       segment.trialId,
     );
     const toLeft = maskVertex(
-      segment.toX + segment.toFrameY * halfWidth - originX,
-      segment.toY - segment.toFrameX * halfWidth - originY,
+      segment.toX + segment.toFrameY * segment.toHalfWidth - originX,
+      segment.toY - segment.toFrameX * segment.toHalfWidth - originY,
       segment.toDistance,
-      -halfWidth,
+      -segment.toHalfWidth,
       segment.toPressure,
       segment.trialId,
     );
     const toRight = maskVertex(
-      segment.toX - segment.toFrameY * halfWidth - originX,
-      segment.toY + segment.toFrameX * halfWidth - originY,
+      segment.toX - segment.toFrameY * segment.toHalfWidth - originX,
+      segment.toY + segment.toFrameX * segment.toHalfWidth - originY,
       segment.toDistance,
-      halfWidth,
+      segment.toHalfWidth,
       segment.toPressure,
       segment.trialId,
     );
@@ -774,28 +776,49 @@ function inkQuad(segment: GpuSweepSegment, chunk: GpuBristleChunk) {
   const centerY = (segment.fromY + segment.toY) / 2 - chunk.bboxRect.top;
   const left = -length / 2 - segment.overlap;
   const right = length / 2 + segment.overlap;
-  const top = -chunk.brushSize / 2;
-  const bottom = chunk.brushSize / 2;
+  // The retained cusp frame may point opposite the segment's travel.
+  const fromHalfWidth =
+    alignment >= 0 ? segment.fromHalfWidth : segment.toHalfWidth;
+  const toHalfWidth =
+    alignment >= 0 ? segment.toHalfWidth : segment.fromHalfWidth;
   return {
-    topLeft: inkVertex(centerX, centerY, frame.x, frame.y, left, top, 0, 0),
+    topLeft: inkVertex(
+      centerX,
+      centerY,
+      frame.x,
+      frame.y,
+      left,
+      -fromHalfWidth,
+      0,
+      0,
+    ),
     bottomLeft: inkVertex(
       centerX,
       centerY,
       frame.x,
       frame.y,
       left,
-      bottom,
+      fromHalfWidth,
       0,
       1,
     ),
-    topRight: inkVertex(centerX, centerY, frame.x, frame.y, right, top, 1, 0),
+    topRight: inkVertex(
+      centerX,
+      centerY,
+      frame.x,
+      frame.y,
+      right,
+      -toHalfWidth,
+      1,
+      0,
+    ),
     bottomRight: inkVertex(
       centerX,
       centerY,
       frame.x,
       frame.y,
       right,
-      bottom,
+      toHalfWidth,
       1,
       1,
     ),

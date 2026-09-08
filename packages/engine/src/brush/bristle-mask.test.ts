@@ -11,32 +11,30 @@ import {
 import { hashSeed } from "./prng";
 
 describe("simple bristle mask evaluator", () => {
-  it("is deterministic and omits edge micro texture", () => {
+  it("is deterministic for the same samples and seed", () => {
     const samples = [
       { pressure: 0.2, distance: 0 },
       { pressure: 0.6, distance: 12 },
       { pressure: 0.9, distance: 25 },
     ];
-    const withEdgeTexture = createSimpleBristleMaskEvaluator(
+    const first = createSimpleBristleMaskEvaluator(
       samples,
       40,
-      { ...DEFAULT_BRISTLE_DYNAMICS, edgeTextureAmount: 1 },
+      DEFAULT_BRISTLE_DYNAMICS,
       0.75,
       17,
     );
-    const withoutEdgeTexture = createSimpleBristleMaskEvaluator(
+    const second = createSimpleBristleMaskEvaluator(
       samples,
       40,
-      { ...DEFAULT_BRISTLE_DYNAMICS, edgeTextureAmount: 0 },
+      DEFAULT_BRISTLE_DYNAMICS,
       0.75,
       17,
     );
 
     for (const u of [0, 0.23, 1.61, 2]) {
-      for (const v of [0, 7.42, withEdgeTexture.height - 1]) {
-        expect(withEdgeTexture.evaluate(u, v)).toBe(
-          withoutEdgeTexture.evaluate(u, v),
-        );
+      for (const v of [0, 7.42, first.height - 1]) {
+        expect(first.evaluate(u, v)).toBe(second.evaluate(u, v));
       }
     }
   });
@@ -53,7 +51,7 @@ describe("simple bristle mask evaluator", () => {
       0.75,
       17,
     );
-    // u=1.5 gives distance=20 (noise x=5), pressure=0.8, threshold=0.2975.
+    // u=1.5 gives distance=20 (noise x=5), pressure=0.8, threshold=0.15.
     // v=0/last gives crossPx=-4/+4 (noise y=-2/+2).
     for (const [v, noiseY] of [
       [0, -2],
@@ -61,7 +59,7 @@ describe("simple bristle mask evaluator", () => {
     ]) {
       const broad =
         hashSeed(hashSeed(17 ^ 0x510e527f, 5), noiseY) / 0x100000000;
-      expect(evaluator.evaluate(1.5, v)).toBeCloseTo(broad - 0.2975, 12);
+      expect(evaluator.evaluate(1.5, v)).toBeCloseTo(broad - 0.15, 12);
     }
   });
 
@@ -98,33 +96,84 @@ describe("simple bristle mask evaluator", () => {
     }
   });
 
-  it("uses the fixed low-pressure gain and clamps pressure after interpolation", () => {
-    const samples = [
-      { distance: 0, pressure: -1 },
-      { distance: 8, pressure: 1 },
-    ];
+  it("clamps pressure after interpolation", () => {
     const evaluator = createSimpleBristleMaskEvaluator(
-      samples,
+      [
+        { distance: 0, pressure: -1 },
+        { distance: 8, pressure: 1 },
+      ],
       8,
-      DEFAULT_BRISTLE_DYNAMICS,
+      { ...DEFAULT_BRISTLE_DYNAMICS, dropoutLengthPx: 4, dropoutWidthPx: 2 },
       1,
       17,
     );
-    const neutral = createSimpleBristleMaskEvaluator(
-      samples,
+    const broad = hashSeed(hashSeed(17 ^ 0x510e527f, 1), -2) / 0x100000000;
+    expect(evaluator.evaluate(0.5, 0)).toBeCloseTo(broad - 1, 12);
+    expect(evaluator.evaluate(1, 0)).toBe(1);
+  });
+
+  it.each([0, 0.5, 1])(
+    "dropout=0 is fully active for every pixel at pressure=%s",
+    (pressure) => {
+      const evaluator = createSimpleBristleMaskEvaluator(
+        [
+          { distance: 0, pressure },
+          { distance: 512, pressure },
+        ],
+        80,
+        DEFAULT_BRISTLE_DYNAMICS,
+        0,
+        17,
+      );
+      for (let x = 0; x < 512; x++) {
+        for (let y = 0; y < 80; y++) {
+          // Distance 1 maps to alpha 1 for every depositHardness, including 0.
+          expect(
+            evaluator.evaluate(x / 512, (y / 80) * (evaluator.height - 1)),
+          ).toBe(1);
+        }
+      }
+    },
+  );
+
+  it("dropout=1 loses strictly less paint as pressure rises, with none lost at 1", () => {
+    const dropoutRates = [0, 0.5, 1].map((pressure) => {
+      const evaluator = createSimpleBristleMaskEvaluator(
+        [
+          { distance: 0, pressure },
+          { distance: 512, pressure },
+        ],
+        80,
+        DEFAULT_BRISTLE_DYNAMICS,
+        1,
+        17,
+      );
+      let missing = 0;
+      for (let x = 0; x < 512; x++) {
+        for (let y = 0; y < 80; y++) {
+          if (
+            evaluator.evaluate(x / 512, (y / 80) * (evaluator.height - 1)) <= 0
+          )
+            missing++;
+        }
+      }
+      return missing / (512 * 80);
+    });
+    expect(dropoutRates[0]).toBeGreaterThan(dropoutRates[1]);
+    expect(dropoutRates[1]).toBeGreaterThan(dropoutRates[2]);
+    expect(dropoutRates[2]).toBe(0);
+  });
+
+  it("dropout=1 at pressure=0.5 preserves the old coverage=1 threshold of 0.5", () => {
+    const evaluator = createSimpleBristleMaskEvaluator(
+      [{ distance: 20, pressure: 0.5 }],
       8,
-      DEFAULT_BRISTLE_DYNAMICS,
-      0,
+      { ...DEFAULT_BRISTLE_DYNAMICS, dropoutLengthPx: 4, dropoutWidthPx: 2 },
+      1,
       17,
     );
-    // At u=0.5, interpolated pressure is 0, so the threshold rises by 0.45 (gain 0.9).
-    expect(
-      evaluator.evaluate(0.5, 7.3) - neutral.evaluate(0.5, 7.3),
-    ).toBeCloseTo(-0.45, 12);
-    expect(evaluator.evaluate(1, 7.3) - neutral.evaluate(1, 7.3)).toBeCloseTo(
-      0.45,
-      12,
-    );
+    const broad = hashSeed(hashSeed(17 ^ 0x510e527f, 5), -2) / 0x100000000;
+    expect(evaluator.evaluate(0, 0)).toBeCloseTo(broad - 0.5, 12);
   });
 });
 

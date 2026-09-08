@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderBrushStroke } from "..";
+import { calculateRadius } from "../../draw";
 import { createLayer } from "../../layer";
 import {
   type BrushRenderState,
@@ -53,82 +54,93 @@ describe("GPU bristle mask parity", () => {
     },
   );
 
-  it("matches the CPU raster for the same rough bristle simple mask and sweep", () => {
-    const width = 160;
-    const height = 96;
-    const brushSize = 60;
-    const seed = 0x1234abcd;
-    const originX = 37;
-    const originY = 19;
-    const samples = createCurvedSamples();
-    const dynamics = ROUGH_BRISTLE.dynamics;
-    const field = createSimpleBristleMaskEvaluator(
-      samples,
-      brushSize,
-      dynamics,
-      ROUGH_BRISTLE.pressureDynamics.coverage,
-      seed,
-    );
-    const cpuMask = rasterizeBristleMaskEvaluatorForTest(
-      field,
-      samples,
-      brushSize,
-      dynamics,
-      seed,
-      originX,
-      originY,
-      width,
-      height,
-    );
+  it.each([
+    { dropout: 0, size: 0 },
+    { dropout: 0, size: 1 },
+    { dropout: 1, size: 0 },
+    { dropout: 1, size: 1 },
+  ])(
+    "matches CPU mask with dropout=$dropout size=$size",
+    ({ dropout, size }) => {
+      const width = 160;
+      const height = 96;
+      const brushSize = 60;
+      const seed = 0x1234abcd;
+      const originX = 37;
+      const originY = 19;
+      const samples = createCurvedSamples().map((sample) => ({
+        ...sample,
+        halfWidth: calculateRadius(sample.pressure, brushSize, size),
+      }));
+      const dynamics = ROUGH_BRISTLE.dynamics;
+      const field = createSimpleBristleMaskEvaluator(
+        samples,
+        brushSize,
+        dynamics,
+        dropout,
+        seed,
+      );
+      const cpuMask = rasterizeBristleMaskEvaluatorForTest(
+        field,
+        samples,
+        brushSize,
+        dynamics,
+        seed,
+        originX,
+        originY,
+        width,
+        height,
+      );
 
-    const canvas = new OffscreenCanvas(width, height);
-    const gl = canvas.getContext("webgl2");
-    expect(gl).not.toBeNull();
-    if (!gl) return;
-    const pass = createGpuBristlePassResources(gl, width, height);
-    const profile = new OffscreenCanvas(2, brushSize);
-    const chunk: GpuBristleChunk = {
-      segments: createSegments(samples, dynamics.geometryStepPx),
-      simpleMask: {
-        dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
-        dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
-        pressureCoverageResponse: ROUGH_BRISTLE.pressureDynamics.coverage,
-      },
-      profileAtlas: profile,
-      grain: {
-        amount: dynamics.surfaceGrain.amount,
-        softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
-        grainSeed: dynamics.surfaceGrain.seed,
-        strokeSeed: seed,
-        toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
-        toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
-      },
-      bboxRect: {
-        left: originX,
-        top: originY,
-        right: originX + width,
-        bottom: originY + height,
-      },
-      brushSize,
-      depositHardness: dynamics.depositHardness,
-      color: { r: 0, g: 0, b: 0, a: 255 },
-      useMaterialField: false,
-    };
+      const canvas = new OffscreenCanvas(width, height);
+      const gl = canvas.getContext("webgl2");
+      expect(gl).not.toBeNull();
+      if (!gl) return;
+      const pass = createGpuBristlePassResources(gl, width, height);
+      const profile = new OffscreenCanvas(2, brushSize);
+      const chunk: GpuBristleChunk = {
+        segments: createSegments(samples, dynamics.geometryStepPx, brushSize),
+        simpleMask: {
+          dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
+          dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
+          dropoutResponse: dropout,
+        },
+        profileAtlas: profile,
+        grain: {
+          amount: dynamics.surfaceGrain.amount,
+          softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
+          grainSeed: dynamics.surfaceGrain.seed,
+          strokeSeed: seed,
+          toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
+          toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
+        },
+        bboxRect: {
+          left: originX,
+          top: originY,
+          right: originX + width,
+          bottom: originY + height,
+        },
+        brushSize,
+        depositHardness: dynamics.depositHardness,
+        color: { r: 0, g: 0, b: 0, a: 255 },
+        useMaterialField: false,
+      };
 
-    try {
-      pass.readMaskForTest(createLargerWarmupChunk(chunk));
-      const cpuAlpha = readCanvasAlpha(cpuMask);
-      const gpuAlpha = pass.readMaskForTest(chunk);
-      const metrics = compareAlpha(cpuAlpha, gpuAlpha);
-      console.info("GPU bristle mask parity", metrics);
+      try {
+        pass.readMaskForTest(createLargerWarmupChunk(chunk));
+        const cpuAlpha = readCanvasAlpha(cpuMask);
+        const gpuAlpha = pass.readMaskForTest(chunk);
+        const metrics = compareAlpha(cpuAlpha, gpuAlpha);
+        console.info("GPU bristle mask parity", metrics);
 
-      expect(metrics.alphaMae).toBeLessThanOrEqual(0.015);
-      expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
-      expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
-    } finally {
-      pass.dispose();
-    }
-  });
+        expect(metrics.alphaMae).toBeLessThanOrEqual(0.015);
+        expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
+        expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
+      } finally {
+        pass.dispose();
+      }
+    },
+  );
 
   it.each([1, 2])(
     "matches CPU external 64x32 tooth maps at scale=%s, including negative coordinates",
@@ -166,7 +178,7 @@ describe("GPU bristle mask parity", () => {
         samples,
         brushSize,
         dynamics,
-        ROUGH_BRISTLE.pressureDynamics.coverage,
+        ROUGH_BRISTLE.pressureDynamics.dropout,
         seed,
       );
       const canvas = new OffscreenCanvas(width, height);
@@ -176,11 +188,11 @@ describe("GPU bristle mask parity", () => {
       const pass = createGpuBristlePassResources(gl, width, height);
       const profile = new OffscreenCanvas(2, brushSize);
       const chunk: GpuBristleChunk = {
-        segments: createSegments(samples, dynamics.geometryStepPx),
+        segments: createSegments(samples, dynamics.geometryStepPx, brushSize),
         simpleMask: {
           dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
           dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
-          pressureCoverageResponse: ROUGH_BRISTLE.pressureDynamics.coverage,
+          dropoutResponse: ROUGH_BRISTLE.pressureDynamics.dropout,
         },
         profileAtlas: profile,
         grain: {
@@ -268,7 +280,7 @@ describe("GPU bristle mask parity", () => {
       samples,
       brushSize,
       dynamics,
-      ROUGH_BRISTLE.pressureDynamics.coverage,
+      ROUGH_BRISTLE.pressureDynamics.dropout,
       seed,
     );
     const cpuMask = rasterizeBristleMaskEvaluatorForTest(
@@ -289,11 +301,11 @@ describe("GPU bristle mask parity", () => {
     if (!gl) return;
     const pass = createGpuBristlePassResources(gl, width, height);
     const chunk: GpuBristleChunk = {
-      segments: createSegments(samples, dynamics.geometryStepPx),
+      segments: createSegments(samples, dynamics.geometryStepPx, brushSize),
       simpleMask: {
         dropoutLengthPx: Math.max(4, dynamics.dropoutLengthPx),
         dropoutWidthPx: Math.max(0.5, dynamics.dropoutWidthPx),
-        pressureCoverageResponse: ROUGH_BRISTLE.pressureDynamics.coverage,
+        dropoutResponse: ROUGH_BRISTLE.pressureDynamics.dropout,
       },
       profileAtlas: new OffscreenCanvas(2, brushSize),
       grain: {
@@ -329,86 +341,94 @@ describe("GPU bristle mask parity", () => {
     }
   });
 
-  it("keeps incremental rough bristle chunks within Tier B", () => {
-    const cpuLayer = createLayer(220, 150);
-    const gpuLayer = createLayer(220, 150);
-    const points = createStrokePoints();
-    const style: StrokeStyle = {
-      color: { r: 20, g: 40, b: 60, a: 255 },
-      lineWidth: 60,
-      pressureCurve: DEFAULT_PRESSURE_CURVE,
-      compositeOperation: "source-over",
-      brush: ROUGH_BRISTLE,
-    };
-    const initialState: BrushRenderState = {
-      tipCanvas: null,
-      seed: 0x1234abcd,
-      branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
-    };
-    let cpuState = renderBrushStroke(
-      cpuLayer,
-      points.slice(0, 9),
-      style,
-      0,
-      initialState,
-    );
-    cpuState = renderBrushStroke(
-      cpuLayer,
-      points.slice(6, 17),
-      style,
-      3,
-      cpuState,
-    );
-    renderBrushStroke(cpuLayer, points.slice(14), style, 3, cpuState);
+  it.each([
+    { dropout: 0, size: 0 },
+    { dropout: 0, size: 1 },
+    { dropout: 1, size: 0 },
+    { dropout: 1, size: 1 },
+  ])(
+    "keeps incremental chunks within Tier B: dropout=$dropout size=$size",
+    ({ dropout, size }) => {
+      const cpuLayer = createLayer(220, 150);
+      const gpuLayer = createLayer(220, 150);
+      const points = createStrokePoints();
+      const style: StrokeStyle = {
+        color: { r: 20, g: 40, b: 60, a: 255 },
+        lineWidth: 60,
+        pressureCurve: DEFAULT_PRESSURE_CURVE,
+        compositeOperation: "source-over",
+        brush: { ...ROUGH_BRISTLE, pressureDynamics: { dropout, size } },
+      };
+      const initialState: BrushRenderState = {
+        tipCanvas: null,
+        seed: 0x1234abcd,
+        branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
+      };
+      let cpuState = renderBrushStroke(
+        cpuLayer,
+        points.slice(0, 9),
+        style,
+        0,
+        initialState,
+      );
+      cpuState = renderBrushStroke(
+        cpuLayer,
+        points.slice(6, 17),
+        style,
+        3,
+        cpuState,
+      );
+      renderBrushStroke(cpuLayer, points.slice(14), style, 3, cpuState);
 
-    const accelerator = createBrushAccelerator({
-      backend: "webgl2",
-      resident: false,
-    });
-    expect(accelerator).not.toBeNull();
-    if (!accelerator) return;
-    const runtime = getBrushAcceleratorRuntime(accelerator);
-    expect(runtime).not.toBeNull();
-    if (!runtime) return;
-    const owner = {};
-    expect(runtime.beginStroke(owner, gpuLayer, gpuLayer.canvas)).toBe(true);
-    const gpuBatches = [
-      points.slice(0, 9),
-      points.slice(6, 17),
-      points.slice(14),
-    ];
-    let gpuState = initialState;
-    for (let index = 0; index < gpuBatches.length; index++) {
-      const batch = gpuBatches[index];
-      if (!batch) continue;
-      runtime.enter(owner);
-      try {
-        gpuState = renderBrushStroke(
-          gpuLayer,
-          batch,
-          style,
-          index === 0 ? 0 : 3,
-          gpuState,
-          gpuLayer,
-          accelerator,
-        );
-      } finally {
-        runtime.leave(owner);
+      const accelerator = createBrushAccelerator({
+        backend: "webgl2",
+        resident: false,
+      });
+      expect(accelerator).not.toBeNull();
+      if (!accelerator) return;
+      const runtime = getBrushAcceleratorRuntime(accelerator);
+      expect(runtime).not.toBeNull();
+      if (!runtime) return;
+      const owner = {};
+      expect(runtime.beginStroke(owner, gpuLayer, gpuLayer.canvas)).toBe(true);
+      const gpuBatches = [
+        points.slice(0, 9),
+        points.slice(6, 17),
+        points.slice(14),
+      ];
+      let gpuState = initialState;
+      for (let index = 0; index < gpuBatches.length; index++) {
+        const batch = gpuBatches[index];
+        if (!batch) continue;
+        runtime.enter(owner);
+        try {
+          gpuState = renderBrushStroke(
+            gpuLayer,
+            batch,
+            style,
+            index === 0 ? 0 : 3,
+            gpuState,
+            gpuLayer,
+            accelerator,
+          );
+        } finally {
+          runtime.leave(owner);
+        }
+        runtime.commitToLayer(owner, gpuLayer);
       }
-      runtime.commitToLayer(owner, gpuLayer);
-    }
-    runtime.endStroke(owner);
-    accelerator.dispose();
+      runtime.endStroke(owner);
+      accelerator.dispose();
 
-    const metrics = compareAlpha(
-      readCanvasAlpha(cpuLayer.canvas),
-      readCanvasAlpha(gpuLayer.canvas),
-    );
-    console.info("GPU rough bristle incremental parity", metrics);
-    expect(metrics.alphaMae).toBeLessThanOrEqual(0.015);
-    expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
-    expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
-  });
+      const metrics = compareAlpha(
+        readCanvasAlpha(cpuLayer.canvas),
+        readCanvasAlpha(gpuLayer.canvas),
+      );
+      console.info("GPU rough bristle incremental parity", metrics);
+      expect(metrics.alphaMae).toBeLessThanOrEqual(0.015);
+      expect(metrics.largeDeltaRate).toBeLessThanOrEqual(0.01);
+      expect(metrics.coverageDifferencePoints).toBeLessThanOrEqual(2);
+    },
+  );
 
   it("does not generate or upload a CPU mask field in the GPU path", () => {
     const previousPerfEnabled = brushPerfDebug.enabled;
@@ -580,6 +600,8 @@ function createLargerWarmupChunk(chunk: GpuBristleChunk): GpuBristleChunk {
           fromFrameY: 0,
           toFrameX: 1,
           toFrameY: 0,
+          fromHalfWidth: chunk.brushSize / 2,
+          toHalfWidth: chunk.brushSize / 2,
           fromPressure: 0.5,
           toPressure: 0.5,
           fromDistance: 0,
@@ -646,6 +668,7 @@ function createCurvedSamples(): BristleMaskSweepSample[] {
 function createSegments(
   samples: readonly BristleMaskSweepSample[],
   geometryStepPx: number,
+  brushSize: number,
 ): GpuSweepSegment[] {
   const segments: GpuSweepSegment[] = [];
   for (let index = 1; index < samples.length; index++) {
@@ -661,6 +684,8 @@ function createSegments(
       fromFrameY: from.frameY,
       toFrameX: to.frameX,
       toFrameY: to.frameY,
+      fromHalfWidth: from.halfWidth ?? brushSize / 2,
+      toHalfWidth: to.halfWidth ?? brushSize / 2,
       fromPressure: from.pressure,
       toPressure: to.pressure,
       fromDistance: from.distance,

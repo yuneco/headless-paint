@@ -116,10 +116,7 @@ uniform float uGrainSoftness;
 uniform uint uGrainSeed;
 uniform uint uStrokeSeed;
 uniform vec2 uDropoutSize;
-uniform float uPressureCoverageResponse;
-
-// Must match SIMPLE_MASK_LOW_PRESSURE_GAIN in ../bristle-mask.ts.
-const float SIMPLE_MASK_LOW_PRESSURE_GAIN = 0.9;
+uniform float uDropoutResponse;
 
 in vec2 vStrokeCoord;
 in float vPressure;
@@ -168,10 +165,8 @@ float simpleMaskDistance() {
     uStrokeSeed ^ 0x510e527fu
   );
   float pressure = clamp(vPressure, 0.0, 1.0);
-  float effectivePressure =
-    0.5 + (pressure - 0.5) * uPressureCoverageResponse;
-  float threshold = 0.5 + (0.5 - effectivePressure) * SIMPLE_MASK_LOW_PRESSURE_GAIN;
-  return broad - threshold;
+  float threshold = uDropoutResponse * (1.0 - pressure);
+  return threshold == 0.0 ? 1.0 : broad - threshold;
 }
 
 int positiveMod(int value, int size) {
@@ -292,6 +287,7 @@ uniform ivec2 uFieldTextureSize;
 uniform int uFieldRowStride;
 uniform int uBranchIndex;
 uniform bool uUseField;
+uniform bool uUseInk;
 uniform vec2 uFieldMixWeights;
 uniform vec2 uFieldMixSpan;
 uniform vec4 uFieldGeometry;
@@ -348,11 +344,10 @@ void main() {
     uAtlasSize.y - 1 - uAtlasOrigin.y - localPixel.y
   );
   float mask = texelFetch(uAtlas, texturePixel, 0).a;
-  float ink = texelFetch(
-    uAtlas,
-    texturePixel + ivec2(uChunkSize.x, 0),
-    0
-  ).a;
+  float ink = 1.0;
+  if (uUseInk) {
+    ink = texelFetch(uAtlas, texturePixel + ivec2(uChunkSize.x, 0), 0).a;
+  }
   vec4 material = sampleMaterial(documentPosition);
   float alpha = material.a * mask * ink;
   outColor = vec4(material.rgb * alpha, alpha);

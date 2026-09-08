@@ -86,17 +86,13 @@ function renderBandStroke(backend: "cpu" | "webgl2", direction: Direction) {
       // A uniformly covered centerline isolates color steps from paper noise.
       dynamics: {
         ...ROUGH_BRISTLE.dynamics,
-        bristleCount: 1,
-        bristleFill: 2.4,
-        bristleWidthVariation: 0,
-        bristleSpacingVariation: 0,
         geometryStepPx: 2,
         dropoutLengthPx: 1_000_000,
         dropoutWidthPx: 1_000_000,
         depositHardness: 1,
         surfaceGrain: { ...ROUGH_BRISTLE.dynamics.surfaceGrain, amount: 0 },
       },
-      pressureDynamics: { ...ROUGH_BRISTLE.pressureDynamics, coverage: 1 },
+      pressureDynamics: { ...ROUGH_BRISTLE.pressureDynamics, dropout: 1 },
       mixing: {
         ...DEFAULT_BRUSH_MIXING,
         enabled: true,

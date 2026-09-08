@@ -18,6 +18,7 @@ export interface BristleMaskSweepSample extends BristleMaskSample {
   readonly frameX: number;
   readonly frameY: number;
   readonly breakBefore?: boolean;
+  readonly halfWidth?: number;
 }
 
 interface BristleMaskEvaluator {
@@ -36,8 +37,6 @@ const CONTEXT_CACHE = new WeakMap<
   OffscreenCanvas,
   OffscreenCanvasRenderingContext2D
 >();
-// Must match SIMPLE_MASK_LOW_PRESSURE_GAIN in gpu/shader-sources.ts.
-const SIMPLE_MASK_LOW_PRESSURE_GAIN = 0.9;
 const GRAIN_HEIGHT_CACHE_LIMIT = 8;
 const GRAIN_TILE_SIZE = 128;
 const REPEAT_CONTACT_STRENGTH = 0.75;
@@ -73,7 +72,7 @@ export function rasterizeBristleMask(
   samples: readonly BristleMaskSweepSample[],
   brushSize: number,
   dynamics: BristleDynamics,
-  pressureCoverageResponse: number,
+  dropoutResponse: number,
   seed: number,
   originX: number,
   originY: number,
@@ -91,7 +90,7 @@ export function rasterizeBristleMask(
     samples,
     brushSize,
     dynamics,
-    pressureCoverageResponse,
+    dropoutResponse,
     seed,
   );
   rasterizeBristleMaskIntoCanvas(
@@ -177,29 +176,34 @@ function rasterizeBristleMaskIntoCanvas(
           Math.max(0.5, dynamics.geometryStepPx),
       );
 
+      const fromHalfWidth = from.halfWidth ?? halfWidth;
+      const toHalfWidth = to.halfWidth ?? halfWidth;
+      // Reference-width coordinates crop/extend noise without stretching it.
+      const fromV = (fromHalfWidth / brushSize) * maxV;
+      const toV = (toHalfWidth / brushSize) * maxV;
       const fromLeft: RasterVertex = {
-        x: from.x + from.frameY * halfWidth - originX,
-        y: from.y - from.frameX * halfWidth - originY,
+        x: from.x + from.frameY * fromHalfWidth - originX,
+        y: from.y - from.frameX * fromHalfWidth - originY,
         u: index - 1,
-        v: 0,
+        v: maxV / 2 - fromV,
       };
       const fromRight: RasterVertex = {
-        x: from.x - from.frameY * halfWidth - originX,
-        y: from.y + from.frameX * halfWidth - originY,
+        x: from.x - from.frameY * fromHalfWidth - originX,
+        y: from.y + from.frameX * fromHalfWidth - originY,
         u: index - 1,
-        v: maxV,
+        v: maxV / 2 + fromV,
       };
       const toLeft: RasterVertex = {
-        x: to.x + to.frameY * halfWidth - originX,
-        y: to.y - to.frameX * halfWidth - originY,
+        x: to.x + to.frameY * toHalfWidth - originX,
+        y: to.y - to.frameX * toHalfWidth - originY,
         u: index,
-        v: 0,
+        v: maxV / 2 - toV,
       };
       const toRight: RasterVertex = {
-        x: to.x - to.frameY * halfWidth - originX,
-        y: to.y + to.frameX * halfWidth - originY,
+        x: to.x - to.frameY * toHalfWidth - originX,
+        y: to.y + to.frameX * toHalfWidth - originY,
         u: index,
-        v: maxV,
+        v: maxV / 2 + toV,
       };
       rasterizeTriangle(
         evaluate,
@@ -238,14 +242,14 @@ export function createSimpleBristleMaskEvaluator(
   samples: readonly BristleMaskSample[],
   brushSize: number,
   dynamics: BristleDynamics,
-  pressureCoverageResponse: number,
+  dropoutResponse: number,
   seed: number,
 ): BristleMaskEvaluator {
   const rows = Math.max(
     30,
     Math.ceil(brushSize / Math.max(0.25, dynamics.transverseMaskCellPx)),
   );
-  const coverageResponse = clamp(pressureCoverageResponse, 0, 1);
+  const response = clamp(dropoutResponse, 0, 1);
 
   if (brushPerfDebug.nullStages.nullField) {
     return { height: rows, evaluate: () => 1 };
@@ -272,10 +276,9 @@ export function createSimpleBristleMaskEvaluator(
         seed ^ 0x510e527f,
       );
       const pressure = clamp(samplePressure(samples, u), 0, 1);
-      const effectivePressure = 0.5 + (pressure - 0.5) * coverageResponse;
-      const threshold =
-        0.5 + (0.5 - effectivePressure) * SIMPLE_MASK_LOW_PRESSURE_GAIN;
-      return broad - threshold;
+      const threshold = response * (1 - pressure);
+      // Zero dropout must stay fully active even in the soft transition band.
+      return threshold === 0 ? 1 : broad - threshold;
     },
   };
 }
