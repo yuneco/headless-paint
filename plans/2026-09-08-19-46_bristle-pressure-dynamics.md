@@ -76,6 +76,19 @@ const expressive: BristleBrushConfig = {
 - Phase 3: codex 委譲 2 本（A: engine、B: react persistence + web DebugPanel / 評価 UI）。検収は Claude（フル + 実ブラウザで dropout 0 / 1、size 0 / 1 の見た目）
 - Phase 4: アーキテクトレビュー、agents-note 更新（flow の後続計画を記録）
 
+## 実装結果（2026-09-08）
+
+- engine: `bristle-profile.ts` 削除、`bristle-section.ts`（alpha 1 の断面 canvas）追加。CPU / GPU の閾値を `dropout × (1 − p)` に置換（`p` は pressureCurve 適用後）。`size` はサンプルごとの半幅を `calculateRadius` で決め、ノイズ・紙目・checkpoint は基準幅。非混色 GPU は ink pass と断面 upload を省略
+- react: persistence が `dropout` / `size` を検証、旧 `coverage` は拒否（既定へフォールバック）、削除フィールドは無視。schema version は据え置き
+- web: DebugPanel に Dropout / Size スライダー
+- テスト: CPU の閾値端点・単調性・旧閾値回帰、幅の検証、GPU parity を dropout {0,1} × size {0,1} に拡張、persistence 4 件。perf-debug の null drawSweep は「一様断面では直線の被覆が bbox 塗りと一致する」ため `>=` へ更新（設計変更に伴う正当な期待値更新）。フル検収 730 件 green
+- 実ブラウザ（Chromium、CPU / WebGL2）で dropout 0 / 1 × size 0 / 1 を確認。dropout 0 でベタ、1 で低筆圧端が掠れ、size 1 で筆圧比例の幅。両経路で見た目一致、エラーなし
+
+### 実装時の調整内容（補足）
+
+- `flow` はユーザー決定で定義ごと見送り（動くものだけ定義する）
+- codex は docs の残存記述（モジュール表・tipCanvas 説明・pass 数・crossPx 範囲・BrushConfig 一覧）を 2 回指摘して停止した。Claude 側で修正してから再投入。docs の一括更新では grep で旧名（profile / lane / coverage）を全文検索してから委譲すること
+
 ## 完了条件
 
 - `pressureDynamics.dropout = 0` で筆圧によらず筋が出ない、`1` で低筆圧ほど掠れる（CPU / GPU）
