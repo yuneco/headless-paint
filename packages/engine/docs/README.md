@@ -51,7 +51,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
 | `SprayDynamics` | spray ブラシの動的パラメータ（spacing, density, particleSize など） |
 | `BrushMixing` | 距離rate、更新距離、checkpoint距離、tip-local色場解像度を持つスタンプ混色設定 |
-| `BristleBrushConfig` / `BristleDynamics` | 連続毛束断面、面掠れ、紙目、反復接触、折返し追従を持つ荒いハケ設定 |
+| `BristleBrushConfig` / `BristleDynamics` / `BristlePressureDynamics` | 面掠れ、紙目、反復接触、折返し追従を持つ荒いハケ設定。筆圧は `dropout`（掠れ）/ `size`（幅）へ反映 |
 | `BristleHeightMap` | bristle の紙目を差し替える document 固定の高さマップ `{ width, height, heights }`（0..1） |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, alphaLocked, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
@@ -119,7 +119,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `SPRAY_AIRBRUSH` | 粒子感エアブラシプリセット（spray、小粒子散布、時間ベース emission 有効） |
 | `PENCIL` | 鉛筆プリセット（ほぼハード円、微小 jitter） |
 | `MARKER` | マーカープリセット（やや柔らか、中間フロー） |
-| `ROUGH_BRISTLE` | 荒いハケプリセット（連続毛束、面掠れ、紙目、反復接触、混色） |
+| `ROUGH_BRISTLE` | 荒いハケプリセット（一様断面の掃引、筆圧連動の面掠れ、紙目、反復接触、混色） |
 | `DEFAULT_PRESSURE_DYNAMICS` | `PressureDynamics` のデフォルト値 |
 | `DEFAULT_SPRAY_DYNAMICS` | `SprayDynamics` のデフォルト値 |
 | `DEFAULT_SPRAY_PRESSURE_DYNAMICS` | `SprayPressureDynamics` のデフォルト値 |

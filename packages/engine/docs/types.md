@@ -714,17 +714,11 @@ interface BristleSurfaceGrain {
 }
 
 interface BristleDynamics {
-  readonly bristleCount: number;
-  readonly bristleFill: number;
-  readonly bristleWidthVariation: number;
-  readonly bristleSpacingVariation: number;
   readonly geometryStepPx: number;
   readonly transverseMaskCellPx: number;
   readonly dropoutLengthPx: number;
   readonly dropoutWidthPx: number;
   readonly depositHardness: number;
-  readonly edgeTextureAmount: number;
-  readonly edgeTextureLengthPx: number;
   readonly cuspAngleThresholdDeg: number;
   readonly cuspDetectionSpanRatio: number;
   readonly lagLengthRatio: number;
@@ -732,7 +726,8 @@ interface BristleDynamics {
 }
 
 interface BristlePressureDynamics {
-  readonly coverage: number;
+  readonly dropout: number; // 筆圧が弱いほど掠れる強さ。0 = 常にベタ、1 = 筆圧 0 で最大の掠れ
+  readonly size: number; // 筆圧を掃引幅へ反映する強さ。0 = 均一幅、1 = 筆圧比例（stamp の size と同義）
 }
 
 interface BristleBrushConfig {
@@ -775,13 +770,15 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `type` | `"bristle"` | 連続掃引する荒いハケ方式 |
-| `dynamics` | `BristleDynamics` | 毛束断面、面掠れ、紙目、折返し追従の設定 |
-| `pressureDynamics` | `BristlePressureDynamics` | 筆圧を着彩率へ反映する強さ。ブラシ幅は変えない |
+| `dynamics` | `BristleDynamics` | 面掠れ、紙目、折返し追従の設定 |
+| `pressureDynamics` | `BristlePressureDynamics` | 筆圧を掠れ（`dropout`）と掃引幅（`size`）へ反映する強さ |
 | `mixing` | `BrushMixing` | 任意の共通連続色場。毛束ごとの色reservoirではない |
 
-`bristleCount` は概念上の細い毛束数、`bristleFill` は平均毛束幅、2つのvariationは幅と配置の不均一さを表す。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`dropoutLengthPx`、`dropoutWidthPx` は毛束数から独立した面掠れ（dropout mask）のstroke方向・横断方向の相関長を定める。`transverseMaskCellPx` は互換上残る横断座標のスケール（CPU rasterの補間座標 `v` の範囲 `lineWidth / transverseMaskCellPx`、下限30）で、面掠れは各pixelで評価されるため空間解像度や見た目を決めない。
+ハケの断面は一様（alpha 1 の矩形）で、毛束ごとの固定の筋は持たない。筋・掠れ・縁のほつれはすべて stroke-space の面掠れ（dropout mask）から生じ、`pressureDynamics.dropout` で筆圧連動の強さを制御する。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`dropoutLengthPx`、`dropoutWidthPx` は面掠れ（dropout mask）のstroke方向・横断方向の相関長を定める。`transverseMaskCellPx` は互換上残る横断座標のスケール（CPU rasterの補間座標 `v` の範囲 `lineWidth / transverseMaskCellPx`、下限30）で、面掠れは各pixelで評価されるため空間解像度や見た目を決めない。
 
-`depositHardness` は着彩/無着彩境界の硬さを定める。`edgeTextureAmount` / `edgeTextureLengthPx` は旧mask経路の縁テクスチャ用で現在は参照されない（互換のため型に残る）。面掠れは符号付き距離のまま
+`pressureDynamics.dropout` は面掠れの閾値を `dropout × (1 − p)` にする（`p` は `pressureCurve` 適用後の筆圧、未定義なら 0.5）。`dropout = 0` なら筆圧によらず閾値 0 で抜けが無く、常にベタ塗りになる。`dropout = 1` なら筆圧 0 で閾値 1（ほぼ全抜け）、筆圧 1 で閾値 0（ベタ）。`pressureDynamics.size` は掃引の半幅をサンプルごとに `calculateRadius(p, lineWidth, size, pressureCurve)` で決める。面掠れノイズの横断座標、紙目、混色の checkpoint footprint は基準の `lineWidth` を使い、幅が変わっても模様と色場は安定する。不透明度の筆圧連動（stamp の `flow` 相当）は持たない。「1 ストローク = 不透明度 `T(p)` の 1 層」の意味論には CPU 側にストローク単位の alpha surface が必要で、実装できる時点で追加する。
+
+`depositHardness` は着彩/無着彩境界の硬さを定める。面掠れは符号付き距離のまま
 swept quadの各pixelで評価し、最終pixelでalphaへ変換する。これにより低筆圧時にも薄いalphaを全面へ
 積まず、不透明な着彩片の面積だけを減らす。`surfaceGrain` はdocument座標へ固定した
 Fine tooth（細かな紙目）を表す。接触判定はswept quad内のpixel-local pressureと紙目の高さを使い、
@@ -803,17 +800,11 @@ nearest に選ぶ（heightMap の場合。procedural は scalePx が焼き込み
 
 ```typescript
 const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
-  bristleCount: 57,
-  bristleFill: 1.8,
-  bristleWidthVariation: 0.62,
-  bristleSpacingVariation: 0.72,
   geometryStepPx: 1,
   transverseMaskCellPx: 0.82,
   dropoutLengthPx: 58,
   dropoutWidthPx: 1,
   depositHardness: 1,
-  edgeTextureAmount: 0.12,
-  edgeTextureLengthPx: 7,
   cuspAngleThresholdDeg: 65,
   cuspDetectionSpanRatio: 0.14,
   lagLengthRatio: 0.3,
@@ -821,7 +812,8 @@ const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
 };
 
 const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {
-  coverage: 1,
+  dropout: 1,
+  size: 0,
 };
 ```
 
