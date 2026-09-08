@@ -1089,7 +1089,7 @@ interface BrushRenderState {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
-| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。bristleは内部の決定的profile cacheを使うため`null` |
+| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。bristleは断面が一様で tip 画像を持たないため`null` |
 | `branches` | `readonly BrushBranchRenderState[]` | Expand 分岐ごとの状態。非 Expand でも長さ 1 の配列を持つ |
 
 **BrushBranchRenderState**:

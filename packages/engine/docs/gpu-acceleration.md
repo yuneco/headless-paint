@@ -124,7 +124,7 @@ spray・非混色 stamp は対象外（CPU 経路のみ）。
 
 ### Rough bristle
 
-stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms 経過、または移動距離が `lineWidth × 1.5` に達した時点。`packages/stroke/src/incremental-stroke.ts` の `shouldFlushBristleBatch`）でまとめて engine に渡し、engine は flush ごとに chunk（確定した中心線周辺の bbox）を GPU surface へ積む。1 chunk は chunk-local の atlas 上で 3 pass で描かれ、最後に accum へ合成される。
+stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms 経過、または移動距離が `lineWidth × 1.5` に達した時点。`packages/stroke/src/incremental-stroke.ts` の `shouldFlushBristleBatch`）でまとめて engine に渡し、engine は flush ごとに chunk（確定した中心線周辺の bbox）を GPU surface へ積む。1 chunk は chunk-local の atlas 上で mask pass（と混色時のみ ink pass）で描かれ、最後に composite pass で accum へ合成される。
 
 | pass | 内容 |
 |---|---|

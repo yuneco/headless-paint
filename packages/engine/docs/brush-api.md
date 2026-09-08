@@ -39,7 +39,7 @@ StrokeStyle.brush.type
 | `material-field.ts` | 距離正規化したPickup / Restore / Diffusionの純粋な数値計算 |
 | `mixing.ts` | 色場のCanvas転送、進行方向付きsampling、有限checkpoint tile |
 | `spray.ts` | spray 描画（`walkEmissions` + 粒子バースト） |
-| `bristle-profile.ts` | seedから決定的な1D毛束断面atlasを生成する純粋計算とcache |
+| `bristle-section.ts` | 混色時に断面の色場を乗せる alpha 1 の断面 canvas（2px × 断面高）と寸法 cache |
 | `bristle-mask.ts` | stroke-spaceの符号付き面掠れ場をswept quadへsoftware rasterizeし、document-space紙目と局所maskへ解決する |
 | `bristle.ts` | 連続掃引、cusp split、短い毛束lag、混色stage、局所合成 |
 
