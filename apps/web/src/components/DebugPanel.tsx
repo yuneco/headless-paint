@@ -107,10 +107,15 @@ function DebugPanelComponent({
       penSettings.brush.type === "bristle"
         ? penSettings.brush.pressureDynamics.dropout
         : 0,
+    handleLengthRatio:
+      penSettings.brush.type === "bristle"
+        ? penSettings.brush.dynamics.handleLengthRatio
+        : 0,
   });
 
   const pressureResponseControllerRef = useRef<Controller | null>(null);
   const dropoutControllerRef = useRef<Controller | null>(null);
+  const handleLengthControllerRef = useRef<Controller | null>(null);
 
   const brushDynamics =
     penSettings.brush.type === "stamp"
@@ -389,8 +394,21 @@ function DebugPanelComponent({
             dropout: value,
           });
         });
+      handleLengthControllerRef.current = penFolder
+        .add(penDataRef.current, "handleLengthRatio", 0, 2, 0.05)
+        .name("Turn follow（旋回の追従、小さいほど機敏）")
+        .listen()
+        .onChange((value: number) => {
+          const ps = penSettingsRef.current;
+          if (ps.brush.type !== "bristle") return;
+          ps.setBrush({
+            ...ps.brush,
+            dynamics: { ...ps.brush.dynamics, handleLengthRatio: value },
+          });
+        });
       if (penSettingsRef.current.brush.type !== "bristle") {
         dropoutControllerRef.current.hide();
+        handleLengthControllerRef.current.hide();
       }
 
       penFolder.open();
@@ -688,11 +706,15 @@ function DebugPanelComponent({
       penSettings.brush.pressureDynamics.size;
     if (penSettings.brush.type === "bristle") {
       penDataRef.current.dropout = penSettings.brush.pressureDynamics.dropout;
+      penDataRef.current.handleLengthRatio =
+        penSettings.brush.dynamics.handleLengthRatio;
       pressureResponseControllerRef.current?.name("Size（筆圧で太さ）");
       dropoutControllerRef.current?.show();
+      handleLengthControllerRef.current?.show();
     } else {
       pressureResponseControllerRef.current?.name("Pressure Response");
       dropoutControllerRef.current?.hide();
+      handleLengthControllerRef.current?.hide();
     }
   }, [penSettings.lineWidth, penSettings.brush]);
 

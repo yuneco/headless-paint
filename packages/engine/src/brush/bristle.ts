@@ -189,7 +189,7 @@ export function renderBristleBrushStroke(
   };
 }
 
-function resolveSweepPoints(
+export function resolveSweepPoints(
   emissions: readonly EmissionPoint[],
   previous: BristleBranchRenderState | undefined,
   brushSize: number,
@@ -215,6 +215,12 @@ function resolveSweepPoints(
 
   let incomingX = previous?.incomingDirectionX;
   let incomingY = previous?.incomingDirectionY;
+  let handleX = previous?.handleX;
+  let handleY = previous?.handleY;
+  let handleDirectionX = previous?.handleDirectionX;
+  let handleDirectionY = previous?.handleDirectionY;
+  const handleLength =
+    brushSize * Math.max(0, brush.dynamics.handleLengthRatio);
   let frameSign: 1 | -1 = previous?.frameSign ?? 1;
   let lag = previous?.lag;
   const spanPx = Math.max(
@@ -231,6 +237,34 @@ function resolveSweepPoints(
   );
 
   for (const emission of emissions) {
+    let stableDirectionX = emission.directionX;
+    let stableDirectionY = emission.directionY;
+    if (handleLength > 0) {
+      if (
+        handleX === undefined ||
+        handleY === undefined ||
+        handleDirectionX === undefined ||
+        handleDirectionY === undefined
+      ) {
+        handleX = emission.x - stableDirectionX * handleLength;
+        handleY = emission.y - stableDirectionY * handleLength;
+        handleDirectionX = stableDirectionX;
+        handleDirectionY = stableDirectionY;
+      } else {
+        const dx = emission.x - handleX;
+        const dy = emission.y - handleY;
+        const distance = Math.hypot(dx, dy);
+        if (distance > handleLength) {
+          handleDirectionX = dx / distance;
+          handleDirectionY = dy / distance;
+          handleX = emission.x - handleDirectionX * handleLength;
+          handleY = emission.y - handleDirectionY * handleLength;
+        }
+      }
+      // Slack retains the last taut direction, including across flushes.
+      stableDirectionX = handleDirectionX;
+      stableDirectionY = handleDirectionY;
+    }
     const pressure = Math.max(0, Math.min(1, emission.pressure ?? 0.5));
     const halfWidth = calculateRadius(
       pressure,
@@ -238,11 +272,11 @@ function resolveSweepPoints(
       brush.pressureDynamics.size,
       pressureCurve,
     );
-    let frameX = emission.directionX * frameSign;
-    let frameY = emission.directionY * frameSign;
+    let frameX = stableDirectionX * frameSign;
+    let frameY = stableDirectionY * frameSign;
     if (incomingX !== undefined && incomingY !== undefined) {
       const dot = clamp(
-        incomingX * emission.directionX + incomingY * emission.directionY,
+        incomingX * stableDirectionX + incomingY * stableDirectionY,
         -1,
         1,
       );
@@ -263,8 +297,7 @@ function resolveSweepPoints(
           breakBefore: false,
         });
         const directDot =
-          incomingFrameX * emission.directionX +
-          incomingFrameY * emission.directionY;
+          incomingFrameX * stableDirectionX + incomingFrameY * stableDirectionY;
         frameSign = directDot >= 0 ? 1 : -1;
         frameX = incomingFrameX;
         frameY = incomingFrameY;
@@ -272,19 +305,19 @@ function resolveSweepPoints(
           startDistance: emission.distance,
           fromAngle: Math.atan2(incomingFrameY, incomingFrameX),
         };
-        incomingX = emission.directionX;
-        incomingY = emission.directionY;
+        incomingX = stableDirectionX;
+        incomingY = stableDirectionY;
       } else {
         const next = normalize(
-          incomingX + (emission.directionX - incomingX) * smoothFactor,
-          incomingY + (emission.directionY - incomingY) * smoothFactor,
+          incomingX + (stableDirectionX - incomingX) * smoothFactor,
+          incomingY + (stableDirectionY - incomingY) * smoothFactor,
         );
         incomingX = next.x;
         incomingY = next.y;
       }
     } else {
-      incomingX = emission.directionX;
-      incomingY = emission.directionY;
+      incomingX = stableDirectionX;
+      incomingY = stableDirectionY;
     }
     if (lag) {
       const lagLength = Math.max(
@@ -297,8 +330,8 @@ function resolveSweepPoints(
         1,
       );
       const targetAngle = Math.atan2(
-        emission.directionY * frameSign,
-        emission.directionX * frameSign,
+        stableDirectionY * frameSign,
+        stableDirectionX * frameSign,
       );
       const angle =
         lag.fromAngle +
@@ -337,6 +370,10 @@ function resolveSweepPoints(
       : previous?.lastSweepPoint,
     incomingDirectionX: incomingX,
     incomingDirectionY: incomingY,
+    handleX,
+    handleY,
+    handleDirectionX,
+    handleDirectionY,
     frameSign,
     lag,
   };

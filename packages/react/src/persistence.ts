@@ -18,6 +18,7 @@ import {
   BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX,
   BRUSH_MIXING_MAX_FIELD_DIMENSION,
   BRUSH_MIXING_MIN_FIELD_DIMENSION,
+  DEFAULT_BRISTLE_DYNAMICS,
   DEFAULT_PRESSURE_DYNAMICS,
   DEFAULT_RADIAL_DISTRIBUTION,
   DEFAULT_SPRAY_PRESSURE_DYNAMICS,
@@ -712,6 +713,10 @@ function parseBristleBrushConfig(
   const dynamics = value.dynamics;
   const grain = dynamics.surfaceGrain as Record<string, unknown>;
   const pressure = value.pressureDynamics;
+  const handleLengthRatio =
+    dynamics.handleLengthRatio === undefined
+      ? DEFAULT_BRISTLE_DYNAMICS.handleLengthRatio
+      : dynamics.handleLengthRatio;
   if (
     !isFiniteInRange(dynamics.geometryStepPx, 0.5, 16) ||
     !isFiniteInRange(dynamics.transverseMaskCellPx, 0.25, 32) ||
@@ -721,6 +726,7 @@ function parseBristleBrushConfig(
     !isFiniteInRange(dynamics.cuspAngleThresholdDeg, 0, 180) ||
     !isUnitNumber(dynamics.cuspDetectionSpanRatio) ||
     !isUnitNumber(dynamics.lagLengthRatio) ||
+    !isFiniteInRange(handleLengthRatio, 0, 4) ||
     !isFiniteInRange(grain.scalePx, 0.5, 512) ||
     !isUnitNumber(grain.amount) ||
     !isUnitNumber(grain.hardness) ||
@@ -744,6 +750,7 @@ function parseBristleBrushConfig(
       cuspAngleThresholdDeg: dynamics.cuspAngleThresholdDeg as number,
       cuspDetectionSpanRatio: dynamics.cuspDetectionSpanRatio as number,
       lagLengthRatio: dynamics.lagLengthRatio as number,
+      handleLengthRatio: handleLengthRatio as number,
       surfaceGrain: {
         scalePx: grain.scalePx as number,
         amount: grain.amount as number,

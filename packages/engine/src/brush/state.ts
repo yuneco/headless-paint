@@ -87,6 +87,10 @@ export function cloneBrushRenderState(
               : undefined,
             incomingDirectionX: branch.bristle.incomingDirectionX,
             incomingDirectionY: branch.bristle.incomingDirectionY,
+            handleX: branch.bristle.handleX,
+            handleY: branch.bristle.handleY,
+            handleDirectionX: branch.bristle.handleDirectionX,
+            handleDirectionY: branch.bristle.handleDirectionY,
             frameSign: branch.bristle.frameSign,
             lag: branch.bristle.lag ? { ...branch.bristle.lag } : undefined,
           }

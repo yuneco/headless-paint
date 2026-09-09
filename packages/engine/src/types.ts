@@ -309,6 +309,7 @@ export interface BristleDynamics {
   readonly cuspAngleThresholdDeg: number;
   readonly cuspDetectionSpanRatio: number;
   readonly lagLengthRatio: number;
+  readonly handleLengthRatio: number;
   readonly surfaceGrain: BristleSurfaceGrain;
 }
 
@@ -326,6 +327,7 @@ export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
   cuspAngleThresholdDeg: 65,
   cuspDetectionSpanRatio: 0.14,
   lagLengthRatio: 0.3,
+  handleLengthRatio: 0.5,
   surfaceGrain: {
     scalePx: 4,
     amount: 1,
@@ -434,6 +436,10 @@ export interface BristleLagState {
 
 export interface BristleBranchRenderState {
   readonly lastSweepPoint?: BristleSweepPointState;
+  readonly handleX?: number;
+  readonly handleY?: number;
+  readonly handleDirectionX?: number;
+  readonly handleDirectionY?: number;
   readonly incomingDirectionX?: number;
   readonly incomingDirectionY?: number;
   readonly frameSign?: 1 | -1;

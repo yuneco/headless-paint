@@ -1,4 +1,5 @@
 import {
+  DEFAULT_BRISTLE_DYNAMICS,
   DEFAULT_RADIAL_DISTRIBUTION,
   ROUGH_BRISTLE,
   createLayer,
@@ -29,6 +30,7 @@ function createBristleSettingsSnapshot() {
       brush: {
         ...ROUGH_BRISTLE,
         dynamics: {
+          ...DEFAULT_BRISTLE_DYNAMICS,
           geometryStepPx: 1,
           transverseMaskCellPx: 0.82,
           dropoutLengthPx: 58,
@@ -272,6 +274,73 @@ describe("persistence", () => {
       ).toBeNull();
     },
   );
+
+  it.each([0, 0.5, 1.25, 4])(
+    "round-trips bristle handleLengthRatio=%s",
+    (handleLengthRatio) => {
+      const snapshot = createBristleSettingsSnapshot();
+      if (snapshot.pen.brush.type !== "bristle")
+        throw new Error("Expected bristle");
+      const settings = {
+        ...snapshot,
+        pen: {
+          ...snapshot.pen,
+          brush: {
+            ...snapshot.pen.brush,
+            dynamics: { ...snapshot.pen.brush.dynamics, handleLengthRatio },
+          },
+        },
+      };
+      const serialized = JSON.stringify(exportPaintSettings(settings));
+      expect(importPaintSettings(JSON.parse(serialized))?.pen.brush).toEqual(
+        settings.pen.brush,
+      );
+    },
+  );
+
+  it("restores missing bristle handleLengthRatio as 0.5", () => {
+    const snapshot = createBristleSettingsSnapshot();
+    const legacy = JSON.parse(
+      JSON.stringify(snapshot, (key, value) =>
+        key === "handleLengthRatio" ? undefined : value,
+      ),
+    );
+    expect(importPaintSettings(legacy)?.pen.brush).toMatchObject({
+      type: "bristle",
+      dynamics: { handleLengthRatio: 0.5 },
+    });
+  });
+
+  it("rejects bristle handleLengthRatio outside finite 0..4", () => {
+    const snapshot = createBristleSettingsSnapshot();
+    if (snapshot.pen.brush.type !== "bristle")
+      throw new Error("Expected bristle");
+    for (const value of [
+      -0.01,
+      4.01,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      null,
+      "0.5",
+    ]) {
+      expect(
+        importPaintSettings({
+          ...snapshot,
+          pen: {
+            ...snapshot.pen,
+            brush: {
+              ...snapshot.pen.brush,
+              dynamics: {
+                ...snapshot.pen.brush.dynamics,
+                handleLengthRatio: value,
+              },
+            },
+          },
+        }),
+      ).toBeNull();
+    }
+  });
 
   it("ignores removed bristle dynamics fields when restoring settings", () => {
     const snapshot = createBristleSettingsSnapshot();
