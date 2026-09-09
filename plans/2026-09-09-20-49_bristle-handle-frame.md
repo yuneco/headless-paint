@@ -69,3 +69,13 @@ interface BristleBranchRenderState {
 - 折返し（180°）で従来どおり `frameSign` が反転し、横向きの一時的な回転が出ない（単体テスト）
 - 実ブラウザ（CPU / WebGL2）で、1px の縦ブレを含む横線が従来より安定する
 - フル検収 green
+
+## 実装結果（2026-09-09、検収済み）
+
+- Phase 3: engineの柄モデル・state、reactの有限0..4検証／欠落0.5補完、webの0..2スライダーを実装。docsは変更していない。
+- 自明な補完: `cloneBrushRenderState` はbristleフィールドを個別コピーしているため、柄の位置・保持方向の4フィールドもコピーするよう追随した。曲がった後のたるみ中でclone前後の継続結果が一致する回帰を追加。
+- Phase 4の静的セルフレビュー: 公開型・既定値・state契約はdocsと一致。閾値式・frameSignの決め方・lag回転式は方向入力以外を維持。
+- `pnpm -r build`、`pnpm typecheck`、`pnpm lint`成功。ノンブラウザ33ファイル403件成功。新規15件（engine9、persistence6）は全成功。既存期待値の変更なし。
+- Claude 検収: フル（build / typecheck / lint / test 745 件）green。L=0 の回帰 snapshot は Node と Chromium で `Math.cos` が 1 ulp 違うため 12 桁丸めで比較するよう修正し、browser モードで焼き直した（差分は丸めのみ）。Chromium の CPU / WebGL2 で柄 0 / 0.5 / 1 を描画してエラーなし。ただし Playwright のマウス入力は `causal-adaptive` と Catmull-Rom で既にならされ、1px ブレの差は画面では出ない。安定化の効果は実機のペン入力（低速・不安定な横線）でユーザーが官能評価する
+- UI ラベルはユーザーの感覚（旋回への追従の機敏さ）に合わせ「Turn follow（旋回の追従、小さいほど機敏）」とした。engine の `handleLengthRatio` は物理量（柄の長さ）のまま
+- 変更一覧、追加／未実行テスト全名、再実行コマンドは `plans/notes/2026-09-09-bristle-handle-frame-report.md`。
