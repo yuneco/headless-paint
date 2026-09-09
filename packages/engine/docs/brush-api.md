@@ -115,7 +115,7 @@ function renderBrushStroke(
    - Catmull-Rom補間後の中心線を`geometryStepPx`間隔で走査し、一様な断面（alpha 1）を連続quadへ掃引する。半幅はサンプルごとに `calculateRadius(p, lineWidth, pressureDynamics.size, pressureCurve)` で決める。毛束ごとの固定の筋は持たない
    - stroke-spaceの面掠れ（dropout mask）を合成する。CPU/GPUともにquad内で距離・横断位置・筆圧を線形補間し、各pixelで `broad value noise(distance / dropoutLengthPx, crossPx / dropoutWidthPx) − threshold` を評価する。threshold は `pressureDynamics.dropout × (1 − p)`（`p` は `pressureCurve` 適用後の筆圧、未定義なら 0.5）。`dropout = 0` は常にベタ、`dropout = 1` は筆圧 0 でほぼ全抜け・筆圧 1 でベタ。`crossPx` は基準 `lineWidth` の横断座標で、`size` による幅の変化で模様はずれない。符号付き距離を `depositHardness` で最終pixelのalphaへ変換し、重複quadは`max(alpha)`で結合する。GPU経路（[gpu-acceleration.md](./gpu-acceleration.md)）も同じ式をshader内で評価する。非混色では断面が一様なので GPU は ink pass を持たず mask の alpha だけで composite する。混色では断面の色場を alpha 1 の断面 canvas に乗せて従来どおり掃引する
    - document座標へ固定したsurface grain（紙目）を面掠れと同じsoftware rasterへ統合し、pixel-local pressureで接触を判定する。紙目の高さは既定で procedural Fine tooth（128² タイル）だが、`surfaceGrain.heightMap` を指定すると外部の高さマップ（[createHeightMapFromImageData](#createheightmapfromimagedata)）へ差し替わる。接触判定の式は変わらず、高さの取得元だけが変わる
-   - 横断方向（掃引フレーム）は接線を直接使わず、ペン先の後ろ `lineWidth × handleLengthRatio` に置いた柄の点からペン先へ向かう方向で決める。柄はその距離を超えて引かれたときだけ動くので、柄の長さ未満のブレでは向きが変わらない（`0` で従来の接線追従）
+   - 横断方向（掃引フレーム）は接線を直接使わず、ペン先の後ろ `lineWidth × handleLengthRatio` に置いた柄の点からペン先へ向かう方向で決める。柄はその距離を超えて引かれたときだけ動くので、横ブレ δ の影響は約 `atan(δ / L)` に縮み、引き返しの間は向きが止まる（`0` で従来の接線追従）
    - 急な折返しはcuspとして分割し、短いbristle lag（毛束の遅れ）で横断方向を追従させる。折返しの検出は柄の方向の反転で行う
    - 同じ場所への反復接触は、紙目の谷に対する確率的な再接触として不透明な着彩片の面積を段階的に増やす。初回の未着彩cellへ半透明の着彩floorは加えず、顔料厚レイヤーも追加しない
    - 混色時は共通の連続色場を毛束断面全体へ適用してからalpha maskを掛ける。毛束単位へ色を固定しない。色場は flush 単位で更新され、run 内では開始/終了時点の色場を run の進行率で線形補間する（[gpu-acceleration.md](./gpu-acceleration.md) の perFlush 意味論）
