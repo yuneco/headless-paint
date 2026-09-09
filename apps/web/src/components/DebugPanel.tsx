@@ -370,7 +370,7 @@ function DebugPanelComponent({
         .add(penDataRef.current, "pressureResponse", 0, 1, 0.05)
         .name(
           penSettingsRef.current.brush.type === "bristle"
-            ? "Size（筆圧で太さ）"
+            ? "Pressure Size"
             : "Pressure Response",
         )
         .listen()
@@ -384,7 +384,7 @@ function DebugPanelComponent({
 
       dropoutControllerRef.current = penFolder
         .add(penDataRef.current, "dropout", 0, 1, 0.05)
-        .name("Dropout（筆圧で掠れ）")
+        .name("Pressure Dropout")
         .listen()
         .onChange((value: number) => {
           const ps = penSettingsRef.current;
@@ -396,7 +396,7 @@ function DebugPanelComponent({
         });
       handleLengthControllerRef.current = penFolder
         .add(penDataRef.current, "handleLengthRatio", 0, 2, 0.05)
-        .name("Turn follow（旋回の追従、小さいほど機敏）")
+        .name("Turn Lag")
         .listen()
         .onChange((value: number) => {
           const ps = penSettingsRef.current;
@@ -708,7 +708,7 @@ function DebugPanelComponent({
       penDataRef.current.dropout = penSettings.brush.pressureDynamics.dropout;
       penDataRef.current.handleLengthRatio =
         penSettings.brush.dynamics.handleLengthRatio;
-      pressureResponseControllerRef.current?.name("Size（筆圧で太さ）");
+      pressureResponseControllerRef.current?.name("Pressure Size");
       dropoutControllerRef.current?.show();
       handleLengthControllerRef.current?.show();
     } else {
