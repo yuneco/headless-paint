@@ -722,6 +722,7 @@ interface BristleDynamics {
   readonly cuspAngleThresholdDeg: number;
   readonly cuspDetectionSpanRatio: number;
   readonly lagLengthRatio: number;
+  readonly handleLengthRatio: number; // 柄の長さ（幅に対する比率）。0 = 接線をそのまま使う
   readonly surfaceGrain: BristleSurfaceGrain;
 }
 
@@ -786,6 +787,8 @@ Fine tooth（細かな紙目）を表す。接触判定はswept quad内のpixel-
 同じ場所を繰り返すと不透明な着彩片の面積が徐々に増える。専用の反復強度パラメータや
 顔料厚layerは持たない。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
 
+横断方向（掃引フレーム）は中心線の接線を直接使わず、ペン先の後ろ `brushSize × handleLengthRatio` の距離に置いた「柄の点」からペン先へ向かう方向で決める（引きずり柄モデル）。柄はペン先との距離がその長さを超えたときだけ引きずられ、超えない間（たるみ）は柄も方向も更新しない。したがって柄の長さ未満の横ブレではフレームが変わらず、本当の曲がりでは移動距離に応じて滑らかに回る。描画位置はペン先のままで、遅れるのは向きだけであり、距離ベースなので停止中に変化しない。引き返して柄を通り越すと方向が反転し、それが `cuspAngleThresholdDeg` の折返し判定に入って `frameSign` の反転と lag の回転が従来どおり働く。`handleLengthRatio = 0` は接線をそのまま使う従来の挙動。ストローク開始時は柄を始点の接線の逆側に置き、最初の点から向きが出る。柄の位置は `BristleBranchRenderState.handleX / handleY` に branch ごとに保持され、replay でも決定的である。
+
 紙目の高さの取得元は2通りある。`surfaceGrain.heightMap` が未指定なら、`seed` と `scalePx`（ノイズのセル幅）から
 生成した 128² の procedural Fine tooth（2周波 value noise）を document 座標でタイル状に繰り返す。
 `heightMap` を指定すると、その `heights` を document 座標でタイル状に繰り返し、`scalePx` は 1 texel あたりの
@@ -808,6 +811,7 @@ const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
   cuspAngleThresholdDeg: 65,
   cuspDetectionSpanRatio: 0.14,
   lagLengthRatio: 0.3,
+  handleLengthRatio: 0.5,
   surfaceGrain: { scalePx: 4, amount: 1, hardness: 0.75, seed: 1 },
 };
 
@@ -1103,7 +1107,7 @@ interface BrushRenderState {
 | `nextTimeEmissionAt` | `number` | 時間ベース emission で、次に emission を配置する予定時刻 |
 | `pressure` | `BrushPressureState` | stampの因果的な筆圧平滑化状態。有効時のみ保持する |
 | `mixing` | `BrushMixingState` | stamp / bristle + mixing 有効時のみ保持する混色状態 |
-| `bristle` | `BristleBranchRenderState` | bristleの直前掃引断面、進入方向、折返し時の短い毛束lagを保持する状態 |
+| `bristle` | `BristleBranchRenderState` | bristleの直前掃引断面、進入方向、折返し時の短い毛束lag、引きずり柄の位置（`handleX` / `handleY`）を保持する状態 |
 
 **BrushMixingState**:
 
