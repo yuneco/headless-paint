@@ -35,6 +35,8 @@ interface BristleBranchRenderState {
   // ...既存
   readonly handleX?: number; // 柄の点。未設定なら次の emission で初期化
   readonly handleY?: number;
+  readonly handleDirectionX?: number; // 柄からペン先への方向。たるみ中はこの値を保持する
+  readonly handleDirectionY?: number;
 }
 ```
 
@@ -56,6 +58,8 @@ interface BristleBranchRenderState {
 ## 設計の補足（2026-09-09、codex 指摘で修正）
 
 前進中は柄が常に張っているため、横ブレは「消える」のではなく角度が `atan(δ / L)` に縮む。たるみで完全に止まるのは引き返す間だけ。内部の `frameX/Y` は長手軸（進行方向）で、横断軸は `(−frameY, frameX)`。docs の保証文とテスト条件をこれに合わせた。
+
+たるみ中は方向を更新しないので、直前の stableDirection を flush をまたいで持ち越す保存先が要る（ペン先−柄の向きはたるみ中に変わり、`incoming` は平滑済み、`frameX/Y` は lag 適用後で代用できない。codex の診断: 一括 25.53° に対し incoming 代用の分割 26.14°）。`BristleBranchRenderState.handleDirectionX/Y` を追加して保持する。
 
 ## 完了条件
 
