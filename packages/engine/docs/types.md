@@ -481,7 +481,7 @@ interface CircleTipConfig {
   readonly hardness: number;
 }
 
-/** 画像ベースチップ（imageId で BrushTipRegistry から解決） */
+/** 画像ベースチップ（imageId で BrushAssetRegistry から解決） */
 interface ImageTipConfig {
   readonly type: "image";
   readonly imageId: string;
@@ -502,7 +502,7 @@ type BrushTipConfig = CircleTipConfig | ImageTipConfig;
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `type` | `"image"` | チップ種別 |
-| `imageId` | `string` | BrushTipRegistry に登録された画像の識別子 |
+| `imageId` | `string` | BrushAssetRegistry に setTip で登録された画像の識別子 |
 
 **使用例**:
 ```typescript
@@ -706,11 +706,11 @@ interface BristleHeightMap {
 }
 
 interface BristleSurfaceGrain {
-  readonly scalePx: number; // procedural: ノイズのセル幅 px / heightMap: 1 texel あたりの px
+  readonly scalePx: number; // procedural: ノイズのセル幅 px / heightMapId 指定時: 1 texel あたりの px
   readonly amount: number;
   readonly hardness: number;
-  readonly seed: number; // procedural の紙目 seed。heightMap 指定時も接触判定の hash に使う
-  readonly heightMap?: BristleHeightMap; // 指定時は procedural Fine tooth の代わりに使う
+  readonly seed: number; // procedural の紙目 seed。heightMapId 指定時も接触判定の hash に使う
+  readonly heightMapId?: string; // BrushAssetRegistry に登録した高さマップの ID。未指定は procedural Fine tooth
 }
 
 interface BristleDynamics {
@@ -789,15 +789,22 @@ Fine tooth（細かな紙目）を表す。接触判定はswept quad内のpixel-
 
 横断方向（掃引フレーム）は中心線の接線を直接使わず、ペン先の後ろ `brushSize × handleLengthRatio` の距離に置いた「柄の点」からペン先へ向かう方向で決める（引きずり柄モデル）。柄はペン先との距離がその長さを超えたときだけ引きずられ、超えない間（たるみ）は柄も方向も更新しない。前進中は柄が常に張っているので、横ブレ δ がフレームに与える角度は接線の跳び（最大 90°）ではなく約 `atan(δ / L)`（L = 15px、δ = 1px で約 3.6°）に縮む。本当の曲がりでは移動距離に応じて滑らかに回る。描画位置はペン先のままで、遅れるのは向きだけであり、距離ベースなので停止中に変化しない。引き返すと柄との距離が縮んで柄も方向も止まり（たるみ）、柄を通り越して再び張った時点で方向が反転し、それが `cuspAngleThresholdDeg` の折返し判定に入って `frameSign` の反転と lag の回転が従来どおり働く。`handleLengthRatio = 0` は接線をそのまま使う従来の挙動。ストローク開始時は柄を始点の接線の逆側に置き、最初の点から向きが出る。柄の位置と、たるみ中に保持している方向は `BristleBranchRenderState.handleX / handleY / handleDirectionX / handleDirectionY` に branch ごとに保持され、flush をまたいでも replay でも決定的である。
 
-紙目の高さの取得元は2通りある。`surfaceGrain.heightMap` が未指定なら、`seed` と `scalePx`（ノイズのセル幅）から
+紙目の高さの取得元は2通りある。`surfaceGrain.heightMapId` が未指定なら、`seed` と `scalePx`（ノイズのセル幅）から
 生成した 128² の procedural Fine tooth（2周波 value noise）を document 座標でタイル状に繰り返す。
-`heightMap` を指定すると、その `heights` を document 座標でタイル状に繰り返し、`scalePx` は 1 texel あたりの
+`heightMapId` を指定すると、`BrushAssetRegistry`（[brush-api.md](./brush-api.md#brushassetregistry)）に同じ ID で
+登録された `BristleHeightMap` の `heights` を document 座標でタイル状に繰り返し、`scalePx` は 1 texel あたりの
 px（拡大率）として働く。どちらも texel は `positiveMod(floor(documentX / scalePx), width)`（Y も同様）で
-nearest に選ぶ（heightMap の場合。procedural は scalePx が焼き込み済みなので scale 1 相当）。接触判定の式
+nearest に選ぶ（heightMapId の場合。procedural は scalePx が焼き込み済みなので scale 1 相当）。接触判定の式
 （`amount` / `hardness` / 反復接触の確率）は取得元によらず同一で、CPU と GPU の両経路で同じ契約を守る。
-`heightMap` はブラシ設定のメモリ上のデータであり、永続化・シリアライズの対象ではない。寸法は 1..2048 で、
-超える場合は描画時に throw する。非整数の `scalePx` では floor の境界が CPU / GPU でわずかに食い違い得る。
-画像から `heightMap` を作るには `createHeightMapFromImageData`（[brush-api.md](./brush-api.md)）を使う。
+
+`heightMapId` は image tip の `imageId` と同じ参照モデルである。ブラシ設定・`StrokeCommand` に乗るのは ID だけで、
+高さマップ本体は永続化・シリアライズしない。解決はストローク開始時（live / replay とも）に 1 回だけ行い、
+結果を `BrushRenderState.heightMap` に置く。レジストリが無い、または ID が未登録なら開始時に throw し、
+procedural へ静かに落ちることはない（環境間で replay 結果が変わらないようにするため）。`scalePx` /
+`amount` / `hardness` / `seed` / `heightMapId` の切り替えは通常のブラシ設定変更であり、ストロークごとに変えられる。
+登録済み高さマップの寸法は 1..2048 で、超える場合は登録時・描画時に throw する。非整数の `scalePx` では
+floor の境界が CPU / GPU でわずかに食い違い得る。画像から `BristleHeightMap` を作るには
+`createHeightMapFromImageData`（[brush-api.md](./brush-api.md)）を使う。
 
 初期版は不透明またはほぼ不透明なpaintを対象とする。掃引chunk間の重なりはこの契約の下で継ぎ目を防ぐために使い、半透明paintの厳密な重なり濃度は保証しない。pending描画は常にno-opで、確定描画だけを表示する。
 
@@ -1086,6 +1093,7 @@ interface BrushPressureState {
 interface BrushRenderState {
   readonly seed: number;
   readonly tipCanvas: OffscreenCanvas | null;
+  readonly heightMap: BristleHeightMap | null;
   readonly branches: readonly BrushBranchRenderState[];
 }
 ```
@@ -1094,6 +1102,7 @@ interface BrushRenderState {
 |---|---|---|
 | `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
 | `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。bristleは断面が一様で tip 画像を持たないため`null` |
+| `heightMap` | `BristleHeightMap \| null` | bristle で `surfaceGrain.heightMapId` を指定したとき、ストローク開始時に `BrushAssetRegistry` から解決した紙目の高さマップ。全 branch・全 flush で同じ参照を共有し、`cloneBrushRenderState` は参照をそのままコピーする（`heights` は不変扱い）。procedural / stamp / spray では `null` |
 | `branches` | `readonly BrushBranchRenderState[]` | Expand 分岐ごとの状態。非 Expand でも長さ 1 の配列を持つ |
 
 **BrushBranchRenderState**:

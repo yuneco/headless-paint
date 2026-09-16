@@ -82,14 +82,15 @@ interface BrushRenderState {
 - `registerAppBrushTips` を `registerAppBrushAssets` に改名し、起動時に 3 枚を fetch → `createImageBitmap` → `OffscreenCanvas` で `ImageData` → `createHeightMapFromImageData` → `setHeightMap`。ID は `"paper-fabric-031"` / `"paper-fabric-036"` / `"paper-fabric-061"`
 - `BristleGrainEvaluation` の Source は「Procedural / Fabric 031 / Fabric 036 / Fabric 061」の固定 select にし、`heightMapId` を切り替える。`/eval-textures/` fetch、ファイル選択、リサイズ段階選択、Contrast / Invert / Normalize の再生成 UI は削除（変換オプションは同梱時に固定する）
 - `vite-eval-textures.ts` / そのテスト / `vite.config.ts` の plugin 登録 / `vitest.config.ts` の include を削除
-- 出典表示: `apps/web/src/brush-presets/paper-textures/README.md` に ambientCG の ID・URL・CC0 1.0・取得日・zip SHA-256・加工内容（Displacement の抽出とリサイズ）を記載。UI 上は評価パネル内に 1 行の出典テキストを置く（CC0 に表示義務はないが出典を明記する方針）
+- 出典表示: `apps/web/src/brush-presets/paper-textures/README.md` に ambientCG の ID・URL・CC0 1.0・取得日・zip SHA-256・加工内容（Displacement の抽出とリサイズ）を記載。UI 上の出典表示は置かない
 
-### 未決（Phase 2 で確認）
+### 追加決定（ユーザー 2026-09-16）
 
-1. レジストリの改名（案 A）か名前維持（案 B）か
-2. 同梱解像度: 評価は 1024 で見ていた。1K JPG は 1 枚 750〜920KB で 3 枚約 2.5MB。512 に縮小（グレースケール JPG、1 枚 100KB 前後）すると tile の周期が半分になる。推奨は 512 だが見た目を優先するなら 1024
-3. 各テクスチャの固定変換オプション（invert / normalize / contrast）と `scalePx` の既定値。評価で良かった組み合わせをユーザーから聞く。未回答なら normalize=true, contrast=1, invert=false, scalePx=1
-4. 評価パネルのファイル読み込み（任意画像）を残すか。残すなら「アプリ側で `setHeightMap` してから ID を切り替える」形になる。デモの範囲外と判断して削除を推奨
+1. レジストリは共通のリソース登録機能として **`BrushAssetRegistry`** に改名（案 A）。`BrushTipRegistry` 系の旧名は残さない
+2. 同梱解像度は **512**（グレースケール JPG）。粒の大きさを評価時（1024 / scale 1）と揃えるため既定 `scalePx = 2`。利用側は任意サイズを `setHeightMap` で登録できる
+3. 固定変換オプション: 3 枚とも invert=false, contrast=1。normalize は **Fabric031 のみ true**、036 / 061 は false
+4. 任意画像の読み込み UI は削除。Source は Procedural + 同梱 3 枚の固定 select
+5. UI 上の出典表示は不要（デモはライブラリ実装者向け）。出典はテクスチャのディレクトリの README のみに記載
 
 ## 作業手順（Doc-First）
 

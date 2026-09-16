@@ -92,7 +92,7 @@ interface StrokeStartConfig {
   readonly alphaLocked: boolean;
   readonly brushSeed?: number;        // 省略時 runtime が生成。テストでは固定注入
   readonly pendingOnly?: boolean;
-  readonly tipRegistry?: BrushTipRegistry;  // image tip ブラシに必須
+  readonly registry?: BrushAssetRegistry;   // image tip / heightMapId 指定の bristle に必須。未登録 ID は開始時に throw
 }
 ```
 

@@ -34,7 +34,7 @@ StrokeStyle.brush.type
 | `prng.ts` | `mulberry32` / `hashSeed` |
 | `scheduler.ts` | 距離ベース + 時間ベース emission 走査（stamp / spray 共有） |
 | `state.ts` | `BrushRenderState` の生成・branch 分解・merge・pending クローン |
-| `tip.ts` | `generateBrushTip` / `BrushTipRegistry` |
+| `tip.ts` | `generateBrushTip` / `BrushAssetRegistry` |
 | `stamp.ts` | stamp 描画（`walkEmissions` + dab 配置） |
 | `material-field.ts` | 距離正規化したPickup / Restore / Diffusionの純粋な数値計算 |
 | `mixing.ts` | 色場のCanvas転送、進行方向付きsampling、有限checkpoint tile |
@@ -43,7 +43,7 @@ StrokeStyle.brush.type
 | `bristle-mask.ts` | stroke-spaceの符号付き面掠れ場をswept quadへsoftware rasterizeし、document-space紙目と局所maskへ解決する |
 | `bristle.ts` | 連続掃引、cusp split、短い毛束lag、混色stage、局所合成 |
 
-`@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`isBrushMixingActive`、`generateBrushTip`、`createBrushTipRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
+`@yuneco/headless-paint/core` からの公開名は `brush/index.ts` 経由で提供する。公開対象は `renderBrushStroke`、`isBrushMixingActive`、`generateBrushTip`、`createBrushAssetRegistry`、`mulberry32`、`hashSeed`、`walkEmissions`、`timeSpacingMsFromRate` と、ブラシ関連型・プリセット定数。
 
 ---
 
@@ -114,7 +114,7 @@ function renderBrushStroke(
 5. `"bristle"`: 荒いハケ方式で描画:
    - Catmull-Rom補間後の中心線を`geometryStepPx`間隔で走査し、一様な断面（alpha 1）を連続quadへ掃引する。半幅はサンプルごとに `calculateRadius(p, lineWidth, pressureDynamics.size, pressureCurve)` で決める。毛束ごとの固定の筋は持たない
    - stroke-spaceの面掠れ（dropout mask）を合成する。CPU/GPUともにquad内で距離・横断位置・筆圧を線形補間し、各pixelで `broad value noise(distance / dropoutLengthPx, crossPx / dropoutWidthPx) − threshold` を評価する。threshold は `pressureDynamics.dropout × (1 − p)`（`p` は `pressureCurve` 適用後の筆圧、未定義なら 0.5）。`dropout = 0` は常にベタ、`dropout = 1` は筆圧 0 でほぼ全抜け・筆圧 1 でベタ。`crossPx` は基準 `lineWidth` の横断座標で、`size` による幅の変化で模様はずれない。符号付き距離を `depositHardness` で最終pixelのalphaへ変換し、重複quadは`max(alpha)`で結合する。GPU経路（[gpu-acceleration.md](./gpu-acceleration.md)）も同じ式をshader内で評価する。非混色では断面が一様なので GPU は ink pass を持たず mask の alpha だけで composite する。混色では断面の色場を alpha 1 の断面 canvas に乗せて従来どおり掃引する
-   - document座標へ固定したsurface grain（紙目）を面掠れと同じsoftware rasterへ統合し、pixel-local pressureで接触を判定する。紙目の高さは既定で procedural Fine tooth（128² タイル）だが、`surfaceGrain.heightMap` を指定すると外部の高さマップ（[createHeightMapFromImageData](#createheightmapfromimagedata)）へ差し替わる。接触判定の式は変わらず、高さの取得元だけが変わる
+   - document座標へ固定したsurface grain（紙目）を面掠れと同じsoftware rasterへ統合し、pixel-local pressureで接触を判定する。紙目の高さは既定で procedural Fine tooth（128² タイル）だが、`surfaceGrain.heightMapId` を指定すると [BrushAssetRegistry](#brushassetregistry) に登録した外部の高さマップ（[createHeightMapFromImageData](#createheightmapfromimagedata)）へ差し替わる。解決はストローク開始時に行い `BrushRenderState.heightMap` に置く。接触判定の式は変わらず、高さの取得元だけが変わる
    - 横断方向（掃引フレーム）は接線を直接使わず、ペン先の後ろ `lineWidth × handleLengthRatio` に置いた柄の点からペン先へ向かう方向で決める。柄はその距離を超えて引かれたときだけ動くので、横ブレ δ の影響は約 `atan(δ / L)` に縮み、引き返しの間は向きが止まる（`0` で従来の接線追従）
    - 急な折返しはcuspとして分割し、短いbristle lag（毛束の遅れ）で横断方向を追従させる。折返しの検出は柄の方向の反転で行う
    - 同じ場所への反復接触は、紙目の谷に対する確率的な再接触として不透明な着彩片の面積を段階的に増やす。初回の未着彩cellへ半透明の着彩floorは加えず、顔料厚レイヤーも追加しない
@@ -380,27 +380,35 @@ function createHeightMapFromImageData(
 - 輝度は Rec.601（`0.299R + 0.587G + 0.114B`）で、alpha は無視する
 - 処理順は 輝度 → `invert` → `normalize` → `contrast`（`clamp(0.5 + (h − 0.5) × contrast, 0, 1)`）
 - 画像のデコードとリサイズは呼び出し側の責務。`image` の寸法がそのまま `width` / `height` になるため、1..2048 に収める
-- 実写の displacement map はコントラストが低いことが多く、`normalize` と `contrast` で紙目の山谷を接触判定の softness に見合う幅へ広げてから使う
+- 実写の displacement map はコントラストが低いことが多く、`normalize` で紙目の山谷を接触判定の softness に見合う幅へ広げてから使う。接触は画素ごとの 0/1 判定なので `contrast` の効果は限定的である
+- 変換オプションは登録時に固定される。同じ画像を別のオプションで使うときは別の ID で登録する
+
+生成した高さマップは [BrushAssetRegistry](#brushassetregistry) に ID で登録し、ブラシ設定には ID だけを乗せる（image tip の `imageId` と同じ参照モデル）。
 
 ```typescript
 const bitmap = await createImageBitmap(blob);
-const canvas = new OffscreenCanvas(1024, 1024);
+const canvas = new OffscreenCanvas(512, 512);
 const ctx = canvas.getContext("2d");
-ctx.drawImage(bitmap, 0, 0, 1024, 1024);
-const heightMap = createHeightMapFromImageData(
-  ctx.getImageData(0, 0, 1024, 1024),
-  { normalize: true, contrast: 2 },
+ctx.drawImage(bitmap, 0, 0, 512, 512);
+registry.setHeightMap(
+  "paper-fabric-031",
+  createHeightMapFromImageData(ctx.getImageData(0, 0, 512, 512), { normalize: true }),
 );
+
 const brush: BristleBrushConfig = {
   ...ROUGH_BRISTLE,
   dynamics: {
     ...ROUGH_BRISTLE.dynamics,
-    surfaceGrain: { ...ROUGH_BRISTLE.dynamics.surfaceGrain, heightMap, scalePx: 1 },
+    surfaceGrain: {
+      ...ROUGH_BRISTLE.dynamics.surfaceGrain,
+      heightMapId: "paper-fabric-031",
+      scalePx: 2, // 1 texel = 2px。512 texel の画像を 1024px 周期でタイルする
+    },
   },
 };
 ```
 
-`heightMap: undefined` に戻せば procedural Fine tooth へ戻る（このとき `scalePx` はノイズのセル幅の意味に戻る）。
+`heightMapId: undefined` に戻せば procedural Fine tooth へ戻る（このとき `scalePx` はノイズのセル幅の意味に戻る）。`scalePx` / `amount` / `hardness` / `seed` / `heightMapId` は通常のブラシ設定なので、ストロークごとに変えてよい。同じレジストリを live の描画と Undo/Redo の replay に渡す必要があり、未登録の ID で描き始めると開始時に throw する（[types.md](./types.md#bristlebrushconfig) の契約）。
 
 ## generateBrushTip
 
@@ -411,7 +419,7 @@ function generateBrushTip(
   config: BrushTipConfig,
   size: number,
   color: Color,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
 ): OffscreenCanvas
 ```
 
@@ -421,7 +429,7 @@ function generateBrushTip(
 | `config` | `BrushTipConfig` | ○ | チップ形状の設定 |
 | `size` | `number` | ○ | チップのピクセルサイズ。stamp では最大 dab 径、spray では最大粒子径 |
 | `color` | `Color` | ○ | チップに焼き込む色 |
-| `registry` | `BrushTipRegistry` | - | 画像チップ用のレジストリ。`ImageTipConfig` 使用時に必要 |
+| `registry` | `BrushAssetRegistry` | - | 画像チップを解決するレジストリ。`ImageTipConfig` 使用時に必要 |
 
 **戻り値**: `OffscreenCanvas` — 生成されたチップ画像
 
@@ -452,34 +460,45 @@ const imageTip = generateBrushTip(
 
 ---
 
-## BrushTipRegistry
+## BrushAssetRegistry
 
-画像ベースチップの管理インターフェース。
+ブラシが ID で参照する画像リソースの管理インターフェース。image tip の画像（`ImageBitmap`）と bristle の紙目高さマップ（`BristleHeightMap`）を、それぞれ独立した ID 空間で保持する。
 
 ```typescript
-interface BrushTipRegistry {
-  readonly get: (imageId: string) => ImageBitmap | undefined;
-  readonly set: (imageId: string, image: ImageBitmap) => void;
+interface BrushAssetRegistry {
+  readonly getTip: (imageId: string) => ImageBitmap | undefined;
+  readonly setTip: (imageId: string, image: ImageBitmap) => void;
+  readonly getHeightMap: (heightMapId: string) => BristleHeightMap | undefined;
+  readonly setHeightMap: (heightMapId: string, map: BristleHeightMap) => void;
 }
+
+function createBrushAssetRegistry(): BrushAssetRegistry;
 ```
 
 | メソッド | 説明 |
 |---------|------|
-| `get(imageId)` | 登録済み画像を取得。未登録の場合 `undefined` |
-| `set(imageId, image)` | 画像を登録 |
+| `getTip(imageId)` | 登録済みチップ画像を取得。未登録の場合 `undefined` |
+| `setTip(imageId, image)` | チップ画像を登録。同じ ID は上書き |
+| `getHeightMap(heightMapId)` | 登録済み高さマップを取得。未登録の場合 `undefined` |
+| `setHeightMap(heightMapId, map)` | 高さマップを登録。同じ ID は上書き。寸法が 1..2048 の範囲外、または `heights.length !== width * height` なら throw |
 
-**設計意図**: 画像チップの base64 埋め込みはコマンド履歴の肥大化を招くため、`imageId` 参照でランタイム解決する。
+**設計意図**: 画像や `Float32Array` を設定・コマンド履歴へ埋め込むと履歴と永続化データが肥大化するため、ブラシ設定には ID だけを乗せ、本体はランタイムで解決する。tip と高さマップで 1 つのレジストリにまとめるのは、stroke / react の配線が 1 本で済み、利用側が渡すオブジェクトを増やさないためである。
 
-**パイプラインへの受け渡し**: `BrushTipRegistry` は `useStrokeSession` / `usePaintEngine` の config に `registry` として渡す。これにより、ストローク開始時とリプレイ（Undo/Redo）時に image tip の解決が可能になる。
+**解決のタイミング**: どちらもストローク開始時（live と replay の両方）に 1 回だけ解決し、`BrushRenderState.tipCanvas` / `BrushRenderState.heightMap` に置く。レジストリ未指定、または ID 未登録は開始時に throw する（`Image tip not found: <id>` / `Height map not found: <id>`）。登録内容を後から差し替えても、進行中のストロークには影響しない。
+
+**パイプラインへの受け渡し**: `BrushAssetRegistry` は `useStrokeSession` / `usePaintEngine` の config に `registry` として渡す。これにより、ストローク開始時とリプレイ（Undo/Redo）時に image tip と高さマップの解決が可能になる。同じ ID を同じ内容で登録した環境でなければ replay 結果は一致しない。
 
 ```typescript
-import { createBrushTipRegistry } from "@yuneco/headless-paint/core";
+import { createBrushAssetRegistry } from "@yuneco/headless-paint/core";
 
-const registry = createBrushTipRegistry();
+const registry = createBrushAssetRegistry();
 
-// テクスチャを登録
+// image tip を登録
 const bitmap = await createImageBitmap(canvas);
-registry.set("my-texture", bitmap);
+registry.setTip("my-texture", bitmap);
+
+// 紙目の高さマップを登録（画像→高さの変換は createHeightMapFromImageData）
+registry.setHeightMap("paper-fabric-031", heightMap);
 
 // usePaintEngine に渡す
 const engine = usePaintEngine({ ..., registry });
@@ -598,4 +617,4 @@ const MARKER: StampBrushConfig = {
 | PENCIL | ほぼハード円 (hardness=0.95) | 微小なサイズ・位置のゆらぎ |
 | MARKER | やや柔らか (hardness=0.7) | 中間フロー。マーカー的な塗り |
 
-> **Note**: エンジンが提供するプリセットは circle tip のみ。image tip を使うプリセット（鉛筆グレイン、散布ブラシ等）はアプリケーション側で `BrushTipRegistry` にテクスチャを登録して定義する。
+> **Note**: エンジンが提供するプリセットは circle tip のみ。image tip を使うプリセット（鉛筆グレイン、散布ブラシ等）や外部紙目を使う bristle プリセットは、アプリケーション側で `BrushAssetRegistry` にテクスチャ・高さマップを登録して定義する。

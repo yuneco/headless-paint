@@ -146,7 +146,7 @@ function getCommandsInRange<TCustom = never>(
 function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
 ): RebuildLayerResult;
 ```
 

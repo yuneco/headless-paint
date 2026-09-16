@@ -52,7 +52,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `SprayDynamics` | spray ブラシの動的パラメータ（spacing, density, particleSize など） |
 | `BrushMixing` | 距離rate、更新距離、checkpoint距離、tip-local色場解像度を持つスタンプ混色設定 |
 | `BristleBrushConfig` / `BristleDynamics` / `BristlePressureDynamics` | 面掠れ、紙目、反復接触、折返し追従を持つ荒いハケ設定。筆圧は `dropout`（掠れ）/ `size`（幅）へ反映 |
-| `BristleHeightMap` | bristle の紙目を差し替える document 固定の高さマップ `{ width, height, heights }`（0..1） |
+| `BristleHeightMap` | bristle の紙目を差し替える document 固定の高さマップ `{ width, height, heights }`（0..1）。`BrushAssetRegistry` に ID で登録し `surfaceGrain.heightMapId` で参照する |
+| `BrushAssetRegistry` | image tip の画像と bristle の高さマップを ID で保持するレジストリ `{ getTip, setTip, getHeightMap, setHeightMap }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, alphaLocked, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
@@ -111,7 +112,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `timeSpacingMsFromRate(emissionsPerSecond)` | 吹きつけレートを時間ベース emission 間隔 ms に変換 |
 | `generateBrushTip(config, size, color, registry?)` | ブラシチップ画像を生成 |
 | `createHeightMapFromImageData(image, options?)` | 画像の輝度から bristle 紙目用の `BristleHeightMap` を生成（invert / normalize / contrast） |
-| `createBrushTipRegistry()` | 画像チップ管理用の `BrushTipRegistry` を作成 |
+| `createBrushAssetRegistry()` | image tip と紙目高さマップを ID 管理する `BrushAssetRegistry` を作成 |
 | `mulberry32(seed)` | 32bit シードから PRNG を生成 |
 | `hashSeed(globalSeed, index)` | branch / emission 固有のシードを生成 |
 | `ROUND_PEN` | デフォルトの round-pen ブラシ定数 |

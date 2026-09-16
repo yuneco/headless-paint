@@ -357,8 +357,8 @@ interface UseStrokeSessionConfig {
   readonly compiledExpand: CompiledExpand;
   /** ストローク完了時に呼ばれるコールバック。履歴記録やコマンド生成に利用する */
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
-  /** 画像ベースチップ用のレジストリ。ImageTipConfig を使うブラシプリセットがある場合に必要 */
-  readonly registry?: BrushTipRegistry;
+  /** ブラシ資産のレジストリ。ImageTipConfig や surfaceGrain.heightMapId を使うブラシプリセットがある場合に必要 */
+  readonly registry?: BrushAssetRegistry;
 }
 ```
 
@@ -534,8 +534,8 @@ interface PaintEngineConfig<TCustom = never> {
   readonly compiledExpand: CompiledExpand;
   /** 履歴の容量設定。省略時はデフォルト値が使われる */
   readonly historyConfig?: HistoryConfig;
-  /** 画像ベースチップ用のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
-  readonly registry?: BrushTipRegistry;
+  /** ブラシ資産（image tip / bristle 高さマップ）のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
+  readonly registry?: BrushAssetRegistry;
   /** GPU 加速器の backend（既定 "auto"）。hook が createBrushAccelerator で生成し、live runtime と Undo/Redo に注入、mixing stamp 選択時に warmUp、unmount 時に dispose する。詳細は engine docs/gpu-acceleration.md */
   readonly gpuBackend?: "auto" | "webgl2" | "cpu";
   /** 復元用の初期ドキュメント。指定時はこの内容でレイヤー群を初期化する */
@@ -934,6 +934,7 @@ function importPaintDocument(value: unknown): Promise<PaintInitialDocument | nul
 - mixingは新しい距離rate + tip-local色場schemaを全項目必須とする。旧`pickup` / `restore`形式や新schemaの一部欠落は専用変換せず`null`を返す
 - mixingのrate負値、非正距離、2〜64外のfield解像度、256px超のcheckpoint距離は暗黙に丸めず`null`を返す
 - `pen.brush.dynamics.emissionsPerSecond` は stamp / spray の両方で正の有限数のみ復元する。未指定、非有限、`0` 以下は `undefined` として扱い、吹きつけOFFにする
+- bristle の `dynamics.surfaceGrain.heightMapId` は省略可。存在する場合は 1..128 文字の文字列のみ受理し、それ以外は `null` を返す。ID が指す高さマップの登録はアプリの責務で、復元時には検証しない（未登録のまま描き始めると開始時に throw する。image tip の `imageId` と同じ契約）。高さマップ本体は保存しない
 
 ### 使い方（保存先はアプリ側で選択）
 
@@ -996,7 +997,7 @@ const documentSnapshot = await exportPaintDocument({
 | `SprayPressureDynamics` | engine | 筆圧を spray の散布径/flow/密度へ反映する強さ |
 | `BrushMixing` | engine | stamp / bristleで共有する距離正規化された色場混色設定 |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
-| `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
+| `BrushAssetRegistry` | engine | image tip 画像と bristle 高さマップを ID で保持するレジストリ |
 | `ViewTransform` | input | ビュー変換行列 |
 | `InputPoint` | input | 入力ポイント（座標 + 筆圧 + タイムスタンプ） |
 | `CompiledFilterPipeline` | input | 構築済み FilterPipeline |

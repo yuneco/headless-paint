@@ -29,7 +29,7 @@ executeHistoryOp<TCustom>(
 
 interface ExecutorDeps<TCustom> {
   readonly layers: readonly Layer[];          // 現在の committed layer 群（z順）
-  readonly tipRegistry?: BrushTipRegistry;    // rebuild 用
+  readonly registry?: BrushAssetRegistry;     // rebuild 用（image tip と bristle 高さマップの解決）
   readonly customExecutor?: CustomCommandExecutor<TCustom>;
   readonly shiftTempCanvas?: Layer;           // wrap-shift 用ワーク
   readonly accelerator?: BrushAccelerator | null; // GPU加速器。rebuild / replay に伝播し、undo は直前 1 手の GPU スナップショット hit 時に rebuild を省略する（engine docs/gpu-acceleration.md）
