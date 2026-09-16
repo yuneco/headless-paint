@@ -235,6 +235,63 @@ describe("persistence", () => {
     });
   });
 
+  it.each([undefined, "p", "paper-fabric-031", "p".repeat(128)])(
+    "round-trips bristle heightMapId=%s without embedding height data",
+    (heightMapId) => {
+      const snapshot = createBristleSettingsSnapshot();
+      if (snapshot.pen.brush.type !== "bristle")
+        throw new Error("Expected bristle");
+      const settings = {
+        ...snapshot,
+        pen: {
+          ...snapshot.pen,
+          brush: {
+            ...snapshot.pen.brush,
+            dynamics: {
+              ...snapshot.pen.brush.dynamics,
+              surfaceGrain: {
+                ...snapshot.pen.brush.dynamics.surfaceGrain,
+                heightMapId,
+              },
+            },
+          },
+        },
+      };
+      const serialized = JSON.stringify(exportPaintSettings(settings));
+      const restored = importPaintSettings(JSON.parse(serialized));
+      expect(restored?.pen.brush).toEqual(settings.pen.brush);
+      expect(serialized).not.toContain('"heights"');
+      expect(serialized).not.toContain('"heightMap"');
+    },
+  );
+
+  it.each(["", "p".repeat(129), 123, null, false, {}, []])(
+    "rejects invalid bristle heightMapId=%j",
+    (heightMapId) => {
+      const snapshot = createBristleSettingsSnapshot();
+      if (snapshot.pen.brush.type !== "bristle")
+        throw new Error("Expected bristle");
+      expect(
+        importPaintSettings({
+          ...snapshot,
+          pen: {
+            ...snapshot.pen,
+            brush: {
+              ...snapshot.pen.brush,
+              dynamics: {
+                ...snapshot.pen.brush.dynamics,
+                surfaceGrain: {
+                  ...snapshot.pen.brush.dynamics.surfaceGrain,
+                  heightMapId,
+                },
+              },
+            },
+          },
+        }),
+      ).toBeNull();
+    },
+  );
+
   it("exports and imports the complete bristle brush contract with dropout 0.5 and size 1", () => {
     const snapshot = createBristleSettingsSnapshot();
 

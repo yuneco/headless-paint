@@ -1,6 +1,6 @@
 import type {
   BrushAccelerator,
-  BrushTipRegistry,
+  BrushAssetRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
@@ -42,7 +42,7 @@ export interface UseStrokeSessionConfig {
   readonly expandConfig: ExpandConfig;
   readonly compiledExpand: CompiledExpand;
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
-  readonly registry?: BrushTipRegistry;
+  readonly registry?: BrushAssetRegistry;
 }
 
 interface InternalUseStrokeSessionConfig extends UseStrokeSessionConfig {
@@ -191,7 +191,7 @@ export function useStrokeSessionWithAccelerator(
         alphaLocked: layer.meta.alphaLocked,
         brushSeed: options?.brushSeed,
         pendingOnly: options?.pendingOnly,
-        tipRegistry: registry,
+        registry,
       });
       bumpRenderVersion();
     },

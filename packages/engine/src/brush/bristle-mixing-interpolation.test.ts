@@ -126,6 +126,7 @@ function renderBandStroke(backend: "cpu" | "webgl2", direction: Direction) {
         style,
         0,
         {
+          heightMap: null,
           tipCanvas: null,
           seed: 2,
           branches: [{ accumulatedDistance: 0, emissionCount: 0 }],

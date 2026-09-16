@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Color } from "../types";
-import { createBrushTipRegistry, generateBrushTip } from "./tip";
+import { createBrushAssetRegistry, generateBrushTip } from "./tip";
 
 const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };
 const RED: Color = { r: 255, g: 0, b: 0, a: 255 };
@@ -74,11 +74,11 @@ describe("generateBrushTip", () => {
     it("registry が未指定の場合は例外を投げる", () => {
       expect(() =>
         generateBrushTip({ type: "image", imageId: "test" }, 32, BLACK),
-      ).toThrow("BrushTipRegistry required");
+      ).toThrow("BrushAssetRegistry required");
     });
 
     it("imageId が見つからない場合は例外を投げる", () => {
-      const registry = createBrushTipRegistry();
+      const registry = createBrushAssetRegistry();
       expect(() =>
         generateBrushTip(
           { type: "image", imageId: "nonexistent" },
@@ -91,9 +91,9 @@ describe("generateBrushTip", () => {
   });
 });
 
-describe("createBrushTipRegistry", () => {
-  it("set/get で画像を保存・取得できる", async () => {
-    const registry = createBrushTipRegistry();
+describe("createBrushAssetRegistry", () => {
+  it("setTip/getTip で画像を保存・取得できる", async () => {
+    const registry = createBrushAssetRegistry();
 
     // ImageBitmap を作成（1x1 白ピクセル）
     const canvas = new OffscreenCanvas(1, 1);
@@ -102,12 +102,12 @@ describe("createBrushTipRegistry", () => {
     ctx.fillRect(0, 0, 1, 1);
     const bitmap = await createImageBitmap(canvas);
 
-    registry.set("test-image", bitmap);
-    expect(registry.get("test-image")).toBe(bitmap);
+    registry.setTip("test-image", bitmap);
+    expect(registry.getTip("test-image")).toBe(bitmap);
   });
 
   it("未登録の imageId は undefined を返す", () => {
-    const registry = createBrushTipRegistry();
-    expect(registry.get("nonexistent")).toBeUndefined();
+    const registry = createBrushAssetRegistry();
+    expect(registry.getTip("nonexistent")).toBeUndefined();
   });
 });

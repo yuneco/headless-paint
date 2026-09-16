@@ -84,9 +84,9 @@ export {
   type EmissionPoint,
 } from "@headless-paint/engine";
 export {
-  createBrushTipRegistry,
+  createBrushAssetRegistry,
   generateBrushTip,
-  type BrushTipRegistry,
+  type BrushAssetRegistry,
 } from "@headless-paint/engine";
 export {
   clearLayer,

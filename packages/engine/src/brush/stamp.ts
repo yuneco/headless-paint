@@ -118,6 +118,7 @@ export function renderStampBrushStroke(
 
   return {
     tipCanvas: state.tipCanvas,
+    heightMap: state.heightMap,
     seed: state.seed,
     branches: [
       {

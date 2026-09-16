@@ -9,8 +9,8 @@ import {
 } from "@headless-paint/engine";
 import type {
   BrushAccelerator,
+  BrushAssetRegistry,
   BrushRenderState,
-  BrushTipRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
@@ -81,8 +81,8 @@ export interface StrokeStartConfig {
   readonly alphaLocked: boolean;
   readonly brushSeed?: number;
   readonly pendingOnly?: boolean;
-  /** image tip ブラシ（ImageTipConfig）に必須。未指定だと該当ブラシで engine が throw する */
-  readonly tipRegistry?: BrushTipRegistry;
+  /** image tip / heightMapId 指定の bristle に必須。未登録 ID は開始時に throw */
+  readonly registry?: BrushAssetRegistry;
 }
 
 interface FrozenStrokeConfig {
@@ -309,7 +309,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     const initialBrush = createInitialBrushState(
       start.config.style,
       start.config.brushSeed ?? randomSeed(),
-      start.config.tipRegistry,
+      start.config.registry,
     );
 
     frozenConfig = {
@@ -333,7 +333,8 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       expand: start.config.expand,
       brushSeed,
       alphaLocked: start.config.alphaLocked,
-      registry: start.config.tipRegistry,
+      registry: start.config.registry,
+      initialBrushState: initialBrush.brushState,
       accelerator: deps.accelerator,
       restoreLayerOnGpuLoss: deps.restoreLayerBeforeStroke
         ? () => deps.restoreLayerBeforeStroke?.(start.config.layer)

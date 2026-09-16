@@ -6,7 +6,7 @@ import {
 } from "@headless-paint/core";
 import type {
   BrushAcceleratorBackend,
-  BrushTipRegistry,
+  BrushAssetRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
@@ -60,7 +60,7 @@ export interface PaintEngineConfig<TCustom = never> {
   readonly expandConfig: ExpandConfig;
   readonly compiledExpand: CompiledExpand;
   readonly historyConfig?: HistoryConfig;
-  readonly registry?: BrushTipRegistry;
+  readonly registry?: BrushAssetRegistry;
   readonly initialDocument?: PaintEngineInitialDocument;
   readonly customCommandHandler?: CustomCommandHandler<TCustom>;
   readonly gpuBackend?: BrushAcceleratorBackend;

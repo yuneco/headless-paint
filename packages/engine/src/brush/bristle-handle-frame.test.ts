@@ -306,6 +306,7 @@ describe("bristle handle frame", () => {
     ).state;
     const slack = resolve([emission(19, 4, Math.PI, 23)], 0.5, initial).state;
     const cloned = cloneBrushRenderState({
+      heightMap: null,
       tipCanvas: null,
       seed: 7,
       branches: [{ accumulatedDistance: 23, emissionCount: 3, bristle: slack }],

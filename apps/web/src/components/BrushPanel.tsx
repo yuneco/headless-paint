@@ -1,4 +1,4 @@
-import type { BrushConfig, BrushTipRegistry } from "@headless-paint/engine";
+import type { BrushAssetRegistry, BrushConfig } from "@headless-paint/engine";
 import { DEFAULT_BRUSH_MIXING, generateBrushTip } from "@headless-paint/engine";
 import { memo, useEffect, useRef } from "react";
 import { APP_BRUSH_PRESETS } from "../brush-presets";
@@ -6,7 +6,7 @@ import { APP_BRUSH_PRESETS } from "../brush-presets";
 interface BrushPanelProps {
   readonly brush: BrushConfig;
   readonly onBrushChange: (brush: BrushConfig) => void;
-  readonly registry: BrushTipRegistry;
+  readonly registry: BrushAssetRegistry;
   readonly registryReady: boolean;
 }
 
@@ -42,7 +42,7 @@ function BrushPreviewCanvas({
   registryReady,
 }: {
   readonly config: BrushConfig;
-  readonly registry: BrushTipRegistry;
+  readonly registry: BrushAssetRegistry;
   readonly registryReady: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

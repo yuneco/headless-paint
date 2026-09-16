@@ -1,7 +1,8 @@
 import type {
+  BristleHeightMap,
   BrushAccelerator,
+  BrushAssetRegistry,
   BrushRenderState,
-  BrushTipRegistry,
   ExpandConfig,
   GpuStrokeOwnerLabel,
   Layer,
@@ -38,7 +39,7 @@ export interface IncrementalStrokeRendererConfig {
   readonly brushSeed: number;
   readonly alphaLocked: boolean;
   readonly sourceLayer?: Layer;
-  readonly registry?: BrushTipRegistry;
+  readonly registry?: BrushAssetRegistry;
   readonly accelerator?: BrushAccelerator | null;
   readonly gpuOwnerLabel?: GpuStrokeOwnerLabel;
   readonly restoreLayerOnGpuLoss?: () => void;
@@ -65,6 +66,8 @@ type GpuCommitCadence = "perFlush" | "final";
 type IncrementalStrokeRendererInternalConfig =
   IncrementalStrokeRendererConfig & {
     readonly gpuCommitCadence?: GpuCommitCadence;
+    /** Reuse resources resolved by the runtime or before GPU recovery. */
+    readonly initialBrushState?: BrushRenderState;
     /** Runtime owns timers; standalone renderers retain synchronous commits. */
     readonly onGpuCommitPending?: (
       poll: () => boolean,
@@ -77,6 +80,10 @@ const BRISTLE_BATCH_INTERVAL_MS = 32;
 export function createIncrementalStrokeRenderer(
   config: IncrementalStrokeRendererInternalConfig,
 ): IncrementalStrokeRenderer {
+  const initialBrushState =
+    config.initialBrushState ??
+    createInitialBrushState(config.style, config.brushSeed, config.registry)
+      .brushState;
   const gpuCommitCadence = config.gpuCommitCadence ?? "perFlush";
   const compiledFilterPipeline = compileFilterPipeline(config.filterPipeline);
   const compiledExpand = compileExpand(config.expand);
@@ -133,11 +140,7 @@ export function createIncrementalStrokeRenderer(
     compiledFilterPipeline,
   );
   let strokeSession: StrokeSessionState | null = null;
-  let brushState = createInitialBrushState(
-    config.style,
-    config.brushSeed,
-    config.registry,
-  ).brushState;
+  let brushState = initialBrushState;
   let hasFed = false;
   let finalized = false;
   let renderedCommittedCount = 0;
@@ -321,6 +324,7 @@ export function createIncrementalStrokeRenderer(
     let recoveredUpdate: IncrementalStrokeRenderUpdate | undefined;
     const cpuRenderer = createIncrementalStrokeRenderer({
       ...config,
+      initialBrushState,
       sourceLayer: undefined,
       accelerator: null,
       restoreLayerOnGpuLoss: undefined,
@@ -400,7 +404,7 @@ function toStrokePoint(point: InputPoint) {
 export function createInitialBrushState(
   style: StrokeStyle,
   seed: number,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
 ): {
   readonly brushState: BrushRenderState | undefined;
   readonly brushSeed: number;
@@ -409,9 +413,19 @@ export function createInitialBrushState(
     return { brushState: undefined, brushSeed: seed };
   }
   if (style.brush.type === "bristle") {
+    const heightMapId = style.brush.dynamics.surfaceGrain.heightMapId;
+    let heightMap: BristleHeightMap | null = null;
+    if (heightMapId !== undefined) {
+      if (!registry)
+        throw new Error("BrushAssetRegistry required for height map");
+      const registered = registry.getHeightMap(heightMapId);
+      if (!registered) throw new Error(`Height map not found: ${heightMapId}`);
+      heightMap = registered;
+    }
     return {
       brushState: {
         tipCanvas: null,
+        heightMap,
         seed,
         branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
       },
@@ -435,6 +449,7 @@ export function createInitialBrushState(
   return {
     brushState: {
       tipCanvas,
+      heightMap: null,
       seed,
       branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
     },

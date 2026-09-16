@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { calculateRadius, evaluateParametricCurve } from "../draw";
 import { createLayer } from "../layer";
 import {
+  type BristleHeightMap,
+  type BrushRenderState,
   DEFAULT_PRESSURE_CURVE,
   ROUGH_BRISTLE,
   type StrokeStyle,
@@ -51,7 +53,7 @@ class RecordingCanvas {
     fillRect: vi.fn(),
     clearRect: vi.fn(),
     drawImage: vi.fn(),
-    putImageData: vi.fn(),
+    putImageData: vi.fn<(image: ImageData, x: number, y: number) => void>(),
     createImageData: (width: number, height: number) => ({
       width,
       height,
@@ -82,6 +84,7 @@ function render(
   size: number,
   curved = false,
   dropout = 0,
+  heightMap: BristleHeightMap | null = null,
 ) {
   const layer = createLayer(200, 200);
   const brush = {
@@ -89,7 +92,11 @@ function render(
     pressureDynamics: { dropout, size },
     dynamics: {
       ...ROUGH_BRISTLE.dynamics,
-      surfaceGrain: { ...ROUGH_BRISTLE.dynamics.surfaceGrain, amount: 0 },
+      surfaceGrain: {
+        ...ROUGH_BRISTLE.dynamics.surfaceGrain,
+        amount: heightMap ? 1 : 0,
+        heightMapId: heightMap ? "paper" : undefined,
+      },
     },
   };
   const style: StrokeStyle = {
@@ -106,6 +113,7 @@ function render(
     brush,
     {
       seed: 17,
+      heightMap,
       tipCanvas: null,
       branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
     },
@@ -116,6 +124,79 @@ function render(
 }
 
 describe("bristle pressure geometry (no browser)", () => {
+  it("CPU raster uses state.heightMap for surface contact", () => {
+    const masks = [0, 1].map((height) => {
+      RecordingCanvas.instances = [];
+      const heightMap = {
+        width: 1,
+        height: 1,
+        heights: new Float32Array([height]),
+      };
+      const { state } = render(0.5, 0, false, 0, heightMap);
+      expect(state.heightMap).toBe(heightMap);
+      return RecordingCanvas.instances.flatMap((canvas) =>
+        canvas.ctx.putImageData.mock.calls.flatMap(([image]) =>
+          Array.from(image.data).filter((_, index) => index % 4 === 3),
+        ),
+      );
+    });
+    expect(masks[0].length).toBeGreaterThan(0);
+    expect(masks[0]).not.toEqual(masks[1]);
+  });
+
+  it("GPU chunks keep state.heightMap across consecutive flushes", () => {
+    gpu.active = true;
+    const layer = createLayer(200, 200);
+    const heightMap = {
+      width: 2,
+      height: 1,
+      heights: new Float32Array([0, 1]),
+    };
+    const brush = {
+      ...ROUGH_BRISTLE,
+      dynamics: {
+        ...ROUGH_BRISTLE.dynamics,
+        surfaceGrain: {
+          ...ROUGH_BRISTLE.dynamics.surfaceGrain,
+          heightMapId: "paper",
+          scalePx: 2,
+        },
+      },
+    };
+    const style: StrokeStyle = {
+      brush,
+      lineWidth: 20,
+      color: { r: 0, g: 0, b: 0, a: 255 },
+      compositeOperation: "source-over",
+      pressureCurve: DEFAULT_PRESSURE_CURVE,
+    };
+    let state: BrushRenderState = {
+      heightMap,
+      tipCanvas: null,
+      seed: 17,
+      branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
+    };
+    for (const xs of [
+      [20, 40, 60, 80],
+      [40, 60, 80, 100],
+    ]) {
+      state = renderBristleBrushStroke(
+        layer,
+        xs.map((x) => ({ x, y: 100, pressure: 0.5 })),
+        style,
+        brush,
+        state,
+        xs[0] === 20 ? 0 : 3,
+        layer,
+      );
+      expect(state.heightMap).toBe(heightMap);
+    }
+    expect(gpu.pushBristleChunk.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const [chunk] of gpu.pushBristleChunk.mock.calls) {
+      expect(chunk.grain.toothMap).toBe(heightMap);
+      expect(chunk.grain.toothScalePx).toBe(2);
+    }
+  });
   it.each([0, 1])(
     "CPU size=%s fills quads at calculateRadius half-width without a section image",
     (size) => {

@@ -45,6 +45,7 @@ function makeStyle(brush = makeBrush()): StrokeStyle {
 
 function initialState(seed = 7): BrushRenderState {
   return {
+    heightMap: null,
     tipCanvas: null,
     seed,
     branches: [{ accumulatedDistance: 0, emissionCount: 0 }],

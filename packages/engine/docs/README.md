@@ -67,7 +67,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `QuadCorners` | 変換後矩形の4隅 `[tl, tr, bl, br]` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
 | `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig \| BristleBrushConfig`） |
-| `BrushRenderState` | ブラシレンダリング状態 `{ seed, tipCanvas, branches }` |
+| `BrushRenderState` | ブラシレンダリング状態 `{ seed, tipCanvas, heightMap, branches }` |
 
 ### Layer 管理関数
 

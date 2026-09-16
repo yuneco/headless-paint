@@ -153,7 +153,7 @@ export interface CircleTipConfig {
   readonly hardness: number;
 }
 
-/** 画像ベースチップ（imageId で BrushTipRegistry から解決） */
+/** 画像ベースチップ（imageId で BrushAssetRegistry から解決） */
 export interface ImageTipConfig {
   readonly type: "image";
   readonly imageId: string;
@@ -297,7 +297,7 @@ export interface BristleSurfaceGrain {
   readonly amount: number;
   readonly hardness: number;
   readonly seed: number;
-  readonly heightMap?: BristleHeightMap;
+  readonly heightMapId?: string;
 }
 
 export interface BristleDynamics {
@@ -481,6 +481,7 @@ export interface BrushBranchRenderState {
 
 export interface BrushRenderState {
   readonly tipCanvas: OffscreenCanvas | null;
+  readonly heightMap: BristleHeightMap | null;
   readonly seed: number;
   readonly branches: readonly BrushBranchRenderState[];
 }

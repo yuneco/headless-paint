@@ -36,9 +36,9 @@ export {
 } from "./state";
 export { isBrushMixingActive } from "./mixing";
 export {
-  createBrushTipRegistry,
+  createBrushAssetRegistry,
   generateBrushTip,
-  type BrushTipRegistry,
+  type BrushAssetRegistry,
 } from "./tip";
 
 /**

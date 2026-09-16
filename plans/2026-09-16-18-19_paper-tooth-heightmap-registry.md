@@ -123,5 +123,21 @@ interface BrushRenderState {
 - 同じ ID・同じ登録内容で live / replay / Undo→Redo が byte 一致
 - 未登録 ID は開始時に throw し、procedural へ静かに落ちない
 - react persistence で `heightMapId` が往復し、web の localStorage 保存が 1K map で失敗しない（本体を保存しないため）
-- web に 3 テクスチャが同梱され、`/eval-textures/` と `work.local` 依存が消える。出典が README と UI に記載される
+- web に 3 テクスチャが同梱され、`/eval-textures/` と `work.local` 依存が消える。出典がテクスチャディレクトリの README に記載される（UI 表示なし）
 - フル検収 green
+
+## 実装結果（2026-09-16、検収済み）
+
+- codex に設計レビュー付きで委譲。ステップ 0 の判定は no-go なし。設計補足として、runtime と incremental renderer が別々に初期状態を作る構造を内部 `initialBrushState` の共有で一本化し、GPU 障害時の CPU 再描画も開始時に解決した同一の heightMap 参照を使うようにした（登録内容の後差し替えが進行中ストロークに影響しない契約を満たすため）
+- engine: `BrushAssetRegistry` / `createBrushAssetRegistry`（`getTip/setTip/getHeightMap/setHeightMap`）、`BristleSurfaceGrain.heightMapId`、`BrushRenderState.heightMap`。`resolveBristleToothMap(grain, heightMap)` を CPU / GPU 両経路で使用。`validateHeightMap` を登録時・描画時で共用
+- stroke: `createInitialBrushState` が開始時に 1 回だけ解決。registry 無しは `BrushAssetRegistry required for height map`、未登録は `Height map not found: <id>` を throw。`tipRegistry` フィールドは `registry` に改名
+- react: persistence は `heightMapId`（1..128 文字）を往復、本体は保存しない
+- web: Fabric031 / 036 / 061 を 512px グレースケール JPEG で `apps/web/src/brush-presets/paper-textures/` に同梱（出典 README 同梱、UI 表示なし）。起動時に `registerAppBrushAssets` で登録。評価パネルの Source は固定 select（Fabric 選択で scalePx 2、Procedural で 4）。`/eval-textures/` middleware・テスト・`apps/web/vitest.config.ts` を削除
+- 追加テスト: asset-registry（検証・名前空間）、state（clone / branch / merge の参照維持）、bristle-pressure-dynamics（CPU raster と GPU chunk が `state.heightMap` を使う）、stroke `height-map-registry`（開始時 1 回解決・GPU 復旧・throw・procedural null）、`height-map-parity`（live / replay / undo-redo byte 一致、別マップで結果が変わる）、persistence 往復・reject
+- Claude 検収: `pnpm -r build` / `pnpm typecheck` / `pnpm lint` 成功、`pnpm test`（browser mode 込み）62 ファイル 775 件成功。既存 parity / snapshot の期待値は無変更。Chromium 実機で Rough bristle → Fabric 031 / 061 の描画と Undo×2 / Redo×2 を実行しコンソールエラーなし
+- docs: codex 指摘の記載漏れ（`BrushRenderState` 使用例・README 概要・round-pen 戻り値の `heightMap`、registry 未指定時のエラー文）を Claude 側で補正
+
+### ペンディング
+
+- 紙目 heightMap の Contrast は接触判定の性質上ほぼ効かない。ヒストグラム均等化（筆圧 p で紙の p 割が接触）への置き換えは別課題
+- 同梱テクスチャの既定 `scalePx = 2` と normalize（031 のみ）は評価時の官能に基づく。実機で再確認して調整可

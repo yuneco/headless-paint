@@ -1,4 +1,4 @@
-import { createBrushTipRegistry } from "@headless-paint/engine";
+import { createBrushAssetRegistry } from "@headless-paint/engine";
 import { compileFilterPipeline } from "@headless-paint/input";
 import type { InputPoint } from "@headless-paint/input";
 import {
@@ -12,7 +12,7 @@ import {
   useWindowSize,
 } from "@headless-paint/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { registerAppBrushTips } from "./brush-presets";
+import { registerAppBrushAssets } from "./brush-presets";
 import { DebugPanel } from "./components/DebugPanel";
 import { PaintCanvas } from "./components/PaintCanvas";
 import { SidebarPanel } from "./components/SidebarPanel";
@@ -102,11 +102,11 @@ function PaintWorkspace({ initialSettings, onReset }: PaintWorkspaceProps) {
     }
   }, [fitToView, restoredSettings]);
 
-  // ブラシチップレジストリ
-  const registryRef = useRef(createBrushTipRegistry());
+  // ブラシ資産レジストリ
+  const registryRef = useRef(createBrushAssetRegistry());
   const [registryReady, setRegistryReady] = useState(false);
   useEffect(() => {
-    registerAppBrushTips(registryRef.current).then(() =>
+    registerAppBrushAssets(registryRef.current).then(() =>
       setRegistryReady(true),
     );
   }, []);

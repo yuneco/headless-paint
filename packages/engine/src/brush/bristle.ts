@@ -4,6 +4,7 @@ import { interpolateStrokePointsCentripetal } from "../stroke-interpolation";
 import type {
   BristleBranchRenderState,
   BristleBrushConfig,
+  BristleHeightMap,
   BristleSweepPointState,
   BrushMixing,
   BrushMixingState,
@@ -126,6 +127,7 @@ export function renderBristleBrushStroke(
   if (emissions.length === 0) {
     return {
       tipCanvas: state.tipCanvas,
+      heightMap: state.heightMap,
       seed: state.seed,
       branches: [
         {
@@ -165,6 +167,7 @@ export function renderBristleBrushStroke(
     brush,
     profile,
     state.seed,
+    state.heightMap,
     sourceLayer,
     mixing,
     mixingState,
@@ -174,6 +177,7 @@ export function renderBristleBrushStroke(
 
   return {
     tipCanvas: state.tipCanvas,
+    heightMap: state.heightMap,
     seed: state.seed,
     branches: [
       {
@@ -387,6 +391,7 @@ function renderRuns(
   brush: BristleBrushConfig,
   profile: OffscreenCanvas | null,
   seed: number,
+  heightMap: BristleHeightMap | null,
   sourceLayer: Layer,
   mixing: BrushMixing | null,
   initialMixingState: BrushMixingState | undefined,
@@ -409,6 +414,7 @@ function renderRuns(
       brush,
       profile,
       seed,
+      heightMap,
       sourceLayer,
       mixing,
       initialMixingState,
@@ -455,6 +461,7 @@ function renderRuns(
       mixingState?.renderCanvas ?? profile,
       profile,
       seed,
+      heightMap,
       !!mixing,
       accelerator,
     );
@@ -479,6 +486,7 @@ function renderRuns(
       mixingState?.renderCanvas ?? profile,
       profile,
       seed,
+      heightMap,
       !!mixing,
       accelerator,
     );
@@ -498,6 +506,7 @@ function renderCpuMixingRuns(
   brush: BristleBrushConfig,
   profile: OffscreenCanvas,
   seed: number,
+  heightMap: BristleHeightMap | null,
   sourceLayer: Layer,
   mixing: BrushMixing,
   initialMixingState: BrushMixingState,
@@ -539,6 +548,7 @@ function renderCpuMixingRuns(
         initialMixingState.renderCanvas,
         profile,
         seed,
+        heightMap,
         true,
       );
     }
@@ -576,6 +586,7 @@ function renderCpuMixingRuns(
       paintProfiles?.canvases[runIndex]?.[0] ?? mixingState.renderCanvas,
       profile,
       seed,
+      heightMap,
       true,
       undefined,
       paintProfiles?.canvases[runIndex]?.[1],
@@ -600,6 +611,7 @@ function renderSweepRun(
   paintProfile: OffscreenCanvas | null,
   profileAtlas: OffscreenCanvas | null,
   seed: number,
+  heightMap: BristleHeightMap | null,
   coloredProfile: boolean,
   accelerator?: BrushAccelerator | null,
   endPaintProfile?: OffscreenCanvas,
@@ -626,7 +638,10 @@ function renderSweepRun(
       dropoutWidthPx: Math.max(0.5, brush.dynamics.dropoutWidthPx),
       dropoutResponse: clamp(brush.pressureDynamics.dropout, 0, 1),
     };
-    const tooth = resolveBristleToothMap(brush.dynamics.surfaceGrain);
+    const tooth = resolveBristleToothMap(
+      brush.dynamics.surfaceGrain,
+      heightMap,
+    );
     gpuSurface.pushBristleChunk({
       segments: createGpuSweepSegments(
         points,
@@ -675,6 +690,7 @@ function renderSweepRun(
     minY,
     width,
     height,
+    heightMap,
   );
   perfStage("drawSweep", () => {
     if (brushPerfDebug.nullStages.nullDrawSweep) {

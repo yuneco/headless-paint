@@ -1,6 +1,6 @@
 import type {
   BrushAccelerator,
-  BrushTipRegistry,
+  BrushAssetRegistry,
   GpuResidencyInvalidationReason,
   GpuStrokeOwnerLabel,
   Layer,
@@ -35,7 +35,7 @@ import { isDrawCommand, isStructuralCommand } from "./types";
 function replayStrokeCommand(
   layer: Layer,
   command: StrokeCommand,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
   accelerator?: BrushAccelerator | null,
   gpuOwnerLabel: GpuStrokeOwnerLabel = "replay",
 ): void {
@@ -100,7 +100,7 @@ function hasLayerCreationCommand<TCustom>(
 export function replayCommand<TCustom = never>(
   layer: Layer,
   command: Command<TCustom>,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
   options: ReplayOptions = {},
 ): void {
   if (!isDrawCommand(command)) {
@@ -134,7 +134,7 @@ export function replayCommand<TCustom = never>(
 export function replayCommands<TCustom = never>(
   layer: Layer,
   commands: readonly Command<TCustom>[],
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
   options: ReplayOptions = {},
 ): void {
   for (const command of commands) {
@@ -149,7 +149,7 @@ export function replayCommands<TCustom = never>(
 export function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
   options: ReplayOptions = {},
 ): RebuildLayerResult {
   const checkpoint = findBestCheckpointForLayer(state, layer.id);

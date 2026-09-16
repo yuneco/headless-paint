@@ -1,21 +1,30 @@
 import { colorToStyle } from "../layer";
-import type { BrushTipConfig, Color } from "../types";
+import type { BristleHeightMap, BrushTipConfig, Color } from "../types";
+import { validateHeightMap } from "./height-map";
 
 // ============================================================
-// BrushTipRegistry
+// BrushAssetRegistry
 // ============================================================
 
-export interface BrushTipRegistry {
-  readonly get: (imageId: string) => ImageBitmap | undefined;
-  readonly set: (imageId: string, image: ImageBitmap) => void;
+export interface BrushAssetRegistry {
+  readonly getTip: (imageId: string) => ImageBitmap | undefined;
+  readonly setTip: (imageId: string, image: ImageBitmap) => void;
+  readonly getHeightMap: (heightMapId: string) => BristleHeightMap | undefined;
+  readonly setHeightMap: (heightMapId: string, map: BristleHeightMap) => void;
 }
 
-export function createBrushTipRegistry(): BrushTipRegistry {
+export function createBrushAssetRegistry(): BrushAssetRegistry {
   const images = new Map<string, ImageBitmap>();
+  const heightMaps = new Map<string, BristleHeightMap>();
   return {
-    get: (imageId) => images.get(imageId),
-    set: (imageId, image) => {
+    getTip: (imageId) => images.get(imageId),
+    setTip: (imageId, image) => {
       images.set(imageId, image);
+    },
+    getHeightMap: (heightMapId) => heightMaps.get(heightMapId),
+    setHeightMap: (heightMapId, map) => {
+      validateHeightMap(map);
+      heightMaps.set(heightMapId, map);
     },
   };
 }
@@ -33,7 +42,7 @@ export function generateBrushTip(
   config: BrushTipConfig,
   size: number,
   color: Color,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
 ): OffscreenCanvas {
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext("2d");
@@ -93,10 +102,10 @@ function generateImageTip(
   size: number,
   color: Color,
   imageId: string,
-  registry?: BrushTipRegistry,
+  registry?: BrushAssetRegistry,
 ): void {
-  if (!registry) throw new Error("BrushTipRegistry required for image tip");
-  const image = registry.get(imageId);
+  if (!registry) throw new Error("BrushAssetRegistry required for image tip");
+  const image = registry.getTip(imageId);
   if (!image) throw new Error(`Image tip not found: ${imageId}`);
 
   ctx.drawImage(image, 0, 0, size, size);

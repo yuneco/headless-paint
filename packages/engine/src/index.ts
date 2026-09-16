@@ -80,7 +80,7 @@ export {
   type GpuStrokeOwnerLabel,
 } from "./brush/gpu/accelerator";
 export {
-  createBrushTipRegistry,
+  createBrushAssetRegistry,
   generateBrushTip,
   hashSeed,
   isBrushMixingActive,
@@ -89,7 +89,7 @@ export {
   timeSpacingMsFromRate,
   walkEmissions,
   type DistanceSpacingAt,
-  type BrushTipRegistry,
+  type BrushAssetRegistry,
   type EmissionPoint,
 } from "./brush";
 export {

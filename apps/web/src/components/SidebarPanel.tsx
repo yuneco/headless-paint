@@ -1,7 +1,7 @@
 import type {
   BackgroundSettings,
+  BrushAssetRegistry,
   BrushConfig,
-  BrushTipRegistry,
   Layer,
 } from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
@@ -30,7 +30,7 @@ interface SidebarPanelProps {
   // Brush panel props
   brush: BrushConfig;
   onBrushChange: (brush: BrushConfig) => void;
-  registry: BrushTipRegistry;
+  readonly registry: BrushAssetRegistry;
   registryReady: boolean;
   strokeCallMetrics: StrokeCallMetrics;
   onResetStrokeCallMetrics: () => void;
@@ -95,7 +95,7 @@ const MinimapSection = memo(function MinimapSection({
 interface BrushSectionProps {
   brush: BrushConfig;
   onBrushChange: (brush: BrushConfig) => void;
-  registry: BrushTipRegistry;
+  readonly registry: BrushAssetRegistry;
   registryReady: boolean;
 }
 
@@ -123,6 +123,7 @@ const BrushSection = memo(function BrushSection({
 });
 
 interface EvaluationSectionProps {
+  readonly registry: BrushAssetRegistry;
   readonly brush: BrushConfig;
   readonly onBrushChange: (brush: BrushConfig) => void;
   readonly metrics: StrokeCallMetrics;
@@ -135,6 +136,7 @@ interface EvaluationSectionProps {
 }
 
 const EvaluationSection = memo(function EvaluationSection({
+  registry,
   brush,
   onBrushChange,
   metrics,
@@ -153,6 +155,7 @@ const EvaluationSection = memo(function EvaluationSection({
       isLast={false}
     >
       <BrushEvaluationPanel
+        registry={registry}
         brush={brush}
         onBrushChange={onBrushChange}
         metrics={metrics}
@@ -341,17 +344,20 @@ function SidebarPanelComponent({
         registry={registry}
         registryReady={registryReady}
       />
-      <EvaluationSection
-        brush={brush}
-        onBrushChange={onBrushChange}
-        metrics={strokeCallMetrics}
-        onResetMetrics={onResetStrokeCallMetrics}
-        onDrawBristleSCurve={onDrawBristleSCurve}
-        inputCaptureStatus={inputCaptureStatus}
-        inputCapturePointCount={inputCapturePointCount}
-        onArmInputCapture={onArmInputCapture}
-        onCopyInputCapture={onCopyInputCapture}
-      />
+      {registryReady && (
+        <EvaluationSection
+          registry={registry}
+          brush={brush}
+          onBrushChange={onBrushChange}
+          metrics={strokeCallMetrics}
+          onResetMetrics={onResetStrokeCallMetrics}
+          onDrawBristleSCurve={onDrawBristleSCurve}
+          inputCaptureStatus={inputCaptureStatus}
+          inputCapturePointCount={inputCapturePointCount}
+          onArmInputCapture={onArmInputCapture}
+          onCopyInputCapture={onCopyInputCapture}
+        />
+      )}
       <LayersSection
         entries={entries}
         activeLayerId={activeLayerId}

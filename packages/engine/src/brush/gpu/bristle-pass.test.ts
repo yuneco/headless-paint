@@ -111,8 +111,9 @@ describe("GPU bristle mask parity", () => {
           softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
           grainSeed: dynamics.surfaceGrain.seed,
           strokeSeed: seed,
-          toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
-          toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
+          toothMap: resolveBristleToothMap(dynamics.surfaceGrain, null).map,
+          toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain, null)
+            .scalePx,
         },
         bboxRect: {
           left: originX,
@@ -170,7 +171,7 @@ describe("GPU bristle mask parity", () => {
         ...ROUGH_BRISTLE.dynamics,
         surfaceGrain: {
           ...ROUGH_BRISTLE.dynamics.surfaceGrain,
-          heightMap,
+          heightMapId: "test-paper",
           scalePx,
         },
       };
@@ -200,8 +201,10 @@ describe("GPU bristle mask parity", () => {
           softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
           grainSeed: dynamics.surfaceGrain.seed,
           strokeSeed: seed,
-          toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
-          toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
+          toothMap: resolveBristleToothMap(dynamics.surfaceGrain, heightMap)
+            .map,
+          toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain, heightMap)
+            .scalePx,
         },
         bboxRect: {
           left: originX,
@@ -218,6 +221,7 @@ describe("GPU bristle mask parity", () => {
       try {
         const procedural = resolveBristleToothMap(
           ROUGH_BRISTLE.dynamics.surfaceGrain,
+          null,
         );
         pass.readMaskForTest(
           createLargerWarmupChunk({
@@ -239,15 +243,13 @@ describe("GPU bristle mask parity", () => {
             field,
             samples,
             brushSize,
-            {
-              ...dynamics,
-              surfaceGrain: { ...dynamics.surfaceGrain, heightMap: map },
-            },
+            dynamics,
             seed,
             originX,
             originY,
             width,
             height,
+            map,
           );
           const nextChunk = {
             ...chunk,
@@ -313,8 +315,9 @@ describe("GPU bristle mask parity", () => {
         softness: 0.01 + (1 - dynamics.surfaceGrain.hardness) * 0.24,
         grainSeed: dynamics.surfaceGrain.seed,
         strokeSeed: seed,
-        toothMap: resolveBristleToothMap(dynamics.surfaceGrain).map,
-        toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain).scalePx,
+        toothMap: resolveBristleToothMap(dynamics.surfaceGrain, null).map,
+        toothScalePx: resolveBristleToothMap(dynamics.surfaceGrain, null)
+          .scalePx,
       },
       bboxRect: {
         left: originX,
@@ -360,6 +363,7 @@ describe("GPU bristle mask parity", () => {
         brush: { ...ROUGH_BRISTLE, pressureDynamics: { dropout, size } },
       };
       const initialState: BrushRenderState = {
+        heightMap: null,
         tipCanvas: null,
         seed: 0x1234abcd,
         branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
@@ -464,6 +468,7 @@ describe("GPU bristle mask parity", () => {
           style,
           0,
           {
+            heightMap: null,
             tipCanvas: null,
             seed: 0x1234abcd,
             branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
@@ -519,6 +524,7 @@ function renderMixingBandStroke(reverse: boolean, gpu: boolean) {
     },
   };
   const initialState: BrushRenderState = {
+    heightMap: null,
     tipCanvas: null,
     seed: 0x1234abcd,
     branches: [{ accumulatedDistance: 0, emissionCount: 0 }],

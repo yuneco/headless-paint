@@ -7,7 +7,7 @@ import {
 } from "@headless-paint/core";
 import type {
   BrushAccelerator,
-  BrushTipRegistry,
+  BrushAssetRegistry,
   Command,
   CustomCommandExecutor,
   CustomCommandOutcome,
@@ -87,7 +87,7 @@ interface ExecuteHistoryOpOptions<TCustom> {
   readonly activeLayerId: string | null;
   readonly entriesRef: UseLayersResult["entriesRef"];
   readonly historyStateRef: React.RefObject<HistoryState<TCustom>>;
-  readonly registryRef: React.RefObject<BrushTipRegistry | undefined>;
+  readonly registryRef: React.RefObject<BrushAssetRegistry | undefined>;
   readonly customCommandHandlerRef: React.RefObject<
     CustomCommandHandler<TCustom> | undefined
   >;
@@ -125,7 +125,7 @@ export function executeAndApplyHistoryOp<TCustom>(
 
   const result = executeHistoryOp(op, previous, {
     layers: options.entriesRef.current.map((entry) => entry.committedLayer),
-    tipRegistry: options.registryRef.current,
+    registry: options.registryRef.current,
     customExecutor: createCustomExecutor({
       handler: options.customCommandHandlerRef.current,
       getContext: () => createCustomCommandContext(options),

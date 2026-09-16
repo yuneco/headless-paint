@@ -3,7 +3,7 @@ import type {
   BristleHeightMap,
   BristleSurfaceGrain,
 } from "../types";
-import { validateHeightMapDimensions } from "./height-map";
+import { validateHeightMap } from "./height-map";
 import { brushPerfDebug, perfElapsed, perfStage } from "./perf-debug";
 import { hashSeed } from "./prng";
 
@@ -78,6 +78,7 @@ export function rasterizeBristleMask(
   originY: number,
   width: number,
   height: number,
+  heightMap: BristleHeightMap | null = null,
 ): OffscreenCanvas {
   const canvas = perfStage(
     "canvasAlloc",
@@ -103,6 +104,7 @@ export function rasterizeBristleMask(
     originY,
     canvas,
     ctx,
+    heightMap,
   );
   return canvas;
 }
@@ -117,6 +119,7 @@ export function rasterizeBristleMaskEvaluatorForTest(
   originY: number,
   width: number,
   height: number,
+  heightMap: BristleHeightMap | null = null,
 ): OffscreenCanvas {
   const canvas = new OffscreenCanvas(width, height);
   const ctx = getContext(canvas, "bristle swept mask evaluator test");
@@ -131,6 +134,7 @@ export function rasterizeBristleMaskEvaluatorForTest(
     originY,
     canvas,
     ctx,
+    heightMap,
   );
   return canvas;
 }
@@ -145,6 +149,7 @@ function rasterizeBristleMaskIntoCanvas(
   originY: number,
   canvas: OffscreenCanvas,
   ctx: OffscreenCanvasRenderingContext2D,
+  heightMap: BristleHeightMap | null,
 ): void {
   const width = canvas.width;
   const height = canvas.height;
@@ -164,6 +169,7 @@ function rasterizeBristleMaskIntoCanvas(
       seed,
       originX,
       originY,
+      heightMap,
     );
     if (brushPerfDebug.nullStages.nullRaster) return;
     for (let index = 1; index < samples.length; index++) {
@@ -363,9 +369,10 @@ export function createSurfaceContactRaster(
   strokeSeed: number,
   originX: number,
   originY: number,
+  heightMap: BristleHeightMap | null = null,
 ): SurfaceContactRaster | undefined {
   const grain = dynamics.surfaceGrain;
-  const resolved = resolveBristleToothMap(grain);
+  const resolved = resolveBristleToothMap(grain, heightMap);
   const amount = clamp(grain.amount, 0, 1);
   if (amount <= 0) return undefined;
   return {
@@ -465,19 +472,16 @@ function positiveModulo(value: number, modulus: number): number {
 }
 
 /** Internal CPU/GPU sampling contract; procedural scale is already baked in. */
-export function resolveBristleToothMap(grain: BristleSurfaceGrain): {
+export function resolveBristleToothMap(
+  grain: BristleSurfaceGrain,
+  heightMap: BristleHeightMap | null,
+): {
   readonly map: BristleHeightMap;
   readonly scalePx: number;
 } {
-  if (grain.heightMap) {
-    const { width, height, heights } = grain.heightMap;
-    validateHeightMapDimensions(width, height);
-    if (heights.length !== width * height) {
-      throw new RangeError(
-        "Bristle height map heights length must equal width * height",
-      );
-    }
-    return { map: grain.heightMap, scalePx: grain.scalePx };
+  if (heightMap) {
+    validateHeightMap(heightMap);
+    return { map: heightMap, scalePx: grain.scalePx };
   }
   const heights = getFineToothHeightTile(grain.seed, grain.scalePx);
   let map = grainMapCache.get(heights);

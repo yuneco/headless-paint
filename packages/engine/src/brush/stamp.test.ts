@@ -63,6 +63,7 @@ describe("renderBrushStroke", () => {
       const style = makeStyle();
       const result = renderBrushStroke(layer, points, style);
       expect(result).toEqual({
+        heightMap: null,
         tipCanvas: null,
         seed: 0,
         branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
@@ -74,6 +75,7 @@ describe("renderBrushStroke", () => {
       const points = makeLine(10, 50, 90, 50, 5);
       const style = makeStyle();
       const inputState: BrushRenderState = {
+        heightMap: null,
         tipCanvas: null,
         seed: 123,
         branches: [{ accumulatedDistance: 42, emissionCount: 0 }],
@@ -104,6 +106,7 @@ describe("renderBrushStroke", () => {
         tip: { type: "circle"; hardness: number };
       };
       return {
+        heightMap: null,
         tipCanvas: generateBrushTip(
           brush.tip,
           Math.ceil(style.lineWidth * 2),
@@ -184,6 +187,7 @@ describe("renderBrushStroke", () => {
       const points = makeLine(10, 50, 90, 50, 5);
       const style = makeStampStyle();
       const state: BrushRenderState = {
+        heightMap: null,
         tipCanvas: null,
         seed: 0,
         branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
@@ -358,6 +362,7 @@ describe("renderBrushStroke", () => {
       });
       const layer1 = createLayer(200, 200);
       renderBrushStroke(layer1, points, style1, 0, {
+        heightMap: null,
         tipCanvas: generateBrushTip(
           { type: "circle", hardness: 1.0 },
           16,
@@ -384,6 +389,7 @@ describe("renderBrushStroke", () => {
       });
       const layer2 = createLayer(200, 200);
       renderBrushStroke(layer2, points, style2, 0, {
+        heightMap: null,
         tipCanvas: generateBrushTip(
           { type: "circle", hardness: 1.0 },
           16,

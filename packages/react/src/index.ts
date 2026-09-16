@@ -82,7 +82,7 @@ export type {
   BrushMixing,
   BrushRenderState,
   BrushTipConfig,
-  BrushTipRegistry,
+  BrushAssetRegistry,
   CausalAdaptiveConfig,
   Color,
   Command,

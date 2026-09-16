@@ -2,8 +2,9 @@ import type {
   BristleBrushConfig,
   BristleHeightMap,
   BristleSurfaceGrain,
+  BrushAssetRegistry,
 } from "@headless-paint/engine";
-import { createHeightMapFromImageData, hashSeed } from "@headless-paint/engine";
+import { hashSeed } from "@headless-paint/engine";
 import { useEffect, useRef, useState } from "react";
 
 const PREVIEW_WIDTH = 232;
@@ -12,68 +13,23 @@ const PREVIEW_CONTACT = 0.5;
 
 interface BristleGrainEvaluationProps {
   readonly brush: BristleBrushConfig;
+  readonly registry: BrushAssetRegistry;
   readonly onBrushChange: (brush: BristleBrushConfig) => void;
 }
 
 export function BristleGrainEvaluation({
   brush,
+  registry,
   onBrushChange,
 }: BristleGrainEvaluationProps) {
   const grain = brush.dynamics.surfaceGrain;
   const [draft, setDraft] = useState(grain);
   const draftRef = useRef(grain);
-  const [files, setFiles] = useState<readonly string[]>([]);
-  const [source, setSource] = useState("procedural");
-  const [fileName, setFileName] = useState("");
-  const [maxSize, setMaxSize] = useState(1024);
-  const [imageData, setImageData] = useState<ImageData | null>(null);
-  const [options, setOptions] = useState({
-    contrast: 1,
-    invert: false,
-    normalize: true,
-  });
-  const optionsRef = useRef(options);
-  const optionsDirty = useRef(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const originalBlob = useRef<Blob | null>(null);
-  const requestId = useRef(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [listError, setListError] = useState("");
   const latest = useRef({ brush, onBrushChange });
 
   useEffect(() => {
     latest.current = { brush, onBrushChange };
   }, [brush, onBrushChange]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    if (import.meta.env.DEV) {
-      void fetch("/eval-textures/", { signal: controller.signal })
-        .then(async (response) => {
-          if (!response.ok) throw new Error("一覧を取得できませんでした");
-          const names: unknown = await response.json();
-          if (
-            !Array.isArray(names) ||
-            !names.every((name) => typeof name === "string")
-          ) {
-            throw new Error("テクスチャ一覧の形式が不正です");
-          }
-          if (!controller.signal.aborted) setFiles(names);
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) {
-            setListError(
-              "評価用テクスチャ一覧を取得できませんでした。画像ファイルは開けます。",
-            );
-          }
-        });
-    }
-    return () => {
-      controller.abort();
-      requestId.current += 1;
-    };
-  }, []);
 
   useEffect(() => {
     draftRef.current = grain;
@@ -105,105 +61,13 @@ export function BristleGrainEvaluation({
 
   const commitDraft = (): void => commitGrain(draftRef.current);
 
-  const updateOptions = (patch: Partial<typeof options>): void => {
-    const next = { ...optionsRef.current, ...patch };
-    optionsRef.current = next;
-    optionsDirty.current = true;
-    setOptions(next);
-  };
-
-  const commitOptions = (): void => {
-    if (!imageData || !draftRef.current.heightMap || !optionsDirty.current)
-      return;
-    const heightMap = createHeightMapFromImageData(
-      imageData,
-      optionsRef.current,
-    );
-    optionsDirty.current = false;
-    commitGrain({ ...draftRef.current, heightMap });
-  };
-
-  const loadImage = async (
-    getBlob: () => Promise<Blob>,
-    nextSource: string,
-    name: string,
-    size: number,
-    resetScale = true,
-  ): Promise<void> => {
-    const id = ++requestId.current;
-    setLoading(true);
-    setError("");
-    try {
-      const blob = await getBlob();
-      if (id !== requestId.current) return;
-      const bitmap = await createImageBitmap(blob);
-      let decoded: ImageData;
-      try {
-        if (id !== requestId.current) return;
-        const ratio = Math.min(1, size / Math.max(bitmap.width, bitmap.height));
-        const width = Math.max(1, Math.round(bitmap.width * ratio));
-        const height = Math.max(1, Math.round(bitmap.height * ratio));
-        const canvas = new OffscreenCanvas(width, height);
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("画像のリサイズに失敗しました");
-        context.drawImage(bitmap, 0, 0, width, height);
-        decoded = context.getImageData(0, 0, width, height);
-      } finally {
-        bitmap.close();
-      }
-      const heightMap = createHeightMapFromImageData(
-        decoded,
-        optionsRef.current,
-      );
-      originalBlob.current = blob;
-      optionsDirty.current = false;
-      setImageData(decoded);
-      setSource(nextSource);
-      setFileName(name);
-      setMaxSize(size);
-      commitGrain({
-        ...draftRef.current,
-        heightMap,
-        scalePx: resetScale ? 1 : draftRef.current.scalePx,
-      });
-    } catch (cause) {
-      if (id === requestId.current) {
-        setError(
-          cause instanceof Error ? cause.message : "画像を読み込めませんでした",
-        );
-      }
-    } finally {
-      if (id === requestId.current) setLoading(false);
-    }
-  };
-
   const selectSource = (value: string): void => {
-    if (value === "open") {
-      fileInputRef.current?.click();
-    } else if (value === "procedural") {
-      requestId.current += 1;
-      setLoading(false);
-      setError("");
-      setSource(value);
-      setImageData(null);
-      originalBlob.current = null;
-      commitGrain({ ...draftRef.current, heightMap: undefined, scalePx: 4 });
-    } else if (value.startsWith("eval:")) {
-      const name = value.slice(5);
-      void loadImage(
-        async () => {
-          const response = await fetch(
-            `/eval-textures/${encodeURIComponent(name)}`,
-          );
-          if (!response.ok)
-            throw new Error(`画像を取得できませんでした (${response.status})`);
-          return response.blob();
-        },
-        value,
-        name,
-        maxSize,
-      );
-    }
+    const heightMapId = value === "procedural" ? undefined : value;
+    commitGrain({
+      ...draftRef.current,
+      heightMapId,
+      scalePx: heightMapId === undefined ? 4 : 2,
+    });
   };
 
   return (
@@ -215,124 +79,25 @@ export function BristleGrainEvaluation({
         <label>
           Source
           <select
-            value={
-              draft.heightMap
-                ? source === "procedural"
-                  ? "current"
-                  : source
-                : "procedural"
-            }
+            value={draft.heightMapId ?? "procedural"}
             onChange={(event) => selectSource(event.currentTarget.value)}
           >
             <option value="procedural">Procedural</option>
-            {files.map((name) => (
-              <option key={name} value={`eval:${name}`}>
-                {name}
-              </option>
-            ))}
-            {source === "file" && <option value="file">{fileName}</option>}
-            {draft.heightMap && source === "procedural" && (
-              <option value="current">現在の高さマップ</option>
-            )}
-            <option value="open">画像を開く…</option>
+            <option value="paper-fabric-031">Fabric 031</option>
+            <option value="paper-fabric-036">Fabric 036</option>
+            <option value="paper-fabric-061">Fabric 061</option>
           </select>
         </label>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (file)
-              void loadImage(
-                () => Promise.resolve(file),
-                "file",
-                file.name,
-                maxSize,
-              );
-          }}
-        />
-        <label>
-          Max size
-          <select
-            value={maxSize}
-            disabled={loading}
-            onChange={(event) => {
-              const size = Number(event.currentTarget.value);
-              const blob = originalBlob.current;
-              if (blob && draft.heightMap) {
-                void loadImage(
-                  () => Promise.resolve(blob),
-                  source,
-                  fileName,
-                  size,
-                  false,
-                );
-              } else {
-                setMaxSize(size);
-              }
-            }}
-          >
-            {[256, 512, 1024, 2048].map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </label>
-        {loading && <output>画像を読み込み中…</output>}
-        {listError && <output>{listError}</output>}
-        {error && <span role="alert">{error}</span>}
-        {draft.heightMap && imageData && (
-          <>
-            <span>
-              {imageData.width} × {imageData.height} texels
-            </span>
-            <GrainRange
-              label="Contrast"
-              value={options.contrast}
-              min={0.25}
-              max={8}
-              step={0.05}
-              onChange={(contrast) => updateOptions({ contrast })}
-              onCommit={commitOptions}
-            />
-            <label>
-              <input
-                type="checkbox"
-                checked={options.invert}
-                onChange={(event) => {
-                  updateOptions({ invert: event.currentTarget.checked });
-                  commitOptions();
-                }}
-              />{" "}
-              Invert
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={options.normalize}
-                onChange={(event) => {
-                  updateOptions({ normalize: event.currentTarget.checked });
-                  commitOptions();
-                }}
-              />{" "}
-              Normalize
-            </label>
-          </>
-        )}
-        <GrainPreview grain={draft} />
+        <GrainPreview grain={draft} registry={registry} />
         <GrainRange
           label={
-            draft.heightMap ? "Scale（px / texel）" : "Scale（粒の大きさ）"
+            draft.heightMapId ? "Scale（px / texel）" : "Scale（粒の大きさ）"
           }
           value={draft.scalePx}
           min={0.5}
-          max={draft.heightMap ? 8 : 16}
+          max={draft.heightMapId ? 8 : 16}
           step={0.25}
-          suffix={draft.heightMap ? "" : "px"}
+          suffix={draft.heightMapId ? "" : "px"}
           onChange={(value) => updateDraft("scalePx", value)}
           onCommit={commitDraft}
         />
@@ -369,7 +134,13 @@ export function BristleGrainEvaluation({
   );
 }
 
-function GrainPreview({ grain }: { readonly grain: BristleSurfaceGrain }) {
+function GrainPreview({
+  grain,
+  registry,
+}: {
+  readonly grain: BristleSurfaceGrain;
+  readonly registry: BrushAssetRegistry;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -379,8 +150,12 @@ function GrainPreview({ grain }: { readonly grain: BristleSurfaceGrain }) {
     canvas.width = PREVIEW_WIDTH;
     canvas.height = PREVIEW_HEIGHT;
     const image = ctx.createImageData(canvas.width, canvas.height);
-    const background = grain.heightMap ? [255, 255, 255] : [244, 239, 228];
-    const paint = grain.heightMap ? [0, 0, 0] : [49, 93, 112];
+    const heightMap =
+      grain.heightMapId === undefined
+        ? undefined
+        : registry.getHeightMap(grain.heightMapId);
+    const background = grain.heightMapId ? [255, 255, 255] : [244, 239, 228];
+    const paint = grain.heightMapId ? [0, 0, 0] : [49, 93, 112];
     const softness = 0.01 + (1 - clamp(grain.hardness, 0, 1)) * 0.24;
     const amount = clamp(grain.amount, 0, 1);
 
@@ -388,8 +163,8 @@ function GrainPreview({ grain }: { readonly grain: BristleSurfaceGrain }) {
       for (let x = 0; x < canvas.width; x++) {
         const sx = x / Math.max(0.5, grain.scalePx);
         const sy = y / Math.max(0.5, grain.scalePx);
-        const height = grain.heightMap
-          ? sampleHeightMap(grain.heightMap, sx, sy)
+        const height = heightMap
+          ? sampleHeightMap(heightMap, sx, sy)
           : fineToothHeight(sx, sy, grain.seed);
         const coverage = smoothstep(
           (PREVIEW_CONTACT - height + softness) / (softness * 2),
@@ -403,7 +178,7 @@ function GrainPreview({ grain }: { readonly grain: BristleSurfaceGrain }) {
       }
     }
     ctx.putImageData(image, 0, 0);
-  }, [grain]);
+  }, [grain, registry]);
 
   return (
     <canvas
@@ -519,6 +294,6 @@ function isSameGrain(
     left.amount === right.amount &&
     left.hardness === right.hardness &&
     left.seed === right.seed &&
-    left.heightMap === right.heightMap
+    left.heightMapId === right.heightMapId
   );
 }

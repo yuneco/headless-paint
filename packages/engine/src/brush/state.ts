@@ -13,6 +13,7 @@ export const DEFAULT_BRUSH_BRANCH_RENDER_STATE: BrushBranchRenderState = {
 
 export const DEFAULT_BRUSH_RENDER_STATE: BrushRenderState = {
   tipCanvas: null,
+  heightMap: null,
   seed: 0,
   branches: [DEFAULT_BRUSH_BRANCH_RENDER_STATE],
 };
@@ -46,6 +47,7 @@ export function getBranchBrushState(
   const base = ensureBrushRenderState(state, branchIndex + 1);
   return {
     tipCanvas: base.tipCanvas,
+    heightMap: base.heightMap,
     seed: hashSeed(base.seed, branchIndex),
     branches: [base.branches[branchIndex]],
   };
@@ -61,6 +63,7 @@ export function mergeBrushState(
 ): BrushRenderState {
   return {
     tipCanvas: state.tipCanvas,
+    heightMap: state.heightMap,
     seed: state.seed,
     branches,
   };
@@ -72,6 +75,7 @@ export function cloneBrushRenderState(
   if (!state) return undefined;
   return {
     tipCanvas: state.tipCanvas,
+    heightMap: state.heightMap,
     seed: state.seed,
     branches: state.branches.map((branch) => ({
       accumulatedDistance: branch.accumulatedDistance,

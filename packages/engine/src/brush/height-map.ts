@@ -40,7 +40,17 @@ export function createHeightMapFromImageData(
   return { width, height, heights };
 }
 
-/** Internal validation shared by image conversion and drawing. */
+/** Internal validation shared by asset registration and drawing. */
+export function validateHeightMap(map: BristleHeightMap): void {
+  validateHeightMapDimensions(map.width, map.height);
+  if (map.heights.length !== map.width * map.height) {
+    throw new RangeError(
+      "Bristle height map heights length must equal width * height",
+    );
+  }
+}
+
+/** Internal validation shared by image conversion, registration and drawing. */
 export function validateHeightMapDimensions(
   width: number,
   height: number,

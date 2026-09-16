@@ -1,6 +1,6 @@
 import type {
   BrushAccelerator,
-  BrushTipRegistry,
+  BrushAssetRegistry,
   Layer,
   LayerMeta,
 } from "@headless-paint/engine";
@@ -25,7 +25,7 @@ import { isDrawCommand, isStructuralCommand } from "./types";
 
 export interface ExecutorDeps<TCustom = never> {
   readonly layers: readonly Layer[];
-  readonly tipRegistry?: BrushTipRegistry;
+  readonly registry?: BrushAssetRegistry;
   readonly customExecutor?: CustomCommandExecutor<TCustom>;
   readonly shiftTempCanvas?: OffscreenCanvas;
   readonly accelerator?: BrushAccelerator | null;
@@ -256,7 +256,7 @@ function executeLayerDraw<TCustom>(
       );
     const result = undoHit
       ? { ok: true as const }
-      : rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
+      : rebuildLayerFromHistory(layer, next, deps.registry, {
           accelerator: deps.accelerator,
           invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
         });
@@ -437,7 +437,7 @@ function executeStructural<TCustom>(
         command.layerId,
         command.meta,
       );
-      const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry, {
+      const result = rebuildLayerFromHistory(layer, next, deps.registry, {
         accelerator: deps.accelerator,
         invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
       });
@@ -569,7 +569,7 @@ function executeStructural<TCustom>(
       const sourceResult = rebuildLayerFromHistory(
         sourceLayer,
         next,
-        deps.tipRegistry,
+        deps.registry,
         {
           accelerator: deps.accelerator,
           invalidationReason: "executorUndo",
@@ -608,7 +608,7 @@ function executeStructural<TCustom>(
       const targetResult = rebuildLayerFromHistory(
         targetLayer,
         next,
-        deps.tipRegistry,
+        deps.registry,
         {
           accelerator: deps.accelerator,
           invalidationReason: "executorUndo",

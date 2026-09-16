@@ -1147,6 +1147,7 @@ interface BrushRenderState {
 const initialState: BrushRenderState = {
   seed: Math.random() * 0xffffffff | 0,
   tipCanvas: generateBrushTip(brush.tip, size, color),
+  heightMap: null, // bristle で heightMapId 指定時のみ registry.getHeightMap(id) の結果
   branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
 };
 

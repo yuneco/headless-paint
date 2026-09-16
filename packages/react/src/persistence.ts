@@ -731,6 +731,10 @@ function parseBristleBrushConfig(
     !isUnitNumber(grain.amount) ||
     !isUnitNumber(grain.hardness) ||
     !Number.isInteger(grain.seed) ||
+    (grain.heightMapId !== undefined &&
+      (typeof grain.heightMapId !== "string" ||
+        grain.heightMapId.length < 1 ||
+        grain.heightMapId.length > 128)) ||
     "coverage" in pressure ||
     !isUnitNumber(pressure.dropout) ||
     !isUnitNumber(pressure.size)
@@ -756,6 +760,9 @@ function parseBristleBrushConfig(
         amount: grain.amount as number,
         hardness: grain.hardness as number,
         seed: grain.seed as number,
+        ...(grain.heightMapId === undefined
+          ? {}
+          : { heightMapId: grain.heightMapId as string }),
       },
     },
     pressureDynamics: {

@@ -86,7 +86,7 @@ function renderBrushStroke(
 | `sourceLayer` | `Layer` | 条件付き | stamp / bristleの混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
 | `accelerator` | `BrushAccelerator \| null` | - | GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。省略 / `null` はCPU経路。混色stampの適格条件を満たす場合のみGPU経路になり、GPU経路の結果はCPU経路と原則一致する。同一backend内では決定的で、CPU/GPU間の許容差は [gpu-acceleration.md](./gpu-acceleration.md) を参照 |
 
-**戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
+**戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, heightMap: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 
 **動作**:
 1. `style.brush.type` を判定
@@ -484,7 +484,7 @@ function createBrushAssetRegistry(): BrushAssetRegistry;
 
 **設計意図**: 画像や `Float32Array` を設定・コマンド履歴へ埋め込むと履歴と永続化データが肥大化するため、ブラシ設定には ID だけを乗せ、本体はランタイムで解決する。tip と高さマップで 1 つのレジストリにまとめるのは、stroke / react の配線が 1 本で済み、利用側が渡すオブジェクトを増やさないためである。
 
-**解決のタイミング**: どちらもストローク開始時（live と replay の両方）に 1 回だけ解決し、`BrushRenderState.tipCanvas` / `BrushRenderState.heightMap` に置く。レジストリ未指定、または ID 未登録は開始時に throw する（`Image tip not found: <id>` / `Height map not found: <id>`）。登録内容を後から差し替えても、進行中のストロークには影響しない。
+**解決のタイミング**: どちらもストローク開始時（live と replay の両方）に 1 回だけ解決し、`BrushRenderState.tipCanvas` / `BrushRenderState.heightMap` に置く。レジストリ未指定は `BrushAssetRegistry required for image tip` / `BrushAssetRegistry required for height map`、ID 未登録は `Image tip not found: <id>` / `Height map not found: <id>` を開始時に throw する。登録内容を後から差し替えても、進行中のストロークには影響しない。
 
 **パイプラインへの受け渡し**: `BrushAssetRegistry` は `useStrokeSession` / `usePaintEngine` の config に `registry` として渡す。これにより、ストローク開始時とリプレイ（Undo/Redo）時に image tip と高さマップの解決が可能になる。同じ ID を同じ内容で登録した環境でなければ replay 結果は一致しない。
 

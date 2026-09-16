@@ -1,4 +1,4 @@
-import type { BrushConfig } from "@headless-paint/engine";
+import type { BrushAssetRegistry, BrushConfig } from "@headless-paint/engine";
 import { memo } from "react";
 import type { StrokeCallMetrics } from "../debug/useStrokeCallMetrics";
 import { BristleGrainEvaluation } from "./BristleGrainEvaluation";
@@ -10,6 +10,7 @@ type BrushPerfStall = BrushPerfSnapshot["stalls"][number];
 
 interface BrushEvaluationPanelProps {
   readonly brush: BrushConfig;
+  readonly registry: BrushAssetRegistry;
   readonly metrics: StrokeCallMetrics;
   readonly onResetMetrics: () => void;
   readonly onBrushChange: (brush: BrushConfig) => void;
@@ -22,6 +23,7 @@ interface BrushEvaluationPanelProps {
 
 function BrushEvaluationPanelComponent({
   brush,
+  registry,
   metrics,
   onResetMetrics,
   onBrushChange,
@@ -63,7 +65,11 @@ function BrushEvaluationPanelComponent({
           >
             Draw Lab S-curve sample（Lab固定S字を描画）
           </button>
-          <BristleGrainEvaluation brush={brush} onBrushChange={onBrushChange} />
+          <BristleGrainEvaluation
+            brush={brush}
+            registry={registry}
+            onBrushChange={onBrushChange}
+          />
         </>
       )}
 
