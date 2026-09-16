@@ -1,0 +1,126 @@
+# 紙目 heightMap の正式化（レジストリ方式・web 同梱）
+
+2026-09-16。`experiment/paper-tooth-heightmap` で評価してきた外部紙目 heightMap を、評価用の「メモリ上のオブジェクト参照」から、stamp の image tip と同じ **ID 参照 + レジストリ解決** に切り替えて正式採用する。procedural Fine tooth は既定として残し、heightMap は選択肢とする。
+
+## 決定事項（ユーザー 2026-09-16）
+
+- Turn follow（`handleLengthRatio`）は既定 0.5 で確定。追加作業なし
+- 紙目テクスチャ外部化は効果的なので採用。procedural は既定として残し、テクスチャはオプション
+- 履歴・設定への載せ方は stamp の image tip と同様（ID 参照、画像本体はレジストリ）
+- web デモには ambientCG の **Fabric031 / Fabric036 / Fabric061** の 3 種のみ同梱（CC0 1.0。表示義務はないが出典を記載する）
+- ブラシ透明度の設計は保留（調査ドキュメント `plans/2026-09-08-20-14_brush-opacity-investigation.md` はコミット済み）
+
+## 現状（Phase 0 調査）
+
+- `BristleSurfaceGrain.heightMap?: BristleHeightMap` が `StrokeCommand.style.brush` に `Float32Array` 参照のまま乗る。react の設定エクスポートでは参照コピー、復元では落ちる。web の `settings-storage` は JSON 化するので 1K map で localStorage 容量超過（catch で継続）
+- image tip は `createInitialBrushState`（`packages/stroke/src/incremental-stroke.ts`）がストローク開始時に `registry` から解決し `BrushRenderState.tipCanvas` に置く。engine の `renderBrushStroke` は registry を受け取らない。未登録 ID は throw（`Image tip not found`）
+- bristle は CPU（`bristle.ts` の `resolveBristleToothMap(brush.dynamics.surfaceGrain)`）と GPU（`pushBristleChunk` の `grain.toothMap`）の両方で `surfaceGrain` から直接高さを取る
+- `BrushTipRegistry` は `get/set(imageId, ImageBitmap)` だけ。stroke（incremental-stroke / replay / stroke-runtime / command-executor）、react（usePaintEngine / useStrokeSession / history-ops）、web（App / BrushPanel / SidebarPanel / register.ts）に配線済み
+- web の評価 UI `BristleGrainEvaluation` は dev サーバー専用 middleware `/eval-textures/`（`vite-eval-textures.ts`）から `work.local/paper-textures/height/` を読み、リサイズ（既定 1024）→ `createHeightMapFromImageData`（normalize=true, contrast=1, invert=false 既定）で作る
+- react persistence の `parseBristleBrushConfig` は `surfaceGrain` の 4 フィールドだけを検証・再構成する（`heightMap` は落とす）
+
+## 設計方針
+
+### 1. 参照モデル: `heightMapId`（engine）
+
+```typescript
+interface BristleSurfaceGrain {
+  readonly scalePx: number;
+  readonly amount: number;
+  readonly hardness: number;
+  readonly seed: number;
+  readonly heightMapId?: string; // レジストリに登録した高さマップの ID。未指定は procedural Fine tooth
+}
+```
+
+- 現行の `heightMap?: BristleHeightMap` フィールドは削除（互換なし。評価期間中のメモリ専用フィールドで、永続化対象外だったため）
+- 意味論は現行と同一: 指定時は `heights` を document 座標でタイル、`scalePx` は 1 texel あたりの px。未指定は procedural（`scalePx` はセル幅）
+
+### 2. レジストリ: tip と高さマップを 1 つのレジストリで扱う
+
+案 A（推奨）: `BrushTipRegistry` を **`BrushAssetRegistry`** に改名し、種別ごとの accessor を持たせる。
+
+```typescript
+interface BrushAssetRegistry {
+  readonly getTip: (imageId: string) => ImageBitmap | undefined;
+  readonly setTip: (imageId: string, image: ImageBitmap) => void;
+  readonly getHeightMap: (heightMapId: string) => BristleHeightMap | undefined;
+  readonly setHeightMap: (heightMapId: string, map: BristleHeightMap) => void;
+}
+function createBrushAssetRegistry(): BrushAssetRegistry;
+```
+
+- 理由: stroke / react / web の配線は既に 1 つの registry 引数で通っている。別レジストリを足すと `registry` と `heightMapRegistry` の 2 本を全経路（incremental-stroke config、replay 3 関数、stroke-runtime、command-executor、usePaintEngine、useStrokeSession、history-ops）に増やすことになる
+- 旧名 `BrushTipRegistry` / `createBrushTipRegistry` / `get` / `set` は残さない（プロジェクト方針: 互換フォールバックなし）。参照箇所は docs 9 ファイル・src 14 ファイル
+- 案 B: `BrushTipRegistry` の名前を維持して `getHeightMap/setHeightMap` を追加。配線ゼロだが「tip レジストリに紙目が入る」名前のねじれが残る。ユーザーが改名の churn を避けたい場合はこちら
+
+### 3. 解決タイミング: ストローク開始時に `BrushRenderState` へ
+
+tip と同じ場所で解決する。
+
+```typescript
+interface BrushRenderState {
+  readonly tipCanvas: OffscreenCanvas | null;
+  readonly heightMap: BristleHeightMap | null; // bristle で heightMapId 指定時のみ。開始時に registry から解決
+  readonly seed: number;
+  readonly branches: readonly BrushBranchRenderState[];
+}
+```
+
+- `createInitialBrushState`（stroke）が bristle かつ `heightMapId` 指定なら `registry.getHeightMap(id)` を呼ぶ。registry なし / 未登録は image tip と同じく throw（`Height map not found: <id>`）。replay でも同じ経路なので、環境間で静かに procedural へ落ちない
+- engine の `renderBristleBrushStroke` は `state.heightMap` を CPU / GPU の両経路で使う（`resolveBristleToothMap(grain, state.heightMap)`）。`cloneBrushRenderState` / `DEFAULT_BRUSH_RENDER_STATE` / `mergeBrushState` は参照をそのままコピー（heights は不変扱い）
+- `BristleHeightMap` の寸法検証（1..2048）は `createHeightMapFromImageData` と `setHeightMap` の両方で行い、描画時の throw は残す
+
+### 4. react persistence
+
+- `parseBristleBrushConfig`: `heightMapId` は省略可。存在すれば非空文字列（長さ ≤ 128）以外は reject。復元後の設定に ID を保持する
+- ID が指すマップの登録はアプリの責務（tip と同じ）。復元時に未登録でも persistence は成功し、その設定で描き始めたときに throw する（tip と同じ契約）
+
+### 5. web デモ
+
+- `apps/web/src/brush-presets/paper-textures/` に 3 枚を同梱し、Vite の asset import で URL を得る（`base` `/headless-paint/` の build でも解決される）。`public/` は作らない
+- `registerAppBrushTips` を `registerAppBrushAssets` に改名し、起動時に 3 枚を fetch → `createImageBitmap` → `OffscreenCanvas` で `ImageData` → `createHeightMapFromImageData` → `setHeightMap`。ID は `"paper-fabric-031"` / `"paper-fabric-036"` / `"paper-fabric-061"`
+- `BristleGrainEvaluation` の Source は「Procedural / Fabric 031 / Fabric 036 / Fabric 061」の固定 select にし、`heightMapId` を切り替える。`/eval-textures/` fetch、ファイル選択、リサイズ段階選択、Contrast / Invert / Normalize の再生成 UI は削除（変換オプションは同梱時に固定する）
+- `vite-eval-textures.ts` / そのテスト / `vite.config.ts` の plugin 登録 / `vitest.config.ts` の include を削除
+- 出典表示: `apps/web/src/brush-presets/paper-textures/README.md` に ambientCG の ID・URL・CC0 1.0・取得日・zip SHA-256・加工内容（Displacement の抽出とリサイズ）を記載。UI 上は評価パネル内に 1 行の出典テキストを置く（CC0 に表示義務はないが出典を明記する方針）
+
+### 未決（Phase 2 で確認）
+
+1. レジストリの改名（案 A）か名前維持（案 B）か
+2. 同梱解像度: 評価は 1024 で見ていた。1K JPG は 1 枚 750〜920KB で 3 枚約 2.5MB。512 に縮小（グレースケール JPG、1 枚 100KB 前後）すると tile の周期が半分になる。推奨は 512 だが見た目を優先するなら 1024
+3. 各テクスチャの固定変換オプション（invert / normalize / contrast）と `scalePx` の既定値。評価で良かった組み合わせをユーザーから聞く。未回答なら normalize=true, contrast=1, invert=false, scalePx=1
+4. 評価パネルのファイル読み込み（任意画像）を残すか。残すなら「アプリ側で `setHeightMap` してから ID を切り替える」形になる。デモの範囲外と判断して削除を推奨
+
+## 作業手順（Doc-First）
+
+### Phase 1: API 設計・ドキュメント
+
+- `packages/engine/docs/types.md`: `BristleSurfaceGrain.heightMapId`、`BrushRenderState.heightMap`、`heightMap` フィールドの削除、永続化の記述を「ID は永続化対象、本体はレジストリ」へ
+- `packages/engine/docs/brush-api.md`: `BrushAssetRegistry`（または案 B）、`createHeightMapFromImageData` の利用例を registry 登録へ、Rough bristle の説明の `surfaceGrain.heightMap` 参照を `heightMapId` へ
+- `packages/engine/docs/README.md`、`gpu-acceleration.md`（tooth texture の取得元）、`packages/stroke/docs/{command-executor,stroke-machine,history-api,README}.md`、`packages/react/docs/README.md` の registry 名・型を更新
+- 未登録 ID の契約（throw）を stroke docs に明記
+
+### Phase 2: 利用イメージレビュー
+
+- web 起動時の登録コード、Rough bristle の `heightMapId` 切り替え、persistence の往復、replay の失敗ケースをコード例で提示し、上記「未決」4 点の回答をもらう
+
+### Phase 3: 実装（codex 委譲）
+
+- engine: 型・registry・state・bristle CPU/GPU の取得元差し替え・`createHeightMapFromImageData` の検証、テスト（heightMapId 指定と未指定の byte 一致、clone の参照維持、GPU chunk の toothMap）
+- stroke: `createInitialBrushState` の解決と throw、replay テスト
+- react: persistence の検証・補完、往復テスト
+- web: 同梱テクスチャ・登録・評価 UI の置き換え・dev middleware 削除・README
+- 検収は Claude がフル（build / typecheck / lint / test 全件、ブラウザ含む）で実施
+
+### Phase 4: アーキテクトレビュー
+
+- 双方向の docs 整合、registry 名の残骸検索、`heightMap` オブジェクト参照の残骸検索、agents-note の関連項目整理
+
+## 完了条件
+
+- `heightMapId` 未指定の Rough bristle は現行と byte 一致
+- 同じ ID・同じ登録内容で live / replay / Undo→Redo が byte 一致
+- 未登録 ID は開始時に throw し、procedural へ静かに落ちない
+- react persistence で `heightMapId` が往復し、web の localStorage 保存が 1K map で失敗しない（本体を保存しないため）
+- web に 3 テクスチャが同梱され、`/eval-textures/` と `work.local` 依存が消える。出典が README と UI に記載される
+- フル検収 green
