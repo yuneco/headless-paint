@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GPU to Canvas2D bridge benchmark</title>
+    <style>
+      body {
+        margin: 24px;
+        background: #111;
+        color: #eee;
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>GPU to Canvas2D bridge benchmark</h1>
+    <pre id="result">Running…</pre>
+    <script>
+      (() => {
+        "use strict";
+
+        const SIZES = [
+          [150, 150],
+          [250, 150],
+          [256, 256],
+          [512, 128],
+        ];
+        const BACKENDS = ["webgl2", "webgpu"];
+        const SOURCES = [
+          "direct",
+          "transferToImageBitmap",
+          "createImageBitmap",
+          "canvas2d-control",
+        ];
+        const MODES = ["sync", "production-like"];
+        const CHUNKS = 80;
+        const RUNS = 3;
+        const PRODUCTION_INTERVAL_MS = 30;
+        const TARGET_SIZE = 2048;
+        const resultElement = document.querySelector("#result");
+
+        window.__bridgeDone = false;
+        window.__bridgeResult = null;
+
+        function round(value) {
+          return Number.isFinite(value) ? Number(value.toFixed(3)) : null;
+        }
+
+        function percentile(values, fraction) {
+          if (values.length === 0) return null;
+          const sorted = [...values].sort((left, right) => left - right);
+          const index = Math.max(
+            0,
+            Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1),
+          );
+          return round(sorted[index]);
+        }
+
+        function errorText(error) {
+          return error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
+        }
+
+        function makeCanvas(width, height, contextType, options) {
+          const candidates = [];
+          if (typeof OffscreenCanvas === "function") {
+            candidates.push(() => new OffscreenCanvas(width, height));
+          }
+          candidates.push(() => {
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            return canvas;
+          });
+
+          const failures = [];
+          for (const createCanvas of candidates) {
+            const canvas = createCanvas();
+            try {
+              const context = canvas.getContext(contextType, options);
+              if (context) return { canvas, context };
+              failures.push(`${canvas.constructor.name}: getContext returned null`);
+            } catch (error) {
+              failures.push(`${canvas.constructor.name}: ${errorText(error)}`);
+            }
+          }
+          throw new Error(`${contextType} unavailable (${failures.join("; ")})`);
+        }
+
+        function compileShader(gl, type, source) {
+          const shader = gl.createShader(type);
+          if (!shader) throw new Error("WebGL2 createShader failed");
+          gl.shaderSource(shader, source);
+          gl.compileShader(shader);
+          if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            const log = gl.getShaderInfoLog(shader) || "unknown shader error";
+            gl.deleteShader(shader);
+            throw new Error(log);
+          }
+          return shader;
+        }
+
+        function createWebGl2Renderer(width, height) {
+          const { canvas, context: gl } = makeCanvas(width, height, "webgl2", {
+            alpha: true,
+            antialias: false,
+            depth: false,
+            desynchronized: false,
+            premultipliedAlpha: true,
+            preserveDrawingBuffer: false,
+            stencil: false,
+          });
+          const errors = [];
+          const vertex = compileShader(
+            gl,
+            gl.VERTEX_SHADER,
+            `#version 300 es
+            const vec2 positions[3] = vec2[3](
+              vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
+            );
+            out vec2 uv;
+            void main() {
+              vec2 position = positions[gl_VertexID];
+              uv = position * 0.5 + 0.5;
+              gl_Position = vec4(position, 0.0, 1.0);
+            }`,
+          );
+          const fragment = compileShader(
+            gl,
+            gl.FRAGMENT_SHADER,
+            `#version 300 es
+            precision highp float;
+            in vec2 uv;
+            uniform float chunk;
+            out vec4 color;
+            float hash21(vec2 p) {
+              p = fract(p * vec2(123.34, 456.21));
+              p += dot(p, p + 45.32);
+              return fract(p.x * p.y);
+            }
+            void main() {
+              vec2 p = uv * 2.0 - 1.0;
+              float bristle = 0.5 + 0.5 * sin(p.x * 31.0 + sin(p.y * 9.0 + chunk * 0.07));
+              float grain = hash21(floor((uv + chunk * 0.0007) * vec2(89.0, 61.0)));
+              float mask = 1.0 - smoothstep(0.08, 1.0, abs(p.y + 0.18 * sin(p.x * 5.0 + chunk * 0.03)));
+              float alpha = clamp(mask * (0.2 + 0.65 * bristle + 0.15 * grain), 0.0, 1.0);
+              vec3 ink = vec3(0.13, 0.42, 0.78) * (0.72 + 0.28 * grain);
+              color = vec4(ink * alpha, alpha);
+            }`,
+          );
+          const program = gl.createProgram();
+          if (!program) throw new Error("WebGL2 createProgram failed");
+          gl.attachShader(program, vertex);
+          gl.attachShader(program, fragment);
+          gl.linkProgram(program);
+          gl.deleteShader(vertex);
+          gl.deleteShader(fragment);
+          if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            throw new Error(gl.getProgramInfoLog(program) || "WebGL2 link failed");
+          }
+          const chunkLocation = gl.getUniformLocation(program, "chunk");
+          const vao = gl.createVertexArray();
+          if (!vao) throw new Error("WebGL2 createVertexArray failed");
+          gl.bindVertexArray(vao);
+          gl.useProgram(program);
+          gl.viewport(0, 0, width, height);
+          gl.disable(gl.BLEND);
+
+          const onContextLost = (event) => {
+            event.preventDefault?.();
+            errors.push("webglcontextlost");
+          };
+          canvas.addEventListener?.("webglcontextlost", onContextLost);
+
+          return {
+            canvas,
+            errors,
+            draw(chunk) {
+              if (gl.isContextLost()) throw new Error("WebGL2 context is lost");
+              gl.useProgram(program);
+              gl.uniform1f(chunkLocation, chunk);
+              gl.drawArrays(gl.TRIANGLES, 0, 3);
+            },
+            async wait() {
+              gl.finish();
+              if (gl.isContextLost()) throw new Error("WebGL2 context lost during finish");
+            },
+            dispose() {
+              canvas.removeEventListener?.("webglcontextlost", onContextLost);
+              gl.deleteVertexArray(vao);
+              gl.deleteProgram(program);
+            },
+          };
+        }
+
+        async function createWebGpuRenderer(width, height) {
+          if (!navigator.gpu) throw new Error("navigator.gpu unavailable");
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) throw new Error("WebGPU requestAdapter returned null");
+          const device = await adapter.requestDevice();
+          const { canvas, context } = makeCanvas(width, height, "webgpu");
+          const format = navigator.gpu.getPreferredCanvasFormat();
+          context.configure({
+            device,
+            format,
+            alphaMode: "premultiplied",
+          });
+          const errors = [];
+          device.lost.then((info) => {
+            errors.push(`WebGPU device lost (${info.reason}): ${info.message}`);
+          });
+          const shader = device.createShaderModule({
+            code: `
+              struct ChunkUniform { value: f32, _pad0: vec3<f32> }
+              @group(0) @binding(0) var<uniform> chunk: ChunkUniform;
+
+              struct VertexOutput {
+                @builtin(position) position: vec4<f32>,
+                @location(0) uv: vec2<f32>,
+              }
+
+              @vertex fn vertexMain(@builtin(vertex_index) index: u32) -> VertexOutput {
+                var positions = array<vec2<f32>, 3>(
+                  vec2<f32>(-1.0, -1.0),
+                  vec2<f32>(3.0, -1.0),
+                  vec2<f32>(-1.0, 3.0),
+                );
+                var output: VertexOutput;
+                let position = positions[index];
+                output.position = vec4<f32>(position, 0.0, 1.0);
+                output.uv = position * 0.5 + vec2<f32>(0.5);
+                return output;
+              }
+
+              fn hash21(input: vec2<f32>) -> f32 {
+                var p = fract(input * vec2<f32>(123.34, 456.21));
+                p += vec2<f32>(dot(p, p + vec2<f32>(45.32)));
+                return fract(p.x * p.y);
+              }
+
+              @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
+                let p = input.uv * 2.0 - vec2<f32>(1.0);
+                let bristle = 0.5 + 0.5 * sin(p.x * 31.0 + sin(p.y * 9.0 + chunk.value * 0.07));
+                let grain = hash21(floor((input.uv + vec2<f32>(chunk.value * 0.0007)) * vec2<f32>(89.0, 61.0)));
+                let mask = 1.0 - smoothstep(0.08, 1.0, abs(p.y + 0.18 * sin(p.x * 5.0 + chunk.value * 0.03)));
+                let alpha = clamp(mask * (0.2 + 0.65 * bristle + 0.15 * grain), 0.0, 1.0);
+                let ink = vec3<f32>(0.13, 0.42, 0.78) * (0.72 + 0.28 * grain);
+                return vec4<f32>(ink * alpha, alpha);
+              }
+            `,
+          });
+          const pipeline = device.createRenderPipeline({
+            layout: "auto",
+            vertex: { module: shader, entryPoint: "vertexMain" },
+            fragment: {
+              module: shader,
+              entryPoint: "fragmentMain",
+              targets: [{ format }],
+            },
+            primitive: { topology: "triangle-list" },
+          });
+          const uniformBuffer = device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+          });
+          const bindGroup = device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
+          });
+          const uniformValues = new Float32Array(4);
+
+          return {
+            canvas,
+            errors,
+            draw(chunk) {
+              uniformValues[0] = chunk;
+              device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+              const encoder = device.createCommandEncoder();
+              const pass = encoder.beginRenderPass({
+                colorAttachments: [
+                  {
+                    view: context.getCurrentTexture().createView(),
+                    clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                    loadOp: "clear",
+                    storeOp: "store",
+                  },
+                ],
+              });
+              pass.setPipeline(pipeline);
+              pass.setBindGroup(0, bindGroup);
+              pass.draw(3);
+              pass.end();
+              device.queue.submit([encoder.finish()]);
+            },
+            async wait() {
+              await device.queue.onSubmittedWorkDone();
+            },
+            dispose() {
+              uniformBuffer.destroy();
+              context.unconfigure?.();
+              device.destroy();
+            },
+          };
+        }
+
+        function createControlCanvas(width, height) {
+          const { canvas, context } = makeCanvas(width, height, "2d", {
+            alpha: true,
+          });
+          const image = context.createImageData(width, height);
+          const pixels = image.data;
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const index = (y * width + x) * 4;
+              const u = x / Math.max(1, width - 1);
+              const v = y / Math.max(1, height - 1);
+              const py = v * 2 - 1;
+              const bristle = 0.5 + 0.5 * Math.sin(u * 62 + Math.sin(v * 9));
+              const grain = ((x * 17 + y * 131) % 251) / 250;
+              const edge = Math.max(0, Math.min(1, (1 - Math.abs(py + 0.18 * Math.sin(u * 10))) / 0.92));
+              const alpha = Math.max(0, Math.min(1, edge * (0.2 + 0.65 * bristle + 0.15 * grain)));
+              pixels[index] = Math.round(33 * (0.72 + 0.28 * grain));
+              pixels[index + 1] = Math.round(107 * (0.72 + 0.28 * grain));
+              pixels[index + 2] = Math.round(199 * (0.72 + 0.28 * grain));
+              pixels[index + 3] = Math.round(255 * alpha);
+            }
+          }
+          context.putImageData(image, 0, 0);
+          return canvas;
+        }
+
+        function createTarget() {
+          if (typeof OffscreenCanvas !== "function") {
+            throw new Error("OffscreenCanvas unavailable for the 2048x2048 target");
+          }
+          const canvas = new OffscreenCanvas(TARGET_SIZE, TARGET_SIZE);
+          const context = canvas.getContext("2d", { alpha: true });
+          if (!context) throw new Error("Canvas2D target context unavailable");
+          return { canvas, context };
+        }
+
+        function drainTarget(context) {
+          context.getImageData(0, 0, 1, 1);
+        }
+
+        function destinationFor(chunk, width, height) {
+          return {
+            x: (chunk * 37) % Math.max(1, TARGET_SIZE - width),
+            y: (chunk * 61) % Math.max(1, TARGET_SIZE - height),
+          };
+        }
+
+        async function drawBridge(source, renderer, controlCanvas, targetContext, chunk, width, height) {
+          const { x, y } = destinationFor(chunk, width, height);
+          if (source === "canvas2d-control") {
+            targetContext.drawImage(controlCanvas, x, y);
+            return;
+          }
+          if (source === "direct") {
+            targetContext.drawImage(renderer.canvas, x, y);
+            return;
+          }
+          if (source === "transferToImageBitmap") {
+            if (typeof renderer.canvas.transferToImageBitmap !== "function") {
+              throw new Error("transferToImageBitmap unavailable for GPU canvas");
+            }
+            const bitmap = renderer.canvas.transferToImageBitmap();
+            try {
+              targetContext.drawImage(bitmap, x, y);
+            } finally {
+              bitmap.close();
+            }
+            return;
+          }
+          if (source === "createImageBitmap") {
+            if (typeof createImageBitmap !== "function") {
+              throw new Error("createImageBitmap unavailable");
+            }
+            const bitmap = await createImageBitmap(renderer.canvas);
+            try {
+              targetContext.drawImage(bitmap, x, y);
+            } finally {
+              bitmap.close();
+            }
+            return;
+          }
+          throw new Error(`Unknown source: ${source}`);
+        }
+
+        function nextAnimationFrame() {
+          return new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+
+        async function waitUntilFrameTime(targetTime) {
+          while (performance.now() < targetTime) await nextAnimationFrame();
+        }
+
+        async function runOnce({ mode, source, renderer, controlCanvas, target, runIndex, width, height }) {
+          const durations = [];
+          target.context.clearRect(0, 0, TARGET_SIZE, TARGET_SIZE);
+          drainTarget(target.context);
+          const scheduledStart = performance.now();
+          for (let chunk = 0; chunk < CHUNKS; chunk += 1) {
+            if (mode === "production-like" && chunk > 0) {
+              await waitUntilFrameTime(scheduledStart + chunk * PRODUCTION_INTERVAL_MS);
+            }
+            const startedAt = performance.now();
+            if (source !== "canvas2d-control") {
+              renderer.draw(runIndex * CHUNKS + chunk);
+              if (mode === "sync") await renderer.wait();
+            }
+            await drawBridge(
+              source,
+              renderer,
+              controlCanvas,
+              target.context,
+              chunk,
+              width,
+              height,
+            );
+            if (mode === "sync") drainTarget(target.context);
+            durations.push(performance.now() - startedAt);
+          }
+
+          const drainStartedAt = performance.now();
+          if (source !== "canvas2d-control") await renderer.wait();
+          drainTarget(target.context);
+          const drainMs = performance.now() - drainStartedAt;
+          return { durations, drainMs };
+        }
+
+        function emptyRow(backend, width, height, source, mode, errors) {
+          return {
+            backend,
+            size: `${width}x${height}`,
+            source,
+            mode,
+            coldP50: null,
+            coldP95: null,
+            warmP50: null,
+            warmP95: null,
+            earlyP50: null,
+            earlyP95: null,
+            lateP50: null,
+            lateP95: null,
+            lateOverEarly: null,
+            drainMs: null,
+            errors: [...errors],
+          };
+        }
+
+        async function runCombination(
+          backend,
+          width,
+          height,
+          source,
+          mode,
+          renderer,
+          controlCanvas,
+          target,
+        ) {
+          const errors = [];
+          const runs = [];
+          for (let runIndex = 0; runIndex < RUNS; runIndex += 1) {
+            try {
+              runs.push(
+                await runOnce({
+                  mode,
+                  source,
+                  renderer,
+                  controlCanvas,
+                  target,
+                  runIndex,
+                  width,
+                  height,
+                }),
+              );
+            } catch (error) {
+              errors.push(`run ${runIndex + 1}: ${errorText(error)}`);
+              runs.push({ durations: [], drainMs: null });
+            }
+          }
+
+          for (const rendererError of renderer.errors) {
+            if (!errors.includes(rendererError)) errors.push(rendererError);
+          }
+          const cold = runs[0].durations;
+          const warmRuns = runs.slice(1);
+          const warm = warmRuns.flatMap((run) => run.durations);
+          const early = warmRuns.flatMap((run) => run.durations.slice(0, 20));
+          const late = warmRuns.flatMap((run) => run.durations.slice(-20));
+          const warmDrain = warmRuns
+            .map((run) => run.drainMs)
+            .filter((value) => Number.isFinite(value));
+          const earlyP50 = percentile(early, 0.5);
+          const lateP50 = percentile(late, 0.5);
+          return {
+            backend,
+            size: `${width}x${height}`,
+            source,
+            mode,
+            coldP50: percentile(cold, 0.5),
+            coldP95: percentile(cold, 0.95),
+            warmP50: percentile(warm, 0.5),
+            warmP95: percentile(warm, 0.95),
+            earlyP50,
+            earlyP95: percentile(early, 0.95),
+            lateP50,
+            lateP95: percentile(late, 0.95),
+            lateOverEarly:
+              earlyP50 && lateP50 !== null ? round(lateP50 / earlyP50) : null,
+            drainMs: percentile(warmDrain, 0.5),
+            errors,
+          };
+        }
+
+        async function createRenderer(backend, width, height) {
+          return backend === "webgl2"
+            ? createWebGl2Renderer(width, height)
+            : createWebGpuRenderer(width, height);
+        }
+
+        async function main() {
+          const target = createTarget();
+          const payload = {
+            schemaVersion: 1,
+            startedAt: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            config: {
+              chunks: CHUNKS,
+              runs: RUNS,
+              productionIntervalMs: PRODUCTION_INTERVAL_MS,
+              targetSize: `${TARGET_SIZE}x${TARGET_SIZE}`,
+              sizes: SIZES.map(([width, height]) => `${width}x${height}`),
+            },
+            results: [],
+          };
+
+          for (const backend of BACKENDS) {
+            for (const [width, height] of SIZES) {
+              let renderer;
+              try {
+                renderer = await createRenderer(backend, width, height);
+              } catch (error) {
+                const message = errorText(error);
+                for (const source of SOURCES) {
+                  for (const mode of MODES) {
+                    payload.results.push(
+                      emptyRow(backend, width, height, source, mode, [message]),
+                    );
+                  }
+                }
+                console.log(`[bridge-bench] ${backend} ${width}x${height}: ${message}`);
+                continue;
+              }
+
+              const controlCanvas = createControlCanvas(width, height);
+              try {
+                for (const source of SOURCES) {
+                  for (const mode of MODES) {
+                    const row = await runCombination(
+                      backend,
+                      width,
+                      height,
+                      source,
+                      mode,
+                      renderer,
+                      controlCanvas,
+                      target,
+                    );
+                    payload.results.push(row);
+                    console.log(
+                      `[bridge-bench] ${backend} ${width}x${height} ${source} ${mode} warm p95=${row.warmP95}`,
+                    );
+                  }
+                }
+              } finally {
+                renderer.dispose();
+              }
+            }
+          }
+
+          payload.finishedAt = new Date().toISOString();
+          return payload;
+        }
+
+        main()
+          .then((payload) => {
+            window.__bridgeResult = payload;
+            resultElement.textContent = JSON.stringify(payload, null, 2);
+          })
+          .catch((error) => {
+            const payload = {
+              schemaVersion: 1,
+              fatalError: errorText(error),
+              results: [],
+            };
+            window.__bridgeResult = payload;
+            resultElement.textContent = JSON.stringify(payload, null, 2);
+          })
+          .finally(() => {
+            window.__bridgeDone = true;
+          });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,584 @@
+import type {
+  BristleDynamics,
+  BristleHeightMap,
+  BristleSurfaceGrain,
+} from "../types";
+import { validateHeightMap } from "./height-map";
+import { brushPerfDebug, perfElapsed, perfStage } from "./perf-debug";
+import { hashSeed } from "./prng";
+
+export interface BristleMaskSample {
+  readonly pressure: number;
+  readonly distance: number;
+}
+
+export interface BristleMaskSweepSample extends BristleMaskSample {
+  readonly x: number;
+  readonly y: number;
+  readonly frameX: number;
+  readonly frameY: number;
+  readonly breakBefore?: boolean;
+  readonly halfWidth?: number;
+}
+
+interface BristleMaskEvaluator {
+  readonly height: number;
+  readonly evaluate: (u: number, v: number) => number;
+}
+
+interface RasterVertex {
+  readonly x: number;
+  readonly y: number;
+  readonly u: number;
+  readonly v: number;
+}
+
+const CONTEXT_CACHE = new WeakMap<
+  OffscreenCanvas,
+  OffscreenCanvasRenderingContext2D
+>();
+const GRAIN_HEIGHT_CACHE_LIMIT = 8;
+const GRAIN_TILE_SIZE = 128;
+const REPEAT_CONTACT_STRENGTH = 0.75;
+const REPEAT_CONTACT_REACH = 0.18;
+const REPEAT_CONTACT_EXPOSURE_PER_PASS = 0.24;
+const FIXED_CONTACT_HASH_SALT = 0x243f6a88;
+const REPEAT_CONTACT_HASH_SALT = 0x85a308d3;
+const grainHeightCache = new Map<string, Float32Array<ArrayBuffer>>();
+const grainMapCache = new WeakMap<Float32Array, BristleHeightMap>();
+const nullRasterCache = new Map<string, ImageData>();
+
+interface SurfaceContactRaster {
+  readonly amount: number;
+  readonly softness: number;
+  readonly grainSeed: number;
+  readonly strokeSeed: number;
+  readonly map: BristleHeightMap;
+  readonly scalePx: number;
+  readonly originX: number;
+  readonly originY: number;
+}
+
+/**
+ * stroke-spaceの符号付きpaint distanceをswept quadの各pixelで求め、
+ * simple dropoutを直接評価して最終alphaへ変換する。
+ *
+ * atlasを先にalpha化してCanvasで重ねると、区間境界のsource-overにより
+ * 低筆圧の未着彩部へ薄いalphaが蓄積するため、このmaskはsoftware rasterで
+ * 1枚に確定する。Fine toothとのpixel-local contactも同じ走査内で0/1判定し、
+ * 重複区間はcanonical trialごとの再接触を評価してmax(alpha)で結合する。
+ */
+export function rasterizeBristleMask(
+  samples: readonly BristleMaskSweepSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  dropoutResponse: number,
+  seed: number,
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+  heightMap: BristleHeightMap | null = null,
+): OffscreenCanvas {
+  const canvas = perfStage(
+    "canvasAlloc",
+    () => new OffscreenCanvas(width, height),
+  );
+  const ctx = getContext(canvas, "bristle swept mask");
+  if (samples.length < 2) return canvas;
+
+  const evaluator = createSimpleBristleMaskEvaluator(
+    samples,
+    brushSize,
+    dynamics,
+    dropoutResponse,
+    seed,
+  );
+  rasterizeBristleMaskIntoCanvas(
+    evaluator,
+    samples,
+    brushSize,
+    dynamics,
+    seed,
+    originX,
+    originY,
+    canvas,
+    ctx,
+    heightMap,
+  );
+  return canvas;
+}
+
+export function rasterizeBristleMaskEvaluatorForTest(
+  evaluator: BristleMaskEvaluator,
+  samples: readonly BristleMaskSweepSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  seed: number,
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+  heightMap: BristleHeightMap | null = null,
+): OffscreenCanvas {
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = getContext(canvas, "bristle swept mask evaluator test");
+  if (samples.length < 2) return canvas;
+  rasterizeBristleMaskIntoCanvas(
+    evaluator,
+    samples,
+    brushSize,
+    dynamics,
+    seed,
+    originX,
+    originY,
+    canvas,
+    ctx,
+    heightMap,
+  );
+  return canvas;
+}
+
+function rasterizeBristleMaskIntoCanvas(
+  evaluator: BristleMaskEvaluator,
+  samples: readonly BristleMaskSweepSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  seed: number,
+  originX: number,
+  originY: number,
+  canvas: OffscreenCanvas,
+  ctx: OffscreenCanvasRenderingContext2D,
+  heightMap: BristleHeightMap | null,
+): void {
+  const width = canvas.width;
+  const height = canvas.height;
+  const uploadCreateStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  const target = brushPerfDebug.nullStages.nullRaster
+    ? getNullRasterImageData(ctx, width, height)
+    : ctx.createImageData(width, height);
+  let uploadElapsed = brushPerfDebug.enabled
+    ? performance.now() - uploadCreateStartedAt
+    : 0;
+  const halfWidth = brushSize / 2;
+  const maxV = evaluator.height - 1;
+  const evaluate = evaluator.evaluate;
+  perfStage("maskRaster", () => {
+    const surface = createSurfaceContactRaster(
+      dynamics,
+      seed,
+      originX,
+      originY,
+      heightMap,
+    );
+    if (brushPerfDebug.nullStages.nullRaster) return;
+    for (let index = 1; index < samples.length; index++) {
+      const from = samples[index - 1];
+      const to = samples[index];
+      if (!from || !to || to.breakBefore) continue;
+      if (Math.hypot(to.x - from.x, to.y - from.y) < 0.001) continue;
+      const trialId = Math.round(
+        ((from.distance + to.distance) * 0.5) /
+          Math.max(0.5, dynamics.geometryStepPx),
+      );
+
+      const fromHalfWidth = from.halfWidth ?? halfWidth;
+      const toHalfWidth = to.halfWidth ?? halfWidth;
+      // Reference-width coordinates crop/extend noise without stretching it.
+      const fromV = (fromHalfWidth / brushSize) * maxV;
+      const toV = (toHalfWidth / brushSize) * maxV;
+      const fromLeft: RasterVertex = {
+        x: from.x + from.frameY * fromHalfWidth - originX,
+        y: from.y - from.frameX * fromHalfWidth - originY,
+        u: index - 1,
+        v: maxV / 2 - fromV,
+      };
+      const fromRight: RasterVertex = {
+        x: from.x - from.frameY * fromHalfWidth - originX,
+        y: from.y + from.frameX * fromHalfWidth - originY,
+        u: index - 1,
+        v: maxV / 2 + fromV,
+      };
+      const toLeft: RasterVertex = {
+        x: to.x + to.frameY * toHalfWidth - originX,
+        y: to.y - to.frameX * toHalfWidth - originY,
+        u: index,
+        v: maxV / 2 - toV,
+      };
+      const toRight: RasterVertex = {
+        x: to.x - to.frameY * toHalfWidth - originX,
+        y: to.y + to.frameX * toHalfWidth - originY,
+        u: index,
+        v: maxV / 2 + toV,
+      };
+      rasterizeTriangle(
+        evaluate,
+        target,
+        fromLeft,
+        fromRight,
+        toRight,
+        dynamics.depositHardness,
+        samples,
+        surface,
+        trialId,
+      );
+      rasterizeTriangle(
+        evaluate,
+        target,
+        fromLeft,
+        toRight,
+        toLeft,
+        dynamics.depositHardness,
+        samples,
+        surface,
+        trialId,
+      );
+    }
+  });
+  const uploadPutStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
+  ctx.putImageData(target, 0, 0);
+  if (brushPerfDebug.enabled) {
+    uploadElapsed += performance.now() - uploadPutStartedAt;
+    perfElapsed("maskUpload", uploadElapsed);
+  }
+}
+
+/** Internal simple-mask evaluator; u/v use the CPU sweep's sample/band indices. */
+export function createSimpleBristleMaskEvaluator(
+  samples: readonly BristleMaskSample[],
+  brushSize: number,
+  dynamics: BristleDynamics,
+  dropoutResponse: number,
+  seed: number,
+): BristleMaskEvaluator {
+  const rows = Math.max(
+    30,
+    Math.ceil(brushSize / Math.max(0.25, dynamics.transverseMaskCellPx)),
+  );
+  const response = clamp(dropoutResponse, 0, 1);
+
+  if (brushPerfDebug.nullStages.nullField) {
+    return { height: rows, evaluate: () => 1 };
+  }
+
+  const dropoutLength = Math.max(4, dynamics.dropoutLengthPx);
+  const dropoutWidth = Math.max(0.5, dynamics.dropoutWidthPx);
+  return {
+    height: rows,
+    evaluate: (u, v) => {
+      const clampedU = clamp(u, 0, samples.length - 1);
+      const fromIndex = Math.floor(clampedU);
+      const toIndex = Math.min(samples.length - 1, fromIndex + 1);
+      const progress = clampedU - fromIndex;
+      const from = samples[fromIndex]?.distance ?? 0;
+      const to = samples[toIndex]?.distance ?? from;
+      const distance = from + (to - from) * progress;
+      // Sweep edges are v=0 / rows-1, matching GPU -halfWidth / +halfWidth.
+      // Evaluate noise at the pixel coordinate, never at band centers.
+      const crossPx = -brushSize / 2 + (v / (rows - 1)) * brushSize;
+      const broad = valueNoise2d(
+        distance / dropoutLength,
+        crossPx / dropoutWidth,
+        seed ^ 0x510e527f,
+      );
+      const pressure = clamp(samplePressure(samples, u), 0, 1);
+      const threshold = response * (1 - pressure);
+      // Zero dropout must stay fully active even in the soft transition band.
+      return threshold === 0 ? 1 : broad - threshold;
+    },
+  };
+}
+
+function rasterizeTriangle(
+  evaluate: (u: number, v: number) => number,
+  target: ImageData,
+  a: RasterVertex,
+  b: RasterVertex,
+  c: RasterVertex,
+  hardness: number,
+  samples: readonly BristleMaskSample[],
+  surface: SurfaceContactRaster | undefined,
+  trialId: number,
+): void {
+  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+  if (Math.abs(denominator) < 0.00001) return;
+  const inverseDenominator = 1 / denominator;
+  const weightADx = (b.y - c.y) * inverseDenominator;
+  const weightADy = (c.x - b.x) * inverseDenominator;
+  const weightBDx = (c.y - a.y) * inverseDenominator;
+  const weightBDy = (a.x - c.x) * inverseDenominator;
+  const uDx = weightADx * (a.u - c.u) + weightBDx * (b.u - c.u);
+  const vDx = weightADx * (a.v - c.v) + weightBDx * (b.v - c.v);
+  const vertices = [a, b, c, a] as const;
+  const minY = Math.max(0, Math.floor(Math.min(a.y, b.y, c.y)));
+  const maxY = Math.min(target.height - 1, Math.ceil(Math.max(a.y, b.y, c.y)));
+  for (let y = minY; y <= maxY; y++) {
+    const sampleY = y + 0.5;
+    let fromX = Number.POSITIVE_INFINITY;
+    let toX = Number.NEGATIVE_INFINITY;
+    let intersectionCount = 0;
+    for (let edgeIndex = 0; edgeIndex < 3; edgeIndex++) {
+      const from = vertices[edgeIndex];
+      const to = vertices[edgeIndex + 1];
+      if (!from || !to) continue;
+      const edgeMinY = Math.min(from.y, to.y);
+      const edgeMaxY = Math.max(from.y, to.y);
+      if (sampleY < edgeMinY || sampleY >= edgeMaxY) continue;
+      const progress = (sampleY - from.y) / (to.y - from.y);
+      const intersection = from.x + (to.x - from.x) * progress;
+      fromX = Math.min(fromX, intersection);
+      toX = Math.max(toX, intersection);
+      intersectionCount++;
+    }
+    if (intersectionCount < 2) continue;
+    const minX = Math.max(0, Math.ceil(fromX - 0.5));
+    const maxX = Math.min(target.width - 1, Math.floor(toX - 0.5));
+    const firstSampleX = minX + 0.5;
+    const weightA =
+      weightADx * (firstSampleX - c.x) + weightADy * (sampleY - c.y);
+    const weightB =
+      weightBDx * (firstSampleX - c.x) + weightBDy * (sampleY - c.y);
+    let u = c.u + weightA * (a.u - c.u) + weightB * (b.u - c.u);
+    let v = c.v + weightA * (a.v - c.v) + weightB * (b.v - c.v);
+    for (let x = minX; x <= maxX; x++) {
+      let alpha = Math.round(
+        activationFromDistance(evaluate(u, v), hardness) * 255,
+      );
+      const offset = (y * target.width + x) * 4;
+      if (
+        alpha > (target.data[offset + 3] ?? 0) &&
+        surface &&
+        !hasSurfaceContact(surface, x, y, samplePressure(samples, u), trialId)
+      ) {
+        alpha = 0;
+      }
+      if (alpha > (target.data[offset + 3] ?? 0)) {
+        target.data[offset] = 255;
+        target.data[offset + 1] = 255;
+        target.data[offset + 2] = 255;
+        target.data[offset + 3] = alpha;
+      }
+      u += uDx;
+      v += vDx;
+    }
+  }
+}
+
+export function createSurfaceContactRaster(
+  dynamics: BristleDynamics,
+  strokeSeed: number,
+  originX: number,
+  originY: number,
+  heightMap: BristleHeightMap | null = null,
+): SurfaceContactRaster | undefined {
+  const grain = dynamics.surfaceGrain;
+  const resolved = resolveBristleToothMap(grain, heightMap);
+  const amount = clamp(grain.amount, 0, 1);
+  if (amount <= 0) return undefined;
+  return {
+    amount,
+    softness: 0.01 + (1 - clamp(grain.hardness, 0, 1)) * 0.24,
+    grainSeed: grain.seed,
+    strokeSeed,
+    ...resolved,
+    originX,
+    originY,
+  };
+}
+
+export function hasSurfaceContact(
+  surface: SurfaceContactRaster,
+  localX: number,
+  localY: number,
+  pressure: number,
+  trialId: number,
+): boolean {
+  if (brushPerfDebug.nullStages.nullContact) return true;
+  const documentX = surface.originX + localX;
+  const documentY = surface.originY + localY;
+  const tileX = positiveModulo(
+    Math.floor(documentX / surface.scalePx),
+    surface.map.width,
+  );
+  const tileY = positiveModulo(
+    Math.floor(documentY / surface.scalePx),
+    surface.map.height,
+  );
+  const height = surface.map.heights[tileY * surface.map.width + tileX] ?? 0;
+  const contact = clamp(pressure, 0, 1);
+  const directCoverage = smoothstep(
+    (contact - height + surface.softness) / (surface.softness * 2),
+  );
+  const directProbability =
+    1 - surface.amount + surface.amount * directCoverage;
+  if (
+    documentHashUnit(
+      surface.grainSeed ^ FIXED_CONTACT_HASH_SALT,
+      documentX,
+      documentY,
+    ) < directProbability
+  ) {
+    return true;
+  }
+
+  const gap = Math.max(0, height - contact);
+  const rate =
+    surface.amount *
+    REPEAT_CONTACT_STRENGTH *
+    Math.exp(-gap / REPEAT_CONTACT_REACH);
+  const probability = 1 - Math.exp(-rate * REPEAT_CONTACT_EXPOSURE_PER_PASS);
+  return (
+    documentHashUnit(
+      hashSeed(surface.strokeSeed ^ REPEAT_CONTACT_HASH_SALT, trialId),
+      documentX,
+      documentY,
+    ) < probability
+  );
+}
+
+function getNullRasterImageData(
+  ctx: OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+): ImageData {
+  const key = `${width}x${height}`;
+  const cached = nullRasterCache.get(key);
+  if (cached) return cached;
+  const image = ctx.createImageData(width, height);
+  nullRasterCache.set(key, image);
+  return image;
+}
+
+function samplePressure(
+  samples: readonly BristleMaskSample[],
+  u: number,
+): number {
+  const clampedU = clamp(u, 0, samples.length - 1);
+  const fromIndex = Math.floor(clampedU);
+  const toIndex = Math.min(samples.length - 1, fromIndex + 1);
+  const progress = clampedU - fromIndex;
+  const from = samples[fromIndex]?.pressure ?? 0;
+  const to = samples[toIndex]?.pressure ?? from;
+  return from + (to - from) * progress;
+}
+
+function documentHashUnit(seed: number, x: number, y: number): number {
+  return hashSeed(hashSeed(seed, x), y) / 0x100000000;
+}
+
+function positiveModulo(value: number, modulus: number): number {
+  const remainder = value % modulus;
+  return remainder < 0 ? remainder + modulus : remainder;
+}
+
+/** Internal CPU/GPU sampling contract; procedural scale is already baked in. */
+export function resolveBristleToothMap(
+  grain: BristleSurfaceGrain,
+  heightMap: BristleHeightMap | null,
+): {
+  readonly map: BristleHeightMap;
+  readonly scalePx: number;
+} {
+  if (heightMap) {
+    validateHeightMap(heightMap);
+    return { map: heightMap, scalePx: grain.scalePx };
+  }
+  const heights = getFineToothHeightTile(grain.seed, grain.scalePx);
+  let map = grainMapCache.get(heights);
+  if (!map) {
+    map = { width: GRAIN_TILE_SIZE, height: GRAIN_TILE_SIZE, heights };
+    grainMapCache.set(heights, map);
+  }
+  return { map, scalePx: 1 };
+}
+
+export function getFineToothHeightTile(
+  seed: number,
+  scalePx: number,
+): Float32Array<ArrayBuffer> {
+  const scale = Math.max(0.5, scalePx);
+  const key = `${seed}:${scale}`;
+  const cached = grainHeightCache.get(key);
+  if (cached) return cached;
+
+  const heights = new Float32Array(GRAIN_TILE_SIZE * GRAIN_TILE_SIZE);
+  for (let y = 0; y < GRAIN_TILE_SIZE; y++) {
+    for (let x = 0; x < GRAIN_TILE_SIZE; x++) {
+      const sx = x / scale;
+      const sy = y / scale;
+      heights[y * GRAIN_TILE_SIZE + x] = clamp(
+        fineToothNoise2d(sx, sy, seed) * 0.68 +
+          fineToothNoise2d(sx * 2.3, sy * 2.3, seed + 17) * 0.32,
+        0,
+        1,
+      );
+    }
+  }
+  grainHeightCache.set(key, heights);
+  if (grainHeightCache.size > GRAIN_HEIGHT_CACHE_LIMIT) {
+    const oldest = grainHeightCache.keys().next().value;
+    if (oldest !== undefined) grainHeightCache.delete(oldest);
+  }
+  return heights;
+}
+
+function fineToothNoise2d(x: number, y: number, seed: number): number {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = smoothstep(x - x0);
+  const ty = smoothstep(y - y0);
+  const top =
+    fineToothHash(seed, x0, y0) * (1 - tx) +
+    fineToothHash(seed, x0 + 1, y0) * tx;
+  const bottom =
+    fineToothHash(seed, x0, y0 + 1) * (1 - tx) +
+    fineToothHash(seed, x0 + 1, y0 + 1) * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
+function fineToothHash(seed: number, x: number, y: number): number {
+  return hashSeed(hashSeed(seed, x), y) / 0x100000000;
+}
+
+function activationFromDistance(distance: number, hardness: number): number {
+  const transition = 0.018 + 0.282 * (1 - clamp(hardness, 0, 1)) ** 2;
+  return smoothstep((distance + transition / 2) / transition);
+}
+
+function valueNoise2d(x: number, y: number, seed: number): number {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = smoothstep(x - x0);
+  const ty = smoothstep(y - y0);
+  const top =
+    hashUnit2d(seed, x0, y0) * (1 - tx) + hashUnit2d(seed, x0 + 1, y0) * tx;
+  const bottom =
+    hashUnit2d(seed, x0, y0 + 1) * (1 - tx) +
+    hashUnit2d(seed, x0 + 1, y0 + 1) * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
+function hashUnit2d(seed: number, x: number, y: number): number {
+  return hashSeed(hashSeed(seed, x), y) / 0x100000000;
+}
+
+function smoothstep(value: number): number {
+  const clamped = clamp(value, 0, 1);
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getContext(
+  canvas: OffscreenCanvas,
+  label: string,
+): OffscreenCanvasRenderingContext2D {
+  const cached = CONTEXT_CACHE.get(canvas);
+  if (cached) return cached;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error(`Failed to get 2d context for ${label}`);
+  CONTEXT_CACHE.set(canvas, ctx);
+  return ctx;
+}

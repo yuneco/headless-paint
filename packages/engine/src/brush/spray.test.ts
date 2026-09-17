@@ -67,10 +67,11 @@ function makeStyle(
 
 function makeInitialState(style: StrokeStyle, seed = 42): BrushRenderState {
   if (style.brush.type !== "spray") {
-    return { tipCanvas: null, seed, branches: [] };
+    return { heightMap: null, tipCanvas: null, seed, branches: [] };
   }
   const tipScale = style.brush.dynamics.sizeJitterMode === "lognormal" ? 4 : 1;
   return {
+    heightMap: null,
     tipCanvas: generateBrushTip(
       style.brush.particle,
       Math.ceil(style.brush.dynamics.particleSize * tipScale),

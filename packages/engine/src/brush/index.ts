@@ -5,6 +5,14 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
+import { renderBristleBrushStroke } from "./bristle";
+import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./gpu/accelerator";
+import { invalidateGpuLayerResidency } from "./gpu/gpu-layer-residency";
+import { isBrushMixingActive } from "./mixing";
+import { brushPerfDebug } from "./perf-debug";
 import { renderSprayBrushStroke } from "./spray";
 import { renderStampBrushStroke } from "./stamp";
 import { DEFAULT_BRUSH_RENDER_STATE } from "./state";
@@ -13,6 +21,7 @@ export { hashSeed, mulberry32 } from "./prng";
 export {
   timeSpacingMsFromRate,
   walkEmissions,
+  type DistanceSpacingAt,
   type EmissionPoint,
 } from "./scheduler";
 export {
@@ -23,13 +32,13 @@ export {
   ensureBrushRenderState,
   getBranchBrushState,
   mergeBrushState,
-  PENDING_COLOR_BUFFER_CACHE,
   stateToBranch,
 } from "./state";
+export { isBrushMixingActive } from "./mixing";
 export {
-  createBrushTipRegistry,
+  createBrushAssetRegistry,
   generateBrushTip,
-  type BrushTipRegistry,
+  type BrushAssetRegistry,
 } from "./tip";
 
 /**
@@ -42,7 +51,12 @@ export function renderBrushStroke(
   overlapCount = 0,
   state?: BrushRenderState,
   sourceLayer?: Layer,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  if (points.length > 0 && style.brush.type !== "round-pen" && !gpuSurface) {
+    invalidateGpuLayerResidency(layer, "cpuBrush");
+  }
   switch (style.brush.type) {
     case "round-pen":
       drawVariableWidthPath(
@@ -57,6 +71,16 @@ export function renderBrushStroke(
       );
       return state ?? DEFAULT_BRUSH_RENDER_STATE;
     case "stamp":
+      if (
+        isBrushMixingActive(style.brush.mixing) &&
+        (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !gpuSurface &&
+        !brushPerfDebug.nullStages.nullFullCopy
+      ) {
+        throw new Error(
+          "Stamp mixing requires a distinct stroke-start sourceLayer snapshot",
+        );
+      }
       return renderStampBrushStroke(
         layer,
         points,
@@ -65,6 +89,7 @@ export function renderBrushStroke(
         state ?? DEFAULT_BRUSH_RENDER_STATE,
         overlapCount,
         sourceLayer ?? layer,
+        accelerator,
       );
     case "spray":
       return renderSprayBrushStroke(
@@ -74,6 +99,27 @@ export function renderBrushStroke(
         style.brush,
         state ?? DEFAULT_BRUSH_RENDER_STATE,
         overlapCount,
+      );
+    case "bristle":
+      if (
+        isBrushMixingActive(style.brush.mixing) &&
+        (!sourceLayer || sourceLayer.canvas === layer.canvas) &&
+        !gpuSurface &&
+        !brushPerfDebug.nullStages.nullFullCopy
+      ) {
+        throw new Error(
+          "Bristle mixing requires a distinct stroke-start sourceLayer snapshot",
+        );
+      }
+      return renderBristleBrushStroke(
+        layer,
+        points,
+        style,
+        style.brush,
+        state ?? DEFAULT_BRUSH_RENDER_STATE,
+        overlapCount,
+        sourceLayer ?? layer,
+        accelerator,
       );
   }
 }

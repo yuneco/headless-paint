@@ -95,7 +95,7 @@ interface SamplingState {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `lastPoint` | `Point \| null` | 最後に採用された座標。初期状態は `null` |
-| `lastTimestamp` | `number \| null` | 最後に採用された時刻（ms）。初期状態は `null` |
+| `lastTimestamp` | `number \| null` | 最後に採用された時刻（ms）。これより古い候補は評価しない |
 
 **使用例**:
 ```typescript
@@ -179,12 +179,13 @@ const point: InputPoint = {
 フィルタの種類。
 
 ```typescript
-type FilterType = "smoothing" | "straight-line";
+type FilterType = "smoothing" | "causal-adaptive" | "straight-line";
 ```
 
 | 値 | 説明 |
 |---|---|
 | `"smoothing"` | スムージング（移動平均）フィルタ |
+| `"causal-adaptive"` | 過去情報だけを使う速度・急旋回適応型の補正。pendingを生成しない |
 | `"straight-line"` | 直線フィルタ（始点→終点の2点に圧縮） |
 
 ---
@@ -219,6 +220,15 @@ const config: SmoothingConfig = { windowSize: 5 };
 interface StraightLineConfig {}
 ```
 
+## CausalAdaptiveConfig
+
+過去の入力だけを使う適応補正の設定。現在はLabで評価した固定応答を使うため設定項目を持たない。各入力を即時確定し、筆圧とtimestampは入力値を保持する。
+
+```typescript
+// biome-ignore lint/suspicious/noEmptyInterface: 将来の調整項目用
+interface CausalAdaptiveConfig {}
+```
+
 ---
 
 ## FilterConfig
@@ -228,6 +238,7 @@ interface StraightLineConfig {}
 ```typescript
 type FilterConfig =
   | { readonly type: "smoothing"; readonly config: SmoothingConfig }
+  | { readonly type: "causal-adaptive"; readonly config: CausalAdaptiveConfig }
   | { readonly type: "straight-line"; readonly config: StraightLineConfig };
 ```
 

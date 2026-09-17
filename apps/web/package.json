@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "dev:https": "HP_DEV_HTTPS=1 vite --host",
     "build": "vite build",
     "preview": "vite preview"
   },

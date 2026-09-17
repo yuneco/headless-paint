@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_BRUSH_MIXING } from "../types";
+import { prepareMixingState } from "./mixing";
 import { hashSeed } from "./prng";
 import {
   cloneBrushRenderState,
@@ -10,8 +12,23 @@ import {
 } from "./state";
 
 describe("brush render state", () => {
+  it("clone, branch expansion and merge preserve the same height map reference", () => {
+    const heightMap = { width: 1, height: 1, heights: new Float32Array([0.5]) };
+    const state = { ...createDefaultBrushState(), heightMap };
+    const clone = cloneBrushRenderState(state);
+    expect(clone).not.toBe(state);
+    expect(clone?.heightMap).toBe(heightMap);
+    expect(clone?.heightMap?.heights).toBe(heightMap.heights);
+    const expanded = ensureBrushRenderState(state, 3);
+    expect(expanded.heightMap).toBe(heightMap);
+    expect(getBranchBrushState(expanded, 2).heightMap).toBe(heightMap);
+    expect(mergeBrushState(expanded, expanded.branches).heightMap).toBe(
+      heightMap,
+    );
+  });
   it("default state は常に branches を持つ", () => {
     expect(createDefaultBrushState()).toEqual({
+      heightMap: null,
       tipCanvas: null,
       seed: 0,
       branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
@@ -21,6 +38,7 @@ describe("brush render state", () => {
   it("branch 数を補完し、branch seed を hashSeed(seed, branchIndex) にする", () => {
     const state = ensureBrushRenderState(
       {
+        heightMap: null,
         tipCanvas: null,
         seed: 123,
         branches: [{ accumulatedDistance: 10, emissionCount: 2 }],
@@ -43,6 +61,7 @@ describe("brush render state", () => {
 
   it("branch 描画結果を root state に merge する", () => {
     const root = {
+      heightMap: null,
       tipCanvas: null,
       seed: 123,
       branches: [
@@ -51,6 +70,7 @@ describe("brush render state", () => {
       ],
     };
     const rendered = {
+      heightMap: null,
       tipCanvas: null,
       seed: hashSeed(123, 1),
       branches: [{ accumulatedDistance: 20, emissionCount: 5 }],
@@ -59,6 +79,7 @@ describe("brush render state", () => {
     branches[1] = stateToBranch(rendered);
 
     expect(mergeBrushState(root, branches)).toEqual({
+      heightMap: null,
       tipCanvas: null,
       seed: 123,
       branches: [
@@ -68,14 +89,17 @@ describe("brush render state", () => {
     });
   });
 
-  it("pending clone は mixing canvas を別 canvas にコピーする", () => {
-    const colorBuffer = new OffscreenCanvas(2, 2);
-    const colorCtx = colorBuffer.getContext("2d");
-    if (!colorCtx) throw new Error("Failed to get 2d context");
-    colorCtx.fillStyle = "rgb(255, 0, 0)";
-    colorCtx.fillRect(0, 0, 2, 2);
+  it("mixing state clone はnumeric fieldとcanvas ownershipを分離する", () => {
+    const tipCanvas = new OffscreenCanvas(4, 4);
+    const mixing = prepareMixingState(
+      tipCanvas,
+      { r: 255, g: 0, b: 0, a: 255 },
+      DEFAULT_BRUSH_MIXING,
+      undefined,
+    );
 
     const state = {
+      heightMap: null,
       tipCanvas: null,
       seed: 1,
       branches: [
@@ -83,22 +107,32 @@ describe("brush render state", () => {
           accumulatedDistance: 3,
           emissionCount: 4,
           mixing: {
-            colorBuffer,
-            lastMixingUpdateDistance: 10,
+            ...mixing,
+            checkpointPixels: new ImageData(3, 2),
+            lastUpdateDistance: 10,
           },
         },
       ],
     };
 
     const cloned = cloneBrushRenderState(state);
-    const clonedBuffer = cloned?.branches[0].mixing?.colorBuffer;
-    expect(clonedBuffer).toBeInstanceOf(OffscreenCanvas);
-    expect(clonedBuffer).not.toBe(colorBuffer);
-    expect(cloned?.branches[0].mixing?.lastMixingUpdateDistance).toBe(10);
+    const clonedMixing = cloned?.branches[0].mixing;
+    expect(clonedMixing?.fieldCanvas).toBeInstanceOf(OffscreenCanvas);
+    expect(clonedMixing?.fieldCanvas).not.toBe(mixing.fieldCanvas);
+    expect(clonedMixing?.checkpointPixels).toBeInstanceOf(ImageData);
+    expect(clonedMixing?.checkpointPixels).not.toBe(
+      state.branches[0]?.mixing?.checkpointPixels,
+    );
+    expect(clonedMixing?.field).not.toBe(mixing.field);
+    expect(Array.from(clonedMixing?.field ?? [])).toEqual(
+      Array.from(mixing.field),
+    );
+    expect(clonedMixing?.lastUpdateDistance).toBe(10);
   });
 
   it("pending clone は時間 emission 状態も複製する", () => {
     const state = {
+      heightMap: null,
       tipCanvas: null,
       seed: 1,
       branches: [
@@ -114,5 +148,25 @@ describe("brush render state", () => {
     const cloned = cloneBrushRenderState(state);
     expect(cloned?.branches[0].lastTimestamp).toBe(120);
     expect(cloned?.branches[0].nextTimeEmissionAt).toBe(145);
+  });
+
+  it("pending clone はstampの筆圧平滑化状態も複製する", () => {
+    const pressure = { value: 0.42, timestamp: 120 };
+    const state = {
+      heightMap: null,
+      tipCanvas: null,
+      seed: 1,
+      branches: [
+        {
+          accumulatedDistance: 3,
+          emissionCount: 4,
+          pressure,
+        },
+      ],
+    };
+
+    const cloned = cloneBrushRenderState(state);
+    expect(cloned?.branches[0].pressure).toEqual(pressure);
+    expect(cloned?.branches[0].pressure).not.toBe(pressure);
   });
 });

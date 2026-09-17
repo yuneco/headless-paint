@@ -1,14 +1,16 @@
 import type {
   BackgroundSettings,
+  BrushAssetRegistry,
   BrushConfig,
-  BrushTipRegistry,
   Layer,
 } from "@headless-paint/engine";
 import type { ViewTransform } from "@headless-paint/input";
 import type { LayerEntry } from "@headless-paint/react";
 import type { HistoryState } from "@headless-paint/stroke";
 import { memo } from "react";
+import type { StrokeCallMetrics } from "../debug/useStrokeCallMetrics";
 import { AccordionPanel } from "./AccordionPanel";
+import { BrushEvaluationPanel } from "./BrushEvaluationPanel";
 import { BrushPanel } from "./BrushPanel";
 import { HistoryContent, getHistoryEntryCount } from "./HistoryContent";
 import { LayerPanel } from "./LayerPanel";
@@ -28,8 +30,15 @@ interface SidebarPanelProps {
   // Brush panel props
   brush: BrushConfig;
   onBrushChange: (brush: BrushConfig) => void;
-  registry: BrushTipRegistry;
+  readonly registry: BrushAssetRegistry;
   registryReady: boolean;
+  strokeCallMetrics: StrokeCallMetrics;
+  onResetStrokeCallMetrics: () => void;
+  onDrawBristleSCurve?: () => void;
+  inputCaptureStatus: "idle" | "armed" | "capturing" | "captured";
+  inputCapturePointCount: number;
+  onArmInputCapture: () => void;
+  onCopyInputCapture?: () => void;
   // Layer panel props
   entries: readonly LayerEntry[];
   activeLayerId: string | null;
@@ -86,7 +95,7 @@ const MinimapSection = memo(function MinimapSection({
 interface BrushSectionProps {
   brush: BrushConfig;
   onBrushChange: (brush: BrushConfig) => void;
-  registry: BrushTipRegistry;
+  readonly registry: BrushAssetRegistry;
   registryReady: boolean;
 }
 
@@ -108,6 +117,54 @@ const BrushSection = memo(function BrushSection({
         onBrushChange={onBrushChange}
         registry={registry}
         registryReady={registryReady}
+      />
+    </AccordionPanel>
+  );
+});
+
+interface EvaluationSectionProps {
+  readonly registry: BrushAssetRegistry;
+  readonly brush: BrushConfig;
+  readonly onBrushChange: (brush: BrushConfig) => void;
+  readonly metrics: StrokeCallMetrics;
+  readonly onResetMetrics: () => void;
+  readonly onDrawBristleSCurve?: () => void;
+  readonly inputCaptureStatus: "idle" | "armed" | "capturing" | "captured";
+  readonly inputCapturePointCount: number;
+  readonly onArmInputCapture: () => void;
+  readonly onCopyInputCapture?: () => void;
+}
+
+const EvaluationSection = memo(function EvaluationSection({
+  registry,
+  brush,
+  onBrushChange,
+  metrics,
+  onResetMetrics,
+  onDrawBristleSCurve,
+  inputCaptureStatus,
+  inputCapturePointCount,
+  onArmInputCapture,
+  onCopyInputCapture,
+}: EvaluationSectionProps) {
+  return (
+    <AccordionPanel
+      title="Material brush evaluation"
+      defaultExpanded={false}
+      isFirst={false}
+      isLast={false}
+    >
+      <BrushEvaluationPanel
+        registry={registry}
+        brush={brush}
+        onBrushChange={onBrushChange}
+        metrics={metrics}
+        onResetMetrics={onResetMetrics}
+        onDrawBristleSCurve={onDrawBristleSCurve}
+        inputCaptureStatus={inputCaptureStatus}
+        inputCapturePointCount={inputCapturePointCount}
+        onArmInputCapture={onArmInputCapture}
+        onCopyInputCapture={onCopyInputCapture}
       />
     </AccordionPanel>
   );
@@ -236,6 +293,13 @@ function SidebarPanelComponent({
   onBrushChange,
   registry,
   registryReady,
+  strokeCallMetrics,
+  onResetStrokeCallMetrics,
+  onDrawBristleSCurve,
+  inputCaptureStatus,
+  inputCapturePointCount,
+  onArmInputCapture,
+  onCopyInputCapture,
   entries,
   activeLayerId,
   background,
@@ -261,6 +325,10 @@ function SidebarPanelComponent({
         top: 16,
         left: 16,
         width: 280,
+        maxHeight: "calc(100vh - 32px)",
+        overflowY: "auto",
+        overscrollBehavior: "contain",
+        WebkitOverflowScrolling: "touch",
       }}
     >
       <MinimapSection
@@ -276,6 +344,20 @@ function SidebarPanelComponent({
         registry={registry}
         registryReady={registryReady}
       />
+      {registryReady && (
+        <EvaluationSection
+          registry={registry}
+          brush={brush}
+          onBrushChange={onBrushChange}
+          metrics={strokeCallMetrics}
+          onResetMetrics={onResetStrokeCallMetrics}
+          onDrawBristleSCurve={onDrawBristleSCurve}
+          inputCaptureStatus={inputCaptureStatus}
+          inputCapturePointCount={inputCapturePointCount}
+          onArmInputCapture={onArmInputCapture}
+          onCopyInputCapture={onCopyInputCapture}
+        />
+      )}
       <LayersSection
         entries={entries}
         activeLayerId={activeLayerId}

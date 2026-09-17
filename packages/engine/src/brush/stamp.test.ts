@@ -63,6 +63,7 @@ describe("renderBrushStroke", () => {
       const style = makeStyle();
       const result = renderBrushStroke(layer, points, style);
       expect(result).toEqual({
+        heightMap: null,
         tipCanvas: null,
         seed: 0,
         branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
@@ -74,6 +75,7 @@ describe("renderBrushStroke", () => {
       const points = makeLine(10, 50, 90, 50, 5);
       const style = makeStyle();
       const inputState: BrushRenderState = {
+        heightMap: null,
         tipCanvas: null,
         seed: 123,
         branches: [{ accumulatedDistance: 42, emissionCount: 0 }],
@@ -104,6 +106,7 @@ describe("renderBrushStroke", () => {
         tip: { type: "circle"; hardness: number };
       };
       return {
+        heightMap: null,
         tipCanvas: generateBrushTip(
           brush.tip,
           Math.ceil(style.lineWidth * 2),
@@ -126,11 +129,65 @@ describe("renderBrushStroke", () => {
       expect(result.seed).toBe(42);
     });
 
+    it("低筆圧では実効tip径へのspacing追従により点線化を抑える", () => {
+      const points: StrokePoint[] = [
+        { x: 10, y: 50, pressure: 0.1 },
+        { x: 90, y: 50, pressure: 0.1 },
+      ];
+      const fixedStyle = makeStyle({
+        lineWidth: 20,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 0.25,
+            spacingSizeCoupling: 0,
+          },
+          pressureDynamics: { size: 1, flow: 0 },
+        },
+      });
+      if (fixedStyle.brush.type !== "stamp") {
+        throw new Error("Expected stamp brush");
+      }
+      const coupledStyle = makeStyle({
+        ...fixedStyle,
+        brush: {
+          ...fixedStyle.brush,
+          dynamics: {
+            ...fixedStyle.brush.dynamics,
+            spacingSizeCoupling: 1,
+          },
+        },
+      });
+
+      const fixed = renderBrushStroke(
+        createLayer(100, 100),
+        points,
+        fixedStyle,
+        0,
+        makeInitialState(fixedStyle),
+      );
+      const coupled = renderBrushStroke(
+        createLayer(100, 100),
+        points,
+        coupledStyle,
+        0,
+        makeInitialState(coupledStyle),
+      );
+
+      expect(primaryBranch(coupled).emissionCount).toBeGreaterThan(
+        primaryBranch(fixed).emissionCount,
+      );
+      expect(primaryBranch(coupled).distanceEmissionProgress).toBeDefined();
+    });
+
     it("tipCanvas が null の場合は描画をスキップする", () => {
       const layer = createLayer(100, 100);
       const points = makeLine(10, 50, 90, 50, 5);
       const style = makeStampStyle();
       const state: BrushRenderState = {
+        heightMap: null,
         tipCanvas: null,
         seed: 0,
         branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
@@ -305,6 +362,7 @@ describe("renderBrushStroke", () => {
       });
       const layer1 = createLayer(200, 200);
       renderBrushStroke(layer1, points, style1, 0, {
+        heightMap: null,
         tipCanvas: generateBrushTip(
           { type: "circle", hardness: 1.0 },
           16,
@@ -331,6 +389,7 @@ describe("renderBrushStroke", () => {
       });
       const layer2 = createLayer(200, 200);
       renderBrushStroke(layer2, points, style2, 0, {
+        heightMap: null,
         tipCanvas: generateBrushTip(
           { type: "circle", hardness: 1.0 },
           16,
@@ -445,7 +504,65 @@ describe("renderBrushStroke", () => {
       expect(relError).toBeLessThan(0.01);
     });
 
-    it("混色は背景footprintの局所色差をcolorBufferに保持する", () => {
+    it("筆圧平滑化状態はincrementalとreplayで一致する", () => {
+      const style = makeStyle({
+        lineWidth: 20,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 0.1,
+          },
+          pressureDynamics: { size: 1, flow: 0.5, smoothingMs: 50 },
+        },
+      });
+      const points: StrokePoint[] = Array.from({ length: 25 }, (_, index) => ({
+        x: 20 + index * 5,
+        y: 60,
+        pressure: 0.45 + Math.sin(index * 0.7) * 0.25,
+        timestamp: index * 4,
+      }));
+
+      const incrementalLayer = createLayer(160, 120);
+      const first = renderBrushStroke(
+        incrementalLayer,
+        points.slice(0, 14),
+        style,
+        0,
+        makeInitialState(style),
+      );
+      const incremental = renderBrushStroke(
+        incrementalLayer,
+        points.slice(11),
+        style,
+        3,
+        first,
+      );
+
+      const replayLayer = createLayer(160, 120);
+      const replay = renderBrushStroke(
+        replayLayer,
+        points,
+        style,
+        0,
+        makeInitialState(style),
+      );
+
+      expect(primaryBranch(incremental).pressure?.value).toBeCloseTo(
+        primaryBranch(replay).pressure?.value ?? 0,
+        6,
+      );
+      expect(primaryBranch(incremental).pressure?.timestamp).toBeCloseTo(
+        primaryBranch(replay).pressure?.timestamp ?? 0,
+        6,
+      );
+      expect(incrementalLayer.ctx.getImageData(0, 0, 160, 120).data).toEqual(
+        replayLayer.ctx.getImageData(0, 0, 160, 120).data,
+      );
+    });
+
+    it("混色は現在dabを元色でdepositし、次位置用fieldへ局所色差を保持する", () => {
       const source = createLayer(100, 100);
       source.ctx.fillStyle = "rgb(255, 0, 0)";
       source.ctx.fillRect(0, 0, 50, 100);
@@ -454,7 +571,7 @@ describe("renderBrushStroke", () => {
 
       const target = createLayer(100, 100);
       const style = makeStyle({
-        color: { r: 0, g: 0, b: 255, a: 255 },
+        color: { r: 0, g: 180, b: 40, a: 255 },
         lineWidth: 20,
         brush: {
           type: "stamp",
@@ -467,8 +584,9 @@ describe("renderBrushStroke", () => {
           mixing: {
             ...DEFAULT_BRUSH_MIXING,
             enabled: true,
-            pickup: 1,
-            restore: 0,
+            pickupRatePerPx: 10,
+            restoreRatePerPx: 0,
+            diffusionRatePerPx: 0,
           },
           pressureDynamics: { size: 0, flow: 0 },
         },
@@ -484,16 +602,139 @@ describe("renderBrushStroke", () => {
         source,
       );
 
-      const left = target.ctx.getImageData(44, 50, 1, 1).data;
-      const right = target.ctx.getImageData(56, 50, 1, 1).data;
-      expect(left[0]).toBeGreaterThan(left[2]);
-      expect(right[2]).toBeGreaterThan(right[0]);
-      expect(result.branches[0].mixing?.colorBuffer).toBeInstanceOf(
-        OffscreenCanvas,
-      );
+      const deposit = target.ctx.getImageData(50, 50, 1, 1).data;
+      expect(deposit[1]).toBeGreaterThan(deposit[0]);
+      expect(deposit[1]).toBeGreaterThan(deposit[2]);
+
+      const field = result.branches[0].mixing?.field;
+      expect(field).toBeInstanceOf(Float32Array);
+      if (!field) throw new Error("Expected mixing field");
+      const leftOffset = 4 * 4;
+      const rightOffset = 4 * 13;
+      expect(field[leftOffset]).toBeGreaterThan(field[leftOffset + 2]);
+      expect(field[rightOffset + 2]).toBeGreaterThan(field[rightOffset]);
     });
 
-    it("混色更新はpx指定でスタンプ配置より低い距離頻度にできる", () => {
+    it("混色には描画先と独立したstroke-start sourceLayerを要求する", () => {
+      const layer = createLayer(100, 100);
+      const style = makeStyle({
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: DEFAULT_BRUSH_DYNAMICS,
+          pressureDynamics: { size: 0, flow: 0 },
+          mixing: { ...DEFAULT_BRUSH_MIXING, enabled: true },
+        },
+      });
+
+      expect(() =>
+        renderBrushStroke(
+          layer,
+          [{ x: 50, y: 50, pressure: 1 }],
+          style,
+          0,
+          makeInitialState(style),
+        ),
+      ).toThrow(/distinct stroke-start sourceLayer snapshot/);
+      expect(() =>
+        renderBrushStroke(
+          layer,
+          [{ x: 50, y: 50, pressure: 1 }],
+          style,
+          0,
+          makeInitialState(style),
+          layer,
+        ),
+      ).toThrow(/distinct stroke-start sourceLayer snapshot/);
+    });
+
+    it("局所色を接触前方へ漏らさず進行方向の後方へ引く", () => {
+      const source = createLayer(120, 60);
+      source.ctx.fillStyle = "rgb(255, 0, 0)";
+      source.ctx.fillRect(48, 0, 8, 60);
+      const target = createLayer(120, 60);
+      const style = makeStyle({
+        color: { r: 0, g: 40, b: 255, a: 255 },
+        lineWidth: 12,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 0.08,
+            flow: 1,
+          },
+          pressureDynamics: { size: 0, flow: 0 },
+          mixing: {
+            ...DEFAULT_BRUSH_MIXING,
+            enabled: true,
+            pickupRatePerPx: 2,
+            restoreRatePerPx: 0,
+            diffusionRatePerPx: 0.2,
+            updateDistancePx: 1,
+            checkpointDistancePx: 200,
+          },
+        },
+      });
+
+      renderBrushStroke(
+        target,
+        makeLine(18, 30, 100, 30, 42),
+        style,
+        0,
+        makeInitialState(style),
+        source,
+      );
+
+      const before = target.ctx.getImageData(28, 30, 1, 1).data;
+      const after = target.ctx.getImageData(70, 30, 1, 1).data;
+      expect(before[2]).toBeGreaterThan(before[0]);
+      expect(after[0]).toBeGreaterThan(after[2]);
+    });
+
+    it("描画済み色の再取得checkpointはlayer全体ではなく有限tileを保持する", () => {
+      const source = createLayer(600, 400);
+      const target = createLayer(600, 400);
+      const style = makeStyle({
+        lineWidth: 20,
+        brush: {
+          type: "stamp",
+          tip: { type: "circle", hardness: 1 },
+          dynamics: {
+            ...DEFAULT_BRUSH_DYNAMICS,
+            spacing: 0.1,
+            flow: 1,
+          },
+          pressureDynamics: { size: 0, flow: 0 },
+          mixing: {
+            ...DEFAULT_BRUSH_MIXING,
+            enabled: true,
+            updateDistancePx: 2,
+            checkpointDistancePx: 10,
+          },
+        },
+      });
+
+      const result = renderBrushStroke(
+        target,
+        makeLine(50, 200, 300, 200, 40),
+        style,
+        0,
+        makeInitialState(style),
+        source,
+      );
+      const checkpoint = result.branches[0]?.mixing?.checkpointCanvas;
+      const checkpointPixels = result.branches[0]?.mixing?.checkpointPixels;
+
+      expect(checkpoint).toBeDefined();
+      expect(checkpointPixels).toBeDefined();
+      expect(checkpointPixels?.width).toBe(checkpoint?.width);
+      expect(checkpointPixels?.height).toBe(checkpoint?.height);
+      expect(checkpoint?.width).toBeLessThan(source.width);
+      expect(checkpoint?.height).toBeLessThan(source.height);
+    });
+
+    it("混色更新はupdateDistanceごとに次のdabへ反映される", () => {
       const style = makeStyle({
         color: { r: 0, g: 180, b: 40, a: 255 },
         lineWidth: 10,
@@ -505,7 +746,13 @@ describe("renderBrushStroke", () => {
             spacing: 0.1,
             flow: 1,
           },
-          mixing: { ...DEFAULT_BRUSH_MIXING, enabled: true, pickup: 1 },
+          mixing: {
+            ...DEFAULT_BRUSH_MIXING,
+            enabled: true,
+            pickupRatePerPx: 10,
+            restoreRatePerPx: 0,
+            diffusionRatePerPx: 0,
+          },
           pressureDynamics: { size: 0, flow: 0 },
         },
       });
@@ -527,8 +774,9 @@ describe("renderBrushStroke", () => {
             mixing: {
               ...DEFAULT_BRUSH_MIXING,
               enabled: true,
-              pickup: 1,
-              restore: 0,
+              pickupRatePerPx: 10,
+              restoreRatePerPx: 0,
+              diffusionRatePerPx: 0,
               updateDistancePx,
             },
           },
@@ -541,19 +789,23 @@ describe("renderBrushStroke", () => {
           makeInitialState(nextStyle),
           source,
         );
-        return target.ctx.getImageData(75, 50, 1, 1).data;
+        const pixels = target.ctx.getImageData(60, 45, 16, 11).data;
+        let red = 0;
+        let green = 0;
+        let blue = 0;
+        for (let offset = 0; offset < pixels.length; offset += 4) {
+          red += pixels[offset] ?? 0;
+          green += pixels[offset + 1] ?? 0;
+          blue += pixels[offset + 2] ?? 0;
+        }
+        return { red, green, blue };
       }
 
-      const everyStamp = renderEndPixel(1);
-      const defaultDistance = renderEndPixel(
-        DEFAULT_BRUSH_MIXING.updateDistancePx,
-      );
-      const missingDistance = renderEndPixel(undefined as unknown as number);
+      const frequent = renderEndPixel(1);
       const sparse = renderEndPixel(100);
 
-      expect(everyStamp[2]).toBeGreaterThan(everyStamp[0]);
-      expect(Array.from(missingDistance)).toEqual(Array.from(defaultDistance));
-      expect(sparse[0]).toBeGreaterThan(sparse[2]);
+      expect(frequent.blue).toBeGreaterThan(frequent.red);
+      expect(sparse.red).toBeGreaterThan(sparse.blue);
     });
   });
 });

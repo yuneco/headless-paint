@@ -103,7 +103,7 @@ export interface FilterPlugin {
 /**
  * フィルタの種類
  */
-export type FilterType = "smoothing" | "straight-line";
+export type FilterType = "smoothing" | "causal-adaptive" | "straight-line";
 
 /**
  * スムージングフィルタの設定
@@ -112,6 +112,13 @@ export interface SmoothingConfig {
   /** 移動平均のウィンドウサイズ（3以上の奇数推奨） */
   readonly windowSize: number;
 }
+
+/**
+ * 過去の入力だけを使う速度・急旋回適応型スムージング。
+ * 現時点ではLabで評価した固定応答をproduction既定値として使う。
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: FilterConfig union の一貫性と将来の調整余地のため型を用意
+export interface CausalAdaptiveConfig {}
 
 /**
  * 直線フィルタの設定
@@ -124,6 +131,7 @@ export interface StraightLineConfig {}
  */
 export type FilterConfig =
   | { readonly type: "smoothing"; readonly config: SmoothingConfig }
+  | { readonly type: "causal-adaptive"; readonly config: CausalAdaptiveConfig }
   | { readonly type: "straight-line"; readonly config: StraightLineConfig };
 
 // ============================================================

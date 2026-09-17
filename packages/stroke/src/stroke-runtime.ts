@@ -1,13 +1,16 @@
 import {
   clearLayer,
   compileExpand,
+  copyLayerPixels,
   createLayer,
+  isBrushMixingActive,
   renderPendingLayer,
   timeSpacingMsFromRate,
 } from "@headless-paint/engine";
 import type {
+  BrushAccelerator,
+  BrushAssetRegistry,
   BrushRenderState,
-  BrushTipRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
@@ -26,6 +29,8 @@ import type {
   FilterPipelineState,
   InputPoint,
 } from "@headless-paint/input";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
+import { getGpuUndoRuntime, retainGpuUndo } from "./gpu-undo-cache";
 import {
   createIncrementalStrokeRenderer,
   createInitialBrushState,
@@ -52,11 +57,14 @@ export interface StrokeRuntimeDeps {
   readonly onCommit: (command: StrokeCommand) => void;
   readonly onDrawingChanged: (isDrawing: boolean) => void;
   readonly randomSeed?: () => number;
+  readonly accelerator?: BrushAccelerator | null;
+  readonly restoreLayerBeforeStroke?: (layer: Layer) => void;
 }
 
 export interface StrokeRuntime {
   start(point: InputPoint, config: StrokeStartConfig): void;
   move(point: InputPoint): void;
+  moveMany(points: readonly InputPoint[]): void;
   confirm(): void;
   end(): void;
   cancel(): void;
@@ -73,8 +81,8 @@ export interface StrokeStartConfig {
   readonly alphaLocked: boolean;
   readonly brushSeed?: number;
   readonly pendingOnly?: boolean;
-  /** image tip ブラシ（ImageTipConfig）に必須。未指定だと該当ブラシで engine が throw する */
-  readonly tipRegistry?: BrushTipRegistry;
+  /** image tip / heightMapId 指定の bristle に必須。未登録 ID は開始時に throw */
+  readonly registry?: BrushAssetRegistry;
 }
 
 interface FrozenStrokeConfig {
@@ -92,7 +100,37 @@ interface PendingStart {
   readonly config: StrokeStartConfig;
 }
 
+const MAX_GPU_COMMIT_POLLS = 8;
+
 const DEFAULT_RANDOM_SEED = (): number => (Math.random() * 0xffffffff) | 0;
+
+function getPerfDebug():
+  | {
+      readonly enabled: boolean;
+      beginBatch(
+        pointCount: number,
+        branchCount: number,
+        kind?: "moveMany" | "strokeStart",
+      ): void;
+      endBatch(): void;
+      recordStage(name: string, startedAt: number): void;
+    }
+  | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      __hpBrushPerf?: {
+        readonly enabled: boolean;
+        beginBatch(
+          pointCount: number,
+          branchCount: number,
+          kind?: "moveMany" | "strokeStart",
+        ): void;
+        endBatch(): void;
+        recordStage(name: string, startedAt: number): void;
+      };
+    }
+  ).__hpBrushPerf;
+}
 
 export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   const randomSeed = deps.randomSeed ?? DEFAULT_RANDOM_SEED;
@@ -101,6 +139,8 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   let disposed = false;
   let drawing = false;
   let emissionTimer: unknown | null = null;
+  let gpuCommitTimer: unknown | null = null;
+  let gpuCommitPollGeneration = 0;
   let pendingStart: PendingStart | null = null;
 
   let strokeSession: StrokeSessionState | null = null;
@@ -130,10 +170,33 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       pendingStart = null;
     },
     move(point) {
+      runtime.moveMany([point]);
+    },
+    moveMany(points) {
       if (disposed || machine.phase !== "active" || !strokeSession) return;
-      feedPoint(point);
-      const result = transition({ type: "move" });
-      executeEffects(result.effects, "move");
+      const perf = getPerfDebug();
+      perf?.beginBatch(
+        points.length,
+        frozenConfig?.compiledExpand.outputCount ?? 1,
+      );
+      const moveStartedAt = perf?.enabled ? performance.now() : 0;
+      try {
+        let lastResult: ReturnType<typeof transition> | null = null;
+        const feedStartedAt = perf?.enabled ? performance.now() : 0;
+        for (const point of points) {
+          feedPoint(point);
+          lastResult = transition({ type: "move" });
+        }
+        if (perf?.enabled) perf.recordStage("feedPoint", feedStartedAt);
+        const effectsStartedAt = perf?.enabled ? performance.now() : 0;
+        if (lastResult) executeEffects(lastResult.effects, "move");
+        if (perf?.enabled) {
+          perf.recordStage("executeEffects", effectsStartedAt);
+        }
+      } finally {
+        if (perf?.enabled) perf.recordStage("moveMany", moveStartedAt);
+        perf?.endBatch();
+      }
     },
     confirm() {
       if (disposed) return;
@@ -172,16 +235,20 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     effects: readonly StrokeMachineEffect[],
     eventType: StrokeMachineEvent["type"],
   ): void {
+    const perf = getPerfDebug();
     for (const effect of effects) {
+      const fxStartedAt = perf?.enabled ? performance.now() : 0;
       switch (effect.type) {
         case "snapshot-layer":
           snapshotLayer();
           break;
         case "append-committed":
           appendCommitted(eventType);
+          if (perf?.enabled) perf.recordStage("fxAppendCommitted", fxStartedAt);
           break;
         case "render-pending":
           renderPending();
+          if (perf?.enabled) perf.recordStage("fxRenderPending", fxStartedAt);
           break;
         case "schedule-emission":
           scheduleEmission();
@@ -211,6 +278,11 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       installPendingStart(pendingStart);
     }
     if (!frozenConfig) return;
+    if (renderer?.usesGpu) {
+      committedSnapshot = undefined;
+      samplingLayer = undefined;
+      return;
+    }
     committedSnapshot = cloneLayerContent(frozenConfig.layer);
     samplingLayer = needsSamplingLayer(frozenConfig.style)
       ? committedSnapshot
@@ -218,6 +290,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function installPendingStart(start: PendingStart): void {
+    getGpuUndoRuntime(deps.accelerator)?.discardUndoSnapshot();
     const compiledFilterPipeline = compileFilterPipeline(
       start.config.filterPipeline,
     );
@@ -236,7 +309,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     const initialBrush = createInitialBrushState(
       start.config.style,
       start.config.brushSeed ?? randomSeed(),
-      start.config.tipRegistry,
+      start.config.registry,
     );
 
     frozenConfig = {
@@ -260,7 +333,13 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       expand: start.config.expand,
       brushSeed,
       alphaLocked: start.config.alphaLocked,
-      registry: start.config.tipRegistry,
+      registry: start.config.registry,
+      initialBrushState: initialBrush.brushState,
+      accelerator: deps.accelerator,
+      restoreLayerOnGpuLoss: deps.restoreLayerBeforeStroke
+        ? () => deps.restoreLayerBeforeStroke?.(start.config.layer)
+        : undefined,
+      onGpuCommitPending: scheduleGpuCommitPoll,
       onRenderUpdate: (update) => {
         brushState = update.brushState;
       },
@@ -301,12 +380,9 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
 
   function feedPendingRendererPoints(): void {
     if (!renderer) return;
-    while (rendererFedPointCount < inputPoints.length) {
-      const point = inputPoints[rendererFedPointCount];
-      if (!point) return;
-      renderer.feed(point);
-      rendererFedPointCount++;
-    }
+    if (rendererFedPointCount >= inputPoints.length) return;
+    renderer.feedMany(inputPoints.slice(rendererFedPointCount));
+    rendererFedPointCount = inputPoints.length;
   }
 
   function renderPending(): void {
@@ -321,6 +397,32 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
       brushState,
       samplingLayer ?? frozenConfig.layer,
     );
+  }
+
+  function scheduleGpuCommitPoll(poll: () => boolean, drain: () => void): void {
+    cancelGpuCommitPoll();
+    const generation = gpuCommitPollGeneration;
+    let polls = 0;
+    const tick = () => {
+      if (disposed || generation !== gpuCommitPollGeneration) return;
+      gpuCommitTimer = null;
+      polls++;
+      if (poll()) {
+        deps.requestRender();
+      } else if (polls >= MAX_GPU_COMMIT_POLLS) {
+        drain();
+        deps.requestRender();
+      } else {
+        gpuCommitTimer = deps.setTimeout(tick, 0);
+      }
+    };
+    gpuCommitTimer = deps.setTimeout(tick, 0);
+  }
+
+  function cancelGpuCommitPoll(): void {
+    gpuCommitPollGeneration++;
+    if (gpuCommitTimer !== null) deps.clearTimeout(gpuCommitTimer);
+    gpuCommitTimer = null;
   }
 
   function scheduleEmission(): void {
@@ -343,6 +445,7 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function finalizeCommit(): void {
+    cancelGpuCommitPoll();
     if (!frozenConfig || !filterState || !strokeSession) {
       releaseSession();
       return;
@@ -355,21 +458,24 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
     strokeSession = finalStrokeResult.state;
     currentRenderUpdate = finalStrokeResult.renderUpdate;
     feedPendingRendererPoints();
+    cancelGpuCommitPoll();
     renderer?.finalize();
 
     const totalPoints = finalStrokeResult.state.allCommitted.length;
     if (totalPoints >= 1) {
-      deps.onCommit(
-        createStrokeCommand(
-          frozenConfig.layer.id,
-          inputPoints,
-          frozenConfig.compiledFilterPipeline.config,
-          finalStrokeResult.state.expand,
-          frozenConfig.style,
-          brushSeed,
-          frozenConfig.alphaLocked,
-        ),
+      const command = createStrokeCommand(
+        frozenConfig.layer.id,
+        inputPoints,
+        frozenConfig.compiledFilterPipeline.config,
+        finalStrokeResult.state.expand,
+        frozenConfig.style,
+        brushSeed,
+        frozenConfig.alphaLocked,
       );
+      if (renderer?.usesGpu) {
+        retainGpuUndo(deps.accelerator, frozenConfig.layer, command);
+      }
+      deps.onCommit(command);
     }
 
     clearPendingLayer();
@@ -377,8 +483,19 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function restoreSnapshot(preservePendingStart: boolean): void {
+    cancelGpuCommitPoll();
+    // A history rebuild may start a new GPU renderer on the same accelerator.
+    // Release the live owner first so recovery never needs the stale-owner path.
+    const rendererUsesGpu = renderer?.usesGpu ?? false;
+    const restoredOnGpu = renderer?.cancel() ?? false;
     if (frozenConfig && committedSnapshot) {
-      restoreLayerContent(frozenConfig.layer, committedSnapshot);
+      restoreLayerContent(
+        frozenConfig.layer,
+        committedSnapshot,
+        deps.accelerator,
+      );
+    } else if (frozenConfig && rendererUsesGpu && !restoredOnGpu) {
+      deps.restoreLayerBeforeStroke?.(frozenConfig.layer);
     }
     clearPendingLayer();
     releaseSession(preservePendingStart);
@@ -391,6 +508,8 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
   }
 
   function releaseSession(preservePendingStart = false): void {
+    cancelGpuCommitPoll();
+    renderer?.cancel();
     strokeSession = null;
     filterState = null;
     inputPoints = [];
@@ -412,22 +531,32 @@ export function createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime {
 }
 
 function getEmissionIntervalMs(style: StrokeStyle): number | undefined {
-  if (style.brush.type === "round-pen") return undefined;
+  if (style.brush.type === "round-pen" || style.brush.type === "bristle") {
+    return undefined;
+  }
   return timeSpacingMsFromRate(style.brush.dynamics.emissionsPerSecond);
 }
 
 function needsSamplingLayer(style: StrokeStyle): boolean {
-  return style.brush.type === "stamp" && !!style.brush.mixing?.enabled;
+  return (
+    (style.brush.type === "stamp" || style.brush.type === "bristle") &&
+    isBrushMixingActive(style.brush.mixing)
+  );
 }
 
 function cloneLayerContent(layer: Layer): Layer {
   const snapshot = createLayer(layer.width, layer.height);
-  snapshot.ctx.drawImage(layer.canvas, 0, 0);
+  copyLayerPixels(layer, snapshot);
   return snapshot;
 }
 
-function restoreLayerContent(layer: Layer, snapshot: Layer): void {
-  clearLayer(layer);
+function restoreLayerContent(
+  layer: Layer,
+  snapshot: Layer,
+  accelerator?: BrushAccelerator | null,
+): void {
+  invalidateGpuLayerResidency(layer, accelerator, "runtimeRestore");
+  layer.ctx.clearRect(0, 0, layer.width, layer.height);
   layer.ctx.drawImage(snapshot.canvas, 0, 0);
 }
 

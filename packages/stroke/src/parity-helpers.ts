@@ -1,4 +1,9 @@
-import type { ExpandConfig, Layer, StrokeStyle } from "@headless-paint/engine";
+import type {
+  BrushAccelerator,
+  ExpandConfig,
+  Layer,
+  StrokeStyle,
+} from "@headless-paint/engine";
 import {
   copyLayerPixels,
   createLayer,
@@ -18,6 +23,7 @@ export interface SimulateLiveStrokeOptions {
   readonly expand: ExpandConfig;
   readonly brushSeed: number;
   readonly alphaLocked: boolean;
+  readonly accelerator?: BrushAccelerator | null;
 }
 
 export interface SimulateLiveStrokeResult {
@@ -44,6 +50,7 @@ export function simulateLiveStroke(
     },
     onDrawingChanged: () => {},
     randomSeed: () => opts.brushSeed,
+    accelerator: opts.accelerator,
   });
 
   runtime.start(firstPoint, {
@@ -72,11 +79,12 @@ export function replayOnLayer(
   command: StrokeCommand,
   layer: Layer,
   sourceLayer?: Layer,
+  accelerator?: BrushAccelerator | null,
 ): void {
   if (sourceLayer) {
     copyLayerPixels(sourceLayer, layer);
   }
-  replayCommand(layer, command);
+  replayCommand(layer, command, undefined, { accelerator });
 }
 
 export function expectPixelEqual(

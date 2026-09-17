@@ -18,9 +18,7 @@
       "import": "./dist/react.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "vite build && rollup -c rollup.dts.config.mjs",
     "dev": "vite build --watch"

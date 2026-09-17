@@ -99,8 +99,9 @@ for (const event of events) {
 | `SamplingConfig` | 間引き設定 |
 | `SamplingState` | 間引き状態 |
 | `TransformComponents` | 変換成分（スケール、回転、平行移動） |
-| `FilterType` | フィルタ種別（`"smoothing" \| "straight-line"`） |
+| `FilterType` | フィルタ種別（`"smoothing" \| "causal-adaptive" \| "straight-line"`） |
 | `SmoothingConfig` | スムージングフィルタ設定 |
+| `CausalAdaptiveConfig` | 過去情報だけを使う即時確定型の適応補正設定 |
 | `StraightLineConfig` | 直線フィルタ設定 |
 | `FilterConfig` | フィルタ設定（Discriminated Union） |
 | `FilterPipelineConfig` | フィルタパイプライン設定 |

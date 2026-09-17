@@ -134,6 +134,8 @@ export const DEFAULT_PRESSURE_CURVE: PressureCurve = {
 export interface PressureDynamics {
   readonly size: number;
   readonly flow: number;
+  /** stampでsize / flowへ反映する前の因果的な筆圧平滑化時定数(ms) */
+  readonly smoothingMs?: number;
 }
 
 export const DEFAULT_PRESSURE_DYNAMICS: PressureDynamics = {
@@ -151,7 +153,7 @@ export interface CircleTipConfig {
   readonly hardness: number;
 }
 
-/** 画像ベースチップ（imageId で BrushTipRegistry から解決） */
+/** 画像ベースチップ（imageId で BrushAssetRegistry から解決） */
 export interface ImageTipConfig {
   readonly type: "image";
   readonly imageId: string;
@@ -161,6 +163,11 @@ export type BrushTipConfig = CircleTipConfig | ImageTipConfig;
 
 export interface BrushDynamics {
   readonly spacing: number;
+  /**
+   * 距離emissionの間隔を筆圧反映後のtip径へ追従させる割合。
+   * 0は基準lineWidth固定、1は実効tip径へ完全追従する。
+   */
+  readonly spacingSizeCoupling: number;
   readonly opacityJitter: number;
   readonly sizeJitter: number;
   readonly rotationJitter: number;
@@ -172,6 +179,7 @@ export interface BrushDynamics {
 
 export const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
   spacing: 0.25,
+  spacingSizeCoupling: 0,
   opacityJitter: 0,
   sizeJitter: 0,
   rotationJitter: 0,
@@ -228,16 +236,31 @@ export const DEFAULT_SPRAY_PRESSURE_DYNAMICS: SprayPressureDynamics = {
 
 export interface BrushMixing {
   readonly enabled: boolean;
-  readonly pickup: number;
-  readonly restore: number;
+  /** 1px進むごとの下地色pickup rate。距離dの係数は1-exp(-rate*d) */
+  readonly pickupRatePerPx: number;
+  /** 1px進むごとの元色restore rate。距離dの係数は1-exp(-rate*d) */
+  readonly restoreRatePerPx: number;
+  /** 1px進むごとの色場diffusion pass量 */
+  readonly diffusionRatePerPx: number;
   readonly updateDistancePx: number;
+  readonly checkpointDistancePx: number;
+  readonly fieldColumns: number;
+  readonly fieldRows: number;
 }
+
+export const BRUSH_MIXING_MIN_FIELD_DIMENSION = 2;
+export const BRUSH_MIXING_MAX_FIELD_DIMENSION = 64;
+export const BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX = 256;
 
 export const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
-  pickup: 0,
-  restore: 0.15,
-  updateDistancePx: 8,
+  pickupRatePerPx: 0.007,
+  restoreRatePerPx: 0.004,
+  diffusionRatePerPx: 0.05,
+  updateDistancePx: 15,
+  checkpointDistancePx: 36,
+  fieldColumns: 18,
+  fieldRows: 8,
 };
 
 /** 現在の circle+trapezoid 方式 */
@@ -263,10 +286,73 @@ export interface SprayBrushConfig {
   readonly pressureDynamics: SprayPressureDynamics;
 }
 
+export interface BristleHeightMap {
+  readonly width: number; // texel 数（1..2048）
+  readonly height: number; // texel 数（1..2048）
+  readonly heights: Float32Array; // row-major、width * height、0..1（1 = 山）
+}
+
+export interface BristleSurfaceGrain {
+  readonly scalePx: number;
+  readonly amount: number;
+  readonly hardness: number;
+  readonly seed: number;
+  readonly heightMapId?: string;
+}
+
+export interface BristleDynamics {
+  readonly geometryStepPx: number;
+  readonly transverseMaskCellPx: number;
+  readonly dropoutLengthPx: number;
+  readonly dropoutWidthPx: number;
+  readonly depositHardness: number;
+  readonly cuspAngleThresholdDeg: number;
+  readonly cuspDetectionSpanRatio: number;
+  readonly lagLengthRatio: number;
+  readonly handleLengthRatio: number;
+  readonly surfaceGrain: BristleSurfaceGrain;
+}
+
+export interface BristlePressureDynamics {
+  readonly dropout: number;
+  readonly size: number;
+}
+
+export const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
+  geometryStepPx: 1,
+  transverseMaskCellPx: 0.82,
+  dropoutLengthPx: 58,
+  dropoutWidthPx: 1,
+  depositHardness: 1,
+  cuspAngleThresholdDeg: 65,
+  cuspDetectionSpanRatio: 0.14,
+  lagLengthRatio: 0.3,
+  handleLengthRatio: 0.5,
+  surfaceGrain: {
+    scalePx: 4,
+    amount: 1,
+    hardness: 0.75,
+    seed: 1,
+  },
+};
+
+export const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {
+  dropout: 1,
+  size: 0,
+};
+
+export interface BristleBrushConfig {
+  readonly type: "bristle";
+  readonly dynamics: BristleDynamics;
+  readonly pressureDynamics: BristlePressureDynamics;
+  readonly mixing?: BrushMixing;
+}
+
 export type BrushConfig =
   | RoundPenBrushConfig
   | StampBrushConfig
-  | SprayBrushConfig;
+  | SprayBrushConfig
+  | BristleBrushConfig;
 
 export const ROUND_PEN: RoundPenBrushConfig = {
   type: "round-pen",
@@ -322,24 +408,80 @@ export const MARKER: StampBrushConfig = {
   pressureDynamics: { size: 0.2, flow: 0.5 },
 };
 
+export const ROUGH_BRISTLE: BristleBrushConfig = {
+  type: "bristle",
+  dynamics: DEFAULT_BRISTLE_DYNAMICS,
+  pressureDynamics: DEFAULT_BRISTLE_PRESSURE_DYNAMICS,
+  mixing: {
+    ...DEFAULT_BRUSH_MIXING,
+    enabled: false,
+  },
+};
+
+export interface BristleSweepPointState {
+  readonly x: number;
+  readonly y: number;
+  readonly pressure: number;
+  readonly directionX: number;
+  readonly directionY: number;
+  readonly frameX: number;
+  readonly frameY: number;
+  readonly distance: number;
+}
+
+export interface BristleLagState {
+  readonly startDistance: number;
+  readonly fromAngle: number;
+}
+
+export interface BristleBranchRenderState {
+  readonly lastSweepPoint?: BristleSweepPointState;
+  readonly handleX?: number;
+  readonly handleY?: number;
+  readonly handleDirectionX?: number;
+  readonly handleDirectionY?: number;
+  readonly incomingDirectionX?: number;
+  readonly incomingDirectionY?: number;
+  readonly frameSign?: 1 | -1;
+  readonly lag?: BristleLagState;
+}
+
 export interface BrushMixingState {
-  readonly colorBuffer?: OffscreenCanvas;
-  readonly mixedCanvas?: OffscreenCanvas;
-  readonly lastMixingUpdateDistance?: number;
+  readonly field: Float32Array;
+  readonly fieldCanvas: OffscreenCanvas;
+  readonly fieldPixels: ImageData;
+  readonly renderCanvas: OffscreenCanvas;
+  readonly checkpointCanvas?: OffscreenCanvas;
+  readonly checkpointPixels?: ImageData;
+  readonly checkpointOriginX?: number;
+  readonly checkpointOriginY?: number;
+  readonly lastUpdateDistance?: number;
+  readonly lastCheckpointDistance?: number;
+}
+
+export interface BrushPressureState {
+  readonly value: number;
+  readonly timestamp: number;
 }
 
 export interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  /** 可変spacing時の、次の距離emissionまでの正規化進捗（0以上1未満） */
+  readonly distanceEmissionProgress?: number;
   /** 時間emission: この分岐で最後に処理した入力時刻 */
   readonly lastTimestamp?: number;
   /** 時間emission: 次にemissionを配置する予定時刻 */
   readonly nextTimeEmissionAt?: number;
+  /** stampの因果的な筆圧平滑化状態 */
+  readonly pressure?: BrushPressureState;
   readonly mixing?: BrushMixingState;
+  readonly bristle?: BristleBranchRenderState;
 }
 
 export interface BrushRenderState {
   readonly tipCanvas: OffscreenCanvas | null;
+  readonly heightMap: BristleHeightMap | null;
   readonly seed: number;
   readonly branches: readonly BrushBranchRenderState[];
 }

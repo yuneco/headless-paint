@@ -50,7 +50,10 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `SprayPressureDynamics` | 筆圧を spray の散布径/flow/密度へ反映する強さ `{ size, flow, density }` |
 | `BrushDynamics` | スタンプブラシの動的パラメータ（全 required） |
 | `SprayDynamics` | spray ブラシの動的パラメータ（spacing, density, particleSize など） |
-| `BrushMixing` | スタンプブラシの混色パラメータ `{ enabled, pickup, restore, updateDistancePx }` |
+| `BrushMixing` | 距離rate、更新距離、checkpoint距離、tip-local色場解像度を持つスタンプ混色設定 |
+| `BristleBrushConfig` / `BristleDynamics` / `BristlePressureDynamics` | 面掠れ、紙目、反復接触、折返し追従を持つ荒いハケ設定。筆圧は `dropout`（掠れ）/ `size`（幅）へ反映 |
+| `BristleHeightMap` | bristle の紙目を差し替える document 固定の高さマップ `{ width, height, heights }`（0..1）。`BrushAssetRegistry` に ID で登録し `surfaceGrain.heightMapId` で参照する |
+| `BrushAssetRegistry` | image tip の画像と bristle の高さマップを ID で保持するレジストリ `{ getTip, setTip, getHeightMap, setHeightMap }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, alphaLocked, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
 | `ExpandLevel` | 1レベル分の展開設定 `{ mode, offset, angle, divisions }` |
@@ -63,8 +66,8 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `Mat3Like` | gl-matrix `mat3` 互換の flat 3x3 行列 |
 | `QuadCorners` | 変換後矩形の4隅 `[tl, tr, bl, br]` |
 | `BackgroundSettings` | 背景設定 `{ color, visible }` |
-| `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig`） |
-| `BrushRenderState` | ブラシレンダリング状態 `{ seed, tipCanvas, branches }` |
+| `BrushConfig` | ブラシ設定（判別共用体: `RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig \| BristleBrushConfig`） |
+| `BrushRenderState` | ブラシレンダリング状態 `{ seed, tipCanvas, heightMap, branches }` |
 
 ### Layer 管理関数
 
@@ -102,11 +105,14 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 
 | 関数 | 説明 |
 |---|---|
-| `renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
-| `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit, timeSpacingMs?)` | 距離ベース + 時間ベース emission を走査（stamp / spray 共有） |
+| `renderBrushStroke(layer, points, style, overlapCount?, state?, sourceLayer?, accelerator?)` | ブラシ種別に応じてストローク描画（ディスパッチ） |
+| `createBrushAccelerator(options?)` | 混色stampとRough bristleをWebGL2で描くGPU加速器を生成（非対応環境は `null`）。詳細は [gpu-acceleration.md](./gpu-acceleration.md) |
+| `resolveBrushAcceleratorBackend(options?, env?)` | 加速器を生成せずに backend（`webgl2` / `cpu`）と判定理由を返す |
+| `walkEmissions(interpolated, spacingPx, startState, overlapCount, emit, timeSpacingMs?, spacingAt?)` | 固定/局所可変の距離ベース + 時間ベース emission を走査（stamp / spray 共有） |
 | `timeSpacingMsFromRate(emissionsPerSecond)` | 吹きつけレートを時間ベース emission 間隔 ms に変換 |
 | `generateBrushTip(config, size, color, registry?)` | ブラシチップ画像を生成 |
-| `createBrushTipRegistry()` | 画像チップ管理用の `BrushTipRegistry` を作成 |
+| `createHeightMapFromImageData(image, options?)` | 画像の輝度から bristle 紙目用の `BristleHeightMap` を生成（invert / normalize / contrast） |
+| `createBrushAssetRegistry()` | image tip と紙目高さマップを ID 管理する `BrushAssetRegistry` を作成 |
 | `mulberry32(seed)` | 32bit シードから PRNG を生成 |
 | `hashSeed(globalSeed, index)` | branch / emission 固有のシードを生成 |
 | `ROUND_PEN` | デフォルトの round-pen ブラシ定数 |
@@ -114,6 +120,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `SPRAY_AIRBRUSH` | 粒子感エアブラシプリセット（spray、小粒子散布、時間ベース emission 有効） |
 | `PENCIL` | 鉛筆プリセット（ほぼハード円、微小 jitter） |
 | `MARKER` | マーカープリセット（やや柔らか、中間フロー） |
+| `ROUGH_BRISTLE` | 荒いハケプリセット（一様断面の掃引、筆圧連動の面掠れ、紙目、反復接触、混色） |
 | `DEFAULT_PRESSURE_DYNAMICS` | `PressureDynamics` のデフォルト値 |
 | `DEFAULT_SPRAY_DYNAMICS` | `SprayDynamics` のデフォルト値 |
 | `DEFAULT_SPRAY_PRESSURE_DYNAMICS` | `SprayPressureDynamics` のデフォルト値 |
@@ -150,7 +157,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | 関数 | 説明 |
 |---|---|
 | `appendToCommittedLayer(layer, points, style, expand, overlapCount?, brushState?, sourceLayer?, alphaLocked?)` | 確定レイヤーに追加描画。`alphaLocked` 有効時の通常描画は既存 alpha に制限する。`BrushRenderState` を返す |
-| `renderPendingLayer(layer, points, style, expand, brushState?, sourceLayer?, previewBaseLayer?)` | 作業レイヤーを再描画。混色有効時は `sourceLayer` を背景転写元にできる |
+| `renderPendingLayer(layer, points, style, expand, brushState?, sourceLayer?, previewBaseLayer?)` | 作業レイヤーを再描画。stateful mixing有効時はclear後no-op |
 | `composeLayers(target, layers, transform?)` | レイヤーを合成 |
 
 ### Pattern Preview

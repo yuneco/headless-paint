@@ -1,4 +1,5 @@
 import type {
+  BristlePressureDynamics,
   BrushConfig,
   Color,
   PressureCurve,
@@ -34,7 +35,10 @@ export interface UsePenSettingsResult {
   readonly setEraser: (eraser: boolean) => void;
   readonly setBrush: (brush: BrushConfig) => void;
   readonly setBrushPressureDynamics: (
-    dynamics: PressureDynamics | SprayPressureDynamics,
+    dynamics:
+      | PressureDynamics
+      | SprayPressureDynamics
+      | BristlePressureDynamics,
   ) => void;
 }
 
@@ -47,6 +51,9 @@ function normalizePressureDynamics(
   return {
     size: value?.size ?? DEFAULT_PRESSURE_DYNAMICS.size,
     flow: value?.flow ?? DEFAULT_PRESSURE_DYNAMICS.flow,
+    ...(value?.smoothingMs === undefined
+      ? {}
+      : { smoothingMs: value.smoothingMs }),
   };
 }
 
@@ -60,6 +67,12 @@ function normalizeSprayPressureDynamics(
   };
 }
 
+function normalizeBristlePressureDynamics(
+  value: BristlePressureDynamics,
+): BristlePressureDynamics {
+  return { dropout: value.dropout, size: value.size };
+}
+
 function normalizeBrushConfig(brush: BrushConfig): BrushConfig {
   if (brush.type === "round-pen") {
     return {
@@ -71,6 +84,14 @@ function normalizeBrushConfig(brush: BrushConfig): BrushConfig {
     return {
       ...brush,
       pressureDynamics: normalizeSprayPressureDynamics(brush.pressureDynamics),
+    };
+  }
+  if (brush.type === "bristle") {
+    return {
+      ...brush,
+      pressureDynamics: normalizeBristlePressureDynamics(
+        brush.pressureDynamics,
+      ),
     };
   }
   return {
@@ -128,9 +149,27 @@ export function usePenSettings(
   }, []);
 
   const handleSetBrushPressureDynamics = useCallback(
-    (dynamics: PressureDynamics | SprayPressureDynamics) => {
+    (
+      dynamics:
+        | PressureDynamics
+        | SprayPressureDynamics
+        | BristlePressureDynamics,
+    ) => {
       setBrush((current) => {
+        if (current.type === "bristle") {
+          return normalizeBrushConfig({
+            ...current,
+            pressureDynamics: {
+              dropout:
+                "dropout" in dynamics
+                  ? dynamics.dropout
+                  : current.pressureDynamics.dropout,
+              size: dynamics.size,
+            },
+          });
+        }
         if (current.type === "spray") {
+          if (!("size" in dynamics) || !("flow" in dynamics)) return current;
           return normalizeBrushConfig({
             ...current,
             pressureDynamics: {
@@ -143,11 +182,21 @@ export function usePenSettings(
             },
           });
         }
+        if (!("size" in dynamics) || !("flow" in dynamics)) return current;
         return normalizeBrushConfig({
           ...current,
           pressureDynamics: {
             size: dynamics.size,
             flow: dynamics.flow,
+            ...(current.pressureDynamics.smoothingMs === undefined &&
+            !("smoothingMs" in dynamics)
+              ? {}
+              : {
+                  smoothingMs:
+                    "smoothingMs" in dynamics
+                      ? dynamics.smoothingMs
+                      : current.pressureDynamics.smoothingMs,
+                }),
           },
         });
       });

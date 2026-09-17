@@ -1,5 +1,6 @@
 import type {
-  BrushTipRegistry,
+  BrushAccelerator,
+  BrushAssetRegistry,
   CompiledExpand,
   ExpandConfig,
   Layer,
@@ -29,6 +30,8 @@ export interface StrokeCompleteData {
 export interface StrokeStartOptions {
   readonly pendingOnly?: boolean;
   readonly straightLine?: boolean;
+  /** 決定的な比較・再生でstroke固有のbrush seedを固定する。 */
+  readonly brushSeed?: number;
 }
 
 export interface UseStrokeSessionConfig {
@@ -39,7 +42,14 @@ export interface UseStrokeSessionConfig {
   readonly expandConfig: ExpandConfig;
   readonly compiledExpand: CompiledExpand;
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
-  readonly registry?: BrushTipRegistry;
+  readonly registry?: BrushAssetRegistry;
+}
+
+interface InternalUseStrokeSessionConfig extends UseStrokeSessionConfig {
+  /** Preserve runtime command identity for the GPU undo history bridge. */
+  readonly onStrokeCommit?: (command: StrokeCommand) => void;
+  readonly accelerator?: BrushAccelerator | null;
+  readonly restoreLayerBeforeStroke?: (layer: Layer) => void;
 }
 
 export interface UseStrokeSessionResult {
@@ -48,6 +58,7 @@ export interface UseStrokeSessionResult {
     options?: StrokeStartOptions,
   ) => void;
   readonly onStrokeMove: (point: InputPoint) => void;
+  readonly onStrokeMoves: (points: readonly InputPoint[]) => void;
   readonly onStrokeEnd: () => void;
   readonly onDrawConfirm: () => void;
   readonly onDrawCancel: () => void;
@@ -76,6 +87,12 @@ function toStrokeCompleteData(command: StrokeCommand): StrokeCompleteData {
 export function useStrokeSession(
   config: UseStrokeSessionConfig,
 ): UseStrokeSessionResult {
+  return useStrokeSessionWithAccelerator(config);
+}
+
+export function useStrokeSessionWithAccelerator(
+  config: InternalUseStrokeSessionConfig,
+): UseStrokeSessionResult {
   const [renderVersion, bumpRenderVersion] = useRafRenderVersion();
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -88,11 +105,17 @@ export function useStrokeSession(
   const strokePointsRef = useRef<readonly InputPoint[]>([]);
   const pendingOnlyRef = useRef(false);
   const runtimeRef = useRef<StrokeRuntime | null>(null);
+  const runtimeAcceleratorRef = useRef(config.accelerator);
 
   // runtime は遅延生成する。StrictMode はマウント直後に unmount/remount を
   // シミュレートするため、cleanup で dispose した runtime を使い回さないよう
   // ref を null に戻し、次の操作時に再生成する
   const getRuntime = useCallback((): StrokeRuntime => {
+    if (runtimeAcceleratorRef.current !== configRef.current.accelerator) {
+      runtimeRef.current?.dispose();
+      runtimeRef.current = null;
+      runtimeAcceleratorRef.current = configRef.current.accelerator;
+    }
     if (runtimeRef.current === null) {
       runtimeRef.current = createStrokeRuntime({
         setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -102,6 +125,7 @@ export function useStrokeSession(
         now: () => performance.now(),
         requestRender: bumpRenderVersion,
         onCommit: (command) => {
+          configRef.current.onStrokeCommit?.(command);
           onStrokeCompleteRef.current?.(toStrokeCompleteData(command));
         },
         onDrawingChanged: (nextIsDrawing) => {
@@ -113,6 +137,8 @@ export function useStrokeSession(
             pendingOnlyRef.current = false;
           }
         },
+        accelerator: configRef.current.accelerator,
+        restoreLayerBeforeStroke: configRef.current.restoreLayerBeforeStroke,
       });
     }
     return runtimeRef.current;
@@ -126,6 +152,13 @@ export function useStrokeSession(
       runtimeRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (runtimeAcceleratorRef.current === config.accelerator) return;
+    runtimeRef.current?.dispose();
+    runtimeRef.current = null;
+    runtimeAcceleratorRef.current = config.accelerator;
+  }, [config.accelerator]);
 
   const canDraw = config.layer?.meta.visible ?? false;
 
@@ -156,8 +189,9 @@ export function useStrokeSession(
           : compiledFilterPipeline.config,
         expand: expandConfig,
         alphaLocked: layer.meta.alphaLocked,
+        brushSeed: options?.brushSeed,
         pendingOnly: options?.pendingOnly,
-        tipRegistry: registry,
+        registry,
       });
       bumpRenderVersion();
     },
@@ -172,6 +206,12 @@ export function useStrokeSession(
     },
     [appendStrokePoint],
   );
+
+  const onStrokeMoves = useCallback((points: readonly InputPoint[]) => {
+    if (!runtimeRef.current?.isDrawing || points.length === 0) return;
+    strokePointsRef.current = [...strokePointsRef.current, ...points];
+    runtimeRef.current.moveMany(points);
+  }, []);
 
   const onStrokeEnd = useCallback(() => {
     if (!runtimeRef.current?.isDrawing) return;
@@ -190,7 +230,11 @@ export function useStrokeSession(
   }, [bumpRenderVersion]);
 
   const onDrawCancel = useCallback(() => {
-    runtimeRef.current?.cancel();
+    if (!runtimeRef.current?.isDrawing) {
+      pendingOnlyRef.current = false;
+      return;
+    }
+    runtimeRef.current.cancel();
     pendingOnlyRef.current = false;
     bumpRenderVersion();
   }, [bumpRenderVersion]);
@@ -198,6 +242,7 @@ export function useStrokeSession(
   return {
     onStrokeStart,
     onStrokeMove,
+    onStrokeMoves,
     onStrokeEnd,
     onDrawConfirm,
     onDrawCancel,

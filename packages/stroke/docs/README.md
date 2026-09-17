@@ -205,9 +205,9 @@ if (canUndo(historyState)) {
 | `redo(state)` | 1つ先に進む |
 | `canUndo(state)` | Undo可能か |
 | `canRedo(state)` | Redo可能か |
-| `rebuildLayerFromHistory(layer, state, registry?)` | `layer.id` に基づきレイヤーを再構築し、結果を返す |
-| `replayCommands(layer, commands, registry?)` | コマンドのリストを順番にリプレイ |
-| `replayCommand(layer, command, registry?)` | 単一コマンドをレイヤーに適用 |
+| `rebuildLayerFromHistory(layer, state, registry?)` | `layer.id` に基づきレイヤーを再構築し、結果を返す。`registry` は `BrushAssetRegistry`（image tip と bristle 高さマップの解決。live と同じ登録内容を渡す） |
+| `replayCommands(layer, commands, registry?, options?)` | コマンドのリストを順番にリプレイ。`options.accelerator` でGPU加速器を注入 |
+| `replayCommand(layer, command, registry?, options?)` | 単一コマンドをレイヤーに適用。`options.accelerator` でGPU加速器を注入 |
 | `computeCumulativeOffset(state)` | グローバルな累積オフセットを返す |
 | `getCommandOffset(state, absoluteIndex)` | 絶対 index を `commands` 配列 offset に変換 |
 | `getCommandAt(state, absoluteIndex)` | 絶対 index からコマンドを取得 |

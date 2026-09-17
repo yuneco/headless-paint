@@ -4,6 +4,13 @@
 export type {
   BackgroundSettings,
   BrushConfig,
+  BristleBranchRenderState,
+  BristleBrushConfig,
+  BristleDynamics,
+  BristleHeightMap,
+  BristlePressureDynamics,
+  BristleSurfaceGrain,
+  BristleSweepPointState,
   BrushBranchRenderState,
   BrushDynamics,
   BrushMixing,
@@ -37,8 +44,17 @@ export type {
   StrokeStyle,
 } from "./types";
 export {
+  type HeightMapFromImageOptions,
+  createHeightMapFromImageData,
+} from "./brush/height-map";
+export {
   AIRBRUSH,
+  BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX,
+  BRUSH_MIXING_MAX_FIELD_DIMENSION,
+  BRUSH_MIXING_MIN_FIELD_DIMENSION,
   DEFAULT_BACKGROUND_COLOR,
+  DEFAULT_BRISTLE_DYNAMICS,
+  DEFAULT_BRISTLE_PRESSURE_DYNAMICS,
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
@@ -49,18 +65,31 @@ export {
   MARKER,
   PENCIL,
   ROUND_PEN,
+  ROUGH_BRISTLE,
   SPRAY_AIRBRUSH,
   SPRAY_MAX_PARTICLES_PER_EMISSION,
 } from "./types";
 export {
-  createBrushTipRegistry,
+  createBrushAccelerator,
+  resolveBrushAcceleratorBackend,
+  type BrushAccelerator,
+  type BrushAcceleratorBackend,
+  type BrushAcceleratorOptions,
+  type BrushAcceleratorResolution,
+  type GpuResidencyInvalidationReason,
+  type GpuStrokeOwnerLabel,
+} from "./brush/gpu/accelerator";
+export {
+  createBrushAssetRegistry,
   generateBrushTip,
   hashSeed,
+  isBrushMixingActive,
   mulberry32,
   renderBrushStroke,
   timeSpacingMsFromRate,
   walkEmissions,
-  type BrushTipRegistry,
+  type DistanceSpacingAt,
+  type BrushAssetRegistry,
   type EmissionPoint,
 } from "./brush";
 export {

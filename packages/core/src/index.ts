@@ -1,6 +1,12 @@
 export type {
   BackgroundSettings,
   BrushConfig,
+  BristleBranchRenderState,
+  BristleBrushConfig,
+  BristleDynamics,
+  BristlePressureDynamics,
+  BristleSurfaceGrain,
+  BristleSweepPointState,
   BrushBranchRenderState,
   BrushDynamics,
   BrushMixing,
@@ -36,7 +42,12 @@ export type {
 
 export {
   AIRBRUSH,
+  BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX,
+  BRUSH_MIXING_MAX_FIELD_DIMENSION,
+  BRUSH_MIXING_MIN_FIELD_DIMENSION,
   DEFAULT_BACKGROUND_COLOR,
+  DEFAULT_BRISTLE_DYNAMICS,
+  DEFAULT_BRISTLE_PRESSURE_DYNAMICS,
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_CURVE,
@@ -47,22 +58,35 @@ export {
   MARKER,
   PENCIL,
   ROUND_PEN,
+  ROUGH_BRISTLE,
   SPRAY_AIRBRUSH,
   SPRAY_MAX_PARTICLES_PER_EMISSION,
 } from "@headless-paint/engine";
 
 export {
+  createBrushAccelerator,
+  resolveBrushAcceleratorBackend,
+  type BrushAccelerator,
+  type BrushAcceleratorBackend,
+  type BrushAcceleratorOptions,
+  type BrushAcceleratorResolution,
+  type GpuResidencyInvalidationReason,
+  type GpuStrokeOwnerLabel,
+} from "@headless-paint/engine";
+export {
   hashSeed,
+  isBrushMixingActive,
   mulberry32,
   renderBrushStroke,
   timeSpacingMsFromRate,
   walkEmissions,
+  type DistanceSpacingAt,
   type EmissionPoint,
 } from "@headless-paint/engine";
 export {
-  createBrushTipRegistry,
+  createBrushAssetRegistry,
   generateBrushTip,
-  type BrushTipRegistry,
+  type BrushAssetRegistry,
 } from "@headless-paint/engine";
 export {
   clearLayer,
@@ -152,6 +176,7 @@ export type {
   FilterConfig,
   FilterPipelineConfig,
   CompiledFilterPipeline,
+  CausalAdaptiveConfig,
   FilterPipelineState,
   FilterOutput,
   FilterProcessResult,

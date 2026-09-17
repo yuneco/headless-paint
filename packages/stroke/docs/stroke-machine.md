@@ -62,13 +62,15 @@ active 中の start（多重開始）は前ストロークを auto-cancel（`can
 createStrokeRuntime(deps: StrokeRuntimeDeps): StrokeRuntime
 
 interface StrokeRuntimeDeps {
-  readonly setTimeout: (fn, ms) => unknown;   // 決定的テスト用に注入
+  readonly setTimeout: (fn, ms) => unknown;   // 決定的テスト用に注入。時間 emission と GPU commit（fence 完了）のポーリングに使う
   readonly clearTimeout: (id) => void;
   readonly now: () => number;                  // emission 合成点の timestamp
-  readonly requestRender: () => void;          // rAF coalesce は呼び出し側実装でも可
+  readonly requestRender: () => void;          // rAF coalesce は呼び出し側実装でも可。GPU commit の転写完了時にも呼ばれる
   readonly onCommit: (command: StrokeCommand) => void;
   readonly onDrawingChanged: (isDrawing: boolean) => void;
   readonly randomSeed?: () => number;          // brushSeed 省略時の seed 生成を注入
+  readonly accelerator?: BrushAccelerator | null; // GPU加速器（engine の createBrushAccelerator）。省略時は CPU 経路。GPU stroke の確定時に command を undo-1 の token として登録する（history-api.md）
+  readonly restoreLayerBeforeStroke?: (layer: Layer) => void; // GPU context loss 時に layer を stroke 開始前へ戻す hook（history rebuild 等）。未注入なら復元せず CPU で描き直すのみ
 }
 
 interface StrokeRuntime {
@@ -90,7 +92,7 @@ interface StrokeStartConfig {
   readonly alphaLocked: boolean;
   readonly brushSeed?: number;        // 省略時 runtime が生成。テストでは固定注入
   readonly pendingOnly?: boolean;
-  readonly tipRegistry?: BrushTipRegistry;  // image tip ブラシに必須
+  readonly registry?: BrushAssetRegistry;   // image tip / heightMapId 指定の bristle に必須。未登録 ID は開始時に throw
 }
 ```
 
@@ -120,7 +122,12 @@ replay（記録済み inputPoints のループ）が**同じ関数を通る**構
 - ストローク終了時に描線が動かない（finalize-by-replay 案はこの点で棄却、レビュー質疑参照）
 - 影響: 過去に保存されたドキュメントの再構築結果が1回だけ AA 縁レベルで変わる（承認事項）。
   rebuild コストは live 実描画と同オーダー
-- move(point) は**単一点 feed を canonical** とする（coalesced events は呼び出し側で1点ずつ渡す）
+- `moveMany(points)` はcoalesced inputのcanonicalな受け口である。batch内のfilter/session更新は
+  点順を維持する。通常ブラシは従来どおり1点単位で確定描画し、Rough bristleだけは呼び出し側の
+  pointer event境界に依存しないよう、timestamp 32msまたは累積移動距離1.5B（B=brush幅）の
+  決定的な境界でまとめて描画する。`move(point)` は単一点batchの便宜APIとする。
+- UI統合層は高密度入力を欠落させず、1 pointer eventの採用点を1 batchとして渡す。
+  pointerupは最後のbatchまで同期的に受理してからendする。履歴には展開済みの全採用点を保存する。
 
 ## テスト計画（Phase 3 で実装）
 

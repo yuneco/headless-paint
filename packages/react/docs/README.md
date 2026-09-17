@@ -39,7 +39,7 @@ useSmoothing ─────── 入力スムージング
 useExpand ─────────── 対称展開（使う場合のみ）
 ```
 
-`usePaintEngine` は内部で `useStrokeSession` と `useLayers` を使用している。利用する機能のうち不要なものがあれば（例: Wrap shift を使わない）、対応するコールバックを接続しなければよい。
+`usePaintEngine` は内部で `useStrokeSession` と `useLayers` を使用している。レイヤー操作と履歴操作のオーケストレーションは `src/paint-engine/` の内部モジュールに分離されているが、公開 API と利用方法は変わらない。利用する機能のうち不要なものがあれば（例: Wrap shift を使わない）、対応するコールバックを接続しなければよい。
 
 ### 中間: 自前の履歴管理をしたい場合
 
@@ -203,6 +203,10 @@ interface UseViewTransformResult {
 
 マウス / ペンのポインタイベントを、選択中のツールに応じたコールバックに変換する。
 内部で screen→layer の座標変換とポイントサンプリング（間引き）を行う。
+pen / eraser の `pointermove` では `getCoalescedEvents()` が返す実入力を時刻順に展開し、
+代表イベントだけを使って高速ストロークの曲線を直線化しない。coalesced input が利用できない
+環境では代表イベントへfallbackする。採用点は `onStrokeMoves` へ1 pointer event単位のbatchとして
+渡す。batch callbackが未指定の場合だけ、互換用の `onStrokeMove` を点ごとに呼ぶ。
 
 ```typescript
 function usePointerHandler(tool: ToolType, options: UsePointerHandlerOptions): PointerHandlers;
@@ -226,6 +230,8 @@ interface UsePointerHandlerOptions {
   readonly onStrokeStart?: (point: InputPoint) => void;
   /** pen / eraser ツールでの描画移動 */
   readonly onStrokeMove?: (point: InputPoint) => void;
+  /** coalesced inputを1 pointer event単位で渡すbatch callback（指定時はこちらを優先） */
+  readonly onStrokeMoves?: (points: readonly InputPoint[]) => void;
   /** pen / eraser ツールでの描画終了 */
   readonly onStrokeEnd?: () => void;
   /** offset ツールでの差分移動（layer 座標系、ピクセル単位に丸め済み） */
@@ -351,8 +357,8 @@ interface UseStrokeSessionConfig {
   readonly compiledExpand: CompiledExpand;
   /** ストローク完了時に呼ばれるコールバック。履歴記録やコマンド生成に利用する */
   readonly onStrokeComplete?: (data: StrokeCompleteData) => void;
-  /** 画像ベースチップ用のレジストリ。ImageTipConfig を使うブラシプリセットがある場合に必要 */
-  readonly registry?: BrushTipRegistry;
+  /** ブラシ資産のレジストリ。ImageTipConfig や surfaceGrain.heightMapId を使うブラシプリセットがある場合に必要 */
+  readonly registry?: BrushAssetRegistry;
 }
 ```
 
@@ -366,6 +372,8 @@ interface StrokeStartOptions {
   readonly pendingOnly?: boolean;
   /** true にすると直線モード（始点→終点の2点に集約、筆圧は中央値）になる */
   readonly straightLine?: boolean;
+  /** 決定的な比較・再生でstroke固有のbrush seedを固定する */
+  readonly brushSeed?: number;
 }
 ```
 
@@ -405,6 +413,8 @@ interface UseStrokeSessionResult {
   readonly onStrokeStart: (point: InputPoint, options?: StrokeStartOptions) => void;
   /** ポイントを追加する。FilterPipeline を通過後、差分レンダリングが実行される */
   readonly onStrokeMove: (point: InputPoint) => void;
+  /** 複数点を順番どおり処理する。描画のbatch方針はbrush rendererが決める */
+  readonly onStrokeMoves: (points: readonly InputPoint[]) => void;
   /** ストロークを終了する。FilterPipeline をフラッシュし、onStrokeComplete を呼ぶ */
   readonly onStrokeEnd: () => void;
   /** pending ストロークを確定する。蓄積されたポイントが committed layer に描画される */
@@ -524,8 +534,10 @@ interface PaintEngineConfig<TCustom = never> {
   readonly compiledExpand: CompiledExpand;
   /** 履歴の容量設定。省略時はデフォルト値が使われる */
   readonly historyConfig?: HistoryConfig;
-  /** 画像ベースチップ用のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
-  readonly registry?: BrushTipRegistry;
+  /** ブラシ資産（image tip / bristle 高さマップ）のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
+  readonly registry?: BrushAssetRegistry;
+  /** GPU 加速器の backend（既定 "auto"）。hook が createBrushAccelerator で生成し、live runtime と Undo/Redo に注入、mixing stamp 選択時に warmUp、unmount 時に dispose する。詳細は engine docs/gpu-acceleration.md */
+  readonly gpuBackend?: "auto" | "webgl2" | "cpu";
   /** 復元用の初期ドキュメント。指定時はこの内容でレイヤー群を初期化する */
   readonly initialDocument?: PaintEngineInitialDocument;
   /** カスタムコマンドの apply/undo ハンドラ。TCustom を指定する場合は必須 */
@@ -604,6 +616,8 @@ interface PaintEngineResult<TCustom = never> {
   readonly onStrokeStart: (point: InputPoint, options?: StrokeStartOptions) => void;
   /** ポイントを追加する */
   readonly onStrokeMove: (point: InputPoint) => void;
+  /** coalesced inputをbatch追加する */
+  readonly onStrokeMoves: (points: readonly InputPoint[]) => void;
   /** ストロークを終了する。履歴にコマンドが自動記録される */
   readonly onStrokeEnd: () => void;
   /** pending ストロークを確定する */
@@ -655,6 +669,10 @@ interface PaintEngineResult<TCustom = never> {
   readonly renderVersion: number;
   /** アクティブレイヤーが描画可能な状態か */
   readonly canDraw: boolean;
+  /** 実際に使われている描画 backend（GPU 加速器が有効なら "webgl2"、それ以外は "cpu"） */
+  readonly gpuBackend: "webgl2" | "cpu";
+  /** backend の判定理由（engine の resolveBrushAcceleratorBackend。"auto: webkit" / "auto: not webkit" / "webgl2: unavailable" / "webgl2: setting" / "cpu: setting"）。デバッグ UI 向け */
+  readonly gpuBackendReason: string;
   /** 現在のストロークで蓄積された入力ポイント列（デバッグ表示用） */
   readonly strokePoints: readonly InputPoint[];
 }
@@ -912,7 +930,11 @@ function importPaintDocument(value: unknown): Promise<PaintInitialDocument | nul
 - zod 等のスキーマライブラリは使わず、手書きの軽量チェックで安全に失敗させる
 - 旧設定の `pen.pressureSensitivity` は `pen.brush.pressureDynamics.size` に補完する。`pressureDynamics.flow` は `0` として扱う
 - 旧 `BrushConfig` に `pressureDynamics` がない場合は `DEFAULT_PRESSURE_DYNAMICS` で補完する
+- stampの`dynamics.spacingSizeCoupling`欠落は既存spacingを維持する`0`で補完する
+- mixingは新しい距離rate + tip-local色場schemaを全項目必須とする。旧`pickup` / `restore`形式や新schemaの一部欠落は専用変換せず`null`を返す
+- mixingのrate負値、非正距離、2〜64外のfield解像度、256px超のcheckpoint距離は暗黙に丸めず`null`を返す
 - `pen.brush.dynamics.emissionsPerSecond` は stamp / spray の両方で正の有限数のみ復元する。未指定、非有限、`0` 以下は `undefined` として扱い、吹きつけOFFにする
+- bristle の `dynamics.surfaceGrain.heightMapId` は省略可。存在する場合は 1..128 文字の文字列のみ受理し、それ以外は `null` を返す。ID が指す高さマップの登録はアプリの責務で、復元時には検証しない（未登録のまま描き始めると開始時に throw する。image tip の `imageId` と同じ契約）。高さマップ本体は保存しない
 
 ### 使い方（保存先はアプリ側で選択）
 
@@ -965,16 +987,17 @@ const documentSnapshot = await exportPaintDocument({
 | `ExpandConfig` | engine | 対称展開の設定 |
 | `CompiledExpand` | engine | 構築済み対称展開変換 |
 | `ExpandMode` | engine | `"none" \| "axial" \| "radial" \| "kaleidoscope"` |
-| `BrushConfig` | engine | ブラシ設定（`RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig`） |
+| `BrushConfig` | engine | ブラシ設定（`RoundPenBrushConfig \| StampBrushConfig \| SprayBrushConfig \| BristleBrushConfig`） |
 | `StampBrushConfig` | engine | スタンプベースブラシの設定 |
 | `SprayBrushConfig` | engine | spray ブラシの設定 |
+| `BristleBrushConfig` | engine | 連続掃引する荒いハケブラシの設定 |
 | `BrushTipConfig` | engine | チップ形状設定（`CircleTipConfig \| ImageTipConfig`） |
 | `BrushDynamics` | engine | スタンプブラシの動的パラメータ |
 | `SprayDynamics` | engine | spray ブラシの動的パラメータ |
 | `SprayPressureDynamics` | engine | 筆圧を spray の散布径/flow/密度へ反映する強さ |
-| `BrushMixing` | engine | スタンプブラシの混色パラメータ（pickup / restore / updateDistancePx） |
+| `BrushMixing` | engine | stamp / bristleで共有する距離正規化された色場混色設定 |
 | `BrushRenderState` | engine | ブラシレンダリング状態 |
-| `BrushTipRegistry` | engine | 画像ベースチップの管理インターフェース |
+| `BrushAssetRegistry` | engine | image tip 画像と bristle 高さマップを ID で保持するレジストリ |
 | `ViewTransform` | input | ビュー変換行列 |
 | `InputPoint` | input | 入力ポイント（座標 + 筆圧 + タイムスタンプ） |
 | `CompiledFilterPipeline` | input | 構築済み FilterPipeline |

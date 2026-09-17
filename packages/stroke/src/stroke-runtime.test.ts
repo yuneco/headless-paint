@@ -1,6 +1,7 @@
 import {
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_PRESSURE_CURVE,
+  ROUGH_BRISTLE,
   ROUND_PEN,
   createLayer,
 } from "@headless-paint/engine";
@@ -96,6 +97,16 @@ function stampStyle(emissionsPerSecond = 10): StrokeStyle {
   };
 }
 
+function roughBristleStyle(): StrokeStyle {
+  return {
+    color: { r: 35, g: 85, b: 105, a: 255 },
+    lineWidth: 20,
+    pressureCurve: DEFAULT_PRESSURE_CURVE,
+    compositeOperation: "source-over",
+    brush: ROUGH_BRISTLE,
+  };
+}
+
 function makeRuntime(options?: {
   readonly clock?: ManualClock;
   readonly onCommit?: (command: StrokeCommand) => void;
@@ -165,6 +176,87 @@ function startConfig(
 }
 
 describe("stroke-runtime", () => {
+  describe("coalesced input batches", () => {
+    it("keeps every point and matches sequential rendering", () => {
+      const sequential = makeRuntime({ randomSeed: () => 42 });
+      const batched = makeRuntime({ randomSeed: () => 42 });
+      const points = [
+        point(12, 14, 4),
+        point(20, 18, 8),
+        point(30, 28, 12),
+        point(42, 40, 16),
+      ];
+
+      sequential.runtime.start(
+        point(8, 12, 0),
+        startConfig(sequential.layer, sequential.pendingLayer, roundStyle()),
+      );
+      for (const next of points) sequential.runtime.move(next);
+      sequential.runtime.end();
+
+      batched.runtime.start(
+        point(8, 12, 0),
+        startConfig(batched.layer, batched.pendingLayer, roundStyle()),
+      );
+      batched.runtime.moveMany(points);
+      batched.runtime.end();
+
+      expect(batched.commits[0]?.inputPoints).toEqual(
+        sequential.commits[0]?.inputPoints,
+      );
+      const sequentialCoverage = layerAlphaCoverage(sequential.layer);
+      const batchedCoverage = layerAlphaCoverage(batched.layer);
+      expect(
+        Math.abs(batchedCoverage - sequentialCoverage) / sequentialCoverage,
+      ).toBeLessThan(0.02);
+    });
+
+    it("keeps rough bristle pixels independent of caller batch boundaries", () => {
+      const sequential = makeRuntime({ randomSeed: () => 42 });
+      const batched = makeRuntime({ randomSeed: () => 42 });
+      const points = [
+        point(12, 20, 0),
+        point(17, 16, 4),
+        point(23, 14, 8),
+        point(30, 16, 12),
+        point(36, 22, 16),
+        point(40, 30, 20),
+        point(38, 39, 24),
+        point(32, 46, 28),
+        point(24, 49, 32),
+        point(16, 46, 36),
+        point(11, 39, 40),
+      ];
+      const firstPoint = points[0];
+      if (!firstPoint) throw new Error("test points must not be empty");
+
+      sequential.runtime.start(
+        firstPoint,
+        startConfig(
+          sequential.layer,
+          sequential.pendingLayer,
+          roughBristleStyle(),
+          { brushSeed: 42 },
+        ),
+      );
+      for (const next of points.slice(1)) sequential.runtime.move(next);
+      sequential.runtime.end();
+
+      batched.runtime.start(
+        firstPoint,
+        startConfig(batched.layer, batched.pendingLayer, roughBristleStyle(), {
+          brushSeed: 42,
+        }),
+      );
+      batched.runtime.moveMany(points.slice(1, 4));
+      batched.runtime.moveMany(points.slice(4, 9));
+      batched.runtime.moveMany(points.slice(9));
+      batched.runtime.end();
+
+      expect(layerPixels(batched.layer)).toEqual(layerPixels(sequential.layer));
+    });
+  });
+
   describe("emission", () => {
     it("does not fire while input arrives faster than the interval", () => {
       const { runtime, layer, pendingLayer, clock, commits } = makeRuntime();
@@ -322,3 +414,18 @@ describe("stroke-runtime", () => {
     });
   });
 });
+
+function layerAlphaCoverage(layer: Layer): number {
+  const pixels = layer.ctx.getImageData(0, 0, layer.width, layer.height).data;
+  let coverage = 0;
+  for (let index = 3; index < pixels.length; index += 4) {
+    coverage += pixels[index] ?? 0;
+  }
+  return coverage;
+}
+
+function layerPixels(layer: Layer): readonly number[] {
+  return Array.from(
+    layer.ctx.getImageData(0, 0, layer.width, layer.height).data,
+  );
+}

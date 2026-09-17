@@ -1,3 +1,4 @@
+import { invalidateGpuLayerResidency } from "./brush/gpu/gpu-layer-residency";
 import type { Layer } from "./types";
 
 /**
@@ -23,6 +24,7 @@ export function wrapShiftLayer(
   const sdy = ((dy % h) + h) % h;
 
   if (sdx === 0 && sdy === 0) return;
+  invalidateGpuLayerResidency(layer, "wrapShift");
 
   const tempCanvas = temp ?? new OffscreenCanvas(w, h);
   // tempキャンバスのサイズが合わない場合はリサイズ

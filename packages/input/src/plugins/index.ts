@@ -1,4 +1,5 @@
 import type { FilterPlugin } from "../types";
+import { causalAdaptivePlugin } from "./causal-adaptive-plugin";
 import { smoothingPlugin } from "./smoothing-plugin";
 import { straightLinePlugin } from "./straight-line-plugin";
 
@@ -7,6 +8,7 @@ import { straightLinePlugin } from "./straight-line-plugin";
  */
 const filterPluginRegistry = new Map<string, FilterPlugin>([
   [smoothingPlugin.type, smoothingPlugin],
+  [causalAdaptivePlugin.type, causalAdaptivePlugin],
   [straightLinePlugin.type, straightLinePlugin],
 ]);
 

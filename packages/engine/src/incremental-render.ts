@@ -3,10 +3,15 @@ import {
   createDefaultBrushState,
   ensureBrushRenderState,
   getBranchBrushState,
+  isBrushMixingActive,
   mergeBrushState,
   renderBrushStroke,
   stateToBranch,
 } from "./brush";
+import {
+  type BrushAccelerator,
+  getActiveGpuStrokeSurface,
+} from "./brush/gpu/accelerator";
 import { expandStrokePoints } from "./expand";
 import { clearLayer } from "./layer";
 import type {
@@ -32,6 +37,7 @@ export function appendToCommittedLayer(
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
   alphaLocked = layer.meta.alphaLocked,
+  accelerator?: BrushAccelerator | null,
 ): BrushRenderState {
   if (points.length === 0) {
     return brushState ?? createDefaultBrushState();
@@ -41,22 +47,30 @@ export function appendToCommittedLayer(
   const strokes = expandStrokePoints(points, compiledExpand);
   let currentState = ensureBrushRenderState(brushState, strokes.length);
   const nextBranches: BrushBranchRenderState[] = [...currentState.branches];
-  for (let i = 0; i < strokes.length; i++) {
-    const stroke = strokes[i];
-    if (stroke.length > 0) {
-      const branchState = getBranchBrushState(currentState, i);
-      const renderedState = renderBrushStroke(
-        layer,
-        stroke,
-        committedStyle,
-        overlapCount,
-        branchState,
-        sourceLayer ?? layer,
-      );
-      const renderedBranch = stateToBranch(renderedState);
-      nextBranches[i] = renderedBranch;
-      currentState = mergeBrushState(currentState, nextBranches);
+  const gpuSurface = getActiveGpuStrokeSurface(accelerator);
+  gpuSurface?.beginBranchBatch();
+  try {
+    for (let i = 0; i < strokes.length; i++) {
+      const stroke = strokes[i];
+      if (stroke.length > 0) {
+        gpuSurface?.selectBranch(i);
+        const branchState = getBranchBrushState(currentState, i);
+        const renderedState = renderBrushStroke(
+          layer,
+          stroke,
+          committedStyle,
+          overlapCount,
+          branchState,
+          sourceLayer,
+          accelerator,
+        );
+        const renderedBranch = stateToBranch(renderedState);
+        nextBranches[i] = renderedBranch;
+        currentState = mergeBrushState(currentState, nextBranches);
+      }
     }
+  } finally {
+    gpuSurface?.endBranchBatch();
   }
   return currentState;
 }
@@ -94,16 +108,12 @@ export function renderPendingLayer(
   compiledExpand: CompiledExpand,
   brushState?: BrushRenderState,
   sourceLayer?: Layer,
-  previewBaseLayer?: Layer,
+  _previewBaseLayer?: Layer,
 ): void {
   clearLayer(layer);
-  const rendersFullPreview = shouldRenderFullMixedPreview(
-    style,
-    previewBaseLayer,
-  );
-  if (rendersFullPreview && previewBaseLayer) {
-    layer.ctx.drawImage(previewBaseLayer.canvas, 0, 0);
-  }
+  // Stateful mixingは確定済みmaterialだけを表示する。pendingで色場を複製・
+  // rollbackしないため、engine境界でも明示的なno-opに固定する。
+  if (hasStatefulPendingDisabled(style)) return;
 
   if (points.length === 0) return;
 
@@ -137,15 +147,10 @@ export function renderPendingLayer(
   }
 }
 
-function shouldRenderFullMixedPreview(
-  style: StrokeStyle,
-  previewBaseLayer: Layer | undefined,
-): boolean {
+function hasStatefulPendingDisabled(style: StrokeStyle): boolean {
   return (
-    !!previewBaseLayer &&
-    style.compositeOperation === "source-over" &&
-    style.brush.type === "stamp" &&
-    !!style.brush.mixing?.enabled
+    style.brush.type === "bristle" ||
+    (style.brush.type === "stamp" && isBrushMixingActive(style.brush.mixing))
   );
 }
 

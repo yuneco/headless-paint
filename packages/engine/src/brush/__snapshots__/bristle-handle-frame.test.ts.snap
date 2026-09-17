@@ -1,0 +1,130 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`bristle handle frame > L=0 exactly preserves the pre-handle curve, cusp and lag output 1`] = `
+[
+  {
+    "frameSign": 1,
+    "lag": undefined,
+    "points": [
+      [
+        1,
+        0,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": 1,
+    "lag": undefined,
+    "points": [
+      [
+        0.995004165278,
+        0.099833416647,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": 1,
+    "lag": undefined,
+    "points": [
+      [
+        0.980066577841,
+        0.198669330795,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": 1,
+    "lag": undefined,
+    "points": [
+      [
+        0.955336489126,
+        0.295520206661,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": 1,
+    "lag": undefined,
+    "points": [
+      [
+        0.921060994003,
+        0.389418342309,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": 1,
+    "lag": undefined,
+    "points": [
+      [
+        0.87758256189,
+        0.479425538604,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": -1,
+    "lag": {
+      "fromAngle": 0.2612465614168697,
+      "startDistance": 18,
+    },
+    "points": [
+      [
+        0.966068760676,
+        0.2582850163,
+        false,
+      ],
+      [
+        0.966068760676,
+        0.2582850163,
+        true,
+      ],
+    ],
+  },
+  {
+    "frameSign": -1,
+    "lag": {
+      "fromAngle": 0.2612465614168697,
+      "startDistance": 18,
+    },
+    "points": [
+      [
+        0.943324131793,
+        0.331872840675,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": -1,
+    "lag": {
+      "fromAngle": 0.2612465614168697,
+      "startDistance": 18,
+    },
+    "points": [
+      [
+        0.849668642438,
+        0.527316980628,
+        false,
+      ],
+    ],
+  },
+  {
+    "frameSign": -1,
+    "lag": undefined,
+    "points": [
+      [
+        0.7259323042,
+        0.687766159184,
+        false,
+      ],
+    ],
+  },
+]
+`;

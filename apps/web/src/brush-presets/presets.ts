@@ -4,6 +4,7 @@ import {
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_BRUSH_MIXING,
   DEFAULT_PRESSURE_DYNAMICS,
+  ROUGH_BRISTLE,
   ROUND_PEN,
   SPRAY_AIRBRUSH,
 } from "@headless-paint/engine";
@@ -48,14 +49,20 @@ const ACRYLIC: StampBrushConfig = {
   dynamics: {
     ...DEFAULT_BRUSH_DYNAMICS,
     spacing: 0.12,
+    spacingSizeCoupling: 1,
     flow: 0.72,
   },
-  pressureDynamics: { size: 0.3, flow: 0.4 },
+  pressureDynamics: { size: 0.3, flow: 0.4, smoothingMs: 50 },
   mixing: {
     ...DEFAULT_BRUSH_MIXING,
     enabled: true,
-    pickup: 0.28,
-    restore: 0.08,
+    pickupRatePerPx: 0.007,
+    restoreRatePerPx: 0.004,
+    diffusionRatePerPx: 0.05,
+    updateDistancePx: 15,
+    checkpointDistancePx: 36,
+    fieldColumns: 18,
+    fieldRows: 8,
   },
 };
 
@@ -65,5 +72,6 @@ export const APP_BRUSH_PRESETS: readonly BrushPresetEntry[] = [
   { label: "Spray", config: SPRAY_AIRBRUSH },
   { label: "Pencil", config: PENCIL_TEXTURED },
   { label: "Acrylic", config: ACRYLIC },
+  { label: "Rough bristle", config: ROUGH_BRISTLE },
   { label: "Star", config: STAR_SCATTER },
 ];

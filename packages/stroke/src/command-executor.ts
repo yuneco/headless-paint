@@ -1,9 +1,12 @@
 import type {
-  BrushTipRegistry,
+  BrushAccelerator,
+  BrushAssetRegistry,
   Layer,
   LayerMeta,
 } from "@headless-paint/engine";
 import { createLayer, wrapShiftLayer } from "@headless-paint/engine";
+import { invalidateGpuLayerResidency } from "./gpu-layer-residency";
+import { getGpuUndoRuntime } from "./gpu-undo-cache";
 import {
   canRedo,
   canUndo,
@@ -22,9 +25,10 @@ import { isDrawCommand, isStructuralCommand } from "./types";
 
 export interface ExecutorDeps<TCustom = never> {
   readonly layers: readonly Layer[];
-  readonly tipRegistry?: BrushTipRegistry;
+  readonly registry?: BrushAssetRegistry;
   readonly customExecutor?: CustomCommandExecutor<TCustom>;
   readonly shiftTempCanvas?: OffscreenCanvas;
+  readonly accelerator?: BrushAccelerator | null;
 }
 
 export interface ExecutorFailure {
@@ -241,7 +245,21 @@ function executeLayerDraw<TCustom>(
     const layer = deps.layers.find((candidate) => candidate.id === layerId);
     if (!layer) continue;
 
-    const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry);
+    const undoHit =
+      op === "undo" &&
+      isDrawCommand(command) &&
+      command.type === "stroke" &&
+      getGpuUndoRuntime(deps.accelerator)?.restoreUndoSnapshot(
+        layer,
+        state.currentIndex,
+        state.commands,
+      );
+    const result = undoHit
+      ? { ok: true as const }
+      : rebuildLayerFromHistory(layer, next, deps.registry, {
+          accelerator: deps.accelerator,
+          invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
+        });
     if (!result.ok) {
       return createFailureResult(
         state,
@@ -306,6 +324,28 @@ function executeCustom<TCustom>(
     );
   }
 
+  const dirty = outcome.dirty ?? DIRTY_NONE;
+  if (dirty.type === "all") {
+    for (const layer of deps.layers) {
+      invalidateGpuLayerResidency(
+        layer,
+        deps.accelerator,
+        op === "undo" ? "executorUndo" : "executorRedo",
+      );
+    }
+  } else if (dirty.type === "layers") {
+    for (const layerId of dirty.layerIds) {
+      const layer = deps.layers.find((candidate) => candidate.id === layerId);
+      if (layer) {
+        invalidateGpuLayerResidency(
+          layer,
+          deps.accelerator,
+          op === "undo" ? "executorUndo" : "executorRedo",
+        );
+      }
+    }
+  }
+
   return {
     ok: true,
     next,
@@ -313,7 +353,7 @@ function executeCustom<TCustom>(
     layerListOps: outcome.layerListOps ?? EMPTY_LAYER_LIST_OPS,
     activeLayerIdHint: outcome.activeLayerIdHint,
     visibilityFixLayerIds: outcome.visibilityFixLayerIds ?? EMPTY_LAYER_IDS,
-    dirty: outcome.dirty ?? DIRTY_NONE,
+    dirty,
     persistence,
   };
 }
@@ -397,7 +437,10 @@ function executeStructural<TCustom>(
         command.layerId,
         command.meta,
       );
-      const result = rebuildLayerFromHistory(layer, next, deps.tipRegistry);
+      const result = rebuildLayerFromHistory(layer, next, deps.registry, {
+        accelerator: deps.accelerator,
+        invalidationReason: op === "undo" ? "executorUndo" : "executorRedo",
+      });
       if (!result.ok) {
         return createFailureResult(
           state,
@@ -526,7 +569,11 @@ function executeStructural<TCustom>(
       const sourceResult = rebuildLayerFromHistory(
         sourceLayer,
         next,
-        deps.tipRegistry,
+        deps.registry,
+        {
+          accelerator: deps.accelerator,
+          invalidationReason: "executorUndo",
+        },
       );
       if (!sourceResult.ok) {
         return createFailureResult(
@@ -561,7 +608,11 @@ function executeStructural<TCustom>(
       const targetResult = rebuildLayerFromHistory(
         targetLayer,
         next,
-        deps.tipRegistry,
+        deps.registry,
+        {
+          accelerator: deps.accelerator,
+          invalidationReason: "executorUndo",
+        },
       );
       if (!targetResult.ok) {
         return createFailureResult(
@@ -575,7 +626,6 @@ function executeStructural<TCustom>(
           persistence,
         );
       }
-
       return {
         ok: true,
         next,
@@ -625,6 +675,9 @@ export function executeHistoryOp<TCustom>(
     };
   }
 
+  if (op !== "undo" || !isDrawCommand(command) || command.type !== "stroke") {
+    getGpuUndoRuntime(deps.accelerator)?.discardUndoSnapshot();
+  }
   const next = op === "undo" ? undo(state) : redo(state);
   const persistence = resolveHistoryPersistenceEvent(op, command);
 

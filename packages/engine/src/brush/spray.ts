@@ -98,6 +98,7 @@ export function renderSprayBrushStroke(
 
   return {
     tipCanvas: state.tipCanvas,
+    heightMap: state.heightMap,
     seed: state.seed,
     branches: [
       {

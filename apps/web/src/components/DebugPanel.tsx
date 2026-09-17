@@ -1,4 +1,5 @@
 import {
+  type BrushConfig,
   DEFAULT_BRUSH_DYNAMICS,
   DEFAULT_PRESSURE_DYNAMICS,
   DEFAULT_SPRAY_DYNAMICS,
@@ -15,7 +16,7 @@ import type {
   UsePenSettingsResult,
   UseSmoothingResult,
 } from "@headless-paint/react";
-import type { GUI } from "lil-gui";
+import type { Controller, GUI } from "lil-gui";
 import { memo, useEffect, useRef } from "react";
 import type { UsePatternPreviewResult } from "../hooks/usePatternPreview";
 import { BezierCurveEditor } from "./BezierCurveEditor";
@@ -32,11 +33,23 @@ interface DebugPanelProps {
   onResetOffset?: () => void;
   showTouchDebug?: boolean;
   onToggleTouchDebug?: () => void;
+  gpuBackendSetting: "auto" | "webgl2" | "cpu";
+  gpuBackend: "webgl2" | "cpu";
+  gpuBackendReason: string;
+  gpuCommitMode: "bitmap" | "direct";
+  onGpuBackendChange: (backend: "auto" | "webgl2" | "cpu") => void;
 }
 
 const EXPAND_MODES: ExpandMode[] = ["none", "axial", "radial", "kaleidoscope"];
 const PATTERN_MODES: PatternMode[] = ["none", "grid", "repeat-x", "repeat-y"];
 const SIZE_JITTER_MODES = ["lognormal", "bimodal"] as const;
+
+function supportsCommonSmoothing(brush: BrushConfig): boolean {
+  return !(
+    brush.type === "bristle" ||
+    (brush.type === "stamp" && brush.mixing?.enabled)
+  );
+}
 
 function DebugPanelComponent({
   transform,
@@ -49,6 +62,11 @@ function DebugPanelComponent({
   onResetOffset,
   showTouchDebug = false,
   onToggleTouchDebug,
+  gpuBackendSetting,
+  gpuBackend,
+  gpuBackendReason,
+  gpuCommitMode,
+  onGpuBackendChange,
 }: DebugPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const guiRef = useRef<GUI | null>(null);
@@ -80,11 +98,24 @@ function DebugPanelComponent({
     enabled: smoothing.enabled,
     windowSize: smoothing.windowSize,
   });
+  const smoothingControllerRefs = useRef<readonly Controller[]>([]);
 
   const penDataRef = useRef({
     lineWidth: penSettings.lineWidth,
-    sizePressure: penSettings.brush.pressureDynamics.size,
+    pressureResponse: penSettings.brush.pressureDynamics.size,
+    dropout:
+      penSettings.brush.type === "bristle"
+        ? penSettings.brush.pressureDynamics.dropout
+        : 0,
+    handleLengthRatio:
+      penSettings.brush.type === "bristle"
+        ? penSettings.brush.dynamics.handleLengthRatio
+        : 0,
   });
+
+  const pressureResponseControllerRef = useRef<Controller | null>(null);
+  const dropoutControllerRef = useRef<Controller | null>(null);
+  const handleLengthControllerRef = useRef<Controller | null>(null);
 
   const brushDynamics =
     penSettings.brush.type === "stamp"
@@ -97,7 +128,10 @@ function DebugPanelComponent({
     sizeJitter: brushDynamics.sizeJitter,
     rotationJitter: brushDynamics.rotationJitter,
     scatter: brushDynamics.scatter,
-    flowPressure: penSettings.brush.pressureDynamics.flow,
+    flowPressure:
+      penSettings.brush.type === "stamp"
+        ? penSettings.brush.pressureDynamics.flow
+        : DEFAULT_PRESSURE_DYNAMICS.flow,
   });
 
   const sprayDynamics =
@@ -290,7 +324,7 @@ function DebugPanelComponent({
 
       const smoothingFolder = gui.addFolder("Smoothing");
 
-      smoothingFolder
+      const smoothingEnabledController = smoothingFolder
         .add(smoothingDataRef.current, "enabled")
         .name("Enable")
         .listen()
@@ -298,13 +332,27 @@ function DebugPanelComponent({
           smoothingRef.current.setEnabled(value);
         });
 
-      smoothingFolder
+      const smoothingWindowController = smoothingFolder
         .add(smoothingDataRef.current, "windowSize", 3, 13, 2)
         .name("Window Size")
         .listen()
         .onChange((value: number) => {
           smoothingRef.current.setWindowSize(value);
         });
+
+      smoothingControllerRefs.current = [
+        smoothingEnabledController,
+        smoothingWindowController,
+      ];
+      const smoothingSupported = supportsCommonSmoothing(
+        penSettingsRef.current.brush,
+      );
+      smoothingDataRef.current.enabled = smoothingSupported
+        ? smoothingRef.current.enabled
+        : false;
+      for (const controller of smoothingControllerRefs.current) {
+        controller.disable(!smoothingSupported);
+      }
 
       smoothingFolder.open();
 
@@ -318,9 +366,13 @@ function DebugPanelComponent({
           penSettingsRef.current.setLineWidth(value);
         });
 
-      penFolder
-        .add(penDataRef.current, "sizePressure", 0, 1, 0.05)
-        .name("Size Pressure")
+      pressureResponseControllerRef.current = penFolder
+        .add(penDataRef.current, "pressureResponse", 0, 1, 0.05)
+        .name(
+          penSettingsRef.current.brush.type === "bristle"
+            ? "Pressure Size"
+            : "Pressure Response",
+        )
         .listen()
         .onChange((value: number) => {
           const ps = penSettingsRef.current;
@@ -329,6 +381,35 @@ function DebugPanelComponent({
             size: value,
           });
         });
+
+      dropoutControllerRef.current = penFolder
+        .add(penDataRef.current, "dropout", 0, 1, 0.05)
+        .name("Pressure Dropout")
+        .listen()
+        .onChange((value: number) => {
+          const ps = penSettingsRef.current;
+          if (ps.brush.type !== "bristle") return;
+          ps.setBrushPressureDynamics({
+            ...ps.brush.pressureDynamics,
+            dropout: value,
+          });
+        });
+      handleLengthControllerRef.current = penFolder
+        .add(penDataRef.current, "handleLengthRatio", 0, 2, 0.05)
+        .name("Turn Lag")
+        .listen()
+        .onChange((value: number) => {
+          const ps = penSettingsRef.current;
+          if (ps.brush.type !== "bristle") return;
+          ps.setBrush({
+            ...ps.brush,
+            dynamics: { ...ps.brush.dynamics, handleLengthRatio: value },
+          });
+        });
+      if (penSettingsRef.current.brush.type !== "bristle") {
+        dropoutControllerRef.current.hide();
+        handleLengthControllerRef.current.hide();
+      }
 
       penFolder.open();
 
@@ -569,6 +650,9 @@ function DebugPanelComponent({
       mounted = false;
       guiRef.current?.destroy();
       guiRef.current = null;
+      smoothingControllerRefs.current = [];
+      pressureResponseControllerRef.current = null;
+      dropoutControllerRef.current = null;
     };
   }, []);
 
@@ -606,14 +690,33 @@ function DebugPanelComponent({
   }, [expand.config, expand.subEnabled]);
 
   useEffect(() => {
-    smoothingDataRef.current.enabled = smoothing.enabled;
+    const smoothingSupported = supportsCommonSmoothing(penSettings.brush);
+    smoothingDataRef.current.enabled = smoothingSupported
+      ? smoothing.enabled
+      : false;
     smoothingDataRef.current.windowSize = smoothing.windowSize;
-  }, [smoothing.enabled, smoothing.windowSize]);
+    for (const controller of smoothingControllerRefs.current) {
+      controller.disable(!smoothingSupported);
+    }
+  }, [smoothing.enabled, smoothing.windowSize, penSettings.brush]);
 
   useEffect(() => {
     penDataRef.current.lineWidth = penSettings.lineWidth;
-    penDataRef.current.sizePressure = penSettings.brush.pressureDynamics.size;
-  }, [penSettings.lineWidth, penSettings.brush.pressureDynamics.size]);
+    penDataRef.current.pressureResponse =
+      penSettings.brush.pressureDynamics.size;
+    if (penSettings.brush.type === "bristle") {
+      penDataRef.current.dropout = penSettings.brush.pressureDynamics.dropout;
+      penDataRef.current.handleLengthRatio =
+        penSettings.brush.dynamics.handleLengthRatio;
+      pressureResponseControllerRef.current?.name("Pressure Size");
+      dropoutControllerRef.current?.show();
+      handleLengthControllerRef.current?.show();
+    } else {
+      pressureResponseControllerRef.current?.name("Pressure Response");
+      dropoutControllerRef.current?.hide();
+      handleLengthControllerRef.current?.hide();
+    }
+  }, [penSettings.lineWidth, penSettings.brush]);
 
   useEffect(() => {
     const d =
@@ -686,8 +789,10 @@ function DebugPanelComponent({
         top: 0,
         right: 0,
         zIndex: 100,
+        width: 250,
         maxHeight: "100vh",
         overflowY: "auto",
+        overflowX: "hidden",
       }}
     >
       <div ref={containerRef} />
@@ -699,6 +804,46 @@ function DebugPanelComponent({
             "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif",
         }}
       >
+        <div
+          style={{
+            display: "grid",
+            gap: 5,
+            marginBottom: 8,
+            paddingBottom: 8,
+            borderBottom: "1px solid #444",
+            color: "#ebebeb",
+            fontSize: 11,
+            minWidth: 0,
+            maxWidth: "100%",
+            overflowWrap: "anywhere",
+          }}
+        >
+          <div style={{ whiteSpace: "normal" }}>
+            Engine: <strong>{gpuBackend}</strong> ({gpuBackendReason}) · commit:{" "}
+            {gpuCommitMode} · build: {__HP_BUILD_ID__}
+          </div>
+          <label style={{ display: "grid", gridTemplateColumns: "1fr 110px" }}>
+            Backend
+            <select
+              value={gpuBackendSetting}
+              onChange={(event) => {
+                const nextBackend = event.currentTarget.value as
+                  | "auto"
+                  | "webgl2"
+                  | "cpu";
+                if (!window.confirm("リロードして切り替えます")) {
+                  event.currentTarget.value = gpuBackendSetting;
+                  return;
+                }
+                onGpuBackendChange(nextBackend);
+              }}
+            >
+              <option value="auto">auto</option>
+              <option value="webgl2">webgl2</option>
+              <option value="cpu">cpu</option>
+            </select>
+          </label>
+        </div>
         <div
           style={{
             fontSize: 11,

@@ -436,6 +436,7 @@ interface StrokeStyle {
 interface PressureDynamics {
   readonly size: number;
   readonly flow: number;
+  readonly smoothingMs?: number;
 }
 ```
 
@@ -443,6 +444,7 @@ interface PressureDynamics {
 |---|---|---|
 | `size` | `number` | 筆圧を描画サイズへ反映する強さ。`0` は均一サイズ、`1` は筆圧比例 |
 | `flow` | `number` | 筆圧をスタンプブラシの flow へ反映する強さ。`0` は均一 flow、`1` は筆圧比例 |
+| `smoothingMs` | `number` | stampでsize / flowへ反映する前の因果的な筆圧平滑化時定数（ms）。省略または`0`以下で無効 |
 
 **関連定数**:
 
@@ -460,6 +462,7 @@ const DEFAULT_PRESSURE_DYNAMICS: PressureDynamics = {
 - `0〜1` の中間値は、均一値と筆圧比例値の線形補間
 - 入力筆圧が `undefined` の場合は `0.5` を使う
 - `pressureCurve` がある場合は、`size` と `flow` の両方に同じ変換済み筆圧を使う
+- `stamp`の`smoothingMs`は未来点を待たず、emission timestampと分岐状態だけで筆圧を平滑化する。入力座標や生の筆圧記録は変更しない
 
 **設計意図**:
 
@@ -478,7 +481,7 @@ interface CircleTipConfig {
   readonly hardness: number;
 }
 
-/** 画像ベースチップ（imageId で BrushTipRegistry から解決） */
+/** 画像ベースチップ（imageId で BrushAssetRegistry から解決） */
 interface ImageTipConfig {
   readonly type: "image";
   readonly imageId: string;
@@ -499,7 +502,7 @@ type BrushTipConfig = CircleTipConfig | ImageTipConfig;
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `type` | `"image"` | チップ種別 |
-| `imageId` | `string` | BrushTipRegistry に登録された画像の識別子 |
+| `imageId` | `string` | BrushAssetRegistry に setTip で登録された画像の識別子 |
 
 **使用例**:
 ```typescript
@@ -517,6 +520,7 @@ const imageTip: ImageTipConfig = { type: "image", imageId: "pastel-grain" };
 ```typescript
 interface BrushDynamics {
   readonly spacing: number;
+  readonly spacingSizeCoupling: number;
   readonly opacityJitter: number;
   readonly sizeJitter: number;
   readonly rotationJitter: number;
@@ -531,6 +535,7 @@ interface BrushDynamics {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `spacing` | `number` | ブラシ直径に対するスタンプ間隔の比率（0.25 = 直径の25%間隔） |
+| `spacingSizeCoupling` | `number` | 距離spacingを筆圧反映後のtip径へ追従させる割合。`0`は基準lineWidth固定、`1`は実効tip径へ完全追従 |
 | `opacityJitter` | `number` | 不透明度のランダム変動 [0, 1] |
 | `sizeJitter` | `number` | サイズのランダム変動 [0, 1] |
 | `rotationJitter` | `number` | 回転のランダム変動 [0, PI] ラジアン |
@@ -543,6 +548,7 @@ interface BrushDynamics {
 ```typescript
 const DEFAULT_BRUSH_DYNAMICS: BrushDynamics = {
   spacing: 0.25,
+  spacingSizeCoupling: 0,
   opacityJitter: 0,
   sizeJitter: 0,
   rotationJitter: 0,
@@ -693,7 +699,50 @@ interface SprayBrushConfig {
   readonly pressureDynamics: SprayPressureDynamics;
 }
 
-type BrushConfig = RoundPenBrushConfig | StampBrushConfig | SprayBrushConfig;
+interface BristleHeightMap {
+  readonly width: number; // texel 数（1..2048）
+  readonly height: number; // texel 数（1..2048）
+  readonly heights: Float32Array; // row-major、width * height、0..1（1 = 山）
+}
+
+interface BristleSurfaceGrain {
+  readonly scalePx: number; // procedural: ノイズのセル幅 px / heightMapId 指定時: 1 texel あたりの px
+  readonly amount: number;
+  readonly hardness: number;
+  readonly seed: number; // procedural の紙目 seed。heightMapId 指定時も接触判定の hash に使う
+  readonly heightMapId?: string; // BrushAssetRegistry に登録した高さマップの ID。未指定は procedural Fine tooth
+}
+
+interface BristleDynamics {
+  readonly geometryStepPx: number;
+  readonly transverseMaskCellPx: number;
+  readonly dropoutLengthPx: number;
+  readonly dropoutWidthPx: number;
+  readonly depositHardness: number;
+  readonly cuspAngleThresholdDeg: number;
+  readonly cuspDetectionSpanRatio: number;
+  readonly lagLengthRatio: number;
+  readonly handleLengthRatio: number; // 柄の長さ（幅に対する比率）。0 = 接線をそのまま使う
+  readonly surfaceGrain: BristleSurfaceGrain;
+}
+
+interface BristlePressureDynamics {
+  readonly dropout: number; // 筆圧が弱いほど掠れる強さ。0 = 常にベタ、1 = 筆圧 0 で最大の掠れ
+  readonly size: number; // 筆圧を掃引幅へ反映する強さ。0 = 均一幅、1 = 筆圧比例（stamp の size と同義）
+}
+
+interface BristleBrushConfig {
+  readonly type: "bristle";
+  readonly dynamics: BristleDynamics;
+  readonly pressureDynamics: BristlePressureDynamics;
+  readonly mixing?: BrushMixing;
+}
+
+type BrushConfig =
+  | RoundPenBrushConfig
+  | StampBrushConfig
+  | SprayBrushConfig
+  | BristleBrushConfig;
 ```
 
 **StampBrushConfig**:
@@ -717,6 +766,68 @@ type BrushConfig = RoundPenBrushConfig | StampBrushConfig | SprayBrushConfig;
 
 spray ブラシは混色非対応。`mixing` フィールドは持たず、pickup 経路を通らない。
 
+**BristleBrushConfig**:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | `"bristle"` | 連続掃引する荒いハケ方式 |
+| `dynamics` | `BristleDynamics` | 面掠れ、紙目、折返し追従の設定 |
+| `pressureDynamics` | `BristlePressureDynamics` | 筆圧を掠れ（`dropout`）と掃引幅（`size`）へ反映する強さ |
+| `mixing` | `BrushMixing` | 任意の共通連続色場。毛束ごとの色reservoirではない |
+
+ハケの断面は一様（alpha 1 の矩形）で、毛束ごとの固定の筋は持たない。筋・掠れ・縁のほつれはすべて stroke-space の面掠れ（dropout mask）から生じ、`pressureDynamics.dropout` で筆圧連動の強さを制御する。`geometryStepPx` は曲線を掃引する間隔でありstamp間隔ではない。`dropoutLengthPx`、`dropoutWidthPx` は面掠れ（dropout mask）のstroke方向・横断方向の相関長を定める。`transverseMaskCellPx` は互換上残る横断座標のスケール（CPU rasterの補間座標 `v` の範囲 `lineWidth / transverseMaskCellPx`、下限30）で、面掠れは各pixelで評価されるため空間解像度や見た目を決めない。
+
+`pressureDynamics.dropout` は面掠れの閾値を `dropout × (1 − p)` にする（`p` は `pressureCurve` 適用後の筆圧、未定義なら 0.5）。`dropout = 0` なら筆圧によらず閾値 0 で抜けが無く、常にベタ塗りになる。`dropout = 1` なら筆圧 0 で閾値 1（ほぼ全抜け）、筆圧 1 で閾値 0（ベタ）。`pressureDynamics.size` は掃引の半幅をサンプルごとに `calculateRadius(p, lineWidth, size, pressureCurve)` で決める。面掠れノイズの横断座標、紙目、混色の checkpoint footprint は基準の `lineWidth` を使い、幅が変わっても模様と色場は安定する。不透明度の筆圧連動（stamp の `flow` 相当）は持たない。「1 ストローク = 不透明度 `T(p)` の 1 層」の意味論には CPU 側にストローク単位の alpha surface が必要で、実装できる時点で追加する。
+
+`depositHardness` は着彩/無着彩境界の硬さを定める。面掠れは符号付き距離のまま
+swept quadの各pixelで評価し、最終pixelでalphaへ変換する。これにより低筆圧時にも薄いalphaを全面へ
+積まず、不透明な着彩片の面積だけを減らす。`surfaceGrain` はdocument座標へ固定した
+Fine tooth（細かな紙目）を表す。接触判定はswept quad内のpixel-local pressureと紙目の高さを使い、
+描画chunkの平均筆圧には丸めない。初回に接触しなかった谷にも固定の再接触transferを適用するため、
+同じ場所を繰り返すと不透明な着彩片の面積が徐々に増える。専用の反復強度パラメータや
+顔料厚layerは持たない。`cusp*` と `lagLengthRatio` は急な折返しで毛束の横断方向が不自然に回転するのを抑える。
+
+横断方向（掃引フレーム）は中心線の接線を直接使わず、ペン先の後ろ `brushSize × handleLengthRatio` の距離に置いた「柄の点」からペン先へ向かう方向で決める（引きずり柄モデル）。柄はペン先との距離がその長さを超えたときだけ引きずられ、超えない間（たるみ）は柄も方向も更新しない。前進中は柄が常に張っているので、横ブレ δ がフレームに与える角度は接線の跳び（最大 90°）ではなく約 `atan(δ / L)`（L = 15px、δ = 1px で約 3.6°）に縮む。本当の曲がりでは移動距離に応じて滑らかに回る。描画位置はペン先のままで、遅れるのは向きだけであり、距離ベースなので停止中に変化しない。引き返すと柄との距離が縮んで柄も方向も止まり（たるみ）、柄を通り越して再び張った時点で方向が反転し、それが `cuspAngleThresholdDeg` の折返し判定に入って `frameSign` の反転と lag の回転が従来どおり働く。`handleLengthRatio = 0` は接線をそのまま使う従来の挙動。ストローク開始時は柄を始点の接線の逆側に置き、最初の点から向きが出る。柄の位置と、たるみ中に保持している方向は `BristleBranchRenderState.handleX / handleY / handleDirectionX / handleDirectionY` に branch ごとに保持され、flush をまたいでも replay でも決定的である。
+
+紙目の高さの取得元は2通りある。`surfaceGrain.heightMapId` が未指定なら、`seed` と `scalePx`（ノイズのセル幅）から
+生成した 128² の procedural Fine tooth（2周波 value noise）を document 座標でタイル状に繰り返す。
+`heightMapId` を指定すると、`BrushAssetRegistry`（[brush-api.md](./brush-api.md#brushassetregistry)）に同じ ID で
+登録された `BristleHeightMap` の `heights` を document 座標でタイル状に繰り返し、`scalePx` は 1 texel あたりの
+px（拡大率）として働く。どちらも texel は `positiveMod(floor(documentX / scalePx), width)`（Y も同様）で
+nearest に選ぶ（heightMapId の場合。procedural は scalePx が焼き込み済みなので scale 1 相当）。接触判定の式
+（`amount` / `hardness` / 反復接触の確率）は取得元によらず同一で、CPU と GPU の両経路で同じ契約を守る。
+
+`heightMapId` は image tip の `imageId` と同じ参照モデルである。ブラシ設定・`StrokeCommand` に乗るのは ID だけで、
+高さマップ本体は永続化・シリアライズしない。解決はストローク開始時（live / replay とも）に 1 回だけ行い、
+結果を `BrushRenderState.heightMap` に置く。レジストリが無い、または ID が未登録なら開始時に throw し、
+procedural へ静かに落ちることはない（環境間で replay 結果が変わらないようにするため）。`scalePx` /
+`amount` / `hardness` / `seed` / `heightMapId` の切り替えは通常のブラシ設定変更であり、ストロークごとに変えられる。
+登録済み高さマップの寸法は 1..2048 で、超える場合は登録時・描画時に throw する。非整数の `scalePx` では
+floor の境界が CPU / GPU でわずかに食い違い得る。画像から `BristleHeightMap` を作るには
+`createHeightMapFromImageData`（[brush-api.md](./brush-api.md)）を使う。
+
+初期版は不透明またはほぼ不透明なpaintを対象とする。掃引chunk間の重なりはこの契約の下で継ぎ目を防ぐために使い、半透明paintの厳密な重なり濃度は保証しない。pending描画は常にno-opで、確定描画だけを表示する。
+
+```typescript
+const DEFAULT_BRISTLE_DYNAMICS: BristleDynamics = {
+  geometryStepPx: 1,
+  transverseMaskCellPx: 0.82,
+  dropoutLengthPx: 58,
+  dropoutWidthPx: 1,
+  depositHardness: 1,
+  cuspAngleThresholdDeg: 65,
+  cuspDetectionSpanRatio: 0.14,
+  lagLengthRatio: 0.3,
+  handleLengthRatio: 0.5,
+  surfaceGrain: { scalePx: 4, amount: 1, hardness: 0.75, seed: 1 },
+};
+
+const DEFAULT_BRISTLE_PRESSURE_DYNAMICS: BristlePressureDynamics = {
+  dropout: 1,
+  size: 0,
+};
+```
+
 **RoundPenBrushConfig**:
 
 | フィールド | 型 | 説明 |
@@ -728,32 +839,50 @@ spray ブラシは混色非対応。`mixing` フィールドは持たず、picku
 
 ### BrushMixing
 
-スタンプブラシの混色設定。一定距離ごとに描画先レイヤーの footprint を分岐ごとのブラシ色バッファへ転写し、元の描画色で復元する強さを制御する。
+stamp / bristleで共有する混色設定。一定距離ごとに描画先レイヤーのfootprintを進行方向へ揃えたbrush-local連続RGBA色場へ取り込み、元の描画色への復元と色場内拡散を制御する。
 
 ```typescript
 interface BrushMixing {
   readonly enabled: boolean;
-  readonly pickup: number;
-  readonly restore: number;
+  readonly pickupRatePerPx: number;
+  readonly restoreRatePerPx: number;
+  readonly diffusionRatePerPx: number;
   readonly updateDistancePx: number;
+  readonly checkpointDistancePx: number;
+  readonly fieldColumns: number;
+  readonly fieldRows: number;
 }
+
+const BRUSH_MIXING_MIN_FIELD_DIMENSION = 2;
+const BRUSH_MIXING_MAX_FIELD_DIMENSION = 64;
+const BRUSH_MIXING_MAX_CHECKPOINT_DISTANCE_PX = 256;
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `enabled` | `boolean` | 混色を有効にする |
-| `pickup` | `number` | 描画先 footprint をブラシ色バッファへ転写する強さ [0, 1] |
-| `restore` | `number` | 元の描画色をブラシ色バッファへ戻す強さ [0, 1] |
-| `updateDistancePx` | `number` | 混色状態を更新する距離の下限をpxで指定する。実際の更新間隔は `max(stampSpacing, updateDistancePx)`。型上は必須で、不正値や型を無視した未指定入力は描画時にデフォルト値へフォールバック |
+| `pickupRatePerPx` | `number` | 下地色を拾う距離rate。距離dの係数は`1-exp(-rate*d)` |
+| `restoreRatePerPx` | `number` | 元の描画色へ戻す距離rate。距離dの係数は`1-exp(-rate*d)` |
+| `diffusionRatePerPx` | `number` | 色場内の隣接拡散pass量 / px |
+| `updateDistancePx` | `number` | 色場を更新する最小移動距離 |
+| `checkpointDistancePx` | `number` | 描画済みtargetから局所sampling tileを更新する距離 |
+| `fieldColumns` | `number` | tip-local色場の進行方向解像度 |
+| `fieldRows` | `number` | tip-local色場の横断方向解像度 |
+
+ratesは0以上、距離は正の有限数、field解像度は2〜64の整数、checkpoint距離は256px以下を有効範囲とする。永続化境界では範囲外を暗黙に丸めずrejectする。`pickupRatePerPx <= 0`ではstroke中に色場が元色から変化しないため、restore / diffusionの値にかかわらず混色stage全体をno-opとする。
 
 **関連定数**:
 
 ```typescript
 const DEFAULT_BRUSH_MIXING: BrushMixing = {
   enabled: false,
-  pickup: 0,
-  restore: 0.15,
-  updateDistancePx: 8,
+  pickupRatePerPx: 0.007,
+  restoreRatePerPx: 0.004,
+  diffusionRatePerPx: 0.05,
+  updateDistancePx: 15,
+  checkpointDistancePx: 36,
+  fieldColumns: 18,
+  fieldRows: 8,
 };
 ```
 
@@ -933,22 +1062,38 @@ renderLayers(layers, ctx, transform, {
 
 ```typescript
 interface BrushMixingState {
-  readonly colorBuffer?: OffscreenCanvas;
-  readonly mixedCanvas?: OffscreenCanvas;
-  readonly lastMixingUpdateDistance?: number;
+  readonly field: Float32Array;
+  readonly fieldCanvas: OffscreenCanvas;
+  readonly fieldPixels: ImageData;
+  readonly renderCanvas: OffscreenCanvas;
+  readonly checkpointCanvas?: OffscreenCanvas;
+  readonly checkpointPixels?: ImageData;
+  readonly checkpointOriginX?: number;
+  readonly checkpointOriginY?: number;
+  readonly lastUpdateDistance?: number;
+  readonly lastCheckpointDistance?: number;
 }
 
 interface BrushBranchRenderState {
   readonly accumulatedDistance: number;
   readonly emissionCount: number;
+  readonly distanceEmissionProgress?: number;
   readonly lastTimestamp?: number;
   readonly nextTimeEmissionAt?: number;
+  readonly pressure?: BrushPressureState;
   readonly mixing?: BrushMixingState;
+  readonly bristle?: BristleBranchRenderState;
+}
+
+interface BrushPressureState {
+  readonly value: number;
+  readonly timestamp: number;
 }
 
 interface BrushRenderState {
   readonly seed: number;
   readonly tipCanvas: OffscreenCanvas | null;
+  readonly heightMap: BristleHeightMap | null;
   readonly branches: readonly BrushBranchRenderState[];
 }
 ```
@@ -956,7 +1101,8 @@ interface BrushRenderState {
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `seed` | `number` | PRNG のグローバルシード。ストロークごとに一意。Undo/Redo で同一結果を保証するため `StrokeCommand.brushSeed` に保存される |
-| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。`round-pen` では `null` |
+| `tipCanvas` | `OffscreenCanvas \| null` | 事前生成されたチップ画像。stamp では dab、spray では粒子チップとして全 emission で再利用する。bristleは断面が一様で tip 画像を持たないため`null` |
+| `heightMap` | `BristleHeightMap \| null` | bristle で `surfaceGrain.heightMapId` を指定したとき、ストローク開始時に `BrushAssetRegistry` から解決した紙目の高さマップ。全 branch・全 flush で同じ参照を共有し、`cloneBrushRenderState` は参照をそのままコピーする（`heights` は不変扱い）。procedural / stamp / spray では `null` |
 | `branches` | `readonly BrushBranchRenderState[]` | Expand 分岐ごとの状態。非 Expand でも長さ 1 の配列を持つ |
 
 **BrushBranchRenderState**:
@@ -965,25 +1111,35 @@ interface BrushRenderState {
 |---|---|---|
 | `accumulatedDistance` | `number` | 分岐ごとの emission 配置累積距離。committed→pending 間で引き継ぎ、ギャップや二重配置を防ぐ |
 | `emissionCount` | `number` | 分岐ごとの emission 通し番号。stamp の dab と spray の粒子バーストで共通に使う |
+| `distanceEmissionProgress` | `number` | 可変spacing時の次回距離emissionまでの正規化進捗（0以上1未満）。未使用時は省略 |
 | `lastTimestamp` | `number` | 時間ベース emission で、この分岐が最後に処理した入力時刻。overlap 再入力区間で二重配置しないために使う |
 | `nextTimeEmissionAt` | `number` | 時間ベース emission で、次に emission を配置する予定時刻 |
-| `mixing` | `BrushMixingState` | stamp + mixing 有効時のみ保持する混色状態 |
+| `pressure` | `BrushPressureState` | stampの因果的な筆圧平滑化状態。有効時のみ保持する |
+| `mixing` | `BrushMixingState` | stamp / bristle + mixing 有効時のみ保持する混色状態 |
+| `bristle` | `BristleBranchRenderState` | bristleの直前掃引断面、進入方向、折返し時の短い毛束lag、引きずり柄の位置と保持中の方向（`handleX` / `handleY` / `handleDirectionX` / `handleDirectionY`）を保持する状態 |
 
 **BrushMixingState**:
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `colorBuffer` | `OffscreenCanvas` | 混色有効時に使うブラシ色バッファ。`tipCanvas` と同じ最大サイズで、背景転写と復元色転写により更新される |
-| `mixedCanvas` | `OffscreenCanvas` | 混色更新を距離ベースで間引くときに再利用する直近の mixed dab。`colorBuffer` に `tipCanvas` の alpha を適用した結果を保持する |
-| `lastMixingUpdateDistance` | `number` | 最後に `colorBuffer` / `mixedCanvas` を更新したストローク距離。混色更新を距離ベースで制御するために使用 |
+| `field` | `Float32Array` | 連続RGBA色場の正本。更新ごとに新しい配列を返す |
+| `fieldCanvas` / `fieldPixels` | Canvas / ImageData | 小さな数値色場をCanvasへuploadするbranch所有cache |
+| `renderCanvas` | `OffscreenCanvas` | 色場をtip alphaでmaskした再利用可能なdab source |
+| `checkpointCanvas` | `OffscreenCanvas` | 描画済みtargetから切り出した有限範囲のsampling tile |
+| `checkpointPixels` | `ImageData` | checkpoint更新時に一度だけreadbackしたCPU sampling source |
+| `checkpointOriginX/Y` | `number` | checkpoint tileのdocument座標原点 |
+| `lastUpdateDistance` | `number` | 最後に色場を更新したstroke距離 |
+| `lastCheckpointDistance` | `number` | 最後にcheckpoint tileを更新したstroke距離 |
 
 **設計意図**:
 
 - `branches` は常に存在し、Expand の出力 branch 数と一致する。非 Expand は長さ 1。
-- branch ごとに独立した `accumulatedDistance` / `emissionCount` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、stamp / spray とも branch 間で spacing 位相と時間 emission の位相が揃う。
+- branch ごとに独立した `accumulatedDistance` / `emissionCount` / `distanceEmissionProgress` / `lastTimestamp` / `nextTimeEmissionAt` を持つため、stamp / spray とも branch 間で spacing 位相と時間 emission の位相が揃う。
 - branch の実効 seed は `hashSeed(seed, branchIndex)` で導出する。emission 序数は branch ごとに 0 から数え、各 emission の局所 seed は `hashSeed(branchSeed, emissionIndex)` で導出する。
 - 時間ベース emission も距離ベース emission と同じ `emissionCount` を消費するため、incremental 描画と replay で PRNG 列が一致する。
-- 混色有効時は Expand 分岐ごとに拾う背景が異なるため、`mixing` に分岐別の色バッファを保持する。spray は混色非対応のため `mixing` を持たない。
+- 混色有効時はExpand分岐ごとに拾う背景が異なるため、`mixing`に分岐別の色場と有限checkpointを保持する。stampとbristleは同じ色場モデルを使い、sprayは混色非対応。
+- `field`は更新ごとに新しい配列を返す数値状態。Canvas / ImageDataはbranch所有のmutable cacheであり、分岐・pendingへ共有せず`cloneBrushRenderState`でdeep cloneする。進行方向付きの18×8 samplingは`checkpointPixels`からCPUで行い、WebKitのGPU→CPU同期をmaterial更新ごとに発生させない。
+- bristleの面掠れは毛束ごとの絵の具reservoirではない。初回接触で未着彩と判定されたcellへ半透明の着彩floorは加えない。面掠れで着彩可能と判定された領域では、document-space grainの谷に確率的な再接触を与え、同じ場所への反復で不透明な着彩片の面積を段階的に増やす。追加のpigment layerは持たない。
 
 **使用例**:
 ```typescript
@@ -991,6 +1147,7 @@ interface BrushRenderState {
 const initialState: BrushRenderState = {
   seed: Math.random() * 0xffffffff | 0,
   tipCanvas: generateBrushTip(brush.tip, size, color),
+  heightMap: null, // bristle で heightMapId 指定時のみ registry.getHeightMap(id) の結果
   branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
 };
 
@@ -998,3 +1155,37 @@ const initialState: BrushRenderState = {
 const nextState = renderBrushStroke(layer, points, style, 0, initialState);
 // nextState.branches[branchIndex] を pending 描画に使う
 ```
+
+## BrushAccelerator / BrushAcceleratorOptions / BrushAcceleratorBackend / BrushAcceleratorResolution
+
+GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。
+
+```typescript
+type BrushAcceleratorBackend = "auto" | "webgl2" | "cpu";
+
+interface BrushAcceleratorOptions {
+  readonly backend?: BrushAcceleratorBackend; // 既定 "auto"（WebKit系かつWebGL2可のときのみ有効）
+  readonly maxBranches?: number;                 // 既定 64
+  readonly resident?: boolean;                   // 既定 true
+  readonly commitMode?: "bitmap" | "direct";    // デバッグ用。既定 "bitmap"
+}
+
+interface BrushAccelerator {
+  readonly backend: "webgl2";
+  warmUp(layer: Layer): void;
+  invalidate(layer: Layer): void;
+  dispose(): void;
+}
+
+interface BrushAcceleratorResolution {
+  readonly backend: "webgl2" | "cpu";
+  readonly reason: string;
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `backend` | 実際に使われているbackend。現状は `"webgl2"` のみ |
+| `warmUp(layer)` | surface確保とlayer内容のuploadを先行実行する。ブラシ選択時に呼ぶと初回strokeの初期化コストを隠せる |
+| `invalidate(layer)` | engine API外で `layer.ctx` に直接描いた後に呼ぶ。常駐accumを無効化する |
+| `dispose()` | GLリソースを解放する |
