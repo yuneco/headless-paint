@@ -24,7 +24,11 @@ import type {
   RebuildLayerResult,
   StrokeCommand,
 } from "./types";
-import { isDrawCommand, isStructuralCommand } from "./types";
+import {
+  isDrawCommand,
+  isLayerDrawCommand,
+  isStructuralCommand,
+} from "./types";
 
 /**
  * ストロークコマンドをリプレイする
@@ -191,6 +195,7 @@ export function rebuildLayerFromHistory<TCustom = never>(
     const command = getCommandAt(state, i);
     if (!command) continue;
     if (isDrawCommand(command)) {
+      if (isLayerDrawCommand(command) && command.layerId !== layer.id) continue;
       replayCommand(layer, command, registry, {
         ...options,
         gpuOwnerLabel: "rebuild",

@@ -226,39 +226,6 @@ void main() {
 }
 `;
 
-export const BRISTLE_INK_VERTEX_SHADER_SOURCE = `#version 300 es
-precision highp float;
-
-layout(location = 0) in vec2 aPosition;
-layout(location = 1) in vec2 aUv;
-uniform vec2 uAtlasSize;
-uniform vec2 uAtlasOrigin;
-out vec2 vUv;
-
-void main() {
-  gl_Position = vec4(
-    (aPosition.x + uAtlasOrigin.x) / uAtlasSize.x * 2.0 - 1.0,
-    1.0 - (aPosition.y + uAtlasOrigin.y) / uAtlasSize.y * 2.0,
-    0.0,
-    1.0
-  );
-  vUv = aUv;
-}
-`;
-
-export const BRISTLE_INK_FRAGMENT_SHADER_SOURCE = `#version 300 es
-precision highp float;
-uniform sampler2D uProfile;
-uniform vec2 uProfileScale;
-in vec2 vUv;
-out vec4 outColor;
-
-void main() {
-  float alpha = texture(uProfile, vUv * uProfileScale).a;
-  outColor = vec4(alpha);
-}
-`;
-
 export const BRISTLE_COMPOSITE_VERTEX_SHADER_SOURCE = `#version 300 es
 precision highp float;
 
@@ -280,14 +247,12 @@ uniform sampler2D uPreviousField;
 uniform ivec2 uSurfaceSize;
 uniform ivec2 uAtlasSize;
 uniform ivec2 uAtlasOrigin;
-uniform ivec2 uChunkSize;
 uniform ivec2 uDocumentOrigin;
 uniform ivec2 uFieldSize;
 uniform ivec2 uFieldTextureSize;
 uniform int uFieldRowStride;
 uniform int uBranchIndex;
 uniform bool uUseField;
-uniform bool uUseInk;
 uniform vec2 uFieldMixWeights;
 uniform vec2 uFieldMixSpan;
 uniform vec4 uFieldGeometry;
@@ -344,12 +309,8 @@ void main() {
     uAtlasSize.y - 1 - uAtlasOrigin.y - localPixel.y
   );
   float mask = texelFetch(uAtlas, texturePixel, 0).a;
-  float ink = 1.0;
-  if (uUseInk) {
-    ink = texelFetch(uAtlas, texturePixel + ivec2(uChunkSize.x, 0), 0).a;
-  }
   vec4 material = sampleMaterial(documentPosition);
-  float alpha = material.a * mask * ink;
+  float alpha = material.a * mask;
   outColor = vec4(material.rgb * alpha, alpha);
 }
 `;

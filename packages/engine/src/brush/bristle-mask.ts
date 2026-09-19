@@ -21,6 +21,18 @@ export interface BristleMaskSweepSample extends BristleMaskSample {
   readonly halfWidth?: number;
 }
 
+export interface BristleMaskPaint {
+  readonly opacity: number;
+  readonly write: (
+    data: Uint8ClampedArray,
+    offset: number,
+    x: number,
+    y: number,
+    u: number,
+    crossRatio: number,
+  ) => void;
+}
+
 interface BristleMaskEvaluator {
   readonly height: number;
   readonly evaluate: (u: number, v: number) => number;
@@ -79,6 +91,7 @@ export function rasterizeBristleMask(
   width: number,
   height: number,
   heightMap: BristleHeightMap | null = null,
+  paint?: BristleMaskPaint,
 ): OffscreenCanvas {
   const canvas = perfStage(
     "canvasAlloc",
@@ -105,6 +118,7 @@ export function rasterizeBristleMask(
     canvas,
     ctx,
     heightMap,
+    paint,
   );
   return canvas;
 }
@@ -150,6 +164,7 @@ function rasterizeBristleMaskIntoCanvas(
   canvas: OffscreenCanvas,
   ctx: OffscreenCanvasRenderingContext2D,
   heightMap: BristleHeightMap | null,
+  paint?: BristleMaskPaint,
 ): void {
   const width = canvas.width;
   const height = canvas.height;
@@ -221,6 +236,8 @@ function rasterizeBristleMaskIntoCanvas(
         samples,
         surface,
         trialId,
+        paint,
+        maxV,
       );
       rasterizeTriangle(
         evaluate,
@@ -232,9 +249,15 @@ function rasterizeBristleMaskIntoCanvas(
         samples,
         surface,
         trialId,
+        paint,
+        maxV,
       );
     }
   });
+  if (paint && paint.opacity !== 1) {
+    for (let i = 3; i < target.data.length; i += 4)
+      target.data[i] *= paint.opacity;
+  }
   const uploadPutStartedAt = brushPerfDebug.enabled ? performance.now() : 0;
   ctx.putImageData(target, 0, 0);
   if (brushPerfDebug.enabled) {
@@ -299,6 +322,8 @@ function rasterizeTriangle(
   samples: readonly BristleMaskSample[],
   surface: SurfaceContactRaster | undefined,
   trialId: number,
+  paint: BristleMaskPaint | undefined,
+  maxV: number,
 ): void {
   const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
   if (Math.abs(denominator) < 0.00001) return;
@@ -353,9 +378,13 @@ function rasterizeTriangle(
         alpha = 0;
       }
       if (alpha > (target.data[offset + 3] ?? 0)) {
-        target.data[offset] = 255;
-        target.data[offset + 1] = 255;
-        target.data[offset + 2] = 255;
+        if (paint) {
+          paint.write(target.data, offset, x, y, u, v / maxV);
+        } else {
+          target.data[offset] = 255;
+          target.data[offset + 1] = 255;
+          target.data[offset + 2] = 255;
+        }
         target.data[offset + 3] = alpha;
       }
       u += uDx;

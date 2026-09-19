@@ -350,12 +350,14 @@ import { computeSimilarityTransform, screenToLayer } from "@yuneco/headless-pain
 const layerP1 = screenToLayer(screenP1, currentTransform);
 const layerP2 = screenToLayer(screenP2, currentTransform);
 
-// 各フレーム: 現在のスクリーン座標とアンカーから ViewTransform を計算
-const newTransform = computeSimilarityTransform(
-  layerP1, layerP2,
-  currentScreenP1, currentScreenP2,
-);
-if (newTransform) {
-  setTransform(newTransform);
+// 逆変換できた場合のみ、各フレームでアンカーから ViewTransform を計算
+if (layerP1 && layerP2) {
+  const newTransform = computeSimilarityTransform(
+    layerP1, layerP2,
+    currentScreenP1, currentScreenP2,
+  );
+  if (newTransform) {
+    setTransform(newTransform);
+  }
 }
 ```

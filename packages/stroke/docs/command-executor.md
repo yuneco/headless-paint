@@ -31,7 +31,7 @@ interface ExecutorDeps<TCustom> {
   readonly layers: readonly Layer[];          // 現在の committed layer 群（z順）
   readonly registry?: BrushAssetRegistry;     // rebuild 用（image tip と bristle 高さマップの解決）
   readonly customExecutor?: CustomCommandExecutor<TCustom>;
-  readonly shiftTempCanvas?: Layer;           // wrap-shift 用ワーク
+  readonly shiftTempCanvas?: OffscreenCanvas; // wrap-shift 用ワーク
   readonly accelerator?: BrushAccelerator | null; // GPU加速器。rebuild / replay に伝播し、undo は直前 1 手の GPU スナップショット hit 時に rebuild を省略する（engine docs/gpu-acceleration.md）
 }
 
@@ -41,12 +41,17 @@ interface CustomCommandExecutor<TCustom> {
   unapply(command: TCustom): CustomCommandOutcome;  // undo 方向
 }
 
+interface ExecutorFailure {
+  readonly reason: "missing-checkpoint" | "apply-failed" | "guard" | "not-implemented";
+  readonly commandType: string;
+  readonly layerId?: string;
+}
+
 interface ExecutorResult<TCustom> {
   readonly ok: boolean;
-  readonly failure?: { reason: "missing-checkpoint" | "apply-failed" | "guard";
-                       commandType: string; layerId?: string };
+  readonly failure?: ExecutorFailure;
   readonly next: HistoryState<TCustom>;       // ok 時のみコミットする新 state
-  readonly command: Command<TCustom>;         // 対象コマンド
+  readonly command?: Command<TCustom>;        // 対象コマンド。空履歴等の guard failure では undefined
   readonly layerListOps: readonly LayerListOp[];  // app が entries へ反映する
   readonly activeLayerIdHint?: string;
   readonly visibilityFixLayerIds: readonly string[]; // rebuild 後に可視化すべき layer
@@ -55,21 +60,21 @@ interface ExecutorResult<TCustom> {
 }
 
 type LayerListOp =
-  | { type: "insert"; index: number; layer: Layer }   // executor が生成・rebuild 済みの実体
-  | { type: "remove"; layerId: string }
-  | { type: "move"; fromIndex: number; toIndex: number }
-  | { type: "replace"; layers: readonly Layer[]; activeLayerId: string }; // duplicate/merge redo
+  | { readonly type: "insert"; readonly index: number; readonly layer: Layer }   // executor が生成・rebuild 済みの実体
+  | { readonly type: "remove"; readonly layerId: string }
+  | { readonly type: "move"; readonly fromIndex: number; readonly toIndex: number }
+  | { readonly type: "replace"; readonly layers: readonly Layer[]; readonly activeLayerId: string }; // duplicate/merge redo
 
 type DirtyHint =
-  | { type: "none" }
-  | { type: "layers"; layerIds: readonly string[] }
-  | { type: "all" };
+  | { readonly type: "none" }
+  | { readonly type: "layers"; readonly layerIds: readonly string[] }
+  | { readonly type: "all" };
 
 type PersistenceEvent =
-  | { type: "none" }
-  | { type: "append-command"; command: unknown }   // redo 非構造
-  | { type: "delete-last-command" }                // undo 非構造
-  | { type: "structural-checkpoint" };             // 構造 undo/redo
+  | { readonly type: "none" }
+  | { readonly type: "append-command"; readonly command: unknown }   // redo 非構造
+  | { readonly type: "delete-last-command" }                // undo 非構造
+  | { readonly type: "structural-checkpoint" };             // 構造 undo/redo
 
 // push 側の対応表（歴史操作→event の一意対応を push にも適用する純粋関数）
 resolvePushPersistenceEvent(command: Command<TCustom>): PersistenceEvent

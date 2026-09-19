@@ -632,12 +632,20 @@ interface HistoryMetrics {
 }
 ```
 
-## ReplayOptions
+## replay の options
 
-`replayCommand` / `replayCommands` の options。
+`replayCommand` / `replayCommands` / `rebuildLayerFromHistory` の第4引数。内部では `ReplayOptions` という型名だが、この名前はパッケージの公開エントリーポイントから export していない。外部アプリは options を直接渡すか、公開関数から型を取得する。
 
 ```typescript
-interface ReplayOptions {
-  readonly accelerator?: BrushAccelerator | null; // GPU加速器（engine docs/gpu-acceleration.md）。省略時は CPU 経路
-}
+import { replayCommand } from "@yuneco/headless-paint/core";
+
+type ReplayOptions = NonNullable<Parameters<typeof replayCommand>[3]>;
 ```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `accelerator` | `BrushAccelerator \| null` | 任意。GPU加速器（[engine docs/gpu-acceleration.md](../../engine/docs/gpu-acceleration.md)）。省略または `null` なら CPU 経路 |
+| `gpuOwnerLabel` | `GpuStrokeOwnerLabel` | 任意。GPU stroke の所有元ラベル。replay では既定 `"replay"`。rebuild は指定値によらず `"rebuild"` を使う |
+| `invalidationReason` | `GpuResidencyInvalidationReason` | 任意。rebuild が checkpoint 復元または空状態への初期化で GPU residency を無効化するときの理由。直接の `replayCommand` / `replayCommands` では使わない |
+
+各フィールドは `readonly`。通常は `accelerator` だけを指定する。`gpuOwnerLabel` / `invalidationReason` は履歴実行などの呼び出し元を識別するための設定で、描画コマンドの保存形式には含めない。

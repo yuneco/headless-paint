@@ -131,8 +131,14 @@ function processPoint(
 - `state`: 次の呼び出しに渡す状態
 - `output`: `{ committed, pending }` - 確定点と未確定点
 
+`output.committed` はストローク開始からの累積確定点です。追加描画に使う新規確定点は、前回の累積件数との差分で取得してください。プラグインの `FilterStepResult.committed` は、その処理で新しく確定した点だけを返します。
+
 **使用例**:
 ```typescript
+// ストローク開始時に初期化し、以降の入力間で保持する
+let committedCount = 0;
+
+// 入力点ごとの処理
 const result = processPoint(pipelineState, {
   x: 100,
   y: 100,
@@ -141,8 +147,10 @@ const result = processPoint(pipelineState, {
 }, compiled);
 
 pipelineState = result.state;
-// result.output.committed - 新しく確定した点
+// result.output.committed - ストローク開始からの累積確定点
 // result.output.pending - 現在未確定の点
+const newlyCommitted = result.output.committed.slice(committedCount);
+committedCount = result.output.committed.length;
 ```
 
 ---
@@ -164,7 +172,7 @@ function finalizePipeline(
 | `state` | `FilterPipelineState` | ○ | 現在の状態 |
 | `compiled` | `CompiledFilterPipeline` | ○ | コンパイル済みパイプライン |
 
-**戻り値**: `FilterOutput` - 全ての点が committed に入り、pending は空
+**戻り値**: `FilterOutput` - 終了処理で確定した点を含む累積確定点が committed に入り、pending は空。追加描画する場合は、直前の累積件数との差分を使う
 
 **使用例**:
 ```typescript
@@ -274,9 +282,9 @@ function onPointerUp() {
 type FilterType = "smoothing" | "causal-adaptive" | "straight-line";
 
 type FilterConfig =
-  | { type: "smoothing"; config: SmoothingConfig }
-  | { type: "causal-adaptive"; config: CausalAdaptiveConfig }
-  | { type: "straight-line"; config: StraightLineConfig };
+  | { readonly type: "smoothing"; readonly config: SmoothingConfig }
+  | { readonly type: "causal-adaptive"; readonly config: CausalAdaptiveConfig }
+  | { readonly type: "straight-line"; readonly config: StraightLineConfig };
 
 interface FilterPipelineConfig {
   readonly filters: readonly FilterConfig[];
@@ -385,14 +393,14 @@ interface StraightLineConfig {}
 import type { FilterPlugin, InputPoint, FilterState, FilterStepResult } from "../types";
 
 interface SmoothingState extends FilterState {
-  buffer: InputPoint[];
-  windowSize: number;
+  readonly buffer: readonly InputPoint[];
+  readonly windowSize: number;
 }
 
 export const smoothingPlugin: FilterPlugin = {
   type: "smoothing",
 
-  createState(config: { windowSize: number }): SmoothingState {
+  createState(config: { readonly windowSize: number }): SmoothingState {
     return {
       buffer: [],
       windowSize: config.windowSize,

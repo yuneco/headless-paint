@@ -2,6 +2,8 @@
 
 Canvas2D ベースのペイントライブラリ。OffscreenCanvas を使用し、DOM に依存せず Web Worker 等でも動作します。
 
+更新内容と既存アプリの移行事項は [CHANGELOG](./CHANGELOG.md) を参照してください。
+
 ## 特徴
 
 - **DOM 非依存** — OffscreenCanvas ベースで Web Worker 上でも動作

@@ -13,6 +13,7 @@ import type {
   StrokePoint,
   StrokeStyle,
 } from "../types";
+import { createBristleMaskPaint } from "./bristle-color";
 import { rasterizeBristleMask, resolveBristleToothMap } from "./bristle-mask";
 import { getBristleSectionCanvas } from "./bristle-section";
 import {
@@ -41,54 +42,6 @@ interface ResolvedSweepPoint extends BristleSweepPointState {
 
 interface BristleRenderResult {
   readonly mixing?: BrushMixingState;
-}
-
-interface BristleEndInkCache {
-  readonly canvas: OffscreenCanvas;
-  readonly ctx: OffscreenCanvasRenderingContext2D;
-}
-
-// The render canvas survives immutable mixing-state updates, but is replaced
-// when mixing is initialized again. Scratch pixels never become mixing state.
-const BRISTLE_END_INK_CACHE = new WeakMap<
-  OffscreenCanvas,
-  BristleEndInkCache
->();
-
-function prepareEndInk(
-  owner: OffscreenCanvas,
-  width: number,
-  height: number,
-): BristleEndInkCache {
-  let cached = BRISTLE_END_INK_CACHE.get(owner);
-  if (!cached) {
-    const canvas = perfStage(
-      "canvasAlloc",
-      () => new OffscreenCanvas(width, height),
-    );
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Bristle interpolation requires Canvas2D");
-    cached = { canvas, ctx };
-    BRISTLE_END_INK_CACHE.set(owner, cached);
-  } else {
-    const { canvas, ctx } = cached;
-    if (width > canvas.width || height > canvas.height) {
-      perfStage("canvasAlloc", () => {
-        if (width > canvas.width) {
-          canvas.width = Math.max(width, canvas.width * 2);
-        }
-        if (height > canvas.height) {
-          canvas.height = Math.max(height, canvas.height * 2);
-        }
-      });
-    } else {
-      // drawSweep leaves the transform at identity. Ignore pixels outside the
-      // current run; the final copy uses an explicit source rectangle.
-      ctx.clearRect(0, 0, width, height);
-    }
-    ctx.globalCompositeOperation = "source-over";
-  }
-  return cached;
 }
 
 export function renderBristleBrushStroke(
@@ -590,7 +543,6 @@ function renderCpuMixingRuns(
       true,
       undefined,
       paintProfiles?.canvases[runIndex]?.[1],
-      mixingState.renderCanvas,
     );
     if (update?.capturesCheckpoint) {
       mixingState = stageBristleMixingCheckpoint(update.input, mixingState);
@@ -615,7 +567,6 @@ function renderSweepRun(
   coloredProfile: boolean,
   accelerator?: BrushAccelerator | null,
   endPaintProfile?: OffscreenCanvas,
-  endInkOwner?: OffscreenCanvas,
 ): void {
   if (points.length < 2) return;
   const margin =
@@ -670,6 +621,38 @@ function renderSweepRun(
     });
     return;
   }
+  if (coloredProfile && paintProfile) {
+    const mask = rasterizeBristleMask(
+      points.map((point) => ({
+        ...point,
+        pressure: evaluateParametricCurve(point.pressure, style.pressureCurve),
+      })),
+      style.lineWidth,
+      brush.dynamics,
+      brush.pressureDynamics.dropout,
+      seed,
+      minX,
+      minY,
+      width,
+      height,
+      heightMap,
+      createBristleMaskPaint(
+        points,
+        style.lineWidth,
+        paintProfile,
+        endPaintProfile,
+        minX,
+        minY,
+        style.color.a / 255,
+      ),
+    );
+    layer.ctx.save();
+    layer.ctx.globalAlpha = 1;
+    layer.ctx.globalCompositeOperation = style.compositeOperation;
+    layer.ctx.drawImage(mask, minX, minY);
+    layer.ctx.restore();
+    return;
+  }
   const ink = perfStage(
     "canvasAlloc",
     () => new OffscreenCanvas(width, height),
@@ -697,69 +680,7 @@ function renderSweepRun(
       inkCtx.fillStyle = "#000";
       inkCtx.fillRect(0, 0, width, height);
     } else {
-      const start = points[0];
-      const end = points[points.length - 1];
-      if (
-        endPaintProfile &&
-        endInkOwner &&
-        start &&
-        end &&
-        Math.hypot(end.x - start.x, end.y - start.y) >= 0.001
-      ) {
-        const { canvas: endInk, ctx: endCtx } = prepareEndInk(
-          endInkOwner,
-          width,
-          height,
-        );
-        const inkBounds = drawSweep(
-          inkCtx,
-          paintProfile,
-          points,
-          style.lineWidth,
-          minX,
-          minY,
-          true,
-        );
-        drawSweep(endCtx, endPaintProfile, points, style.lineWidth, minX, minY);
-        if (!inkBounds) return;
-        const gradient = inkCtx.createLinearGradient(
-          start.x - minX,
-          start.y - minY,
-          end.x - minX,
-          end.y - minY,
-        );
-        gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
-        gradient.addColorStop(1, "rgba(0, 0, 0, 1)");
-        inkCtx.globalCompositeOperation = "destination-out";
-        inkCtx.fillStyle = gradient;
-        inkCtx.fillRect(
-          inkBounds.x,
-          inkBounds.y,
-          inkBounds.width,
-          inkBounds.height,
-        );
-        endCtx.globalCompositeOperation = "destination-in";
-        endCtx.fillStyle = gradient;
-        endCtx.fillRect(
-          inkBounds.x,
-          inkBounds.y,
-          inkBounds.width,
-          inkBounds.height,
-        );
-        // Add the complementary premultiplied colors and alphas. Source-over
-        // would attenuate ink0 again and create a dip in alpha at mid-run.
-        inkCtx.globalCompositeOperation = "lighter";
-        inkCtx.drawImage(endInk, 0, 0, width, height, 0, 0, width, height);
-      } else {
-        drawSweep(
-          inkCtx,
-          endPaintProfile ?? paintProfile,
-          points,
-          style.lineWidth,
-          minX,
-          minY,
-        );
-      }
+      drawSweep(inkCtx, paintProfile, points, style.lineWidth, minX, minY);
     }
   });
   perfStage("composite", () => {

@@ -91,11 +91,15 @@ interface UsePenSettingsResult {
   /** true にすると compositeOperation が "destination-out" に設定される */
   readonly setEraser: (eraser: boolean) => void;
   readonly setBrush: (brush: BrushConfig) => void;
-  readonly setBrushPressureDynamics: (dynamics: PressureDynamics) => void;
+  readonly setBrushPressureDynamics: (
+    dynamics: PressureDynamics | SprayPressureDynamics | BristlePressureDynamics,
+  ) => void;
 }
 ```
 
 筆圧の反映先は `brush.pressureDynamics` で管理する。`round-pen` では `pressureDynamics.size` のみ描画に使い、`pressureDynamics.flow` は無視する。UIは `round-pen` 選択時に flow 筆圧コントロールを表示しない。
+
+`setBrushPressureDynamics` には現在のブラシに対応する設定を渡す。round-pen / stamp は `PressureDynamics`、spray は `SprayPressureDynamics`（size / flow / density）、bristle は `BristlePressureDynamics`（dropout / size）を使う。
 
 ### `useSmoothing`
 
@@ -395,7 +399,7 @@ interface StrokeCompleteData {
   readonly brushSeed: number;
   /** ストローク開始時点の対象レイヤー alpha lock 設定 */
   readonly alphaLocked: boolean;
-  /** 確定済みポイントの総数 */
+  /** フィルタ適用前の入力ポイント数（inputPoints.length）。吹きつけ用 synthetic point も含む */
   readonly totalPoints: number;
 }
 ```
@@ -407,7 +411,8 @@ interface UseStrokeSessionResult {
   /**
    * ストロークを開始する。
    * options.pendingOnly=true にすると committed layer への描画を保留し、
-   * onDrawConfirm() が呼ばれるまで pendingLayer のみに描画する。
+   * onDrawConfirm() が呼ばれるまで pendingLayer にプレビューする。
+   * 混色が有効な stamp と bristle は pending 描画を行わないため、確認まで表示も保留する。
    * options.straightLine=true にすると直線モード（始点→終点の2点に集約）になる。
    */
   readonly onStrokeStart: (point: InputPoint, options?: StrokeStartOptions) => void;
@@ -432,7 +437,9 @@ interface UseStrokeSessionResult {
 }
 ```
 
-描画ブラシは live 描画中のみ `pendingLayer` 側でストローク全体を再描画し、ストローク終了時に `committed layer` へ確定する。高速カーブや急コーナーで future context を失った補間結果を早期確定しないための挙動で、外部 API の使い方は変わらない。
+通常の live 描画では、FilterPipeline が確定した点を `committed layer` へ順次描画する。round-pen / 非混色 stamp / spray は未確定点を `pendingLayer` に再描画する。混色が有効な stamp（`isBrushMixingActive` が true）と bristle は pending 描画を行わず、確定済みの描画結果だけを表示する。bristle は入力を時間・移動距離に基づく batch にまとめて描画し、ストローク終了時に残りを処理する。
+
+`pendingOnly: true` はタッチ操作の確認待ちモードであり、通常の差分描画とは別に committed layer への書き込みを保留する。`onDrawConfirm()` で蓄積入力を committed 描画へ渡し、以後は通常の描画を続ける。混色 stamp / bristle はこの確認待ち中も pending 描画を行わない。確認前に `onStrokeEnd()` が呼ばれると、そのストロークはキャンセルされる。
 
 ### 吹きつけ用 synthetic input
 
@@ -536,8 +543,10 @@ interface PaintEngineConfig<TCustom = never> {
   readonly historyConfig?: HistoryConfig;
   /** ブラシ資産（image tip / bristle 高さマップ）のレジストリ。内部で useStrokeSession と rebuildLayerFromHistory に渡される */
   readonly registry?: BrushAssetRegistry;
-  /** GPU 加速器の backend（既定 "auto"）。hook が createBrushAccelerator で生成し、live runtime と Undo/Redo に注入、mixing stamp 選択時に warmUp、unmount 時に dispose する。詳細は engine docs/gpu-acceleration.md */
+  /** GPU 加速器の backend（既定 "auto"）。hook が createBrushAccelerator で生成し、live runtime と Undo/Redo に注入、mixing stamp / bristle 選択時に warmUp、unmount 時に dispose する。詳細は engine docs/gpu-acceleration.md */
   readonly gpuBackend?: "auto" | "webgl2" | "cpu";
+  /** GPU commit の転写方式（既定 "bitmap"）。"bitmap" は fence 完了後に ImageBitmap で転写し、"direct" は WebGL canvas から同期転写する。デバッグ・比較用 */
+  readonly gpuCommitMode?: "bitmap" | "direct";
   /** 復元用の初期ドキュメント。指定時はこの内容でレイヤー群を初期化する */
   readonly initialDocument?: PaintEngineInitialDocument;
   /** カスタムコマンドの apply/undo ハンドラ。TCustom を指定する場合は必須 */

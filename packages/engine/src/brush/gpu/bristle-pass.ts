@@ -9,14 +9,11 @@ import type {
 import {
   BRISTLE_COMPOSITE_FRAGMENT_SHADER_SOURCE,
   BRISTLE_COMPOSITE_VERTEX_SHADER_SOURCE,
-  BRISTLE_INK_FRAGMENT_SHADER_SOURCE,
-  BRISTLE_INK_VERTEX_SHADER_SOURCE,
   BRISTLE_MASK_FRAGMENT_SHADER_SOURCE,
   BRISTLE_MASK_VERTEX_SHADER_SOURCE,
 } from "./shader-sources";
 
 const MASK_VERTEX_FLOATS = 6;
-const INK_VERTEX_FLOATS = 4;
 
 interface MaskUniforms {
   readonly toothSize: WebGLUniformLocation;
@@ -33,24 +30,16 @@ interface MaskUniforms {
   readonly dropoutResponse: WebGLUniformLocation;
 }
 
-interface InkUniforms {
-  readonly atlasSize: WebGLUniformLocation;
-  readonly atlasOrigin: WebGLUniformLocation;
-  readonly profileScale: WebGLUniformLocation;
-}
-
 interface CompositeUniforms {
   readonly surfaceSize: WebGLUniformLocation;
   readonly atlasSize: WebGLUniformLocation;
   readonly atlasOrigin: WebGLUniformLocation;
-  readonly chunkSize: WebGLUniformLocation;
   readonly documentOrigin: WebGLUniformLocation;
   readonly fieldSize: WebGLUniformLocation;
   readonly fieldTextureSize: WebGLUniformLocation;
   readonly fieldRowStride: WebGLUniformLocation;
   readonly branchIndex: WebGLUniformLocation;
   readonly useField: WebGLUniformLocation;
-  readonly useInk: WebGLUniformLocation;
   readonly fieldMixWeights: WebGLUniformLocation;
   readonly fieldMixSpan: WebGLUniformLocation;
   readonly fieldGeometry: WebGLUniformLocation;
@@ -113,12 +102,6 @@ export function createGpuBristlePassResources(
     BRISTLE_MASK_FRAGMENT_SHADER_SOURCE,
     "GPU bristle mask",
   );
-  const inkProgram = createProgram(
-    gl,
-    BRISTLE_INK_VERTEX_SHADER_SOURCE,
-    BRISTLE_INK_FRAGMENT_SHADER_SOURCE,
-    "GPU bristle ink",
-  );
   const compositeProgram = createProgram(
     gl,
     BRISTLE_COMPOSITE_VERTEX_SHADER_SOURCE,
@@ -139,16 +122,10 @@ export function createGpuBristlePassResources(
     dropoutSize: uniformLocation(gl, maskProgram, "uDropoutSize"),
     dropoutResponse: uniformLocation(gl, maskProgram, "uDropoutResponse"),
   };
-  const inkUniforms: InkUniforms = {
-    atlasSize: uniformLocation(gl, inkProgram, "uAtlasSize"),
-    atlasOrigin: uniformLocation(gl, inkProgram, "uAtlasOrigin"),
-    profileScale: uniformLocation(gl, inkProgram, "uProfileScale"),
-  };
   const compositeUniforms: CompositeUniforms = {
     surfaceSize: uniformLocation(gl, compositeProgram, "uSurfaceSize"),
     atlasSize: uniformLocation(gl, compositeProgram, "uAtlasSize"),
     atlasOrigin: uniformLocation(gl, compositeProgram, "uAtlasOrigin"),
-    chunkSize: uniformLocation(gl, compositeProgram, "uChunkSize"),
     documentOrigin: uniformLocation(gl, compositeProgram, "uDocumentOrigin"),
     fieldSize: uniformLocation(gl, compositeProgram, "uFieldSize"),
     fieldTextureSize: uniformLocation(
@@ -159,7 +136,6 @@ export function createGpuBristlePassResources(
     fieldRowStride: uniformLocation(gl, compositeProgram, "uFieldRowStride"),
     branchIndex: uniformLocation(gl, compositeProgram, "uBranchIndex"),
     useField: uniformLocation(gl, compositeProgram, "uUseField"),
-    useInk: uniformLocation(gl, compositeProgram, "uUseInk"),
     fieldMixWeights: uniformLocation(gl, compositeProgram, "uFieldMixWeights"),
     fieldMixSpan: uniformLocation(gl, compositeProgram, "uFieldMixSpan"),
     fieldGeometry: uniformLocation(gl, compositeProgram, "uFieldGeometry"),
@@ -169,10 +145,6 @@ export function createGpuBristlePassResources(
     gl.createVertexArray(),
     "GPU bristle mask vertex array",
   );
-  const inkVertexArray = requireResource(
-    gl.createVertexArray(),
-    "GPU bristle ink vertex array",
-  );
   const vertexBuffer = requireResource(
     gl.createBuffer(),
     "GPU bristle vertex buffer",
@@ -180,10 +152,6 @@ export function createGpuBristlePassResources(
   const toothTexture = requireResource(
     gl.createTexture(),
     "GPU bristle tooth texture",
-  );
-  const profileTexture = requireResource(
-    gl.createTexture(),
-    "GPU bristle profile texture",
   );
   const fallbackMaterialTexture = requireResource(
     gl.createTexture(),
@@ -199,7 +167,6 @@ export function createGpuBristlePassResources(
   );
 
   configureTexture(gl, toothTexture, gl.NEAREST);
-  configureTexture(gl, profileTexture, gl.LINEAR);
   configureTexture(gl, fallbackMaterialTexture, gl.NEAREST);
   configureTexture(gl, atlasTexture, gl.NEAREST);
   gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
@@ -222,11 +189,9 @@ export function createGpuBristlePassResources(
     gl.UNSIGNED_BYTE,
     new Uint8Array([255, 255, 255, 255]),
   );
-  configureGeometry(gl, maskVertexArray, inkVertexArray, vertexBuffer);
+  configureGeometry(gl, maskVertexArray, vertexBuffer);
   gl.useProgram(maskProgram);
   gl.uniform1i(uniformLocation(gl, maskProgram, "uTooth"), 1);
-  gl.useProgram(inkProgram);
-  gl.uniform1i(uniformLocation(gl, inkProgram, "uProfile"), 0);
   gl.useProgram(compositeProgram);
   gl.uniform1i(uniformLocation(gl, compositeProgram, "uAtlas"), 0);
   gl.uniform1i(uniformLocation(gl, compositeProgram, "uField"), 1);
@@ -235,11 +200,8 @@ export function createGpuBristlePassResources(
 
   let atlasWidth = 0;
   let atlasHeight = 0;
-  let profileTextureWidth = 0;
-  let profileTextureHeight = 0;
   let vertexBufferCapacity = 0;
   let atlasStatusNeedsCheck = false;
-  let profileSource: OffscreenCanvas | null = null;
   let toothSource: BristleHeightMap | null = null;
   let toothTextureWidth = 0;
   let toothTextureHeight = 0;
@@ -262,7 +224,7 @@ export function createGpuBristlePassResources(
   function readMaskForTest(chunk: GpuBristleChunk): Uint8ClampedArray {
     const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
     const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
-    ensureAtlasSize(chunkWidth * 2, chunkHeight);
+    ensureAtlasSize(chunkWidth, chunkHeight);
     uploadTooth(chunk);
     gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
     prepareAtlas();
@@ -344,41 +306,6 @@ export function createGpuBristlePassResources(
     toothSource = map;
   }
 
-  function uploadProfile(profile: OffscreenCanvas): void {
-    if (profileSource === profile) return;
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.bindTexture(gl.TEXTURE_2D, profileTexture);
-    if (
-      profile.width > profileTextureWidth ||
-      profile.height > profileTextureHeight
-    ) {
-      profileTextureWidth = Math.max(profileTextureWidth, profile.width);
-      profileTextureHeight = Math.max(profileTextureHeight, profile.height);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA8,
-        profileTextureWidth,
-        profileTextureHeight,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null,
-      );
-    }
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      0,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      profile,
-    );
-    profileSource = profile;
-  }
-
   function prepareAtlas(): void {
     gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
     if (!atlasStatusNeedsCheck) return;
@@ -411,13 +338,6 @@ export function createGpuBristlePassResources(
         if (!slot) continue;
         if (!sharedTooth) uploadTooth(slot.chunk);
         drawMask(slot.chunk, slot.x, slot.y);
-        if (slot.chunk.useMaterialField) {
-          const profile = slot.chunk.profileAtlas;
-          if (!profile)
-            throw new Error("Bristle mixing requires a section canvas");
-          uploadProfile(profile);
-          drawInk(slot.chunk, slot.x + slot.width, slot.y, profile);
-        }
       }
     });
     if (page.slots.some((slot) => slot.chunk.useMaterialField)) {
@@ -470,32 +390,6 @@ export function createGpuBristlePassResources(
     gl.drawArrays(gl.TRIANGLES, 0, vertices.length / MASK_VERTEX_FLOATS);
   }
 
-  function drawInk(
-    chunk: GpuBristleChunk,
-    atlasX: number,
-    atlasY: number,
-    profile: OffscreenCanvas,
-  ): void {
-    gl.viewport(0, 0, atlasWidth, atlasHeight);
-    const vertices = createInkVertices(chunk);
-    uploadGeometry(vertices);
-    gl.bindVertexArray(inkVertexArray);
-    gl.useProgram(inkProgram);
-    gl.uniform2f(inkUniforms.atlasSize, atlasWidth, atlasHeight);
-    gl.uniform2f(inkUniforms.atlasOrigin, atlasX, atlasY);
-    gl.uniform2f(
-      inkUniforms.profileScale,
-      profile.width / profileTextureWidth,
-      profile.height / profileTextureHeight,
-    );
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, profileTexture);
-    gl.enable(gl.BLEND);
-    gl.blendEquation(gl.FUNC_ADD);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / INK_VERTEX_FLOATS);
-  }
-
   function compositePage(page: AtlasPage): void {
     perfStage("gpuBristleComposite", () => {
       const first = page.slots[0];
@@ -525,11 +419,8 @@ export function createGpuBristlePassResources(
 
   function setCompositeUniforms(slot: AtlasSlot): void {
     const { chunk, target } = slot;
-    const chunkWidth = chunk.bboxRect.right - chunk.bboxRect.left;
-    const chunkHeight = chunk.bboxRect.bottom - chunk.bboxRect.top;
     gl.uniform2i(compositeUniforms.atlasSize, atlasWidth, atlasHeight);
     gl.uniform2i(compositeUniforms.atlasOrigin, slot.x, slot.y);
-    gl.uniform2i(compositeUniforms.chunkSize, chunkWidth, chunkHeight);
     gl.uniform2i(
       compositeUniforms.documentOrigin,
       chunk.bboxRect.left,
@@ -554,7 +445,6 @@ export function createGpuBristlePassResources(
       compositeUniforms.useField,
       chunk.useMaterialField && target.fieldColumns > 0 ? 1 : 0,
     );
-    gl.uniform1i(compositeUniforms.useInk, chunk.useMaterialField ? 1 : 0);
     gl.uniform2f(compositeUniforms.fieldMixWeights, ...target.fieldMixWeights);
     gl.uniform2f(compositeUniforms.fieldMixSpan, ...target.fieldMixSpan);
     // Before the first update the field is uniform, so any valid frame works.
@@ -601,13 +491,10 @@ export function createGpuBristlePassResources(
 
   function dispose(): void {
     gl.deleteProgram(maskProgram);
-    gl.deleteProgram(inkProgram);
     gl.deleteProgram(compositeProgram);
     gl.deleteVertexArray(maskVertexArray);
-    gl.deleteVertexArray(inkVertexArray);
     gl.deleteBuffer(vertexBuffer);
     gl.deleteTexture(toothTexture);
-    gl.deleteTexture(profileTexture);
     gl.deleteTexture(fallbackMaterialTexture);
     gl.deleteTexture(atlasTexture);
     gl.deleteFramebuffer(atlasFramebuffer);
@@ -626,18 +513,18 @@ function createAtlasPages(
     if (width <= 0 || height <= 0 || draw.chunk.segments.length === 0) {
       return [];
     }
-    if (width * 2 > maxTextureSize || height > maxTextureSize) {
+    if (width > maxTextureSize || height > maxTextureSize) {
       throw new Error("GPU bristle chunk exceeds the atlas texture limit");
     }
     return [{ ...draw, width, height }];
   });
   if (entries.length === 0) return [];
   const totalArea = entries.reduce(
-    (sum, entry) => sum + entry.width * 2 * entry.height,
+    (sum, entry) => sum + entry.width * entry.height,
     0,
   );
   const widest = entries.reduce(
-    (maximum, entry) => Math.max(maximum, entry.width * 2),
+    (maximum, entry) => Math.max(maximum, entry.width),
     1,
   );
   const packWidth = Math.min(
@@ -662,7 +549,7 @@ function createAtlasPages(
   };
 
   for (const entry of entries) {
-    const slotWidth = entry.width * 2;
+    const slotWidth = entry.width;
     if (x > 0 && x + slotWidth > packWidth) {
       x = 0;
       y += rowHeight;
@@ -738,119 +625,6 @@ function maskVertex(
   return [x, y, u, v, pressure, trialId];
 }
 
-function createInkVertices(chunk: GpuBristleChunk): Float32Array {
-  const values: number[] = [];
-  for (const segment of chunk.segments) {
-    const vertices = inkQuad(segment, chunk);
-    values.push(
-      ...vertices.topLeft,
-      ...vertices.bottomLeft,
-      ...vertices.bottomRight,
-      ...vertices.topLeft,
-      ...vertices.bottomRight,
-      ...vertices.topRight,
-    );
-  }
-  return new Float32Array(values);
-}
-
-function inkQuad(segment: GpuSweepSegment, chunk: GpuBristleChunk) {
-  const dx = segment.toX - segment.fromX;
-  const dy = segment.toY - segment.fromY;
-  const length = Math.hypot(dx, dy);
-  const pathX = dx / length;
-  const pathY = dy / length;
-  const sampled = normalize(
-    segment.fromFrameX + segment.toFrameX,
-    segment.fromFrameY + segment.toFrameY,
-  );
-  const alignment = pathX * sampled.x + pathY * sampled.y;
-  const frame =
-    Math.abs(alignment) > 0.96
-      ? {
-          x: pathX * (alignment >= 0 ? 1 : -1),
-          y: pathY * (alignment >= 0 ? 1 : -1),
-        }
-      : sampled;
-  const centerX = (segment.fromX + segment.toX) / 2 - chunk.bboxRect.left;
-  const centerY = (segment.fromY + segment.toY) / 2 - chunk.bboxRect.top;
-  const left = -length / 2 - segment.overlap;
-  const right = length / 2 + segment.overlap;
-  // The retained cusp frame may point opposite the segment's travel.
-  const fromHalfWidth =
-    alignment >= 0 ? segment.fromHalfWidth : segment.toHalfWidth;
-  const toHalfWidth =
-    alignment >= 0 ? segment.toHalfWidth : segment.fromHalfWidth;
-  return {
-    topLeft: inkVertex(
-      centerX,
-      centerY,
-      frame.x,
-      frame.y,
-      left,
-      -fromHalfWidth,
-      0,
-      0,
-    ),
-    bottomLeft: inkVertex(
-      centerX,
-      centerY,
-      frame.x,
-      frame.y,
-      left,
-      fromHalfWidth,
-      0,
-      1,
-    ),
-    topRight: inkVertex(
-      centerX,
-      centerY,
-      frame.x,
-      frame.y,
-      right,
-      -toHalfWidth,
-      1,
-      0,
-    ),
-    bottomRight: inkVertex(
-      centerX,
-      centerY,
-      frame.x,
-      frame.y,
-      right,
-      toHalfWidth,
-      1,
-      1,
-    ),
-  };
-}
-
-function inkVertex(
-  centerX: number,
-  centerY: number,
-  frameX: number,
-  frameY: number,
-  x: number,
-  y: number,
-  u: number,
-  v: number,
-): readonly number[] {
-  return [
-    centerX + frameX * x - frameY * y,
-    centerY + frameY * x + frameX * y,
-    u,
-    v,
-  ];
-}
-
-function normalize(
-  x: number,
-  y: number,
-): { readonly x: number; readonly y: number } {
-  const length = Math.hypot(x, y);
-  return length > 0.000001 ? { x: x / length, y: y / length } : { x: 1, y: 0 };
-}
-
 function uniformLocation(
   gl: WebGL2RenderingContext,
   program: WebGLProgram,
@@ -865,7 +639,6 @@ function uniformLocation(
 function configureGeometry(
   gl: WebGL2RenderingContext,
   maskVertexArray: WebGLVertexArrayObject,
-  inkVertexArray: WebGLVertexArrayObject,
   vertexBuffer: WebGLBuffer,
 ): void {
   gl.bindVertexArray(maskVertexArray);
@@ -878,14 +651,6 @@ function configureGeometry(
   gl.vertexAttribPointer(1, 2, gl.FLOAT, false, maskStride, 2 * 4);
   gl.vertexAttribPointer(2, 1, gl.FLOAT, false, maskStride, 4 * 4);
   gl.vertexAttribPointer(3, 1, gl.FLOAT, false, maskStride, 5 * 4);
-
-  gl.bindVertexArray(inkVertexArray);
-  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-  const inkStride = INK_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
-  gl.enableVertexAttribArray(0);
-  gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, inkStride, 0);
-  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, inkStride, 2 * 4);
 }
 
 function configureTexture(

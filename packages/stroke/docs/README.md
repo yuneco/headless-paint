@@ -3,7 +3,7 @@
 ストロークセッション管理と履歴管理（Undo/Redo）を行うパッケージ。
 
 このドキュメントは workspace 内部パッケージ `@headless-paint/stroke` に対応する。
-外部アプリケーションから利用する場合は `@yuneco/headless-paint` をインストールし、`@yuneco/headless-paint/core` から同等の API を import する。
+外部アプリケーションから利用する場合は `@yuneco/headless-paint` をインストールし、`@yuneco/headless-paint/core` から公開 API を import する。stroke-machine の純粋遷移関数と関連型は workspace 内部向けで、外部アプリは `createStrokeRuntime` を使う（下記参照）。
 
 ## インストール
 
@@ -109,10 +109,10 @@ if (canUndo(historyState)) {
 | `StrokeSessionState` | セッション状態 |
 | `StrokeSessionResult` | セッション操作の結果（state + renderUpdate） |
 | `RenderUpdate` | 描画更新データ |
-| `StrokePhase` | ストローク状態機械の phase |
-| `StrokeMachineEvent` | `transitionStroke` に渡すイベント |
-| `StrokeMachineEffect` | runtime が解釈する副作用指示 |
-| `StrokeTransitionResult` | `transitionStroke` の結果（next + effects） |
+| `StrokePhase` | ストローク状態機械の phase（workspace 内部向け） |
+| `StrokeMachineEvent` | `transitionStroke` に渡すイベント（workspace 内部向け） |
+| `StrokeMachineEffect` | runtime が解釈する副作用指示（workspace 内部向け） |
+| `StrokeTransitionResult` | `transitionStroke` の結果（next + effects、workspace 内部向け） |
 | `TransformPhase` | 変形セッションの状態機械 phase |
 | `TransformMachineEvent` | `transitionTransform` に渡すイベント |
 | `TransformMachineEffect` | app shell が解釈する変形セッション副作用指示 |
@@ -168,8 +168,8 @@ if (canUndo(historyState)) {
 
 | 関数 | 説明 |
 |---|---|
-| `createInitialStrokePhase()` | 初期 idle phase を作成 |
-| `transitionStroke(state, event)` | ストローク状態を純粋に遷移し、runtime 向け effects を返す |
+| `createInitialStrokePhase()` | 初期 idle phase を作成（workspace 内の `@headless-paint/stroke` のみ） |
+| `transitionStroke(state, event)` | ストローク状態を純粋に遷移し、runtime 向け effects を返す（workspace 内の `@headless-paint/stroke` のみ） |
 | `createStrokeRuntime(deps)` | `transitionStroke` の effects を解釈し、live stroke 描画・emission・commit を行う |
 
 ### Transform Machine
@@ -205,7 +205,7 @@ if (canUndo(historyState)) {
 | `redo(state)` | 1つ先に進む |
 | `canUndo(state)` | Undo可能か |
 | `canRedo(state)` | Redo可能か |
-| `rebuildLayerFromHistory(layer, state, registry?)` | `layer.id` に基づきレイヤーを再構築し、結果を返す。`registry` は `BrushAssetRegistry`（image tip と bristle 高さマップの解決。live と同じ登録内容を渡す） |
+| `rebuildLayerFromHistory(layer, state, registry?, options?)` | `layer.id` に基づきレイヤーを再構築し、結果を返す。`registry` は `BrushAssetRegistry`（image tip と bristle 高さマップの解決。live と同じ登録内容を渡す）。`options.accelerator` でGPU加速器を注入 |
 | `replayCommands(layer, commands, registry?, options?)` | コマンドのリストを順番にリプレイ。`options.accelerator` でGPU加速器を注入 |
 | `replayCommand(layer, command, registry?, options?)` | 単一コマンドをレイヤーに適用。`options.accelerator` でGPU加速器を注入 |
 | `computeCumulativeOffset(state)` | グローバルな累積オフセットを返す |

@@ -4,6 +4,10 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 発見した課題・改善候補
 
+- **Bristle混色ONの急カーブ割れ修正（2026-09-20）**: coverageをmaskへ統一。CPUは同じquad内で色を補間、GPUは重複ink pass/uploadを除去。80条件の比較で混色に由来する欠け0、Chrome相当CPUの混色ONは中央値27.9%短縮。色付き下地の局所RGB差は最大4.25%の画素で20/255超、既存履歴の再描画も変化する。全784テスト・build・lint成功。Safari/iPad実機性能は未確認。詳細は `plans/notes/2026-09-20-bristle-mixing-coverage-results.md`。
+
+- **履歴再構築のレイヤー分離を修正（2026-09-20）**: `rebuildLayerFromHistory` は既存の `isLayerDrawCommand` で対象layerIdだけを選別する。全体操作の wrap-shift と直接 `replayCommand` で任意レイヤーへ再生する契約は維持。実Canvasでclear/stroke/transform、Undo/Redo、wrap-shift、duplicate/mergeの回帰7件を追加し、修正前全失敗→修正後全成功。全782テスト・build・公開成果物検証・lint成功。関連docsを訂正し0.0.12からの移行事項をCHANGELOGに追加。詳細は `plans/2026-09-20-01-37_release-review-fixes.md`。配布文書同梱は今回対象外。
+
 - **公開APIの検証範囲（2026-09-20）**: 最後の高さマップ再exportコミットを精査。engine 内部importの単体テストと現行 `verify-publish-artifacts.mjs` だけでは、公開 `.` / `./core` から関数・関連型を利用できることを保証できない。公開成果物経由の実行・型検査を同スクリプトへ追加済み。ブラウザ775テスト・build・型検査・lintを検収。設計判断と結果は `plans/2026-09-20-00-22_height-map-public-export-review.md`。高さの有限性・範囲と非有限 `contrast` の入力検証は親以前からの別課題。
 
 - **GPU deferred bitmap commit（2026-09-07、実ブラウザ・性能検収待ち）**: runtime の live perFlush 単一 pass を fence + setTimeout(0) poll にした。8 回上限で drain。低レベル既定は既存 checkpoint の同期画素読み取り契約を維持し、internal defer 指定でのみ非同期。context lost は pending 破棄。docs は変更禁止のため未編集（同期例外と lost の記述は Claude 側で補足候補）。タイマーの8回上限は回数保証で、event loop 混雑・timer clamp を含む数 ms の厳密な時間保証ではない。build/lint/typecheck と非ブラウザ20ファイル244件成功、実 GPU byte 比較7件・既存parityは未検収。採用条件は Mac WebKit probe6 moveMany −20%以上。詳細は `plans/notes/2026-09-07-gpu-deferred-commit-report.md`。

@@ -21,18 +21,20 @@ headless-paint のコアパッケージ（engine / input / stroke）を React �
 
 | 責務 | 詳細 |
 |------|------|
-| セッション状態の管理 | `StrokeSessionState`, `FilterPipelineState`, `InputPoint[]` を `useRef` で保持。ストローク開始時にスナップショットとして `compiledExpand`, `compiledFilterPipeline`, `layerId` も記録する |
-| pendingOnly モード | タッチ入力の pending-until-confirmed パターン。`onStrokeStart(point, true)` で開始し、`onDrawConfirm()` まで committed layer への書き込みを保留する |
-| FilterPipeline 処理 | `createFilterPipelineState` → `processPoint`（毎ポイント）→ `finalizePipeline`（ストローク終了時）の一連のフローを管理 |
-| 差分レンダリング | `appendToCommittedLayer` / `renderPendingLayer` / `clearLayer` の呼び出し。`committedOverlapCount` による差分描画最適化を含む |
-| 時間ベース emission | stamp / spray で `emissionsPerSecond > 0` のとき、描画中に `setTimeout` で最後の座標・筆圧へ `performance.now()` の synthetic `InputPoint` を注入する |
-| compositeOperation の同期 | ストローク開始時に `pendingLayer.meta.compositeOperation` を strokeStyle から設定し、終了時に `undefined` にリセット |
+| セッション状態の管理 | `StrokeRuntime` を `useRef` で保持し、状態遷移・入力記録・開始時の描画設定の固定を runtime に委譲する |
+| pendingOnly モード | タッチ入力の pending-until-confirmed パターン。`onStrokeStart(point, { pendingOnly: true })` で開始し、`onDrawConfirm()` まで committed layer への書き込みを保留する。混色 stamp / bristle は確認待ち中の pending 描画も行わない |
+| FilterPipeline 処理 | runtime と incremental renderer が入力の `processPoint`、終了時の `finalizePipeline` を管理する |
+| 差分レンダリング | runtime / renderer が確定点を committed layer へ追加し、round-pen / 非混色 stamp / spray の未確定点を pending layer に描く。混色 stamp / bristle は確定描画のみで、bristle の入力は batch 単位で処理する |
+| 時間ベース emission | runtime に timer / clock を注入する。stamp / spray で `emissionsPerSecond > 0` のとき、runtime が描画中に最後の座標・筆圧へ synthetic `InputPoint` を注入する |
+| compositeOperation の同期 | runtime がストローク開始時に `pendingLayer.meta.compositeOperation` を strokeStyle から設定し、終了時に `undefined` にリセットする |
 | renderVersion | 描画操作後に `requestAnimationFrame` 単位で合流して進む再描画トリガー |
 | canDraw 判定 | `layer !== null && layer.meta.visible` |
 
 時間ベース emission の timer は実入力・synthetic input のたびに再スケジュールするため、実入力がレートより速い間は発火しない。synthetic input は通常入力と同じ `inputPoints` に保存され、`onStrokeComplete` へ渡される。timer は stroke end / cancel / unmount で停止する。
 
-**境界**: 履歴への記録は責務外。ストローク完了時に `onStrokeComplete` コールバックでデータを通知し、呼び出し側が記録する。時間ベース emission の replay は保存済み `inputPoints.timestamp` で行い、React hook の timer は live 入力補完だけを担当する。
+**境界**: 履歴への記録は責務外。ストローク完了時に `onStrokeComplete` コールバックでデータを通知し、呼び出し側が記録する。時間ベース emission の replay は保存済み `inputPoints.timestamp` で行い、React hook が注入する timer / clock は runtime の live 入力補完に使う。
+
+`StrokeCompleteData.totalPoints` は runtime の command を変換するときに `command.inputPoints.length` から設定する。フィルタ適用前の入力数であり、synthetic input を含む。フィルタ後の確定点数とは一致するとは限らない。
 
 内部の `useStrokeSessionWithAccelerator` は `onStrokeCommit` に runtime が確定した command を同一インスタンスのまま渡す。`usePaintEngine` は `command.layerId` の entry を使って履歴へ記録する。GPU undo-1 の retain / bind は command のオブジェクト同一性に依存するため、途中で再生成・複製しない。公開 `useStrokeSession` の `onStrokeComplete` / `StrokeCompleteData` と persisted 形式は変更しない。
 
@@ -48,7 +50,7 @@ useStrokeSession + useLayers + 履歴 + wrap shift のオーケストレーシ�
 | Wrap shift | 最初の非ゼロ移動を適用する直前に全 entry へ `beginHistoryMutation`、ドラッグ完了時に `createWrapShiftCommand` → `pushCommand` |
 | Undo/Redo | コマンド種別に応じた3分岐の処理（後述） |
 | pendingLayer の管理 | 内部で `createLayer` した pendingLayer を保持し、戻り値に含める |
-| layers 配列の構築 | 各 entry の committedLayer + アクティブレイヤー直後に pendingLayer を挿入した描画用配列 |
+| layers 配列の構築 | 各 entry の committedLayer のみを返す。pendingLayer は別の `pendingOverlay` として `renderLayers` / `composeLayers` に渡す |
 | cumulativeOffset の計算 | 履歴中の全 wrap-shift コマンドの累積 + ドラッグ中の移動量 |
 
 ### 設定系 hooks（usePenSettings / useSmoothing）

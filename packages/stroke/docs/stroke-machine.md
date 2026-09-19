@@ -16,6 +16,11 @@ stroke-runtime.ts   命令的シェル。可変セル（brushState/committedSnap
 
 ## stroke-machine
 
+この節の `createInitialStrokePhase` / `transitionStroke` と `StrokePhase` / `StrokeMachineEvent` /
+`StrokeMachineEffect` / `StrokeTransitionResult` は workspace 内の `@headless-paint/stroke` 用APIであり、
+外部向けの `@yuneco/headless-paint/core` からは公開していない。外部アプリは次節の
+`createStrokeRuntime` を使ってストロークのライフサイクルを操作する。
+
 ```ts
 type StrokePhase =
   | { readonly phase: "idle" }
@@ -76,6 +81,7 @@ interface StrokeRuntimeDeps {
 interface StrokeRuntime {
   start(point: InputPoint, config: StrokeStartConfig): void;
   move(point: InputPoint): void;
+  moveMany(points: readonly InputPoint[]): void; // coalesced input を入力順に処理
   confirm(): void;
   end(): void;
   cancel(): void;

@@ -123,23 +123,13 @@ function onPointerMove(e: PointerEvent) {
 
 ### パターン3: 回転考慮のスクロール
 
-回転がある場合、Screen Spaceでのドラッグ方向を Layer Space の移動方向に変換する必要があります。
+`pan` は Screen Space の移動量を受け取ります。ビューが回転・拡大されていても、ドラッグの移動量をそのまま渡します。
 
 ```typescript
 function onPointerMove(e: PointerEvent) {
   if (!isPanning) return;
 
-  // 移動量をベクトルとして変換
-  const screenDelta = { x: e.movementX, y: e.movementY };
-
-  // 回転成分のみを逆適用（スケールは無視）
-  const { rotation: angle } = decomposeTransform(transform);
-  const cos = Math.cos(-angle);
-  const sin = Math.sin(-angle);
-  const layerDx = screenDelta.x * cos - screenDelta.y * sin;
-  const layerDy = screenDelta.x * sin + screenDelta.y * cos;
-
-  transform = pan(transform, layerDx, layerDy);
+  transform = pan(transform, e.movementX, e.movementY);
   redraw();
 }
 ```

@@ -51,7 +51,9 @@ transform = rotate(transform, Math.PI / 12, centerX, centerY);
 
 // 座標変換
 const layerPoint = screenToLayer({ x: e.offsetX, y: e.offsetY }, transform);
-const screenPoint = layerToScreen(layerPoint, transform);
+if (layerPoint) {
+  const screenPoint = layerToScreen(layerPoint, transform);
+}
 
 // 変換成分の取得（デバッグ用など）
 const components = decomposeTransform(transform);
@@ -69,7 +71,7 @@ let pipelineState = createFilterPipelineState(compiled);
 // 入力点を処理
 const result = processPoint(pipelineState, { x: 100, y: 100, pressure: 0.5, timestamp: Date.now() }, compiled);
 pipelineState = result.state;
-// result.output.committed - 確定した点
+// result.output.committed - ストローク開始からの累積確定点
 // result.output.pending - 未確定の点
 
 // ジェスチャー状態マシン

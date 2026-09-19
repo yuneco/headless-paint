@@ -63,17 +63,19 @@ interface SamplingConfig {
 | フィールド | 型 | デフォルト | 説明 |
 |---|---|---|---|
 | `minDistance` | `number` | `2` | 前回の採用点からこの距離以上離れていれば採用 |
-| `minTimeInterval` | `number` | `0` | 前回の採用からこの時間以上経過していれば採用 |
+| `minTimeInterval` | `number` | `0` | 正の値の場合、前回の採用からこの時間以上経過していれば採用。0 は時間判定を無効化 |
+
+処理済みの入力を除外した後、距離・時間のいずれかの条件を満たせば採用します（OR）。時間間隔による入力頻度の上限制限ではありません。
 
 **使用例**:
 ```typescript
 // 距離ベースの間引き
 const config: SamplingConfig = { minDistance: 3 };
 
-// 時間ベースの間引き
-const config: SamplingConfig = { minTimeInterval: 16 };  // 約60fps
+// デフォルトの距離条件（2px）に加え、16ms経過した点も採用
+const config: SamplingConfig = { minTimeInterval: 16 };
 
-// 組み合わせ（両方の条件を満たす場合に採用）
+// 組み合わせ（距離・時間のいずれかの条件を満たす場合に採用）
 const config: SamplingConfig = { minDistance: 2, minTimeInterval: 8 };
 ```
 
@@ -116,11 +118,11 @@ function onPointerDown() {
 
 ```typescript
 interface TransformComponents {
-  scaleX: number;      // X軸方向のスケール
-  scaleY: number;      // Y軸方向のスケール
-  rotation: number;    // 回転角度（ラジアン、正=反時計回り）
-  translateX: number;  // X軸方向の平行移動
-  translateY: number;  // Y軸方向の平行移動
+  readonly scaleX: number;      // X軸方向のスケール
+  readonly scaleY: number;      // Y軸方向のスケール
+  readonly rotation: number;    // 回転角度（ラジアン、正=反時計回り）
+  readonly translateX: number;  // X軸方向の平行移動
+  readonly translateY: number;  // Y軸方向の平行移動
 }
 ```
 
@@ -323,18 +325,18 @@ interface FilterPipelineState {
 
 ```typescript
 interface FilterOutput {
-  readonly committed: readonly InputPoint[];  // 確定済みの点
+  readonly committed: readonly InputPoint[];  // ストローク開始からの累積確定点
   readonly pending: readonly InputPoint[];    // 未確定の点
 }
 ```
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `committed` | `readonly InputPoint[]` | 座標確定済み。確定レイヤーに永続描画 |
+| `committed` | `readonly InputPoint[]` | ストローク開始からの累積確定点。追加描画には前回件数との差分を使う |
 | `pending` | `readonly InputPoint[]` | 座標変更の可能性あり。作業レイヤーに毎回再描画 |
 
 **committed/pendingの違い**:
-- **committed**: 新しい入力が来ても座標が変わらない。追加描画のみで良い。
+- **committed**: 新しい入力が来ても座標が変わらない。累積点列から新規確定分だけを取り出して追加描画する。
 - **pending**: 新しい入力が来ると座標が変わる可能性がある。毎回クリア→再描画が必要。
 
 ---

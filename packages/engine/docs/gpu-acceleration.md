@@ -2,7 +2,7 @@
 
 ## 概要
 
-`BrushAccelerator` は、mixing 有効な stamp ブラシ（Acrylic 系）の描画を WebGL2 で行う engine 内部の加速器である。公開 `Layer` は Canvas2D のままで、加速器は stroke 中の中間状態（描画結果 accum・混色 field・pickup 用 checkpoint）を GPU に常駐させ、pointer batch ごとに結果を `layer.ctx` へ書き戻す（commit）。外部から見た契約（`Layer` / `StrokeCommand` / History / 永続化形式）は変わらない。
+`BrushAccelerator` は、mixing 有効な stamp ブラシ（Acrylic 系）と bristle ブラシ（mixing の有無を問わない）の描画を WebGL2 で行う engine 内部の加速器である。公開 `Layer` は Canvas2D のままで、加速器は stroke 中の中間状態（描画結果 accum・混色 field・pickup 用 checkpoint）を GPU に常駐させ、pointer batch ごとに結果を `layer.ctx` へ書き戻す（commit）。外部から見た契約（`Layer` / `StrokeCommand` / History / 永続化形式）は変わらない。
 
 ### 背景
 
@@ -85,15 +85,17 @@ executeHistoryOp(op, state, { ...deps, accelerator })      // Undo / Redo の hi
 
 core 利用者の最小手順:
 
+engine の `renderBrushStroke` / `appendToCommittedLayer` は、stroke runtime / replay が開始した GPU stroke の内部で加速器を使う。これらの低レベル関数へ加速器を渡すだけでは GPU stroke の開始・commit・終了は行われない。外部アプリは以下のように `createStrokeRuntime` と replay / history executor へ注入する。
+
 ```typescript
 const accelerator = createBrushAccelerator({ backend: settings.engineBackend }); // null なら CPU
 const runtime = createStrokeRuntime({ ...deps, accelerator });
 // Undo / Redo / replay にも同じ accelerator を渡す
-// 任意: mixing stamp を選んだときに accelerator?.warmUp(activeLayer) で初回 stroke の初期化を隠す
+// 任意: mixing stamp / bristle を選んだときに accelerator?.warmUp(activeLayer) で初回 stroke の初期化を隠す
 // 終了時: accelerator?.dispose()
 ```
 
-react（`usePaintEngine`）はこれを内包する。`gpuBackend?: "auto" | "webgl2" | "cpu"`（既定 `"auto"`）を渡すだけで、加速器の生成・runtime / replay への注入・mixing stamp 選択時と Undo / Redo 直後（次 frame）の `warmUp`・unmount 時の `dispose` を hook が行う。Undo / Redo は通常 checkpoint 復元（CPU 書き込み）で終わるため常駐が無効化されるが、直後の warmUp で次の stroke 開始前に再 upload を済ませる。現在の backend と auto の判定理由は `engine.gpuBackend` / `engine.gpuBackendReason` で取得でき、デバッグ UI で表示できる。
+react（`usePaintEngine`）はこれを内包する。`gpuBackend?: "auto" | "webgl2" | "cpu"`（既定 `"auto"`）を渡すだけで、加速器の生成・runtime / replay への注入・mixing stamp / bristle 選択時と Undo / Redo 直後（次 frame）の `warmUp`・unmount 時の `dispose` を hook が行う。Undo / Redo は通常 checkpoint 復元（CPU 書き込み）で終わるため常駐が無効化されるが、直後の warmUp で次の stroke 開始前に再 upload を済ませる。現在の backend と auto の判定理由は `engine.gpuBackend` / `engine.gpuBackendReason` で取得でき、デバッグ UI で表示できる。
 
 詳細は [brush-api.md](./brush-api.md)、[incremental-render-api.md](./incremental-render-api.md)、stroke の docs を参照。
 
@@ -124,18 +126,17 @@ spray・非混色 stamp は対象外（CPU 経路のみ）。
 
 ### Rough bristle
 
-stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms 経過、または移動距離が `lineWidth × 1.5` に達した時点。`packages/stroke/src/incremental-stroke.ts` の `shouldFlushBristleBatch`）でまとめて engine に渡し、engine は flush ごとに chunk（確定した中心線周辺の bbox）を GPU surface へ積む。1 chunk は chunk-local の atlas 上で mask pass（と混色時のみ ink pass）で描かれ、最後に composite pass で accum へ合成される。
+stroke 側が bristle の入力を **flush** 単位（点列の先頭から 32ms 経過、または移動距離が `lineWidth × 1.5` に達した時点。`packages/stroke/src/incremental-stroke.ts` の `shouldFlushBristleBatch`）でまとめて engine に渡し、engine は flush ごとに chunk（確定した中心線周辺の bbox）を GPU surface へ積む。1 chunk は chunk-local の atlas 上で mask passで描かれ、最後に composite pass で accum へ合成される。
 
 | pass | 内容 |
 |---|---|
 | mask | 掃引 quad を描き、fragment ごとに面掠れ（simple dropout mask: broad value noise 1 octave − 筆圧閾値。CPU と同一式を画素評価）と document 座標固定の紙目接触を評価して alpha を得る。quad の頂点属性は `(distance, crossPx)` と筆圧。crossPx は基準 `lineWidth` の横断座標で、quad の実際の半幅はサンプルごとに `pressureDynamics.size` で決まる（±サンプル半幅） |
-| ink | 混色時のみ。断面の色場（alpha 1 の断面 canvas に乗せた色）を quad に沿って描く。非混色では断面が一様なのでこの pass は省略し、mask の alpha だけで composite する |
-| composite | `mask × ink × material` を premultiplied で accum に `source-over`。material は混色 OFF なら `uColor`、混色 ON なら material field |
+| composite | `mask × material` を premultiplied で accum に `source-over`。material は混色 OFF なら `uColor`、混色 ON なら material field |
 
-- **混色（perFlush 意味論）**: material field は flush 単位で進める（stamp の `updateDistancePx` ごとではない）。順序は「flush 内の全 run の pickup / restore を field に適用 → その field（F1）で composite → composite 後に diffusion（最大 1 pass 相当）を掛けて次の flush へ持ち越す」。checkpoint は run（field 更新 1 回分の区間）ごとに**位置を指定**するが、同一 flush 内の pickup が読む画素は該当矩形の **flush 開始時点の accum** であり、run の描画結果は同じ flush 内の後続 pickup には反映されない。画像として次の flush へコピー保持するのは branch ごとに最後に指定された checkpoint だけ。composite は flush 開始時の field（F0）と F1 を距離重みで mix する。重みは run の開始値 `w0 = runStartDistance / totalDistance` と終了値 `w1 = runEndDistance / totalDistance` を run 内の進行率で線形補間する（GPU は run geometry の local.x から進行率を得る。CPU は run 始点→終点の直線グラデーションで近似する。補間の省略判定は CPU が `max|F1 − F0| × |w1 − w0| < 1/255`（flush ごとに field 差を 1 回走査）、GPU が `|w1 − w0| < 1/255`。どちらも省略時の出力差は 1/255 以下）。CPU 経路も同じ意味論（`endField` は diffusion 前）なので、flush の切り方（32ms / 1.5×lineWidth）は描画結果の一部であり、replay で flush を束ねたり広げたりしてはならない
+- **混色（perFlush 意味論）**: material field は flush 単位で進める（stamp の `updateDistancePx` ごとではない）。順序は「flush 内の全 run の pickup / restore を field に適用 → その field（F1）で composite → composite 後に diffusion（最大 1 pass 相当）を掛けて次の flush へ持ち越す」。checkpoint は run（field 更新 1 回分の区間）ごとに**位置を指定**するが、同一 flush 内の pickup が読む画素は該当矩形の **flush 開始時点の accum** であり、run の描画結果は同じ flush 内の後続 pickup には反映されない。画像として次の flush へコピー保持するのは branch ごとに最後に指定された checkpoint だけ。composite は flush 開始時の field（F0）と F1 を距離重みで mix する。重みは run の開始値 `w0 = runStartDistance / totalDistance` と終了値 `w1 = runEndDistance / totalDistance` を run 内の進行率で線形補間する（GPU は run geometry の local.x から進行率を得る。CPU はmaskと同じquadの画素走査で色を補間し、run 始点→終点への射影で重みを近似する。色場の長手座標はrun終点を基準に連続した距離から求める。補間の省略判定は CPU が `max|F1 − F0| × |w1 − w0| < 1/255`（flush ごとに field 差を 1 回走査）、GPU が `|w1 − w0| < 1/255`。どちらも省略時の出力差は 1/255 以下）。CPU 経路も同じ意味論（`endField` は diffusion 前）なので、flush の切り方（32ms / 1.5×lineWidth）は描画結果の一部であり、replay で flush を束ねたり広げたりしてはならない
 - **composite の field 参照**: field 更新 pass は run geometry（center / angle / sampleSize）で回転した正方形として checkpoint を読む。composite は同じ geometry の逆変換 `R(-angle) · (documentPosition − center) / sampleSize + 0.5` を clamp して field を読む。F0 / F1 とも現在の run の local frame で参照する
 - 混色 OFF では field 更新 pass と checkpoint snapshot は走らない
-- CPU 側での mask の事前生成・texture upload は無い（dropout mask は shader 内で評価）。混色時の断面 canvas と紙目 tile は chunk が同じオブジェクトを参照している間は再 upload しない（差し替わったときだけ upload）。紙目 texture（R32F）の寸法は高さマップに従う（procedural は 128²、`surfaceGrain.heightMapId` 指定時は `BrushRenderState.heightMap` に解決された map の `width × height`）。寸法が変わったときだけ再確保し、同寸なら sub-upload する。shader は寸法と texel 当たりの px を uniform（`uToothSize` / `uToothScale`）で受け取り、`positiveMod(floor(documentPixel / scale), size)` で CPU と同じ texel を選ぶ
+- CPU 側での mask の事前生成・texture upload は無い（dropout mask は shader 内で評価）。形状の被覆は混色ON/OFFともmaskのみで決め、別形状のink alphaを重ねない。紙目 tile は chunk が同じオブジェクトを参照している間は再 upload しない（差し替わったときだけ upload）。紙目 texture（R32F）の寸法は高さマップに従う（procedural は 128²、`surfaceGrain.heightMapId` 指定時は `BrushRenderState.heightMap` に解決された map の `width × height`）。寸法が変わったときだけ再確保し、同寸なら sub-upload する。shader は寸法と texel 当たりの px を uniform（`uToothSize` / `uToothScale`）で受け取り、`positiveMod(floor(documentPixel / scale), size)` で CPU と同じ texel を選ぶ
 
 ## 常駐（residency）と無効化の契約
 

@@ -84,7 +84,7 @@ function renderBrushStroke(
 | `overlapCount` | `number` | - | 先頭のオーバーラップ点数。`round-pen` では `drawVariableWidthPath` にパススルー。`stamp` では `interpolateStrokePoints` に渡され、overlap 区間は Catmull-Rom の文脈点として使われるが出力からは除外される |
 | `state` | `BrushRenderState` | - | ブラシレンダリング状態。`stamp` / `spray` / `bristle` の共通scheduler位相、混色状態、bristleの直前断面と短いlag stateをbranchごとに保持する。`round-pen` では無視される |
 | `sourceLayer` | `Layer` | 条件付き | stamp / bristleの混色有効時は必須。`layer`と異なるstroke-start snapshotを渡す。非混色では省略可 |
-| `accelerator` | `BrushAccelerator \| null` | - | GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。省略 / `null` はCPU経路。混色stampの適格条件を満たす場合のみGPU経路になり、GPU経路の結果はCPU経路と原則一致する。同一backend内では決定的で、CPU/GPU間の許容差は [gpu-acceleration.md](./gpu-acceleration.md) を参照 |
+| `accelerator` | `BrushAccelerator \| null` | - | GPU加速器（[gpu-acceleration.md](./gpu-acceleration.md)）。省略 / `null` はCPU経路。混色stampまたはbristleが適格条件を満たし、stroke runtime / replay がGPU strokeを開始している場合にGPU経路になる。この関数へ渡すだけではGPU strokeを開始しない。同一backend内では決定的で、CPU/GPU間の許容差は [gpu-acceleration.md](./gpu-acceleration.md) を参照 |
 
 **戻り値**: `BrushRenderState` — 更新されたレンダリング状態。`stamp` / `spray` では対象 branch の `accumulatedDistance` と `emissionCount` が更新される。`round-pen` では `{ seed: 0, tipCanvas: null, heightMap: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 
@@ -113,7 +113,7 @@ function renderBrushStroke(
    - `brush.dynamics.emissionsPerSecond` が正の有限数なら、`StrokePoint.timestamp` の進行に応じて静止中も粒子バーストを追加する
 5. `"bristle"`: 荒いハケ方式で描画:
    - Catmull-Rom補間後の中心線を`geometryStepPx`間隔で走査し、一様な断面（alpha 1）を連続quadへ掃引する。半幅はサンプルごとに `calculateRadius(p, lineWidth, pressureDynamics.size, pressureCurve)` で決める。毛束ごとの固定の筋は持たない
-   - stroke-spaceの面掠れ（dropout mask）を合成する。CPU/GPUともにquad内で距離・横断位置・筆圧を線形補間し、各pixelで `broad value noise(distance / dropoutLengthPx, crossPx / dropoutWidthPx) − threshold` を評価する。threshold は `pressureDynamics.dropout × (1 − p)`（`p` は `pressureCurve` 適用後の筆圧、未定義なら 0.5）。`dropout = 0` は常にベタ、`dropout = 1` は筆圧 0 でほぼ全抜け・筆圧 1 でベタ。`crossPx` は基準 `lineWidth` の横断座標で、`size` による幅の変化で模様はずれない。符号付き距離を `depositHardness` で最終pixelのalphaへ変換し、重複quadは`max(alpha)`で結合する。GPU経路（[gpu-acceleration.md](./gpu-acceleration.md)）も同じ式をshader内で評価する。非混色では断面が一様なので GPU は ink pass を持たず mask の alpha だけで composite する。混色では断面の色場を alpha 1 の断面 canvas に乗せて従来どおり掃引する
+   - stroke-spaceの面掠れ（dropout mask）を合成する。CPU/GPUともにquad内で距離・横断位置・筆圧を線形補間し、各pixelで `broad value noise(distance / dropoutLengthPx, crossPx / dropoutWidthPx) − threshold` を評価する。threshold は `pressureDynamics.dropout × (1 − p)`（`p` は `pressureCurve` 適用後の筆圧、未定義なら 0.5）。`dropout = 0` は常にベタ、`dropout = 1` は筆圧 0 でほぼ全抜け・筆圧 1 でベタ。`crossPx` は基準 `lineWidth` の横断座標で、`size` による幅の変化で模様はずれない。符号付き距離を `depositHardness` で最終pixelのalphaへ変換し、重複quadは`max(alpha)`で結合する。GPU経路（[gpu-acceleration.md](./gpu-acceleration.md)）も同じ式をshader内で評価する。非混色では断面が一様なので GPU は ink pass を持たず mask の alpha だけで composite する。混色でも輪郭の被覆は同じmaskが決め、色用の矩形でmaskを削らない。CPUはmaskと同じquad座標で色を補間し、GPUはmaskへmaterial fieldの色・alphaを適用する
    - document座標へ固定したsurface grain（紙目）を面掠れと同じsoftware rasterへ統合し、pixel-local pressureで接触を判定する。紙目の高さは既定で procedural Fine tooth（128² タイル）だが、`surfaceGrain.heightMapId` を指定すると [BrushAssetRegistry](#brushassetregistry) に登録した外部の高さマップ（[createHeightMapFromImageData](#createheightmapfromimagedata)）へ差し替わる。解決はストローク開始時に行い `BrushRenderState.heightMap` に置く。接触判定の式は変わらず、高さの取得元だけが変わる
    - 横断方向（掃引フレーム）は接線を直接使わず、ペン先の後ろ `lineWidth × handleLengthRatio` に置いた柄の点からペン先へ向かう方向で決める。柄はその距離を超えて引かれたときだけ動くので、横ブレ δ の影響は約 `atan(δ / L)` に縮み、引き返しの間は向きが止まる（`0` で従来の接線追従）
    - 急な折返しはcuspとして分割し、短いbristle lag（毛束の遅れ）で横断方向を追従させる。折返しの検出は柄の方向の反転で行う
@@ -345,6 +345,7 @@ const state = renderBrushStroke(layer, points, style, overlapCount);
 const initialStampState: BrushRenderState = {
   seed: brushSeed,
   tipCanvas: generateBrushTip(brush.tip, size, color),
+  heightMap: null,
   branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
 };
 
@@ -352,15 +353,17 @@ const initialStampState: BrushRenderState = {
 const initialImageStampState: BrushRenderState = {
   seed: brushSeed,
   tipCanvas: generateBrushTip(brush.tip, size, color, registry),
+  heightMap: null,
   branches: [{ accumulatedDistance: 0, emissionCount: 0 }],
 };
 const nextState = renderBrushStroke(layer, points, style, 0, initialImageStampState);
-// nextState.branches[0] を次の呼び出しに渡す
+// nextState を次の呼び出しの state 引数に渡す
 ```
 
 ---
 
 ## createHeightMapFromImageData
+
 
 画像の輝度から bristle の紙目高さマップ（`BristleHeightMap`）を作る純関数。
 

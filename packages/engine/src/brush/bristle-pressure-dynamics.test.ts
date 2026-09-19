@@ -376,7 +376,7 @@ describe("bristle pressure geometry (no browser)", () => {
     expect(getBristleSectionCanvas(1).height).toBe(8);
   });
 
-  it("skips ink and section uploads for plain chunks, retains mixing ink and composite callbacks", () => {
+  it("uses mask-only coverage without section uploads for plain and mixed chunks", () => {
     gpu.active = true;
     render(0.5, 0);
     const chunk = gpu.pushBristleChunk.mock.calls[0][0];
@@ -399,7 +399,6 @@ describe("bristle pressure geometry (no browser)", () => {
     pass.drawBatch([{ chunk, target, afterComposite }]);
     expect(draws).toEqual(["GPU bristle mask", "GPU bristle composite"]);
     expect(methods.texSubImage2D).not.toHaveBeenCalled();
-    expect(methods.uniform1i).toHaveBeenCalledWith("uUseInk", 0);
     const section = getBristleSectionCanvas(40);
     const mixed = { ...chunk, profileAtlas: section, useMaterialField: true };
     draws.length = 0;
@@ -409,13 +408,12 @@ describe("bristle pressure geometry (no browser)", () => {
       { chunk, target, afterComposite },
     ]);
     expect(draws.filter((label) => label === "GPU bristle ink")).toHaveLength(
-      1,
+      0,
     );
     expect(afterComposite).toHaveBeenCalledTimes(4);
-    expect(methods.texSubImage2D).toHaveBeenCalledTimes(1);
-    expect(methods.uniform1i).toHaveBeenCalledWith("uUseInk", 1);
+    expect(methods.texSubImage2D).not.toHaveBeenCalled();
     pass.draw(mixed, target);
-    expect(methods.texSubImage2D).toHaveBeenCalledTimes(1);
+    expect(methods.texSubImage2D).not.toHaveBeenCalled();
     pass.dispose();
   });
 });

@@ -107,7 +107,7 @@ function appendToCommittedLayer(
 6. 既存の描画は保持される（追加描画のみ）
 7. 更新された `BrushRenderState` を返す（各 branch の `accumulatedDistance` / `emissionCount` / 時間 state が進む）
 
-**戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。stamp / spray では branch ごとの `accumulatedDistance`、`emissionCount`、`lastTimestamp`、`nextTimeEmissionAt` が更新されている。`round-pen` では `{ seed: 0, tipCanvas: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
+**戻り値**: `BrushRenderState` — 更新されたブラシレンダリング状態。stamp / spray では branch ごとの `accumulatedDistance`、`emissionCount`、`lastTimestamp`、`nextTimeEmissionAt` が更新されている。`round-pen` では `{ seed: 0, tipCanvas: null, heightMap: null, branches: [{ accumulatedDistance: 0, emissionCount: 0 }] }` を返す。
 
 **消しゴムモードの動作**:
 `style.compositeOperation` が `"destination-out"` の場合、committedレイヤーの既存ピクセルが直接消去される。

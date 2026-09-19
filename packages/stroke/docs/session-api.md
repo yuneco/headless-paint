@@ -90,7 +90,7 @@ function addPointToSession(
 **戻り値**: `StrokeSessionResult`
 
 **動作**:
-1. filterOutput.committed を allCommitted に追加
+1. filterOutput.committed（そのストロークの全確定点の累積配列）で allCommitted を置換する。差分点列の追記ではない
 2. filterOutput.pending を currentPending に設定
 3. lastRenderedCommitIndex からオーバーラップ点（最大3点）を含めて newlyCommitted を計算
 4. `committedOverlapCount = min(3, lastRenderedCommitIndex + 1)` で利用可能なオーバーラップ点数をクランプ

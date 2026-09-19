@@ -147,10 +147,15 @@ function rebuildLayerFromHistory<TCustom = never>(
   layer: Layer,
   state: HistoryState<TCustom>,
   registry?: BrushAssetRegistry,
+  options?: Parameters<typeof replayCommand>[3],
 ): RebuildLayerResult;
 ```
 
 対象レイヤーの `currentIndex` 以下で最も新しい checkpoint を復元し、そこから `currentIndex` まで該当レイヤーの draw command と `wrap-shift` を replay する。checkpoint がなく安全に rebuild できない場合はレイヤーを変更せず、`{ ok: false, reason: "missing-checkpoint", layerId }` を返す。通常の `beginHistoryMutation()` / `pushCommand()` フローではこの結果に到達しない。
+
+`stroke` / `clear` / `transform-layer` は `command.layerId === layer.id` のものだけを適用し、他レイヤー宛の command は無視する。`wrap-shift` はグローバルな描画操作なので、再構築する各レイヤーに適用する。
+
+第4引数の `options.accelerator` には live と同じ GPU 加速器を渡す。省略すると CPU 経路で再構築するため、GPU live の結果とは [Tier B の許容範囲](./parity-testing.md#gpu加速器との-paritytier-b)で差が出る。options の各フィールドと型の取得方法は [replay の options](./types.md#replay-の-options) を参照。rebuild 中の GPU owner label は常に `"rebuild"` となる。
 
 stroke replay では `StrokeCommand.alphaLocked` を使って描画し、現在の `LayerMeta.alphaLocked` は参照しない。`LayerMeta.alphaLocked` を後から切り替えても、過去 stroke の rebuild 結果は変わらない。
 
