@@ -4,6 +4,8 @@ LLMエージェントの作業メモ。設計ドキュメントではない。�
 
 ## 発見した課題・改善候補
 
+- **公開APIの検証範囲（2026-09-20）**: 最後の高さマップ再exportコミットを精査。engine 内部importの単体テストと現行 `verify-publish-artifacts.mjs` だけでは、公開 `.` / `./core` から関数・関連型を利用できることを保証できない。公開成果物経由の実行・型検査を同スクリプトへ追加済み。ブラウザ775テスト・build・型検査・lintを検収。設計判断と結果は `plans/2026-09-20-00-22_height-map-public-export-review.md`。高さの有限性・範囲と非有限 `contrast` の入力検証は親以前からの別課題。
+
 - **GPU deferred bitmap commit（2026-09-07、実ブラウザ・性能検収待ち）**: runtime の live perFlush 単一 pass を fence + setTimeout(0) poll にした。8 回上限で drain。低レベル既定は既存 checkpoint の同期画素読み取り契約を維持し、internal defer 指定でのみ非同期。context lost は pending 破棄。docs は変更禁止のため未編集（同期例外と lost の記述は Claude 側で補足候補）。タイマーの8回上限は回数保証で、event loop 混雑・timer clamp を含む数 ms の厳密な時間保証ではない。build/lint/typecheck と非ブラウザ20ファイル244件成功、実 GPU byte 比較7件・既存parityは未検収。採用条件は Mac WebKit probe6 moveMany −20%以上。詳細は `plans/notes/2026-09-07-gpu-deferred-commit-report.md`。
 
 - **Rough bristle simple mask のCPUをpixel procedural化（2026-09-06、実ブラウザ検収済み: Tier B 通過・S字 CPU/GPU 差 0.01%）**: simple既定・low-pressure gain 0.9のworking treeを保持し、CPUのsample×band格子とbilinearをsimple経路から除去した。quadのuからdistance/pressureを線形補間し、v=0〜rows−1をcrossPx=−brushSize/2〜+brushSize/2に対応させてGPUと同じbroad noiseを各pixelで評価する。ノンブラウザ範囲140テストは通過。指定incremental Tier Bテストは無変更で、依頼側の実ブラウザ検収待ち（修正前alpha MAE 0.0171、large delta率0.0206）。過去のCPU grid/GPU procedural間の未達計測・速度測定は旧実装の値なので、今回のparityや性能の根拠に流用しない。詳細は `plans/2026-09-06-04-31_bristle-cpu-procedural-parity.md`。

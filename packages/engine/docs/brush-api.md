@@ -364,6 +364,16 @@ const nextState = renderBrushStroke(layer, points, style, 0, initialImageStampSt
 
 画像の輝度から bristle の紙目高さマップ（`BristleHeightMap`）を作る純関数。
 
+外部アプリでは関数と関連型 `BristleHeightMap` / `HeightMapFromImageOptions` を
+`@yuneco/headless-paint/core` から import する。ルートの `@yuneco/headless-paint` も
+同じ core API を公開する。workspace 内部では `@headless-paint/engine` から利用できる。
+
+**命名と責務**: `createHeightMapFromImageData` は入力がデコード済みの `ImageData` であることを示す。
+`HeightMapFromImageOptions` はその画像変換の設定であり、描画時の `BristleSurfaceGrain` とは分ける。
+戻り値の `BristleHeightMap` は現在の利用先が bristle の紙目であることを示し、
+全ブラシ共通の紙面モデルを意味しない。変換処理は engine に置き、core は再exportだけを担う。
+画像の取得・デコード・リサイズとアセットIDの選択はアプリ、登録とID解決は `BrushAssetRegistry` の責務とする。
+
 ```typescript
 interface HeightMapFromImageOptions {
   readonly invert?: boolean; // 暗い所を山にする（default false: 明るい所が山）
@@ -382,18 +392,38 @@ function createHeightMapFromImageData(
 - 画像のデコードとリサイズは呼び出し側の責務。`image` の寸法がそのまま `width` / `height` になるため、1..2048 に収める
 - 実写の displacement map はコントラストが低いことが多く、`normalize` で紙目の山谷を接触判定の softness に見合う幅へ広げてから使う。接触は画素ごとの 0/1 判定なので `contrast` の効果は限定的である
 - 変換オプションは登録時に固定される。同じ画像を別のオプションで使うときは別の ID で登録する
+- 単色画像の `normalize: true` は高さを一度すべて 0 にしてから `contrast` を適用する（既定の `contrast: 1` ではすべて 0）
+- 戻り値の `heights` は新しい配列。registry はコピーせず参照を保持するため、登録後は配列の要素も不変として扱う。`readonly` は `Float32Array` の要素の書き換えまでは禁止しない
 
 生成した高さマップは [BrushAssetRegistry](#brushassetregistry) に ID で登録し、ブラシ設定には ID だけを乗せる（image tip の `imageId` と同じ参照モデル）。
 
 ```typescript
+import {
+  createBrushAssetRegistry,
+  createHeightMapFromImageData,
+  ROUGH_BRISTLE,
+  type BristleBrushConfig,
+  type BristleHeightMap,
+  type HeightMapFromImageOptions,
+} from "@yuneco/headless-paint/core";
+
+const registry = createBrushAssetRegistry();
+const options: HeightMapFromImageOptions = { normalize: true };
+// blob はアプリ側で取得した画像。デコードとリサイズもアプリが担当する。
 const bitmap = await createImageBitmap(blob);
 const canvas = new OffscreenCanvas(512, 512);
 const ctx = canvas.getContext("2d");
-ctx.drawImage(bitmap, 0, 0, 512, 512);
-registry.setHeightMap(
-  "paper-fabric-031",
-  createHeightMapFromImageData(ctx.getImageData(0, 0, 512, 512), { normalize: true }),
-);
+try {
+  if (!ctx) throw new Error("2D context unavailable");
+  ctx.drawImage(bitmap, 0, 0, 512, 512);
+  const heightMap: BristleHeightMap = createHeightMapFromImageData(
+    ctx.getImageData(0, 0, 512, 512),
+    options,
+  );
+  registry.setHeightMap("paper-fabric-031", heightMap);
+} finally {
+  bitmap.close();
+}
 
 const brush: BristleBrushConfig = {
   ...ROUGH_BRISTLE,

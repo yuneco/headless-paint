@@ -85,6 +85,9 @@ export {
 } from "@headless-paint/engine";
 export {
   createBrushAssetRegistry,
+  createHeightMapFromImageData,
+  type BristleHeightMap,
+  type HeightMapFromImageOptions,
   generateBrushTip,
   type BrushAssetRegistry,
 } from "@headless-paint/engine";

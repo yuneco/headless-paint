@@ -60,6 +60,11 @@ React 以外の環境（Vanilla JS, Vue.js 等）や `@yuneco/headless-paint/rea
 
 → [engine/docs](./packages/engine/docs/README.md) / [input/docs](./packages/input/docs/README.md) / [stroke/docs](./packages/stroke/docs/README.md)
 
+紙目画像を利用する場合も、`createHeightMapFromImageData` と関連型を
+`@yuneco/headless-paint/core` から import できます。画像の取得・デコードはアプリで行い、
+変換した高さマップを `BrushAssetRegistry` へ登録します。
+具体例と責務分担は [高さマップ変換API](./packages/engine/docs/brush-api.md#createheightmapfromimagedata) を参照してください。
+
 ## デモアプリ（apps/web）
 
 `apps/web` は `@headless-paint/react` の hooks を中心に、`engine / input / stroke` の低レベル API も一部直接使う React ベースのデモアプリケーションです。hooks の組み合わせ方と低レベル API の併用例の参考になります。

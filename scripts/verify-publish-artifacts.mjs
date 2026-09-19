@@ -1,6 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
+import ts from "typescript";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const publicPackageDir = path.join(repoRoot, "packages", "headless-paint");
@@ -64,6 +66,37 @@ for (const fileName of await readdir(distDir)) {
       );
     }
   }
+}
+
+// Resolve package self-references through exports, without workspace source aliases.
+try {
+  await import(
+    pathToFileURL(path.join(publicPackageDir, "tests", "public-api.mjs")).href
+  );
+} catch (error) {
+  failures.push(`public API runtime check: ${error.message}`);
+}
+
+const program = ts.createProgram(
+  [path.join(publicPackageDir, "tests", "public-api.mts")],
+  {
+    noEmit: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    types: [],
+  },
+);
+const diagnostics = ts.getPreEmitDiagnostics(program);
+if (diagnostics.length > 0) {
+  failures.push(
+    ts.formatDiagnostics(diagnostics, {
+      getCanonicalFileName: (fileName) => fileName,
+      getCurrentDirectory: () => repoRoot,
+      getNewLine: () => "\n",
+    }),
+  );
 }
 
 if (failures.length > 0) {

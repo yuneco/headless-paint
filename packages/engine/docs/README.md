@@ -53,6 +53,7 @@ setPixel(layer, 60, 60, { r: 0, g: 0, b: 255, a: 255 });
 | `BrushMixing` | 距離rate、更新距離、checkpoint距離、tip-local色場解像度を持つスタンプ混色設定 |
 | `BristleBrushConfig` / `BristleDynamics` / `BristlePressureDynamics` | 面掠れ、紙目、反復接触、折返し追従を持つ荒いハケ設定。筆圧は `dropout`（掠れ）/ `size`（幅）へ反映 |
 | `BristleHeightMap` | bristle の紙目を差し替える document 固定の高さマップ `{ width, height, heights }`（0..1）。`BrushAssetRegistry` に ID で登録し `surfaceGrain.heightMapId` で参照する |
+| `HeightMapFromImageOptions` | [画像から高さマップへの変換](./brush-api.md#createheightmapfromimagedata)のオプション `{ invert?, normalize?, contrast? }` |
 | `BrushAssetRegistry` | image tip の画像と bristle の高さマップを ID で保持するレジストリ `{ getTip, setTip, getHeightMap, setHeightMap }` |
 | `LayerMeta` | レイヤーメタデータ `{ name, visible, opacity, alphaLocked, compositeOperation? }` |
 | `Layer` | レイヤー本体（id, width, height, canvas, ctx, meta） |
